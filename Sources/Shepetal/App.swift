@@ -27,7 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
-    private lazy var meetings = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts)) { [weak self] in self?.indicator.show($0, seconds: 4) }
+    private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
+                                                                 card: { [weak self] in self?.meetingCard.show($0) }) { [weak self] in self?.indicator.show($0, seconds: 4) }
+    /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
+    private lazy var meetingCard: MeetingCard = MeetingCard(onRecord: { [weak self] in self?.meetings.record() },
+                                                            onNotNow: { [weak self] in self?.meetings.notNow() })
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -56,7 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   stopMic: { [recorder] in recorder.stop() },
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
-        applyRetention()
         tap.onChange = { [weak self] down, t in self?.fnWatch.tapEvent(); self?.fn(down, at: t) }
         fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
         fnWatch.start()
@@ -74,9 +77,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
             meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
             meetingFlow?.attach(meetings)
-            meetingFlow?.onRecording = { [weak self] in self?.statusItem.button?.title = $0 ? "🤫●" : "🤫" }
+            meetingFlow?.onRecording = { [weak self] in
+                self?.statusItem.button?.title = $0 ? "🤫●" : "🤫"
+                self?.indicator.meeting = $0  // the red ring, for the whole recording
+            }
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
+        applyRetention()
 
         // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
         Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
@@ -221,6 +228,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyRetention() {
         do { try pipeline?.store.applyRetention(retention) } catch { fail("Retention: \(error.localizedDescription)") }
+        // Meeting audio follows the same choice; the meeting being recorded is never deleted.
+        do { try meetingFlow?.store.applyRetention(retention, dir: meetings.dir, recording: meetings.current?.id) }
+        catch { fail("Meeting retention: \(error.localizedDescription)") }
     }
 
     private func showOnboarding() {

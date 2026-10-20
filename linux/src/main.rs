@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+mod meeting_rec;
 
 const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon | shepetal indicator | shepetal dict|snippet add|remove|list | shepetal mics [--pw-dump FILE]\n\
 env: SHEPETAL_KEY (default fn), SHEPETAL_MODEL (path to the model `probe` names: a sherpa-onnx dir or a ggml .bin)";
@@ -283,6 +284,7 @@ fn daemon() -> Res {
     if let Some(note) = focus::Session::from_env().unreadable_note() {
         eprintln!("shepetal: {note}");
     }
+    meeting_rec::spawn(&choice)?;
 
     listen(&rx, key, &key_name, &data_home, &choice, typer, &ind, &keys)
 }
@@ -378,8 +380,8 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
         // Type what was said now, and let the next press start a new dictation instead of
         // ending this one.
         if rec.as_mut().is_some_and(|(c, _, _)| matches!(c.try_wait(), Ok(Some(_)))) {
-            g = Gesture::default();
-            if let Some(hint) = act(Action::Stop, &mut rec, data_home, stt, typer, key_name, ind)? {
+            s.reset();
+            if let Some(hint) = act(Action::Stop, &mut rec, data_home, stt, typer, key_name, ind, &mut last)? {
                 eprintln!("shepetal: hint: {hint}");
                 ind.send(&format!("hint {hint}"));
             }
@@ -1066,7 +1068,7 @@ mod tests {
                 tx.send((shepetal::KEY_FN, 1)).unwrap();
                 wait_until("a second recording", || clips(&audio).len() == 2);
             });
-            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default()).unwrap_err();
+            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
             keyboard.join().unwrap();
             assert_eq!(err, "all input devices closed");
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");

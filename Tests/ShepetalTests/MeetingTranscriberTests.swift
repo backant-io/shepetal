@@ -243,4 +243,39 @@ final class MeetingTranscriberTests: XCTestCase {
         }
         XCTAssertNil(summarizer.got)
     }
+
+    // The recorder's WAV header counts what is written (#100), so a live pass reads only that much and the rest at
+    // the next pass. Past 4 GB (about 3 h of 48 kHz stereo) the size stays at 0xFFFFFFFF, which must read to the
+    // end of the file, or the rest of a long meeting would never be transcribed.
+    func testWavTailFollowsTheDeclaredSizeAndReadsToTheEndWhenItIsUnknown() throws {
+        let url = root.appendingPathComponent("x.wav")
+        var d = AudioStore.wav([0.5, 0.25, 0.125])
+        d.replaceSubrange(40..<44, with: [8, 0, 0, 0])  // 2 frames counted, the third still being written
+        try d.write(to: url)
+        let tail = WavTail(url)
+        XCTAssertEqual(try XCTUnwrap(tail.read(maxSeconds: 60)).frameLength, 2)
+        XCTAssertNil(try tail.read(maxSeconds: 60))
+        d.replaceSubrange(40..<44, with: [0xFF, 0xFF, 0xFF, 0xFF])
+        try d.write(to: url)
+        let rest = try XCTUnwrap(tail.read(maxSeconds: 60))
+        XCTAssertEqual(rest.frameLength, 1)
+        XCTAssertEqual(rest.floatChannelData?[0][0], 0.125)
+    }
+
+    // A meeting past 4 GB: the frames after the 0xFFFFFFFF size are read too. The file is sparse, so it takes no
+    // disk space.
+    func testWavTailReadsPast4GB() throws {
+        let url = root.appendingPathComponent("long.wav")
+        var header = AudioStore.wav([])  // 16 kHz mono float
+        header.replaceSubrange(40..<44, with: [0xFF, 0xFF, 0xFF, 0xFF])
+        try header.write(to: url)
+        let bytes: UInt64 = 4_295_000_000  // past 0xFFFFFFFF, whole frames
+        let h = try FileHandle(forWritingTo: url)
+        try h.truncate(atOffset: 44 + bytes)
+        try h.close()
+        let tail = WavTail(url)
+        var frames: UInt64 = 0
+        while let b = try tail.read(maxSeconds: 600) { frames += UInt64(b.frameLength) }
+        XCTAssertEqual(frames, bytes / 4)
+    }
 }

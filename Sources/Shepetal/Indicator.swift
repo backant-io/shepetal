@@ -52,16 +52,19 @@ final class Indicator {
     }
 
     private(set) var mode: Mode = .idle
+    /// True while a meeting records: the ring stays red the whole time, whatever dictation does meanwhile.
+    var meeting = false { didSet { set(mode) } }
 
     func set(_ mode: Mode) {
         self.mode = mode
-        let ring: NSColor? = switch mode {
+        var ring: NSColor? = switch mode {
         case .idle: nil
         case .recording: .systemRed
         case .handsFree: .systemOrange
         case .processing: .systemBlue
         case .error: .systemYellow
         }
+        if meeting { ring = .systemRed }
         emoji.layer?.borderWidth = ring == nil ? 0 : 2
         emoji.layer?.borderColor = ring?.cgColor
         emoji.layer?.removeAllAnimations()

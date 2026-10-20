@@ -54,7 +54,7 @@ final class MeetingFlowTests: XCTestCase {
         store = try MeetingStore(path: root.appendingPathComponent("meetings.sqlite"))
         capture = WavCapture()
         recorder = MeetingRecorder(dir: root.appendingPathComponent("meetings"), capture: capture,
-                                   detector: MeetingDetector()) { [unowned self] in hints.append($0) }
+                                   detector: MeetingDetector(), autoRecord: { false }, card: { _ in }) { [unowned self] in hints.append($0) }
         connect(self.engine)
     }
 
@@ -80,6 +80,7 @@ final class MeetingFlowTests: XCTestCase {
     func testDetectedMeetingShowsLiveInTheTabThenGetsItsTranscriptAndSummaryWithTheAudioKept() async throws {
         let tab = MeetingsModel(store: store, copy: { _ in })
         for t in 0...5 { recorder.update(zoom, now: Double(t)) }
+        recorder.record()  // the click on the card
         tab.refresh()
         let listed = try XCTUnwrap(tab.record, "the meeting is in the Meetings tab from its first second")
         XCTAssertEqual(listed.meeting.app, "Zoom")
