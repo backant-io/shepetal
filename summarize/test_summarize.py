@@ -24,14 +24,14 @@ class DefaultSummarizer(unittest.TestCase):
             text, sents = fixture(path)
             md = S.render(*S.load("textrank-tfidf")(text, sents), S.decisions(sents), S.actions(sents))
             with self.subTest(os.path.basename(path)):
-                self.assertEqual(md, open(os.path.join(HERE, "out", "textrank-tfidf", os.path.basename(path)[:-4] + ".md")).read())
+                self.assertEqual(md, read(os.path.join(HERE, "out", "textrank-tfidf", os.path.basename(path)[:-4] + ".md")))
 
     def test_fixture_action_items_keep_owner_and_due(self):
         # Goal: action items are recovered with the right owner; the due date is what makes them schedulable.
         for path in sorted(glob.glob(os.path.join(HERE, "fixtures", "*.txt"))):
             _, sents = fixture(path)
             got = [(o, d) for o, _, d in S.actions(sents)]
-            ref = re.findall(r"^- (\w+): .*?(?:\(due ([^)]+)\))?\.?$", open(path[:-4] + ".ref.md").read().split("## Action items")[1], re.M)
+            ref = re.findall(r"^- (\w+): .*?(?:\(due ([^)]+)\))?\.?$", read(path[:-4] + ".ref.md").split("## Action items")[1], re.M)
             with self.subTest(os.path.basename(path)):
                 self.assertTrue(ref)
                 for owner, due in ref:
@@ -79,8 +79,13 @@ class Ranking(unittest.TestCase):
         self.assertLess(r[3], r[0])
 
 
+def read(path):
+    with open(path) as f:
+        return f.read()
+
+
 def fixture(path):
-    text = open(path).read()
+    text = read(path)
     return text, S.parse(text)
 
 
