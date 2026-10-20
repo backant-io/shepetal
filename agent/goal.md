@@ -20,7 +20,7 @@ This is a continuous effort. You work in iterations, and the goal is reached ONL
   - `todo`: not built yet.
 - **Cloud-backed user features still count.** Wispr features that give the user value through its cloud (cross-device sync, share links, MCP export, team dictionaries, server-side formatting, cloud ASR) are NOT `n/a`. Each needs a local-first equivalent: sync through a folder the user picks (iCloud Drive, Syncthing), sharing by exported file, a local MCP server, local models.
 - **`scripts/parity.py` computes the result.** Use plain Python stdlib, with an assert-based self-check. It fails if any inventory ID is missing from the ledger, if a `done` cell has no evidence, or if an `n/a` falls outside the allowed categories. It prints two numbers: **automated coverage** (done + hand-test + confirmed + impossible + n/a, over all cells) and **confirmed coverage** (the same, with hand-test cells counting only once Pavel has confirmed them). The goal is reached when both are 100%.
-- **The inventory must be complete before 100% means anything.** Cross-check it against the Wispr bundle (pre-extracted asar at /Users/sorcecoder/shepetal-re/asar): every user-facing settings key in config.json (201), every HelperAPI message (102 requests / 28 responses), every feature flag (about 230), every analytics event name (1,065; each user action implies a feature), every renderer window (9) and every shortcut action. `scripts/parity.py --completeness` reads a mapping file, `docs/re/identifier-map.tsv` (identifier → F-ID or `internal` with a reason), and fails on any identifier left unmapped. Any feature found this way becomes a new F-ID row.
+- **The inventory must be complete before 100% means anything.** Cross-check it against the Wispr bundle (pre-extracted asar at /Users/sorcecoder/shepetal-re/asar): every user-facing settings key in config.json (201), every HelperAPI message (102 requests / 28 responses), every feature flag (about 230), every analytics event name (1,065; each user action implies a feature), every renderer window (9) and every shortcut action. `scripts/parity.py --completeness <map>` reads a mapping file (identifier → F-ID or `internal` with a reason) and fails on any identifier left unmapped. Any feature found this way becomes a new F-ID row. The map lists about 1,600 Wispr identifiers, so it stays OUT of the repo: it lives at /Users/sorcecoder/shepetal-re/identifier-map.tsv, next to the extracted bundle, because committing it would copy Wispr's strings. The check runs on this Mac.
 
 ## Each iteration
 
@@ -90,7 +90,7 @@ On Pavel's Mac: Apple M4 Pro, 24 GB, macOS 15.7, Xcode 26.3 with the iOS 26.3 si
 
 ## Milestones (each ends in merged PRs)
 
-- **M0:** Write scripts/parity.py, docs/parity.md and docs/re/identifier-map.tsv. Run the completeness check and add any missing features to the inventory. Rebase and land PRs #1–#6, running PR #4's Parakeet v3 benchmark. Write docs/architecture.md, covering the repo layout, the shared core and the per-platform shells.
+- **M0:** Write scripts/parity.py, docs/parity.md and the local identifier map. Run the completeness check and add any missing features to the inventory. Rebase and land PRs #1–#6, running PR #4's Parakeet v3 benchmark. Write docs/architecture.md, covering the repo layout, the shared core and the per-platform shells.
 - **M1:** Mac app foundation, working end to end:
   - a menu-bar app with the 🤫 indicator;
   - fn hold / double-tap / short-press hint;
