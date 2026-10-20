@@ -7,7 +7,20 @@ import ShepetalCore
 @MainActor
 final class Account: NSObject, ObservableObject {
     static let shared = Account(client: AccountClient(), tokens: .keychain(),
-                                stateURL: Paths.root.appendingPathComponent("account.json"))
+                                stateURL: Paths.root.appendingPathComponent("account.json"), required: signInRequired())
+
+    /// Whether dictation needs a trial or a license. It stays off until shepetal.backant.io is live, because
+    /// before that nobody could sign in and dictation would be off for everyone. The release turns it on with
+    /// `ShepetalRequiresSignIn` = true in Info.plist (scripts/make-app.sh). SHEPETAL_REQUIRE_SIGNIN=1 or 0
+    /// overrides it for a hand test.
+    static func signInRequired(env: [String: String] = ProcessInfo.processInfo.environment,
+                               info: [String: Any]? = Bundle.main.infoDictionary) -> Bool {
+        if let v = env["SHEPETAL_REQUIRE_SIGNIN"] { return v == "1" }
+        return info?["ShepetalRequiresSignIn"] as? Bool ?? false
+    }
+
+    /// False before the paid launch: sign-in, the trial line and Buy work, but fn always dictates.
+    let required: Bool
 
     @Published private(set) var access: Access = .signedOut
     /// The code shown in the browser while a sign-in waits for the user.
@@ -37,7 +50,8 @@ final class Account: NSObject, ObservableObject {
     private var recheckUntil: Date?
     private var timer: Timer?
 
-    init(client: AccountClient, tokens: TokenStore, stateURL: URL) {
+    init(client: AccountClient, tokens: TokenStore, stateURL: URL, required: Bool = true) {
+        self.required = required
         self.client = client
         self.tokens = tokens
         self.stateURL = stateURL
@@ -53,7 +67,7 @@ final class Account: NSObject, ObservableObject {
         self.hint = hint
         if signedIn { check() }
         // A signed-in user whose cache is stale gets the answer of the check that just started instead.
-        if let h = access.blockedHint, access != .unchecked || !signedIn { hint(h) }
+        if required, let h = access.blockedHint, access != .unchecked || !signedIn { hint(h) }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -70,7 +84,7 @@ final class Account: NSObject, ObservableObject {
     /// and a license check in flight is cancelled so no request runs while the user dictates.
     func allowFnDown() -> Bool {
         refresh()
-        guard access.allowsDictation else {
+        guard access.allowsDictation || !required else {
             hint(pendingCode.map { "Finish signing in: confirm code \($0) in your browser" } ?? access.blockedHint ?? "")
             // Nothing is being dictated, so ask again: a purchase on the website or a network that came back
             // unlocks on the next press instead of the next day. At most once a minute.

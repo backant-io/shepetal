@@ -50,6 +50,19 @@ final class AccountControllerTests: XCTestCase {
 
     private func titles(_ a: Account) -> [String] { a.menuItems().map(\.title) }
 
+    func testBeforeThePaidLaunchFnAlwaysDictates() async throws {
+        let a = Account(client: AccountClient(base: server.url), tokens: tokens, stateURL: stateURL, required: false)
+        a.start(isDictating: { false }, hint: { [unowned self] in hints.append($0) })
+        XCTAssertTrue(a.allowFnDown(), "signed out, but sign-in is not required yet")
+        XCTAssertTrue(hints.isEmpty, "no sign-in hint at launch or on fn")
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in to start your free 30-day trial…"], "sign-in is still offered")
+
+        XCTAssertFalse(Account.signInRequired(env: [:], info: [:]), "off unless the release turns it on")
+        XCTAssertTrue(Account.signInRequired(env: [:], info: ["ShepetalRequiresSignIn": true]))
+        XCTAssertFalse(Account.signInRequired(env: ["SHEPETAL_REQUIRE_SIGNIN": "0"], info: ["ShepetalRequiresSignIn": true]))
+        XCTAssertTrue(Account.signInRequired(env: ["SHEPETAL_REQUIRE_SIGNIN": "1"], info: [:]))
+    }
+
     func testSignedOutAtFirstLaunchBlocksFnAndSaysSignIn() async throws {
         let a = account()
         XCTAssertEqual(hints, ["Sign in to start your free 30-day trial"], "the 🤫 hint at launch")
