@@ -125,6 +125,18 @@ public final class MeetingStore: MeetingStoring {
         return record
     }
 
+    public func delete(_ id: String) throws {
+        try transaction {
+            // Segments go with the meeting (ON DELETE CASCADE); the search index has no foreign key.
+            for sql in ["DELETE FROM meeting_text WHERE meeting_id = ?", "DELETE FROM meetings WHERE id = ?"] {
+                let stmt = try prepare(sql)
+                defer { sqlite3_finalize(stmt) }
+                bind(stmt, 1, id)
+                guard sqlite3_step(stmt) == SQLITE_DONE else { throw error("delete") }
+            }
+        }
+    }
+
     // MARK: - SQLite
 
     private func index(_ id: String, _ kind: String, _ texts: [String]) throws {

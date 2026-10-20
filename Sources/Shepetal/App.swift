@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
+    private var meetingFlow: MeetingFlow?
     private lazy var meetings = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts)) { [weak self] in self?.indicator.show($0, seconds: 4) }
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
@@ -66,6 +67,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
+        do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
+            meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
+            meetingFlow?.attach(meetings)
+            meetingFlow?.onRecording = { [weak self] in self?.statusItem.button?.title = $0 ? "🤫●" : "🤫" }
+        } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
 
         permissions = PermissionMonitor(revoked: { [weak self] message in
@@ -272,7 +278,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          status: { [weak self] in (self?.engineStatus ?? "", self?.tap.isRunning == true) },
                          retention: { [weak self] in self?.retention ?? .keep },
                          setRetention: { [weak self] in self?.retention = $0 },
-                         openPermissions: { [weak self] in self?.showOnboarding() })
+                         openPermissions: { [weak self] in self?.showOnboarding() },
+                         meetingStore: meetingFlow?.store ?? InMemoryMeetingStore())
         hub?.show()
     }
 

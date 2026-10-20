@@ -104,4 +104,6 @@ final class InMemoryMeetingStore: MeetingStoring {
     }
 
     func get(_ id: String) throws -> MeetingRecord? { records[id] }
+
+    func delete(_ id: String) throws { records[id] = nil }
 }

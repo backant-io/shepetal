@@ -101,6 +101,8 @@ public protocol MeetingStoring: AnyObject {
     /// Meetings whose app, segment text or summary contains `query` (case-insensitive), newest first.
     func search(_ query: String, limit: Int) throws -> [Meeting]
     func get(_ id: String) throws -> MeetingRecord?
+    /// Removes the meeting with its segments and summary (its audio files are the caller's).
+    func delete(_ id: String) throws
 }
 
 /// Local, non-LLM summarizer (rule 6). Pure: no network, no I/O.

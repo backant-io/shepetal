@@ -27,6 +27,10 @@ final class MeetingRecorder: NSObject {
     private(set) var current: Meeting?
     /// Gets each finished meeting with the channels that were written ("" for a missing one).
     var onEnded: (Meeting) -> Void = { _ in }
+    /// Gets each meeting as its recording starts, so it is stored and transcribed while it runs.
+    var onStarted: (Meeting) -> Void = { _ in }
+    /// Gets a meeting that ended with no audio written; it is not kept.
+    var onDiscarded: (Meeting) -> Void = { _ in }
 
     init(dir: URL = Paths.root.appendingPathComponent("meetings"), capture: MeetingCapturing,
          detector: MeetingDetector = MeetingRecorder.configuredDetector(), hint: @escaping (String) -> Void) {
@@ -89,6 +93,7 @@ final class MeetingRecorder: NSObject {
                               othersAudioPath: both ? folder.appendingPathComponent("Others.wav").path : "")
             let what = app == Self.manualApp ? "Recording meeting" : "Meeting detected · recording"
             hint(both ? what : "\(what) mic only (turn on System Audio Recording)")
+            current.map(onStarted)
         } catch {
             hint("Meeting recording failed: \(error.localizedDescription)")
         }
@@ -104,6 +109,7 @@ final class MeetingRecorder: NSObject {
             meeting[keyPath: path] = ""
         }
         guard !meeting.meAudioPath.isEmpty || !meeting.othersAudioPath.isEmpty else {
+            onDiscarded(meeting)
             return hint("Meeting not saved: \(problem ?? "no audio was captured")")
         }
         hint(problem.map { "Meeting saved, but: \($0)" } ?? "Meeting recording saved")
