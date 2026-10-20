@@ -1,5 +1,5 @@
 #!/bin/bash
-# Release check of a built app bundle, launched the way Finder launches it (LaunchServices):
+# Release check of a built app bundle, run as the bundle's app (LaunchServices sees its Info.plist):
 #   - it starts with --no-permission-prompts and stays running in the background for SOAK seconds;
 #   - it is a menu-bar-only app (LaunchServices type UIElement: no Dock icon, no app switcher entry);
 #   - its 🤫 panel is on screen, 18 pt tall, 8 pt in from the bottom-left corner of the main display;
@@ -71,10 +71,11 @@ trap cleanup EXIT
 rm -f "$DIR/stderr.log" "$DIR/stdout.log"
 touch "$DIR/started"
 START=$(date +%s)
-open -g -n --env SHEPETAL_HOME="$HOMEDIR" --stderr "$DIR/stderr.log" --stdout "$DIR/stdout.log" \
-  "$APP" --args --no-permission-prompts --quit-from-menu-after "$SOAK"
-for _ in $(seq 1 40); do PID=$(pgrep -nf "$EXE" || true); [ -n "$PID" ] && break; sleep 0.25; done
-[ -n "$PID" ] || fail "the app did not start: $(cat "$DIR/stderr.log" 2>/dev/null)"
+# Started directly (not through `open`) so the check gets the exit status; AppKit still checks the
+# process in with LaunchServices as the bundle's app, with its Info.plist (LSUIElement).
+SHEPETAL_HOME="$HOMEDIR" "$EXE" --no-permission-prompts --quit-from-menu-after "$SOAK" \
+  > "$DIR/stdout.log" 2> "$DIR/stderr.log" &
+PID=$!
 echo "started pid $PID ($APP, ad-hoc copy of $SRC)"
 sleep 3
 
@@ -98,12 +99,17 @@ screencapture -x "$DIR/screen.png" && echo "screenshot: $DIR/screen.png (empty o
 WAIT=$((START + SOAK - 4 - $(date +%s)))
 [ "$WAIT" -gt 0 ] && sleep "$WAIT"
 UP=$(( $(date +%s) - START ))
-kill -0 "$PID" 2>/dev/null || fail "the app exited after ${UP}s, before the menu quit at ${SOAK}s: $(cat "$DIR/stderr.log")"
+if ! kill -0 "$PID" 2>/dev/null; then
+  wait "$PID" && CODE=0 || CODE=$?
+  fail "the app exited with status $CODE after ${UP}s, before the menu quit at ${SOAK}s (143 = killed by SIGTERM from outside): $(cat "$DIR/stderr.log")"
+fi
 panel_ok || fail "the 🤫 panel is gone after ${UP}s: $(tr '\n' ' ' < "$DIR/windows.txt")"
 echo "ok: still running in the background with 🤫 shown after ${UP}s (rss $(ps -o rss= -p "$PID" | tr -d ' ') KB)"
 for _ in $(seq 1 120); do kill -0 "$PID" 2>/dev/null || break; sleep 0.25; done
 kill -0 "$PID" 2>/dev/null && fail "Quit Shepetal from the menu did not end the app"
+wait "$PID" && CODE=0 || CODE=$?
 PID=
+[ "$CODE" = 0 ] || fail "the app ended with status $CODE, not 0: $(tail -3 "$DIR/stderr.log")"
 grep -q "quit-from-menu: menu-bar 🤫 shown" "$DIR/stderr.log" || fail "$(grep quit-from-menu "$DIR/stderr.log" || echo "the menu quit never ran")"
 CRASH=$(find "$HOME/Library/Logs/DiagnosticReports" -name 'Shepetal*' -newer "$DIR/started" 2>/dev/null | head -1)
 [ -z "$CRASH" ] || fail "it crashed: $CRASH"
