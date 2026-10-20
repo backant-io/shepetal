@@ -59,6 +59,15 @@ Pick from this list. It replaces the iteration 1 list under "Left".
   - Mark the desktop-only P0 rows `impossible` where iOS forbids them, each with an Apple doc URL and a built substitute: F04, F17, F92 and F99 are candidates.
   - Then build F03 keyboard cancel and F10 duration warning (#13), F02 hands-free and F112 from the keyboard, F51 nonsense guard, F12 languages, F32 cleanup and F39 dictionary.
 
+### summarizer (#129 and its Swift port)
+
+| PR | State | What landed | Verified before merge |
+|---|---|---|---|
+| #129 | merged | Python action items: content-word recap dedupe, the next speaker as the "you" owner, job titles as names, request questions, five modal cue features, threshold 0.575 picked by 5-fold CV over train + dev. AMI test 16/20 role labels, 14/20 Speaker labels; CV 54.5% / 46.5% (#8 stays open) | 43 Python tests with the AMI cache, none skipped. 4 deliberate breaks (dedupe, addressee window, request questions, title aliases) each went red. Retraining reproduced `actions_model.json` byte for byte (sha1 15484b5c) and `eval test` gave the reported 16/20 and 14/20 |
+| `feat/summary-v2-port` | open | The same changes in `Sources/ShepetalSummary`, the new weights as the bundled resource (threshold read from the file), `python_golden.json` regenerated, and 5 Swift tests that mirror the new Python tests case for case | `swift test` 218 pass with 0 skipped, also under `sandbox-exec` with only loopback allowed (the account tests need a stub server on 127.0.0.1). 7 deliberate breaks each went red. A one-off run on all 138 AMI scenario meetings, with role labels and with Speaker 1..4 labels, gave the same action items as Python in 276 of 276 (2,343 items: sentence, owner, task, due); it is not a committed test because the corpus is gitignored. `scripts/e2e-meeting.sh` OK (network denied for the app), and its 3 action items match Python's |
+
+Left for the summarizer: action items with the right owner are 54.5% in CV, short of the 80% goal (#8). On the e2e meeting, "tomorrow morning" leaves "morning" in the task ("book the room morning"), in Python and Swift alike (#137).
+
 ### account (Mac sign-in, free trial, lifetime license, no model names in the UI)
 
 | PR | State | What landed | Verified before merge |

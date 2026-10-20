@@ -23,6 +23,7 @@ final class Pipeline {
     let store: AudioStore
     let history: History
     let inserter: Inserter
+    let dictionary: URL  // dictionary.txt in this pipeline's data dir
 
     /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
     /// Tests pass a temp `root` and a private named pasteboard.
@@ -31,6 +32,7 @@ final class Pipeline {
         try AudioStore.makeOwnerOnlyDirectory(root)
         store = try AudioStore(dir: root.appendingPathComponent("audio"))
         history = try History(path: root.appendingPathComponent("history.sqlite"))
+        dictionary = root.appendingPathComponent("dictionary.txt")
     }
 
     /// `app` is the frontmost app at dictation start (history only). `selection` is the text the paste replaces.
@@ -68,7 +70,7 @@ final class Pipeline {
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Self.finishText(run.entry.rawText)
+        run.entry.text = Self.finishText(run.entry.rawText, dictionary: dictionary)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
         // Rule 8 first: when the text is not pasted, the field that has focus now is not read. Its AX reads
@@ -94,8 +96,9 @@ final class Pipeline {
     }
 
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
-    static func finishText(_ raw: String) -> String {
-        Cleanup.apply(SpeechGuard.stripTags(raw))
+    /// Cleanup, then the personal dictionary (F39); InsertionRules fits the result to the cursor afterwards.
+    static func finishText(_ raw: String, dictionary: URL) -> String {
+        Vocabulary.load(dictionary).apply(Cleanup.apply(SpeechGuard.stripTags(raw)))
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {

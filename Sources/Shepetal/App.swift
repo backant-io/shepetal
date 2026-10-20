@@ -9,7 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var indicator: Indicator!
     private let tap = FnTap()
-    private let recorder = Recorder()
+    private let mic = Mic()
+    private let speech = SpeechMenu()
     private var dictation: Dictation?
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
@@ -57,15 +58,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let pipeline {
             dictation = Dictation(store: pipeline.store, history: pipeline.history,
                                   startMic: { [weak self] in try self?.openMic() },
-                                  stopMic: { [recorder] in recorder.stop() },
+                                  stopMic: { [mic] in mic.stop() },
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
+        wireMicAndSpeech()
         tap.onChange = { [weak self] down, t in self?.fnReceived(); self?.fn(down, at: t) }
         fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
         fnWatch.active = { [weak self] in self?.tap.isRunning == true }
         fnWatch.start()
         tap.onOtherKey = { [weak self] t in self?.run { $0.otherKeyDown(at: t) } }
-        recorder.onError = { [weak self] in self?.fail($0) }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -183,7 +184,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if allowPrompts { Permission.microphone.request() }
             throw SpeechError("Microphone access is off")
         }
-        recorder.start()
+        do { try mic.open() } catch { throw SpeechError("Microphone: \(error.localizedDescription)") }
+    }
+
+    /// Mic problems end the dictation through the gesture, so the audio is kept like any other recording.
+    private func wireMicAndSpeech() {
+        mic.notice = { [weak self] in self?.indicator.show($0, seconds: 4) }
+        mic.end = { [weak self] transcribe, message in
+            self?.run { $0.reset(); return [transcribe ? .stop : .cancel] }
+            self?.fail(message)
+        }
+        speech.reload = { [weak self] in
+            self?.engineStatus = "Loading on-device speech recognition…"
+            Task { await self?.loadEngine() }
+        }
+        speech.fail = { [weak self] in self?.fail($0) }
+        mic.watch()
     }
 
     private func transcribe(_ samples: [Float]) {
@@ -200,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                              secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false
             if let error = run.error { fail(error) } else { indicator.set(.idle) }
+            if Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
         }
     }
 
@@ -212,13 +229,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func loadEngine() async {
         do {
-            let e = try await Speech.load()
+            let e = try await Speech.load(languages: speech.languages)
             engine = e
             engineStatus = EngineLabel.status(e.name)
         } catch {
+            engine = nil
             NSLog("shepetal: speech: %@", error.localizedDescription)  // model names stay in the log
-            engineStatus = ParakeetEngine.isInstalled ? "On-device speech recognition could not start"
-                                                      : "On-device speech recognition is not downloaded yet"
+            let tier = currentModelTier()
+            engineStatus = speechRoute(languages: speech.languages, tier: tier).model != tier.primary
+                ? error.localizedDescription  // Speech.load's own plain message names the languages
+                : ParakeetEngine.isInstalled ? "On-device speech recognition could not start"
+                                             : "On-device speech recognition is not downloaded yet"
             fail("No speech recognition. Open the 🤫 menu.")
         }
     }
@@ -260,6 +281,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if engine == nil, !ParakeetEngine.isInstalled {
             menu.addItem(item("Download on-device speech recognition (about 470 MB)", #selector(downloadModel)))
         }
+        for i in [mic.menuItem()] + speech.items() { menu.addItem(i) }
         menu.addItem(.separator())
 
         let recent = NSMenu()

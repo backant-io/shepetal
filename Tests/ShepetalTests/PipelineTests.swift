@@ -142,11 +142,30 @@ final class PipelineTests: XCTestCase {
         XCTAssertLessThan(elapsed, PasteCheck.failAfter, "a paste that landed does not wait out the failure timeout")
     }
 
+    /// The dictionary is read from the pipeline's own data dir and runs after tag stripping and Cleanup,
+    /// before the text is fitted to the cursor.
+    @MainActor
+    func testDictionaryRunsAfterCleanupFromTheDataDir() async throws {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
+        var pasted: String?
+        let (run, row) = try await process(speech, FakeEngine("[BLANK_AUDIO] um, call the dentist"), before: "Then") { [pasteboard] event in
+            if event.type == .keyDown { pasted = pasteboard!.string(forType: .string) }
+        }
+        XCTAssertEqual(row.text, Cleanup.apply("call the orthodontist"))
+        XCTAssertEqual(pasted, InsertionRules.fit(Cleanup.apply("call the orthodontist"), before: "Then", after: ""))
+        XCTAssertEqual(run.inserted, pasted)
+    }
+
     /// Re-transcribe in the hub runs the same text step as dictation, so it strips non-speech tags too.
     @MainActor
     func testFinishTextStripsTagsForReTranscribeToo() {
-        XCTAssertEqual(Pipeline.finishText("[BLANK_AUDIO] um, send it"), Cleanup.apply("send it"))
-        XCTAssertEqual(Pipeline.finishText("[Music]"), "")
+        XCTAssertEqual(Pipeline.finishText("[BLANK_AUDIO] um, send it", dictionary: root.appendingPathComponent("dictionary.txt")), Cleanup.apply("send it"))
+        XCTAssertEqual(Pipeline.finishText("[Music]", dictionary: root.appendingPathComponent("dictionary.txt")), "")
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try? "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(Pipeline.finishText("call the dentist", dictionary: root.appendingPathComponent("dictionary.txt")),
+                       Cleanup.apply("call the orthodontist"), "re-transcribe applies the personal dictionary too")
     }
 
     /// The hub's re-transcribe writes the same text step's result to the same row.
@@ -157,6 +176,17 @@ final class PipelineTests: XCTestCase {
         let e = try await pipeline.retranscribe(row, with: FakeEngine("[BLANK_AUDIO] um, send it"))
         XCTAssertEqual(e.text, Cleanup.apply("send it"))
         XCTAssertEqual(try pipeline.history.recent().first { $0.id == row.id }?.text, Cleanup.apply("send it"))
+    }
+
+    /// The hub's re-transcribe reads the pipeline's own dictionary.txt, so it gets the replacements dictation
+    /// gets, and a test or a second data dir never reads the real one.
+    @MainActor
+    func testRetranscribeUsesThePipelinesDictionary() async throws {
+        let (_, row) = try await process(speech, FakeEngine("Send it."))
+        try "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let e = try await pipeline.retranscribe(row, with: FakeEngine("call the dentist"))
+        XCTAssertEqual(e.text, Cleanup.apply("call the orthodontist"))
     }
 
     @MainActor

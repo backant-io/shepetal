@@ -41,7 +41,7 @@ extension Pipeline {
         let wav = URL(fileURLWithPath: entry.audioPath)
         var e = entry
         e.rawText = try await engine.transcribe(AudioStore.read(wav), wav: wav)
-        e.text = Self.finishText(e.rawText)
+        e.text = Self.finishText(e.rawText, dictionary: dictionary)
         e.model = engine.name
         try history.update(e)
         return e
