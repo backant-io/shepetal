@@ -8,6 +8,8 @@
 # return at once and do its work off the main thread. Each clip is then re-transcribed from its kept WAV,
 # as History's re-transcribe does, and must give the same text and the engine's model name on the same row.
 # A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
+# short.wav is the loudest 200 ms of e01: Parakeet refuses under 300 ms, so the engine must pad it, and a
+# clip that short must never end as "Transcription failed" (a quick hold used to).
 # e01-quiet is e01 at -40 dB (loudest 100 ms about -52 dBFS): it must still be inserted word for word,
 # so a speech floor set too high fails here.
 # Run it offline to prove transcription makes no network call:
@@ -87,7 +89,19 @@ fi
 python3 -c 'import sys, wave; w = wave.open(sys.argv[1], "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close()' "$FIX/silence.wav"
 "$BIN" --e2e "$FIX/silence.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/silence.jsonl" || true
 
-python3 - "$WORK/results.jsonl" "$FIX" "$WORK/silence.jsonl" <<'PY'
+python3 - "$FIX/e01.wav" "$FIX/short.wav" <<'PY'
+import struct, sys, wave
+w = wave.open(sys.argv[1])
+rate, n = w.getframerate(), w.getnframes()
+x = struct.unpack(f"<{n}h", w.readframes(n))
+win = rate // 5
+start = max(range(0, n - win, rate // 50), key=lambda i: sum(v * v for v in x[i:i + win]))
+o = wave.open(sys.argv[2], "wb"); o.setnchannels(1); o.setsampwidth(2); o.setframerate(rate)
+o.writeframes(struct.pack(f"<{win}h", *x[start:start + win])); o.close()
+PY
+"$BIN" --e2e "$FIX/short.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/short.jsonl" || true
+
+python3 - "$WORK/results.jsonl" "$FIX" "$WORK/silence.jsonl" "$WORK/short.jsonl" <<'PY'
 import json, os, re, stat, struct, sys
 
 def words(s):
@@ -164,6 +178,13 @@ data = open(s["audio_path"], "rb").read()
 assert abs(s["audio_seconds"] - 2) < 0.05 and abs((len(data) - 44) / 4 / 16000 - s["audio_seconds"]) < 1e-3, s
 assert set(data[44:]) == {0}, "the kept WAV must hold the silent samples the guard saw"
 print(f"silence.wav: outcome {s['history_outcome']}, inserted_text {s['inserted_text']!r}, audio {s['audio_mode']} in a {s['audio_dir_mode']} dir")
+
+(c,) = [json.loads(l) for l in open(sys.argv[4]) if l.strip()]
+assert c["audio_seconds"] < 0.3, ("short.wav is not under Parakeet's 300 ms minimum", c["audio_seconds"])
+assert not c["error"].startswith("Transcription failed"), ("a short clip reached the model unpadded", c["error"])
+assert c["history_outcome"] in ("inserted", "no_speech") and c["history_audio_path"] == c["audio_path"], c
+assert stat.S_IMODE(os.stat(c["audio_path"]).st_mode) == 0o600, c
+print(f"short.wav: {c['audio_seconds']:.2f} s, outcome {c['history_outcome']}, error {c['error']!r}")
 PY
 
 # A paste that does not land (the target lost focus) must leave the text on the clipboard.

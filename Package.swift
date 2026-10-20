@@ -3,10 +3,11 @@ import PackageDescription
 
 let package = Package(
     name: "Shepetal",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("14.4")],  // meeting capture needs Core Audio process taps (14.4)
     products: [.executable(name: "shepetal", targets: ["Shepetal"])],
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio", exact: "0.17.7"),
+        .package(path: "meeting"),
     ],
     targets: [
         // Pure Swift: gesture state machine, model tiers, audio store, history, text rules.
@@ -20,12 +21,18 @@ let package = Package(
         .executableTarget(name: "Shepetal", dependencies: [
             "ShepetalCore",
             "ShepetalCleanup",
+            "ShepetalSummary",
             .product(name: "FluidAudio", package: "FluidAudio"),
+            .product(name: "MeetingCore", package: "meeting"),
+            .product(name: "MeetingMac", package: "meeting"),
         ]),
         // bench/cleanup/run.sh: scores cleanup models on bench/cleanup/fixtures.
         .executableTarget(name: "cleanup-bench", dependencies: ["ShepetalCleanup"], path: "bench/cleanup/Sources"),
+        // Meeting summarizer: not an LLM (rule 6).
+        .target(name: "ShepetalSummary", dependencies: ["ShepetalCore"], resources: [.copy("actions_model.json")]),
         .testTarget(name: "ShepetalCoreTests", dependencies: ["ShepetalCore"]),
         .testTarget(name: "ShepetalTests", dependencies: ["Shepetal"]),
+        .testTarget(name: "ShepetalSummaryTests", dependencies: ["ShepetalSummary"]),
         // Runs the real cleanup model when SHEPETAL_CLEANUP_MODEL names a GGUF; skipped otherwise.
         .testTarget(name: "ShepetalCleanupTests", dependencies: ["ShepetalCleanup"]),
     ],
