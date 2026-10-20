@@ -317,6 +317,12 @@ fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
 /// recording is lost, and the thread says so.
 pub fn spawn(stt: &model::Choice) -> Result<(), String> {
     let t = Thresholds::parse(&crate::env("SHEPETAL_MEETING_THRESHOLDS")).map_err(|e| format!("SHEPETAL_MEETING_THRESHOLDS: {e}"))?;
+    // Checked on PATH: Rust 1.75 (Ubuntu 24.04) spawns a missing program as a child that exits
+    // 127, so a spawn error alone would not say that the tool is missing.
+    if !insert::on_path("pw-dump") || !(insert::on_path("pw-record") || insert::on_path("parecord")) {
+        eprintln!("shepetal: meetings are not recorded: install pw-dump and pw-record (pipewire-bin), or parecord");
+        return Ok(());
+    }
     let data_home = PathBuf::from(crate::data_home());
     // The final pass is Whisper on the whole files (docs/re/meetings.md section 7): the dictation
     // model when it is Whisper, else Whisper turbo next to the dictation model.

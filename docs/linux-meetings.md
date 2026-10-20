@@ -8,7 +8,8 @@
 1. Every 2 s it runs `pw-dump` and lists the meeting apps that are capturing the mic: running
    `Stream/Input/Audio` nodes that are not on a sink monitor, matched to Zoom, Teams, Slack,
    Discord, Chrome/Chromium or Firefox. shepetal's own streams never count. They are named
-   `shepetal`, and Others.wav records a monitor.
+   `shepetal`, and Others.wav records a monitor. If `pw-dump` is missing, or both `pw-record`
+   and `parecord` are, the daemon says so at startup and records no meetings.
 2. Once a meeting app has held the mic for the start grace, it creates
    `$XDG_DATA_HOME/shepetal/meetings/<unix-ms>/` (default `~/.local/share/...`) and records two
    16 kHz mono WAVs there:
@@ -124,6 +125,8 @@ to 5 (see the known gaps).
 
 ## Known gaps
 
+- 🤫 has no meeting state yet. While a meeting records, the daemon's stderr line is the only
+  sign of it. Section 7 asks for a clear recording indicator.
 - No live transcript. The final pass runs only after the call (section 7 asks for streaming
   ASR per channel).
 - Others is one speaker. The system channel is not diarized yet, and calendar names are not used.
