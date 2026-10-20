@@ -4,6 +4,25 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### Mac hand test (Pavel, 2026-10-21, installed build 6298f40)
+
+Pavel ran `docs/manual-test.md#mac` on the v0.1.0-mac build (`ShepetalCommit` 6298f40, the #112 merge). It predates #94 (fn gestures) and #113 (meetings), so the meeting steps could not work there. His report: M-FN-2 does not work, M-FN-3 starts hands-free, M-INS-1 capitalizes and adds a period mid-sentence, M-NS-1 "no focus ... took forever to realize the window changed", M-MTG-1 and M-MTG-2 do not detect Zoom or a browser meeting. Everything else on the Mac works.
+
+A Mac `hand-test` cell moved to `confirmed` only when every hand step it cites passed and every PR its Mac evidence cites is an ancestor of 6298f40. Measured with `python3 scripts/parity.py` against main at 047cde9:
+
+| | Before | After |
+|---|---|---|
+| Automated coverage | 13.4% (50 of 372) | 13.4%, the same |
+| Confirmed coverage | 6.7% (25 of 372: 21 n/a, 4 outside) | 8.6% (32 of 372) |
+
+- **Confirmed (7):** F05 (M-IND-1), F17 (M-SEC-1), F23 (M-CTX-1), F53 (M-RET-1), F90 (M-PERM-5), F92 (M-LOGIN-1), F112 (M-FN-4). Their PRs (#10, #28, #34, #36) are all in 6298f40. Since then main changed the fn tap timestamps (#94) and added the red meeting ring to 🤫 (#113). F112's gesture logic and F05's dictation rings are the same.
+- **Failed steps, still `hand-test`:** F01 (M-FN-3), F02 (M-FN-2), F19 (M-INS-1), F51 (M-NS-1). #94 landed after 6298f40, and PR #139 handles M-FN-2 and M-FN-3.
+- **Still `hand-test` because his report touches them:**
+  - F109 (M-INS-5, M-INS-6): his M-INS-1 failure is F109's casing rule, and M-INS-5 runs through the same `InsertionRules.fit`.
+  - F20 (M-INS-4) and F27 (M-FOC-1): his M-NS-1 note names M-INS-4's setup ("no text field has focus") and the rule 8 notice "The window changed while you spoke" (`PasteGate.focusMoved`).
+  - F52 (M-HUB-2 to M-HUB-5): his copy of `docs/manual-test.md` heads M-HUB-4 "(failing with different model)". Without the whisper.cpp fallback, "Re-transcribe failed" is the expected result, so it needs his word.
+- No Mac `hand-test` cell cites a PR after 6298f40. The meeting rows F65 to F67 are still `todo` even though #113 has merged. Moving them is for the next audit, and his M-MTG results do not count because his build had no meetings.
+
 ### Parity audit (main at 45e8bf4)
 
 `docs/parity.md` was checked cell by cell against main at 45e8bf4. Work in open PRs counts for nothing until it merges. This redoes the 800cacc audit (#74) on the current ledger, and applies the cell moves that #90 (Linux steps) and #27 (iPhone steps) left to it.
