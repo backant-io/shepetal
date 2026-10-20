@@ -8,12 +8,18 @@ final class DictationSessionTests: XCTestCase {
     final class FakeMic: Microphone {
         var starts = 0
         var running = false
-        func start() throws { starts += 1; running = true }
+        var failStart = false
+        func start() throws {
+            if failStart { throw MicError() }
+            starts += 1
+            running = true
+        }
         func stop() { running = false }
         var isRunning: Bool { running }
     }
 
     struct ModelError: LocalizedError { var errorDescription: String? { "model broke" } }
+    struct MicError: Error {}
 
     let mic = FakeMic()
     let field = UUID()
@@ -122,6 +128,186 @@ final class DictationSessionTests: XCTestCase {
         await session.open(url(id))
         XCTAssertEqual(mic.starts, 0)
         XCTAssertEqual(state.keyboardStatus(for: id)?.hasPrefix("Microphone access is off"), true)
+    }
+
+    // MARK: Issue #14: any app can post the stop notification; only a stop the keyboard wrote ends the recording.
+
+    @MainActor
+    func testBareStopNotificationDoesNotStopTheRecording() async throws {
+        let session = makeSession()
+        session.observeKeyboard()
+        let id = await recording(session)
+        SharedHandoff.post(SharedHandoff.stopNotification) // what any other app can do
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertTrue(session.isRecording)
+        XCTAssertTrue(mic.running)
+
+        SharedHandoff.update(in: handoff) { _ = $0.requestStop(id) } // what the keyboard does first
+        SharedHandoff.post(SharedHandoff.stopNotification)
+        for _ in 0..<50 where session.isRecording { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(session.isRecording) // the same notification is delivered, and now it stops
+        XCTAssertEqual(state.phase, .ready)
+        XCTAssertEqual(try savedSamples(id), speech)
+    }
+
+    @MainActor
+    func testStopRequestForAnotherSessionDoesNotStopTheRecording() async {
+        let session = makeSession()
+        _ = await recording(session)
+        SharedHandoff.update(in: handoff) { _ = $0.requestStop(UUID()) }
+        let ended = await session.followKeyboard()
+        await session.tick()
+        XCTAssertFalse(ended)
+        XCTAssertTrue(session.isRecording)
+    }
+
+    @MainActor
+    func testCancelForAnotherSessionDoesNotCancelTheRecording() async {
+        let session = makeSession()
+        let id = await recording(session)
+        let other = UUID()
+        keyboardRequests(other)
+        SharedHandoff.update(in: handoff) { _ = $0.cancel(other) } // what the keyboard's cancel (#13) writes
+        let ended = await session.followKeyboard()
+        XCTAssertFalse(ended)
+        XCTAssertTrue(session.isRecording)
+        await session.tick() // superseded: kept and transcribed into history, not marked cancelled
+        XCTAssertEqual(entry(id)?.outcome, .transcribed)
+    }
+
+    @MainActor
+    func testStopRequestIsFollowedByTheTickWhenItsNotificationIsLost() async {
+        let session = makeSession()
+        let id = await recording(session)
+        SharedHandoff.update(in: handoff) { _ = $0.requestStop(id) }
+        await session.tick()
+        XCTAssertFalse(session.isRecording)
+        XCTAssertEqual(entry(id)?.outcome, .transcribed)
+    }
+
+    @MainActor
+    func testCancelWrittenToTheSharedStateKeepsTheAudioMarkedCancelled() async throws {
+        let session = makeSession()
+        let id = await recording(session)
+        SharedHandoff.update(in: handoff) { _ = $0.cancel(id) }
+        let ended = await session.followKeyboard()
+        XCTAssertTrue(ended)
+        XCTAssertFalse(session.isRecording)
+        XCTAssertTrue(heard.isEmpty)
+        XCTAssertEqual(try savedSamples(id), speech)
+        XCTAssertEqual(entry(id)?.outcome, .cancelled)
+    }
+
+    // MARK: Goal rule 3: the Live Activity shows 🤫 and the state while a dictation runs, and ends with it.
+
+    @MainActor
+    func testLiveActivityFollowsTheDictationAndEndsWhenTheTextIsDelivered() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        _ = await recording(session)
+        XCTAssertEqual(shown, [.recording])
+        await session.stop()
+        XCTAssertEqual(shown, [.recording, .processing, nil])
+    }
+
+    @MainActor
+    func testLiveActivityShowsAFailureAndACancelEndsIt() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        _ = await recording(session, Array(speech.prefix(DictationSession.minimumSamples - 1)))
+        await session.stop()
+        XCTAssertEqual(shown, [.recording, .error])
+        _ = await recording(session)
+        session.cancel()
+        XCTAssertEqual(shown, [.recording, .error, .recording, nil])
+    }
+
+    @MainActor
+    func testSupersededRecordingDoesNotEndTheNewRecordingsLiveActivity() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        _ = await recording(session)
+        let new = UUID()
+        keyboardRequests(new)
+        await session.open(url(new)) // the old recording is transcribed into history meanwhile
+        XCTAssertTrue(session.isRecording)
+        XCTAssertEqual(shown, [.recording, .recording]) // sent again for the new recording, never ended
+    }
+
+    /// Holds a fake transcription until the test releases it, so the order of events does not depend on timing.
+    final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isOpen = false
+        private var waiter: CheckedContinuation<Void, Never>?
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if isOpen { lock.unlock(); continuation.resume() } else { waiter = continuation; lock.unlock() }
+            }
+        }
+        func release() {
+            lock.lock()
+            isOpen = true
+            let waiting = waiter
+            waiter = nil
+            lock.unlock()
+            waiting?.resume()
+        }
+    }
+
+    @MainActor
+    func testOlderRecordingFinishingLateDoesNotEndTheLiveActivityOfANewerOneThatStopped() async throws {
+        let session = DictationSession(mic: mic, directory: dir, handoff: handoff, settings: UserDefaults(suiteName: settingsSuite)!) { true }
+        let newer = Array(speech.reversed())
+        let olderDone = Gate(), newerDone = Gate()
+        session.modelReady { samples in
+            await (samples == newer ? newerDone : olderDone).wait()
+            return samples == newer ? "newer" : "older"
+        }
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        let old = await recording(session)
+        let new = UUID()
+        keyboardRequests(new)
+        let opening = Task { await session.open(url(new)) } // ends the old recording, starts the new one, transcribes the old
+        for _ in 0..<500 where state.sessionID != new || state.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.isRecording)
+        session.append(newer)
+        let stopping = Task { await session.stop() } // the user stops the new one while the old is still transcribing
+        for _ in 0..<500 where session.activity != .processing { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(session.activity, .processing)
+        olderDone.release() // the old transcription finishes while the new one is still transcribing
+        await opening.value
+        XCTAssertEqual(entry(old)?.text, "older")
+        XCTAssertEqual(session.activity, .processing) // still "Transcribing" for the new recording
+        XCTAssertEqual(session.status, "Transcribing...")
+        newerDone.release()
+        await stopping.value
+        XCTAssertNil(session.activity)
+        XCTAssertEqual(shown, [.recording, .recording, .processing, nil])
+        var h = state
+        XCTAssertEqual(h.consume(new, document: field), "newer")
+    }
+
+    @MainActor
+    func testMicThatFailsToStartForANewRequestEndsTheLiveActivityAndTranscribesTheOldRecording() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        let old = await recording(session)
+        mic.failStart = true
+        let new = UUID()
+        keyboardRequests(new)
+        await session.open(url(new))
+        XCTAssertFalse(session.isRecording)
+        XCTAssertFalse(mic.running)
+        XCTAssertEqual(shown, [.recording, .error]) // not stuck on "Listening", and not ended before the error shows
+        XCTAssertEqual(entry(old)?.outcome, .transcribed)
+        XCTAssertEqual(state.phase, .failed)
+        XCTAssertTrue(session.status.hasPrefix("Could not start recording"))
     }
 
     // MARK: Product rule 4: every recording keeps the exact samples the model got, next to its history entry.
