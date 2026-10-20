@@ -98,6 +98,20 @@ mod tests {
     }
 
     #[test]
+    fn an_audio_dir_open_to_others_is_refused() {
+        // Goal rule 4: owner-only. An existing dir that others can read is not used as is.
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("shepetal-open-{}", std::process::id()));
+        let dir = home.join("shepetal/audio");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let err = new_recording(&home, 1).unwrap_err();
+        assert!(err.to_string().contains("must be a 0700 directory"), "{err}");
+        assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "no file created in it");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
     fn decodes_fn_press_and_skips_sync() {
         let mut b = [0u8; 24];
         b[16..18].copy_from_slice(&EV_KEY.to_ne_bytes());

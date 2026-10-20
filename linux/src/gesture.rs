@@ -11,7 +11,8 @@ pub enum Event {
     Up(u64),
     /// Another key was pressed.
     Other,
-    /// Clock tick, so an expired tap window cancels without waiting for a key.
+    /// Clock tick, so an expired tap window ends as too short without waiting for fn. The
+    /// daemon feeds one after every key event and every 50 ms without one.
     Tick(u64),
 }
 
@@ -72,7 +73,8 @@ impl Gesture {
             (Pressed(_), Event::Other) => (Idle, vec![Cancel]),
             (Tapped(t0), Event::Down(t)) if t - t0 <= self.double_tap_ms => (HandsFree, vec![]),
             (Tapped(_), Event::Down(t)) => (Pressed(t), vec![TooShort, Start]),
-            (Tapped(t0), Event::Tick(t)) if t - t0 > self.double_tap_ms => (Idle, vec![TooShort]),
+            // At the deadline, as the Mac's `FnGesture.tick` (`>=`).
+            (Tapped(t0), Event::Tick(t)) if t - t0 >= self.double_tap_ms => (Idle, vec![TooShort]),
             // The release of the second tap, and typing while hands-free, keep recording. Typing
             // after a tap is not a chord (fn is already up), so the tap still ends as too short.
             (HandsFree, Event::Down(_)) => (Idle, vec![Stop]),
@@ -117,9 +119,9 @@ mod tests {
     #[test]
     fn single_tap_is_too_short_once_window_expires() {
         // Goal rule 2: nothing is transcribed, and only after the double-tap window has passed.
-        assert_eq!(run(&[Down(0), Up(100), Tick(600)]), vec![Start]);
-        assert_eq!(run(&[Down(0), Up(100), Tick(601)]), vec![Start, TooShort]);
-        assert_eq!(run(&[Down(0), Up(100), Tick(601), Tick(5000)]), vec![Start, TooShort], "settled once");
+        assert_eq!(run(&[Down(0), Up(100), Tick(599)]), vec![Start]);
+        assert_eq!(run(&[Down(0), Up(100), Tick(600)]), vec![Start, TooShort], "at the deadline, as on the Mac");
+        assert_eq!(run(&[Down(0), Up(100), Tick(600), Tick(5000)]), vec![Start, TooShort], "settled once");
     }
 
     #[test]

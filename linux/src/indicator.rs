@@ -148,7 +148,10 @@ mod tests {
         assert_eq!(err.to_string(), "another shepetal daemon is running");
 
         let stale = dir.join("stale.sock");
-        drop(UnixListener::bind(&stale).unwrap()); // the file stays, nobody answers
+        // A socket file nobody accepts on. Not a dropped UnixListener: a test in another thread
+        // that forks a tool between our bind and drop would keep that listener alive in the child
+        // until exec, and the connect would succeed.
+        drop(std::os::unix::net::UnixDatagram::bind(&stale).unwrap());
         let ind = Indicator::bind(&stale).expect("a dead daemon's socket is replaced");
         let mut r = BufReader::new(UnixStream::connect(&stale).unwrap());
         assert_eq!(line(&mut r), "idle\n"); // read first: the accept thread may not have run yet
