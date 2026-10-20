@@ -1,0 +1,7 @@
+{
+  "uuid": "shepetal-indicator@backant.io",
+  "name": "shepetal 🤫 indicator",
+  "description": "Shows the shepetal dictation daemon's 🤫 indicator in the bottom-left corner on GNOME Wayland, where apps cannot place overlays. Needs `shepetal daemon` running.",
+  "shell-version": ["45", "46", "47", "48", "49", "50", "51"],
+  "url": "https://github.com/backant-io/shepetal"
+}
