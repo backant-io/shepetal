@@ -148,6 +148,16 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(Pipeline.finishText("[Music]"), "")
     }
 
+    /// The hub's re-transcribe writes the same text step's result to the same row.
+    @MainActor
+    func testRetranscribeStripsTagsAndUpdatesTheRow() async throws {
+        let (_, row) = try await process(speech, FakeEngine("Send it."))
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let e = try await pipeline.retranscribe(row, with: FakeEngine("[BLANK_AUDIO] um, send it"))
+        XCTAssertEqual(e.text, Cleanup.apply("send it"))
+        XCTAssertEqual(try pipeline.history.recent().first { $0.id == row.id }?.text, Cleanup.apply("send it"))
+    }
+
     @MainActor
     func testNoEngineAndEngineErrorKeepAudio() async throws {
         let (none, noneRow) = try await process(speech, nil)
