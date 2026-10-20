@@ -2,8 +2,8 @@
 //!
 //! [`Detector`] is a pure state machine over [`Snapshot`]s (which processes hold the mic, which
 //! windows are open), ported from the Mac `MeetingCore` detector with the docs/re/meetings.md
-//! thresholds as [`Config`]. It also decides when the recording starts and stops, so all of
-//! that is tested on any OS. The Win32 probe and the WASAPI capture are in `win` (Windows only).
+//! thresholds as [`Config`]. It also decides when to offer "Record?" and when the recording
+//! starts (only after the user accepts) and stops, so all of that is tested on any OS. The Win32 probe and the WASAPI capture are in `win` (Windows only).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -44,9 +44,14 @@ pub struct Snapshot {
 pub enum Event {
     Started(String),
     Ended(String),
-    /// The first meeting started: record Me.wav and Others.wav.
+    /// The first meeting started: show the one-click "Record?" offer. Nothing records until
+    /// the user clicks it ([`Detector::accept`]).
+    OfferRecording,
+    /// The last meeting ended before the offer was clicked: hide it.
+    WithdrawOffer,
+    /// The user accepted the offer: record Me.wav and Others.wav.
     StartRecording,
-    /// The last meeting ended: close the files.
+    /// The last meeting of a recording ended: close the files.
     StopRecording,
 }
 
@@ -126,6 +131,8 @@ pub struct Detector {
     device_grace_until: f64,
     last_devices: Option<Vec<String>>,
     active: BTreeSet<String>,
+    /// The user accepted "Record?" for the current run of meetings.
+    recording: bool,
 }
 
 impl Detector {
@@ -139,6 +146,7 @@ impl Detector {
             device_grace_until: f64::NEG_INFINITY,
             last_devices: None,
             active: BTreeSet::new(),
+            recording: false,
         }
     }
 
@@ -262,14 +270,30 @@ impl Detector {
             }
         }
 
-        // One recording covers overlapping meetings: it captures the whole mic and system mix.
+        // One offer, and one recording, covers overlapping meetings: it captures the whole mic
+        // and system mix.
         if was_idle && !self.active.is_empty() {
-            events.push(Event::StartRecording);
+            events.push(Event::OfferRecording);
         }
         if !was_idle && self.active.is_empty() {
-            events.push(Event::StopRecording);
+            events.push(if self.recording {
+                Event::StopRecording
+            } else {
+                Event::WithdrawOffer
+            });
+            self.recording = false;
         }
         events
+    }
+
+    /// The user clicked "Record?": starts the recording while the offer stands. A click after
+    /// the meetings ended, or a second click, does nothing.
+    pub fn accept(&mut self) -> Vec<Event> {
+        if self.active.is_empty() || self.recording {
+            return vec![];
+        }
+        self.recording = true;
+        vec![Event::StartRecording]
     }
 }
 
@@ -361,18 +385,63 @@ mod tests {
     }
 
     #[test]
-    fn starts_and_records_after_five_second_grace() {
+    fn starts_and_offers_to_record_after_five_second_grace() {
         let mut d = detector();
         let s = holding(&[zoom()]);
         assert_eq!(run(&mut d, &s, 0, 4), vec![]);
         assert_eq!(
             d.update(&s, 5.0),
-            vec![started("Zoom"), Event::StartRecording]
+            vec![started("Zoom"), Event::OfferRecording]
         );
         assert_eq!(
             run(&mut d, &s, 6, 20),
             vec![],
-            "no second start while the call runs"
+            "no second start or offer while the call runs"
+        );
+    }
+
+    #[test]
+    fn records_only_after_the_record_click() {
+        // Pavel's rule: a detected meeting is never recorded on its own, only after one click
+        // on "Record?".
+        let mut d = detector();
+        let call = holding(&[zoom()]);
+        let events = run(&mut d, &call, 0, 60);
+        assert!(!events.contains(&Event::StartRecording), "{events:?}");
+        assert_eq!(d.accept(), vec![Event::StartRecording]);
+        assert_eq!(d.accept(), vec![], "a second click starts nothing");
+        assert_eq!(run(&mut d, &call, 61, 90), vec![]);
+        assert_eq!(
+            run(&mut d, &released(), 91, 95),
+            vec![ended("Zoom"), Event::StopRecording]
+        );
+        // The next meeting asks again, and its click records again.
+        assert_eq!(
+            run(&mut d, &call, 100, 105),
+            vec![started("Zoom"), Event::OfferRecording]
+        );
+        assert_eq!(d.accept(), vec![Event::StartRecording]);
+    }
+
+    #[test]
+    fn an_unanswered_offer_records_nothing() {
+        let mut d = detector();
+        assert_eq!(d.accept(), vec![], "no meeting, nothing to accept");
+        run(&mut d, &holding(&[zoom()]), 0, 30);
+        assert_eq!(
+            run(&mut d, &released(), 31, 35),
+            vec![ended("Zoom"), Event::WithdrawOffer],
+            "the offer goes away, there is no recording to stop"
+        );
+        assert_eq!(
+            d.accept(),
+            vec![],
+            "a late click after the meeting starts nothing"
+        );
+        // The next meeting asks again.
+        assert_eq!(
+            run(&mut d, &holding(&[zoom()]), 40, 45),
+            vec![started("Zoom"), Event::OfferRecording]
         );
     }
 
@@ -385,7 +454,7 @@ mod tests {
         assert_eq!(run(&mut d, &released(), 31, 34), vec![]);
         assert_eq!(
             d.update(&released(), 35.0),
-            vec![ended("Zoom"), Event::StopRecording]
+            vec![ended("Zoom"), Event::WithdrawOffer]
         );
     }
 
@@ -400,7 +469,7 @@ mod tests {
         assert_eq!(run(&mut d, &released(), 50, 53), vec![]);
         assert_eq!(
             d.update(&released(), 54.0),
-            vec![ended("Zoom"), Event::StopRecording]
+            vec![ended("Zoom"), Event::WithdrawOffer]
         );
     }
 
@@ -409,7 +478,7 @@ mod tests {
         let mut d = detector();
         assert_eq!(
             run(&mut d, &holding(&[zoom()]), 0, 5),
-            vec![started("Zoom"), Event::StartRecording]
+            vec![started("Zoom"), Event::OfferRecording]
         );
         assert_eq!(
             run(&mut d, &released(), 6, 19),
@@ -418,7 +487,7 @@ mod tests {
         );
         assert_eq!(
             d.update(&released(), 20.0),
-            vec![ended("Zoom"), Event::StopRecording]
+            vec![ended("Zoom"), Event::WithdrawOffer]
         );
     }
 
@@ -434,7 +503,7 @@ mod tests {
         assert_eq!(run(&mut d, &tab_open, 31, 60), vec![]);
         assert_eq!(
             d.update(&tab_open, 61.0),
-            vec![ended("Google Meet (Chrome)"), Event::StopRecording]
+            vec![ended("Google Meet (Chrome)"), Event::WithdrawOffer]
         );
 
         // Tab gone too (bound): the short wait.
@@ -443,7 +512,7 @@ mod tests {
         assert_eq!(run(&mut d, &released(), 31, 34), vec![]);
         assert_eq!(
             d.update(&released(), 35.0),
-            vec![ended("Google Meet (Chrome)"), Event::StopRecording]
+            vec![ended("Google Meet (Chrome)"), Event::WithdrawOffer]
         );
     }
 
@@ -479,7 +548,7 @@ mod tests {
         );
         assert_eq!(
             d.update(&headset, 41.0),
-            vec![ended("Zoom"), Event::StopRecording]
+            vec![ended("Zoom"), Event::WithdrawOffer]
         );
     }
 
@@ -488,11 +557,13 @@ mod tests {
         let mut d = detector();
         assert_eq!(
             run(&mut d, &holding(&[zoom()]), 0, 5),
-            vec![started("Zoom"), Event::StartRecording]
+            vec![started("Zoom"), Event::OfferRecording]
         );
+        assert_eq!(d.accept(), vec![Event::StartRecording]);
         assert_eq!(
             run(&mut d, &holding(&[zoom(), teams()]), 6, 30),
-            vec![started("Microsoft Teams")]
+            vec![started("Microsoft Teams")],
+            "no second offer, no second recording"
         );
         assert_eq!(
             run(&mut d, &holding(&[teams()]), 31, 35),
@@ -520,7 +591,7 @@ mod tests {
             vec![
                 started("Google Meet (Chrome)"),
                 started("Zoom"),
-                Event::StartRecording
+                Event::OfferRecording
             ]
         );
         let tab_open = Snapshot {
@@ -530,7 +601,7 @@ mod tests {
         assert_eq!(run(&mut d, &tab_open, 31, 35), vec![ended("Zoom")]);
         assert_eq!(
             run(&mut d, &tab_open, 36, 61),
-            vec![ended("Google Meet (Chrome)"), Event::StopRecording]
+            vec![ended("Google Meet (Chrome)"), Event::WithdrawOffer]
         );
     }
 
@@ -590,7 +661,7 @@ mod tests {
         let mut d = detector();
         assert_eq!(
             run(&mut d, &meet_call(), 0, 30),
-            vec![started("Google Meet (Chrome)"), Event::StartRecording]
+            vec![started("Google Meet (Chrome)"), Event::OfferRecording]
         );
         let docs = Snapshot {
             mic: vec![chrome()],
@@ -628,7 +699,7 @@ mod tests {
         };
         assert_eq!(
             run(&mut d, &huddle, 61, 66),
-            vec![started("Slack"), Event::StartRecording]
+            vec![started("Slack"), Event::OfferRecording]
         );
     }
 
@@ -642,7 +713,7 @@ mod tests {
         );
         assert_eq!(
             run(&mut d, &holding(&[mic("zoom.exe", SELF), zoom()]), 61, 66),
-            vec![started("Zoom"), Event::StartRecording]
+            vec![started("Zoom"), Event::OfferRecording]
         );
     }
 
