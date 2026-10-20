@@ -1,0 +1,68 @@
+# The Windows workspace (windows/): release build, tests, the per-user installer, a silent
+# install and uninstall of it, and the installer as an artifact. Its own file, apart from ci.yml,
+# so it runs only when windows/ changes.
+name: Windows
+on:
+  pull_request:
+    paths: ["windows/**", ".github/workflows/windows.yml"]
+  push:
+    branches: [main]
+    paths: ["windows/**", ".github/workflows/windows.yml"]
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            windows/target
+          key: windows-cargo-${{ hashFiles('windows/Cargo.lock') }}
+          restore-keys: windows-cargo-
+      - run: cargo --version; rustc --version
+      - run: cargo build --release --locked
+      - run: cargo test --release --locked
+      - name: shepetal.exe is a GUI-subsystem exe (no console window)
+        run: |
+          $b = [IO.File]::ReadAllBytes("target\release\shepetal.exe")
+          $pe = [BitConverter]::ToInt32($b, 0x3C)
+          # PE signature (4) + COFF header (20) + Subsystem's offset in the optional header (68).
+          $subsystem = [BitConverter]::ToUInt16($b, $pe + 92)
+          if ($subsystem -ne 2) { throw "subsystem $subsystem, want 2 (IMAGE_SUBSYSTEM_WINDOWS_GUI)" }
+          "subsystem 2: Windows GUI"
+      - name: Build the installer (Inno Setup)
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $version = (cargo pkgid -p app) -replace '.*[#@]', ''
+          & $iscc "/DAppVersion=$version" installer\shepetal.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Install, check, uninstall, recordings kept
+        run: installer\test-install.ps1 (Get-ChildItem target\installer\shepetal-setup-*.exe).FullName
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shepetal-windows-setup
+          path: windows/target/installer/shepetal-setup-*.exe
+          if-no-files-found: error
+
+  windows-pure-on-linux:
+    # The platform-free crates, and the app's flow on top of them, test on Linux too. audio is
+    # Windows-only here: it builds whisper.cpp and needs WASAPI through cpal.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo test --locked -p app -p shepetal-core -p input -p insert -p meetings
