@@ -46,6 +46,9 @@ public final class DictationSession: ObservableObject {
     private let settings: UserDefaults
     private let requestPermission: () async -> Bool
     private var sessionID: UUID?
+    /// The newest request the app acted on. Only its outcome may set the status and the Live Activity, so an
+    /// older recording that finishes late never ends the Live Activity of a newer one, even after it stopped.
+    private var latestID: UUID?
     private var startedAt = Date()
     private var samples: [Float] = []
     private var unsaved: [UUID: Unsaved] = [:]
@@ -98,10 +101,12 @@ public final class DictationSession: ObservableObject {
             mic.stop()
             SharedHandoff.post(SharedHandoff.readyNotification)
             if let superseded { await finish(superseded) }
-            setStatus("Could not start recording. Tap the mic again.", activity: .error)
+            latestID = id
+            setStatus("Could not start recording. Tap the mic again.", activity: .error, for: id)
             return
         }
         sessionID = id
+        latestID = id
         startedAt = Date()
         isRecording = true
         status = "Listening. Go back to your app and tap the mic to finish."
@@ -168,7 +173,7 @@ public final class DictationSession: ObservableObject {
         entry.outcome = .cancelled
         keep(entry)
         tell { $0.cancel(entry.id) }
-        setStatus("Cancelled. The recording is kept.", activity: nil)
+        setStatus("Cancelled. The recording is kept.", activity: nil, for: entry.id)
     }
 
     /// Transcribes an ended recording into history and tells the keyboard how it went.
@@ -180,7 +185,7 @@ public final class DictationSession: ObservableObject {
             entry.note = message
             keep(entry)
             if ended.forKeyboard { tell { $0.fail(id, message) } }
-            setStatus(message, activity: .error)
+            setStatus(message, activity: .error, for: id)
         }
         guard samples.count >= Self.minimumSamples else {
             return fail(.tooShort, "Too short to transcribe. Tap the mic, speak, then tap it again.")
@@ -188,14 +193,14 @@ public final class DictationSession: ObservableObject {
         guard let transcribe else {
             return fail(.failed, "Not transcribed: the speech model is still loading. The audio is kept.")
         }
-        setStatus("Transcribing...", activity: .processing)
+        setStatus("Transcribing...", activity: .processing, for: id)
         do {
             let text = try await transcribe(samples)
             entry.outcome = .transcribed
             entry.text = text
             keep(entry)
             if ended.forKeyboard { tell { $0.deliver(id, text: text, note: reason) } }
-            setStatus(reason ?? Self.ready, activity: nil)
+            setStatus(reason ?? Self.ready, activity: nil, for: id)
         } catch {
             fail(.failed, "Could not transcribe: \(error.localizedDescription). The audio is kept.")
         }
@@ -250,9 +255,10 @@ public final class DictationSession: ObservableObject {
         SharedHandoff.post(SharedHandoff.readyNotification)
     }
 
-    /// A finished transcription must not overwrite the status or Live Activity of a recording that started meanwhile.
-    private func setStatus(_ text: String, activity: Indicator.Mode?) {
-        guard sessionID == nil else { return }
+    /// A finished transcription must not overwrite the status or Live Activity of a newer recording, while that
+    /// one records or after it stopped.
+    private func setStatus(_ text: String, activity: Indicator.Mode?, for id: UUID) {
+        guard sessionID == nil, id == latestID else { return }
         status = text
         self.activity = activity
     }

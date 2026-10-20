@@ -238,6 +238,36 @@ final class DictationSessionTests: XCTestCase {
     }
 
     @MainActor
+    func testOlderRecordingFinishingLateDoesNotEndTheLiveActivityOfANewerOneThatStopped() async throws {
+        let session = DictationSession(mic: mic, directory: dir, handoff: handoff, settings: UserDefaults(suiteName: settingsSuite)!) { true }
+        let newer = Array(speech.reversed())
+        session.modelReady { samples in
+            // The superseded recording takes 0.3 s; the newer one takes 1.5 s, so the older finishes in between.
+            try await Task.sleep(for: .milliseconds(samples == newer ? 1500 : 300))
+            return samples == newer ? "newer" : "older"
+        }
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        let old = await recording(session)
+        let new = UUID()
+        keyboardRequests(new)
+        let opening = Task { await session.open(url(new)) } // ends the old recording, starts the new one, transcribes the old
+        for _ in 0..<200 where state.sessionID != new || state.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.isRecording)
+        session.append(newer)
+        let stopping = Task { await session.stop() } // the user stops the new one while the old is still transcribing
+        await opening.value
+        XCTAssertEqual(entry(old)?.text, "older")
+        XCTAssertEqual(session.activity, .processing) // still "Transcribing" for the new recording
+        XCTAssertEqual(session.status, "Transcribing...")
+        await stopping.value
+        XCTAssertNil(session.activity)
+        XCTAssertEqual(shown, [.recording, .processing, nil])
+        var h = state
+        XCTAssertEqual(h.consume(new, document: field), "newer")
+    }
+
+    @MainActor
     func testMicThatFailsToStartForANewRequestEndsTheLiveActivityAndTranscribesTheOldRecording() async {
         let session = makeSession()
         var shown: [Indicator.Mode?] = []

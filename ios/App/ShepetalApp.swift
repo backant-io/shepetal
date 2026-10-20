@@ -91,7 +91,8 @@ final class LiveIndicator {
     /// Nil ends the Live Activity. An error stays for a few seconds, then it ends.
     func show(_ mode: Indicator.Mode?) {
         guard let mode else { return end(nil, .immediate) }
-        let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: nil)
+        // If the app dies mid-dictation, the widget shows the activity as stale once the state is past its timeout.
+        let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: mode.staleAfter.map { .now + $0 })
         if mode == .error { return end(content, .after(.now + 4)) }
         if let activity {
             Task { await activity.update(content) }
