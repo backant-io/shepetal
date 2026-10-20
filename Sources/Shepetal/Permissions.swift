@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import ShepetalCore
 
 enum Permission: CaseIterable {
     case microphone, inputMonitoring, accessibility
@@ -101,5 +102,30 @@ final class Onboarding: NSWindowController {
         let firstMicAsk = p == .microphone && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
         if allowRequests { p.request() }
         if !(allowRequests && firstMicAsk) { NSWorkspace.shared.open(p.settingsURL) }
+    }
+}
+
+/// Notices a permission that was turned off while Shepetal runs: on the 2 s timer, after wake,
+/// and whenever an app comes to the front (the user coming back from System Settings).
+@MainActor
+final class PermissionMonitor {
+    private var watch = PermissionWatch<Permission>()
+    private let revoked: (String) -> Void
+
+    /// `revoked` gets the message to show, for example "Accessibility access was turned off".
+    init(revoked: @escaping (String) -> Void) {
+        self.revoked = revoked
+        check()  // the first poll only records
+        for name in [NSWorkspace.didWakeNotification, NSWorkspace.didActivateApplicationNotification] {
+            NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.check() }
+            }
+        }
+    }
+
+    func check() {
+        for p in watch.observe(Dictionary(uniqueKeysWithValues: Permission.allCases.map { ($0, $0.granted) })) {
+            revoked(PermissionWatch<Permission>.message(p.title))
+        }
     }
 }

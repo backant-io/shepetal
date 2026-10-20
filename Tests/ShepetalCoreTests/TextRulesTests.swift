@@ -2,7 +2,10 @@ import XCTest
 @testable import ShepetalCore
 
 final class InsertionRulesTests: XCTestCase {
-    func fit(_ s: String, _ before: String, _ after: String) -> String { InsertionRules.fit(s, before: before, after: after) }
+    func fit(_ s: String, _ before: String, _ after: String, selected: String = "") -> String {
+        InsertionRules.fit(s, before: before, after: after, selected: selected)
+    }
+    let nbsp = "\u{00A0}"
 
     func testEmptyFieldKeepsTextAsIs() {
         XCTAssertEqual(fit("Hello there.", "", ""), "Hello there.")
@@ -23,10 +26,71 @@ final class InsertionRulesTests: XCTestCase {
         XCTAssertEqual(fit("API keys rotate.", "the ", ""), "API keys rotate.")
     }
 
+    // The space before following text is a non-breaking space now (see testTrailingBoundarySpaceIsNBSP).
     func testFollowingTextDropsSentenceEndAndAddsSpace() {
-        XCTAssertEqual(fit("The report.", "", "is due"), "The report ")
+        XCTAssertEqual(fit("The report.", "", "is due"), "The report" + nbsp)
         XCTAssertEqual(fit("The report.", "", ", which"), "The report")
-        XCTAssertEqual(fit("Done.", "", "Next sentence."), "Done. ")
+        XCTAssertEqual(fit("Done.", "", "Next sentence."), "Done." + nbsp)
+    }
+
+    // Apps that trim trailing ASCII spaces from a paste would glue our last word to the next one.
+    func testTrailingBoundarySpaceIsNBSP() {
+        let out = fit("Hello.", "", "world")
+        XCTAssertEqual(out.unicodeScalars.last, "\u{00A0}")
+        XCTAssertFalse(out.hasSuffix(" "))
+    }
+
+    func testNoTrailingSpaceWhenNothingFollows() {
+        XCTAssertEqual(fit("Hello there.", "Done.", ""), " Hello there.")
+        XCTAssertEqual(fit("Hello there.", "", " Next one."), "Hello there.")
+        XCTAssertEqual(fit("Hello there.", "", "\nnext line"), "Hello there.")
+    }
+
+    // Only the trailing space is non-breaking. A leading NBSP would stop the line from wrapping there.
+    func testLeadingSpaceStaysASCII() {
+        XCTAssertEqual(fit("Send it.", "Please", ""), " send it.")
+        XCTAssertEqual(fit("Send it", "Please", "now"), " send it" + nbsp)
+    }
+
+    // Replacing a selected word mid-sentence: the new words take its case.
+    func testSelectionLowercaseIsMatched() {
+        XCTAssertEqual(fit("Quick brown.", "The ", " fox", selected: "slow"), "quick brown")
+        XCTAssertEqual(fit("quick brown", "", "", selected: "Slow"), "Quick brown")
+    }
+
+    func testSelectionWithoutPeriodDropsOurs() {
+        XCTAssertEqual(fit("New text.", "", "", selected: "Old text"), "New text")
+    }
+
+    func testSelectionWithPeriodKeepsIt() {
+        XCTAssertEqual(fit("New text.", "", "", selected: "Old text."), "New text.")
+        XCTAssertEqual(fit("New text", "", "", selected: "Old text!"), "New text!")
+        XCTAssertEqual(fit("New text?", "", "", selected: "Old text."), "New text?")
+    }
+
+    // The spaces around the selection are the user's; the paste replaces them, so they go back.
+    func testSelectionKeepsItsSpaces() {
+        XCTAssertEqual(fit("Bar baz.", "a", "b", selected: " Foo "), " Bar baz ")
+        XCTAssertEqual(fit("Bar baz.", "a", "b", selected: " foo "), " bar baz ")
+    }
+
+    // "I" and acronyms keep their capital, and a selected "I" or acronym says nothing about sentence position.
+    func testIAndAcronymsIgnoreSelectionCase() {
+        XCTAssertEqual(fit("I agree.", "", "", selected: "maybe"), "I agree")
+        XCTAssertEqual(fit("API keys.", "", "", selected: "the keys"), "API keys")
+        XCTAssertEqual(fit("The endpoint", "Call ", "", selected: "API"), "the endpoint")
+        XCTAssertEqual(fit("Then", "", "", selected: "I"), "Then")
+    }
+
+    // Text on earlier lines says nothing about the cursor's sentence.
+    func testOnlyLastLineOfBeforeCounts() {
+        XCTAssertEqual(fit("Please send it.", "Hello.\nplease", ""), " please send it.")
+        XCTAssertEqual(fit("Send it.", "and then\n", ""), "Send it.")
+        XCTAssertEqual(fit("Send it.", "and then\r\n", ""), "Send it.")
+    }
+
+    func testOnlyFirstLineOfAfterCounts() {
+        XCTAssertEqual(fit("Done.", "", "\ncontinues below"), "Done.")
     }
 
     func testNoSpaceAfterOpeningBracket() {

@@ -31,14 +31,17 @@ final class Pipeline {
         history = try History(path: Paths.history)
     }
 
+    /// `selection` is the text the paste replaces, `refocus` puts focus back where dictation started, and
+    /// `secureInput` names the app holding secure input (then nothing is pasted). The defaults skip all three.
     func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
+                 selection: () -> String = { "" }, refocus: () async -> Void = {}, secureInput: () -> String? = { nil },
                  sendPaste: (CGEvent) -> Void) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
                                           durationMs: Self.ms(samples)))
         save(samples, &run)  // first, so the audio survives anything below
         let saveError = run.error
-        let error = await transcribeAndInsert(samples, engine, t0, context, sendPaste, &run)
+        let error = await transcribeAndInsert(samples, engine, t0, context, selection, refocus, secureInput, sendPaste, &run)
         run.error = saveError ?? error
         record(&run)
         return run
@@ -46,7 +49,8 @@ final class Pipeline {
 
     /// Returns an error message, or nil when the text landed.
     private func transcribeAndInsert(_ samples: [Float], _ engine: SpeechEngine?, _ t0: TimeInterval,
-                                     _ context: () -> (before: String, after: String),
+                                     _ context: () -> (before: String, after: String), _ selection: () -> String,
+                                     _ refocus: () async -> Void, _ secureInput: () -> String?,
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
         guard let engine else { return "Speech model is not loaded" }
         run.entry.model = engine.name
@@ -58,8 +62,13 @@ final class Pipeline {
         run.entry.text = Cleanup.apply(run.entry.rawText)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return "No speech heard" }
+        await refocus()
         let (before, after) = context()
-        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after)
+        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selection())
+        if let app = secureInput() {  // the clipboard is not touched
+            run.entry.outcome = .pasteFailed
+            return SecureInputWatch.pasteMessage(app)
+        }
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed

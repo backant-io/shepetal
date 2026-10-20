@@ -104,23 +104,36 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     }
 }
 
-/// Text around the cursor of the focused field, through Accessibility. Empty when unreadable.
+/// Text around the cursor of the focused field, and the selection the paste replaces, through
+/// Accessibility (`AXValue` and `AXSelectedTextRange`). Empty when unreadable.
 enum FocusedText {
     static func context() -> (before: String, after: String) {
+        read().map { split($0, $1) } ?? ("", "")
+    }
+
+    static func selected() -> String {
+        read().map { s, r in
+            let ns = s as NSString
+            let start = min(max(r.location, 0), ns.length)
+            return ns.substring(with: NSRange(location: start, length: min(max(r.length, 0), ns.length - start)))
+        } ?? ""
+    }
+
+    private static func read() -> (String, NSRange)? {
         let system = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused else { return ("", "") }
+              let element = focused else { return nil }
         let el = element as! AXUIElement
         var value: CFTypeRef?
         var rangeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
               let string = value as? String,
               AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-              let rangeValue = rangeRef else { return ("", "") }
+              let rangeValue = rangeRef else { return nil }
         var range = CFRange()
-        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return ("", "") }
-        return split(string, NSRange(location: range.location, length: range.length))
+        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
+        return (string, NSRange(location: range.location, length: range.length))
     }
 
     static func split(_ s: String, _ selection: NSRange) -> (before: String, after: String) {

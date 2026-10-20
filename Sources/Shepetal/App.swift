@@ -18,6 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
+    private let focus = FocusRestore()
+    private let sounds = Sounds()
+    private lazy var secureInput = SecureInput(indicator: indicator)
+    private var permissions: PermissionMonitor!
+    private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -55,10 +60,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.applyRetention() }
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.startTapIfAllowed() }
+            MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
 
+        permissions = PermissionMonitor { [weak self] message in
+            self?.fail(message)
+            if self?.allowPrompts == true { self?.showOnboarding() }
+        }
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
         }
@@ -98,8 +107,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func show(_ action: GestureAction) {
+        sounds.play(action)
         switch action {
-        case .start: indicator.set(.recording)
+        case .start:
+            focus.store()
+            indicator.set(.recording)
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
@@ -123,7 +135,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         indicator.set(.processing)
         Task {
             let run = await pipeline.process(samples, engine: engine, context: FocusedText.context,
-                                             sendPaste: Inserter.postCmdV)
+                                             selection: FocusedText.selected, refocus: focus.restore,
+                                             secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false
             if let error = run.error { fail(error) } else { indicator.set(.idle) }
         }
@@ -198,6 +211,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keepItem.submenu = keep
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
+        menu.addItem(sounds.menuItem)
+        menu.addItem(loginItem.menuItem)
         menu.addItem(item(Permission.missing.isEmpty ? "Permissions…" : "Permissions… (\(Permission.missing.count) missing)", #selector(openPermissions)))
         menu.addItem(.separator())
         for (title, url) in Self.donate {
