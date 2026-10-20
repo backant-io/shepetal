@@ -12,16 +12,60 @@ protocol MeetingCapturing: AnyObject {
     func stop() throws
 }
 
-/// Detector to recorder: the probe runs every second, a detected meeting is recorded until the detector
-/// says it ended, then the meeting goes to `onEnded` (the transcriber). The menu item starts and stops by hand.
+/// Pavel's decision (1): a detected meeting is only offered, on a card next to 🤫. Capture starts on one click on
+/// Record, or at once when "Always record meetings automatically" is on (off by default). Not now, the 20 s
+/// timeout and the meeting ending first record nothing for that meeting. Pure, so tests drive the clock.
+struct MeetingOffer {
+    enum Step: Equatable { case none, offer(String), record(String), dismiss }
+    static let seconds: Double = 20
+
+    /// The app on the card; nil while no card shows.
+    private(set) var app: String?
+    private var until = 0.0
+
+    mutating func detected(_ app: String, autoRecord: Bool, now: Double) -> Step {
+        guard !autoRecord else { self.app = nil; return .record(app) }
+        self.app = app
+        until = now + Self.seconds
+        return .offer(app)
+    }
+
+    /// The card's Record button: the one click that starts capture.
+    mutating func record() -> Step {
+        guard let app else { return .none }
+        self.app = nil
+        return .record(app)
+    }
+
+    mutating func notNow() -> Step { dismiss(if: app != nil) }
+    mutating func tick(now: Double) -> Step { dismiss(if: app != nil && now >= until) }
+    /// The offered meeting ended before anyone clicked.
+    mutating func ended(_ app: String) -> Step { dismiss(if: app == self.app) }
+
+    private mutating func dismiss(if yes: Bool) -> Step {
+        guard yes else { return .none }
+        app = nil
+        return .dismiss
+    }
+}
+
+/// Detector to recorder: the probe runs every second, a detected meeting is offered (`MeetingOffer`) and, once
+/// accepted, recorded until the detector says it ended, then the meeting goes to `onEnded` (the transcriber).
+/// The menu item starts and stops by hand.
 @MainActor
 final class MeetingRecorder: NSObject {
     nonisolated static let manualApp = "Manual"
+    /// "Always record meetings automatically" in Settings; unset means off.
+    nonisolated static let autoRecordKey = "meeting.autoRecord"
 
     private(set) var detector: MeetingDetector
     let dir: URL
     private let capture: MeetingCapturing
     private let hint: (String) -> Void
+    private let autoRecord: () -> Bool
+    /// Shows the "Meeting detected · <app>" card, or hides it for nil.
+    private let card: (String?) -> Void
+    private var offer = MeetingOffer()
     private var timer: DispatchSourceTimer?
     /// The meeting being recorded; nil when idle.
     private(set) var current: Meeting?
@@ -33,12 +77,18 @@ final class MeetingRecorder: NSObject {
     var onDiscarded: (Meeting) -> Void = { _ in }
 
     init(dir: URL = Paths.root.appendingPathComponent("meetings"), capture: MeetingCapturing,
-         detector: MeetingDetector = MeetingRecorder.configuredDetector(), hint: @escaping (String) -> Void) {
+         detector: MeetingDetector = MeetingRecorder.configuredDetector(),
+         autoRecord: @escaping () -> Bool = { MeetingRecorder.autoRecords() },
+         card: @escaping (String?) -> Void, hint: @escaping (String) -> Void) {
         self.dir = dir
         self.capture = capture
         self.detector = detector
+        self.autoRecord = autoRecord
+        self.card = card
         self.hint = hint
     }
+
+    nonisolated static func autoRecords(_ defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: autoRecordKey) }
 
     /// The detector thresholds from docs/re/meetings.md, each overridable with
     /// `defaults write io.backant.shepetal meeting.<name> <seconds>`.
@@ -69,15 +119,33 @@ final class MeetingRecorder: NSObject {
         timer = t
     }
 
-    /// One detector step. A stopped-by-hand meeting stays active in the detector, so it is not restarted
-    /// until it ends and a new one starts.
+    /// One detector step, which also times the card out. A declined or stopped-by-hand meeting stays active in
+    /// the detector, so it is not offered again until it ends and a new one starts.
     func update(_ snapshot: Snapshot, now: Double) {
         for event in detector.update(snapshot, now: now) {
             switch event {
-            case .started(let app) where current == nil: start(app: app)
-            case .ended(let app) where current?.app == app: stop()
+            case .started(let app) where current == nil: apply(offer.detected(app, autoRecord: autoRecord(), now: now))
+            case .ended(let app):
+                if current?.app == app { stop() }
+                apply(offer.ended(app))
             default: break
             }
+        }
+        apply(offer.tick(now: now))
+    }
+
+    /// The card's buttons.
+    func record() { apply(offer.record()) }
+    func notNow() { apply(offer.notNow()) }
+
+    private func apply(_ step: MeetingOffer.Step) {
+        switch step {
+        case .none: break
+        case .offer(let app): card(app)
+        case .dismiss: card(nil)
+        case .record(let app):
+            card(nil)
+            start(app: app)
         }
     }
 
@@ -123,7 +191,11 @@ final class MeetingRecorder: NSObject {
         return i
     }
 
-    @objc private func toggle() { if current == nil { start() } else { stop() } }
+    @objc private func toggle() {
+        guard current == nil else { return stop() }
+        apply(offer.notNow())  // recording by hand answers the card too
+        start()
+    }
 
     private static func newID() -> String {
         let f = DateFormatter()
