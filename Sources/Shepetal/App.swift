@@ -19,7 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
     private var hub: Hub?
-    private var appAtStart = AppContext()
+    private var appAtStart: Task<AppContext, Never>?
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -125,8 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let pipeline else { return }
         busy = true
         indicator.set(.processing)
+        let appAtStart = appAtStart
         Task {
-            let run = await pipeline.process(samples, engine: engine, app: appAtStart, context: FocusedText.context,
+            let app = await appAtStart?.value ?? AppContext()
+            let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
                                              sendPaste: Inserter.postCmdV)
             busy = false
             if let error = run.error { fail(error) } else { indicator.set(.idle) }

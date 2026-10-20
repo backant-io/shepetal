@@ -59,6 +59,15 @@ final class E2E: NSObject, NSApplicationDelegate {
             return 1
         }
         let loadMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
+        // The app each dictation records, fixed so history can be checked against it. The page-URL lookup is a
+        // slow stand-in for a browser's AX walk: resolve must return at once and run it off the main thread.
+        let resolveStart = ProcessInfo.processInfo.systemUptime
+        let lookup = AppContext.resolve(AppContext(name: "E2E Browser", bundleId: "com.apple.Safari"), pid: 0) { _ in
+            Thread.sleep(forTimeInterval: 0.3)
+            return Thread.isMainThread ? "looked up on the main thread" : "https://example.com/e2e?page=1"
+        }
+        let resolveMs = (ProcessInfo.processInfo.systemUptime - resolveStart) * 1000
+        let app = await lookup.value
         var failed = false
         for wav in wavs {
             textView.string = ""
@@ -68,7 +77,7 @@ final class E2E: NSObject, NSApplicationDelegate {
                 failed = true
                 continue
             }
-            let run = await pipeline.process(samples, engine: engine, app: AppContext.capture(), context: { [textView] in
+            let run = await pipeline.process(samples, engine: engine, app: app, context: { [textView] in
                 FocusedText.split(textView!.string, textView!.selectedRange())
             }, sendPaste: { event in
                 // The same Cmd+V the app posts system-wide, delivered through this process's menu instead.
@@ -91,11 +100,21 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["audio_dir_mode"] = Self.mode(dir)
             out["history_outcome"] = stored?.outcome.rawValue ?? "missing"
             out["history_audio_path"] = stored?.audioPath ?? ""
+            out["app_resolve_ms"] = Int(resolveMs)
             out["history_app"] = stored?.app ?? ""
-            // History's re-transcribe: the kept WAV, the same text step, the same row.
-            do { _ = try await pipeline.retranscribe(run.entry, with: engine) } catch { out["retranscribe_error"] = "\(error)" }
+            out["history_bundle_id"] = stored?.bundleId ?? ""
+            out["history_url"] = stored?.url ?? ""
+            // History's re-transcribe: the kept WAV, the same text step, the same row. The row first names
+            // another model, so the check sees re-transcribe record the engine it used.
+            var older = run.entry
+            older.model = "e2e-older-model"
+            do {
+                try pipeline.history.update(older)
+                _ = try await pipeline.retranscribe(older, with: engine)
+            } catch { out["retranscribe_error"] = "\(error)" }
             let again = (try? pipeline.history.recent(limit: 50))?.first { $0.id == run.entry.id }
             out["retranscribed_text"] = again?.text ?? ""
+            out["retranscribed_model"] = again?.model ?? ""
             out["retranscribed_row_kept"] = again != nil && again?.createdAt == stored?.createdAt
                 && again?.outcome == stored?.outcome && again?.audioPath == stored?.audioPath
             out["error"] = run.error ?? ""

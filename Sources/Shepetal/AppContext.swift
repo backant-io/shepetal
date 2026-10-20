@@ -8,37 +8,45 @@ struct AppContext: Equatable {
     var bundleId = ""
     var url = ""
 
-    static func capture() -> AppContext {
-        guard let app = NSWorkspace.shared.frontmostApplication else { return AppContext() }
-        let bundleId = app.bundleIdentifier ?? ""
-        return AppContext(name: app.localizedName ?? "", bundleId: bundleId,
-                          url: Browser.contains(bundleId) ? pageURL(pid: app.processIdentifier) : "")
+    static func capture() -> Task<AppContext, Never> {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return Task { AppContext() } }
+        return resolve(AppContext(name: app.localizedName ?? "", bundleId: app.bundleIdentifier ?? ""),
+                       pid: app.processIdentifier)
+    }
+
+    /// Returns at once. A browser's page URL is looked up on a background thread: the AX walk waits on the
+    /// browser, and fn events are timed on the main thread, so a slow page must not hold that thread.
+    static func resolve(_ app: AppContext, pid: pid_t,
+                        pageURL: @escaping @Sendable (pid_t) -> String = { pageURL(pid: $0) }) -> Task<AppContext, Never> {
+        guard Browser.contains(app.bundleId) else { return Task { app } }
+        return Task.detached {
+            var app = app
+            app.url = pageURL(pid)
+            return app
+        }
     }
 
     /// Breadth-first from the focused window to the first AXWebArea, then its AXURL. Needs Accessibility.
     /// ponytail: a page whose browser exposes no AXWebArea (Chrome before its accessibility tree is
     /// built) gives no URL; set AXEnhancedUserInterface first if that turns out to be common.
-    private static func pageURL(pid: pid_t) -> String {
-        let app = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(app, 0.1)  // a hung browser must not hold up dictation start
-        var window: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &window) == .success,
-              let window else { return "" }
+    static func pageURL(pid: pid_t) -> String {
+        guard let window = value(AXUIElementCreateApplication(pid), kAXFocusedWindowAttribute) else { return "" }
         var queue = [window as! AXUIElement]
         let deadline = ProcessInfo.processInfo.systemUptime + 0.2
         while !queue.isEmpty, ProcessInfo.processInfo.systemUptime < deadline {
             let el = queue.removeFirst()
-            var role: CFTypeRef?
-            AXUIElementCopyAttributeValue(el, kAXRoleAttribute as CFString, &role)
-            if role as? String == "AXWebArea" {
-                var url: CFTypeRef?
-                AXUIElementCopyAttributeValue(el, kAXURLAttribute as CFString, &url)
-                return (url as? URL)?.absoluteString ?? ""
+            if value(el, kAXRoleAttribute) as? String == "AXWebArea" {
+                return (value(el, kAXURLAttribute) as? URL)?.absoluteString ?? ""
             }
-            var children: CFTypeRef?
-            AXUIElementCopyAttributeValue(el, kAXChildrenAttribute as CFString, &children)
-            queue += children as? [AXUIElement] ?? []
+            queue += value(el, kAXChildrenAttribute) as? [AXUIElement] ?? []
         }
         return ""
+    }
+
+    /// A messaging timeout applies only to the element it is set on, so every element gets its own.
+    private static func value(_ el: AXUIElement, _ attribute: String) -> CFTypeRef? {
+        AXUIElementSetMessagingTimeout(el, 0.1)
+        var v: CFTypeRef?
+        return AXUIElementCopyAttributeValue(el, attribute as CFString, &v) == .success ? v : nil
     }
 }

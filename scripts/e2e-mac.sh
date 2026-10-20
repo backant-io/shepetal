@@ -33,7 +33,7 @@ FIXTURES
 
 "$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl"
 
-python3 - "$WORK/results.jsonl" "$FIX" "$(basename "$BIN")" <<'PY'
+python3 - "$WORK/results.jsonl" "$FIX" <<'PY'
 import json, os, re, stat, struct, sys
 
 def words(s):
@@ -49,7 +49,7 @@ def edits(a, b):
 
 assert edits("a b c".split(), "a x c d".split()) == 2  # self-check of the WER math
 
-results, fix, app_name = sys.argv[1], sys.argv[2], sys.argv[3]
+results, fix = sys.argv[1], sys.argv[2]
 rows = [json.loads(l) for l in open(results) if l.strip()]
 assert rows and all("wav" in r for r in rows), f"no results: {rows}"
 errors = ref_words = 0
@@ -71,8 +71,11 @@ for r in rows:
     assert stat.S_IMODE(os.stat(os.path.dirname(p)).st_mode) == 0o700, name
     assert not p.startswith(("/tmp", "/private/tmp")), p
     assert r["history_outcome"] == "inserted" and r["history_audio_path"] == p, (name, r["history_outcome"])
-    assert r["history_app"] == app_name, (name, "frontmost app at dictation start", r["history_app"], app_name)
+    app = (r["history_app"], r["history_bundle_id"], r["history_url"])
+    assert app == ("E2E Browser", "com.apple.Safari", "https://example.com/e2e?page=1"), (name, "app at dictation start", app)
+    assert r["app_resolve_ms"] < 100, (name, "page-URL lookup held the main thread", r["app_resolve_ms"])
     assert r["retranscribed_text"] == r["text"] and r["retranscribed_row_kept"], (name, "re-transcribe", r)
+    assert r["retranscribed_model"] == r["model"], (name, "re-transcribe model", r["retranscribed_model"])
     data = open(p, "rb").read()
     fmt, ch, rate = struct.unpack("<HHI", data[20:28])
     assert (fmt, ch, rate) == (3, 1, 16000), (name, fmt, ch, rate)
