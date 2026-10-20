@@ -27,6 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
+    private var meetingFlow: MeetingFlow?
+    private lazy var meetings = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts)) { [weak self] in self?.indicator.show($0, seconds: 4) }
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -69,6 +71,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
+        do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
+            meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
+            meetingFlow?.attach(meetings)
+            meetingFlow?.onRecording = { [weak self] in self?.statusItem.button?.title = $0 ? "🤫●" : "🤫" }
+        } catch { fail("Meetings: \(error.localizedDescription)") }
+        meetings.watch()
 
         // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
         Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
@@ -103,6 +111,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         indicator.set(.error)
         indicator.show(message, seconds: 8)
     }
+
+    /// Closes the meeting files so their WAV headers are written (rule 4).
+    func applicationWillTerminate(_ notification: Notification) { meetings.stop() }
 
     // MARK: fn → gestures
 
@@ -263,6 +274,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keepItem.submenu = keep
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
+        menu.addItem(meetings.menuItem)
         menu.addItem(sounds.menuItem)
         menu.addItem(loginItem.menuItem)
         if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
@@ -306,7 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          status: { [weak self] in (self?.engineStatus ?? "", self?.tap.isRunning == true) },
                          retention: { [weak self] in self?.retention ?? .keep },
                          setRetention: { [weak self] in self?.retention = $0 },
-                         openPermissions: { [weak self] in self?.showOnboarding() })
+                         openPermissions: { [weak self] in self?.showOnboarding() },
+                         meetingStore: meetingFlow?.store ?? InMemoryMeetingStore())
         hub?.show()
     }
 
