@@ -29,6 +29,10 @@ enum FnKeySystem {
             if let value { UserDefaults.standard.set(value, forKey: FnKeySetting.previousKey) } else {
                 UserDefaults.standard.removeObject(forKey: FnKeySetting.previousKey)
             }
+        },
+        takeNoticePending: {
+            defer { UserDefaults.standard.removeObject(forKey: FnKeySetting.noticePendingKey) }
+            return UserDefaults.standard.bool(forKey: FnKeySetting.noticePendingKey)
         })
 
     @discardableResult
@@ -52,18 +56,22 @@ enum FnDiagnostics {
     static var problem: String?
 }
 
-/// Polls the HID state of fn (no permission needed) and reports a press the event tap never delivered.
+/// Polls the HID state of the fn key itself (keycode 63; not the fn flag, which macOS also sets for arrows,
+/// F-keys and Home/End, and not the Globe key's 179, which the tap ignores too) and reports a press the event
+/// tap never delivered. It only polls while `active()` (the tap is running): without Input Monitoring the
+/// permission prompt speaks.
 @MainActor
 final class FnWatch {
     private var health = FnHealth()
     private var timer: Timer?
     var onUnreported: (() -> Void)?
+    var active: () -> Bool = { false }
 
     func start() {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let down = CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn)
+                let down = self.active() && CGEventSource.keyState(.hidSystemState, key: CGKeyCode(FnKey.keycode))
                 if self.health.poll(hidFnDown: down, at: ProcessInfo.processInfo.systemUptime) { self.onUnreported?() }
             }
         }
