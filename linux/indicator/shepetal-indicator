@@ -1,0 +1,260 @@
+#!/usr/bin/env python3
+"""The shepetal 🤫 indicator on X11 and on Wayland compositors with wlr-layer-shell.
+
+About 18 px, 8 px in from the bottom-left corner of the primary monitor, on top, click-through,
+never focused. It reads state lines from the daemon's socket ($XDG_RUNTIME_DIR/shepetal.sock,
+see linux/src/indicator.rs) and exits when the daemon closes it. `shepetal daemon` starts it.
+GNOME Wayland uses linux/gnome-extension/ instead. Design and checks: docs/linux.md.
+"""
+import math
+import os
+import signal
+import socket
+import sys
+
+SIZE = 18  # px at scale 1, like the Mac's 18 pt (GDK applies the monitor scale)
+INSET = 8  # from the left and bottom edges
+GAP = 6  # between 🤫 and its text
+PAD = 4  # inside the dark text box
+EMOJI_PX = 13  # the glyph in its 18 px circle, as on the Mac
+TEXT_PX = 11
+HINT_S, ERROR_S = 2, 4  # how long a hint and an error's text stay, as on the Mac
+PULSE_S, PULSE_MIN = 0.6, 0.35  # processing: opacity 1 → 0.35 → 1, 0.6 s each way
+
+# Ring colors: Apple's system red, orange, blue and yellow, which the Mac indicator uses.
+RING = {
+    "idle": None,
+    "recording": (1.0, 0.231, 0.188),
+    "handsfree": (1.0, 0.584, 0.0),
+    "processing": (0.0, 0.478, 1.0),
+    "error": (1.0, 0.8, 0.0),
+}
+
+
+def parse(line):
+    """A daemon line → (new state or None, text or None, seconds the text stays)."""
+    word, _, text = line.strip().partition(" ")
+    if word == "error":
+        return "error", text or None, ERROR_S
+    if word in RING:
+        return word, None, 0
+    if word == "hint" and text:
+        return None, text, HINT_S
+    return None, None, 0  # unknown lines are ignored, so the daemon can add kinds later
+
+
+def origin(monitor):
+    """Top-left corner of the indicator on `monitor` (x, y, width, height), in GDK pixels."""
+    x, y, _, height = monitor
+    return x + INSET, y + height - INSET - SIZE
+
+
+def width(text_px):
+    """Window width: 🤫 alone, or with its text box when the text is `text_px` wide."""
+    return SIZE if text_px is None else SIZE + GAP + PAD + text_px + PAD
+
+
+def pulse_alpha(seconds):
+    """Opacity of 🤫 and its ring `seconds` into processing: linear 1 → PULSE_MIN → 1."""
+    k = (seconds / PULSE_S) % 2
+    return 1 - (1 - PULSE_MIN) * (k if k <= 1 else 2 - k)
+
+
+def main():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if not runtime.startswith("/"):
+        sys.exit("shepetal-indicator: XDG_RUNTIME_DIR is not set; the daemon's socket lives there.")
+    path = os.path.join(runtime, "shepetal.sock")
+    conn = socket.socket(socket.AF_UNIX)
+    try:
+        conn.connect(path)
+    except OSError as e:
+        sys.exit(f"shepetal-indicator: {path}: {e}. Start `shepetal daemon`, which starts this.")
+
+    import gi
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("Gtk", "3.0")
+    gi.require_version("PangoCairo", "1.0")
+    import cairo
+    from gi.repository import Gdk, GLib, Gtk, Pango, PangoCairo
+
+    display = Gdk.Display.get_default()
+    if display is None:
+        sys.exit("shepetal-indicator: no X11 or Wayland display")
+    wayland = display.__gtype__.name == "GdkWaylandDisplay"
+    # X11: an override-redirect (POPUP) window. The window manager never manages it, so it is on
+    # every workspace, gets no frame and is never focused.
+    win = Gtk.Window(type=Gtk.WindowType.TOPLEVEL if wayland else Gtk.WindowType.POPUP)
+    win.set_title("shepetal")
+    win.set_decorated(False)
+    win.set_accept_focus(False)
+    win.set_app_paintable(True)
+    screen = win.get_screen()
+    rgba = screen.is_composited() and screen.get_rgba_visual()
+    if rgba:
+        win.set_visual(rgba)
+    if wayland:
+        gi.require_version("GtkLayerShell", "0.1")
+        from gi.repository import GtkLayerShell as Layer
+        if not Layer.is_supported():
+            sys.exit("shepetal-indicator: this Wayland compositor has no wlr-layer-shell. On GNOME, "
+                     "turn on the extension in linux/gnome-extension/. Elsewhere run it on XWayland "
+                     "with GDK_BACKEND=x11.")
+        Layer.init_for_window(win)
+        Layer.set_namespace(win, "shepetal")
+        Layer.set_layer(win, Layer.Layer.OVERLAY)  # above full-screen windows
+        for edge in (Layer.Edge.BOTTOM, Layer.Edge.LEFT):
+            Layer.set_anchor(win, edge, True)
+            Layer.set_margin(win, edge, INSET)
+        Layer.set_keyboard_mode(win, Layer.KeyboardMode.NONE)
+        Layer.set_exclusive_zone(win, -1)  # the screen corner, over panels, as the Mac's is over the Dock
+
+    area = Gtk.DrawingArea()
+    win.add(area)
+    now = {"state": "idle", "text": None, "text_px": None, "pulse_from": 0.0}
+    timers = {}
+
+    def font(px, family):
+        d = Pango.FontDescription.from_string(family)
+        d.set_absolute_size(px * Pango.SCALE)
+        return d
+
+    emoji_font, text_font = font(EMOJI_PX, "Noto Color Emoji"), font(TEXT_PX, "Sans Medium")
+
+    def layout(cr, text, desc):
+        lay = PangoCairo.create_layout(cr)
+        lay.set_font_description(desc)
+        lay.set_text(text, -1)
+        return lay
+
+    def paint(cr, alpha):
+        cr.push_group()
+        lay = layout(cr, "🤫", emoji_font)
+        ink = lay.get_pixel_extents()[0]
+        cr.move_to((SIZE - ink.width) / 2 - ink.x, (SIZE - ink.height) / 2 - ink.y)
+        PangoCairo.show_layout(cr, lay)
+        cr.new_path()  # drop the point move_to left, or the arcs below would draw a line from it
+        ring = RING[now["state"]]
+        if ring:
+            cr.set_source_rgb(*ring)
+            cr.set_line_width(2)
+            cr.arc(SIZE / 2, SIZE / 2, SIZE / 2 - 1, 0, 2 * math.pi)
+            cr.stroke()
+        cr.pop_group_to_source()
+        cr.paint_with_alpha(alpha)
+        if now["text"]:
+            lay = layout(cr, now["text"], text_font)
+            _, th = lay.get_pixel_size()
+            # A dark box with 4 px corners, as on the Mac: left edge x, right edge r.
+            x, h, r = SIZE + GAP, min(SIZE, th + 2), width(now["text_px"])
+            y = (SIZE - h) / 2
+            for cx, cy, a in ((r - 4, y + 4, -0.5), (r - 4, y + h - 4, 0), (x + 4, y + h - 4, 0.5), (x + 4, y + 4, 1)):
+                cr.arc(cx, cy, 4, a * math.pi, (a + 0.5) * math.pi)
+            cr.close_path()
+            cr.set_source_rgba(0, 0, 0, 0.75)
+            cr.fill()
+            cr.set_source_rgb(1, 1, 1)
+            cr.move_to(x + PAD, y + (h - th) / 2)
+            PangoCairo.show_layout(cr, lay)
+
+    def alpha():
+        if now["state"] != "processing":
+            return 1.0
+        return pulse_alpha(GLib.get_monotonic_time() / 1e6 - now["pulse_from"])
+
+    def on_draw(_area, cr):
+        cr.set_operator(cairo.OPERATOR_SOURCE)
+        cr.set_source_rgba(0, 0, 0, 0)
+        cr.paint()
+        cr.set_operator(cairo.OPERATOR_OVER)
+        paint(cr, alpha())
+
+    area.connect("draw", on_draw)
+
+    def place():
+        mon = display.get_primary_monitor() or display.get_monitor(0)
+        if wayland:
+            Layer.set_monitor(win, mon)
+        else:
+            g = mon.get_geometry()
+            win.move(*origin((g.x, g.y, g.width, g.height)))
+
+    def redraw():
+        w = width(now["text_px"])
+        area.set_size_request(w, SIZE)
+        win.resize(w, SIZE)
+        if not rgba:
+            # No compositor (plain X11): cut the window to what is drawn, or 🤫 would sit on a
+            # black square.
+            surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, w, SIZE)
+            paint(cairo.Context(surf), 1.0)
+            win.shape_combine_region(Gdk.cairo_region_create_from_surface(surf))
+        area.queue_draw()
+
+    def stop(name):
+        if name in timers:
+            GLib.source_remove(timers.pop(name))
+
+    def clear_text():
+        timers.pop("text", None)
+        now["text"] = now["text_px"] = None
+        redraw()
+        return GLib.SOURCE_REMOVE
+
+    def pulse():
+        area.queue_draw()
+        return GLib.SOURCE_CONTINUE
+
+    def apply(line):
+        state, text, seconds = parse(line)
+        if state:
+            now["state"] = state
+            stop("pulse")
+            if state == "processing":
+                now["pulse_from"] = GLib.get_monotonic_time() / 1e6
+                timers["pulse"] = GLib.timeout_add(40, pulse)
+        if text:
+            stop("text")
+            now["text"] = text
+            lay = Pango.Layout(area.get_pango_context())
+            lay.set_font_description(text_font)
+            lay.set_text(text, -1)
+            now["text_px"] = lay.get_pixel_size()[0]
+            timers["text"] = GLib.timeout_add(seconds * 1000, clear_text)
+        if state or text:
+            redraw()
+
+    buf = b""
+
+    def on_socket(_fd, _cond):
+        nonlocal buf
+        try:
+            data = conn.recv(4096)
+        except OSError:
+            data = b""
+        if not data:  # the daemon is gone, and so is 🤫
+            Gtk.main_quit()
+            return GLib.SOURCE_REMOVE
+        buf += data
+        *lines, buf = buf.split(b"\n")
+        for line in lines:
+            apply(line.decode("utf-8", "replace"))
+        return GLib.SOURCE_CONTINUE
+
+    GLib.io_add_watch(conn.fileno(), GLib.PRIORITY_DEFAULT, GLib.IO_IN | GLib.IO_HUP | GLib.IO_ERR, on_socket)
+    screen.connect("monitors-changed", lambda *_: place())
+    # Click-through: an empty input region, so every click goes to the window below.
+    win.input_shape_combine_region(cairo.Region())
+    place()
+    redraw()
+    win.show_all()
+    if not wayland:
+        # ponytail: re-raise every second, so a window mapped later covers 🤫 for at most 1 s.
+        # Watching the root window's restacks would close that gap.
+        GLib.timeout_add_seconds(1, lambda: win.get_window().raise_() or GLib.SOURCE_CONTINUE)
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()
