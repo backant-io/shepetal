@@ -1,9 +1,11 @@
 #!/bin/bash
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
-# cleanup -> audio store + history -> clipboard + Cmd+V into a text view the app owns.
+# cleanup -> audio store + history -> pasteboard + Cmd+V into a text view the app owns.
+# The test shows no window, never takes focus, and uses a private pasteboard, never the user's clipboard.
 # Asserts WER <= 8 %, text ready <= 700 ms after release, an owner-only audio file per recording, and
-# that history recorded this process as the app each dictation went to. Each clip is then re-transcribed
-# from its kept WAV, as History's re-transcribe does, and must give the same text on the same row.
+# that history kept the app, bundle id and page URL given for each dictation. The page-URL lookup must
+# return at once and do its work off the main thread. Each clip is then re-transcribed from its kept WAV,
+# as History's re-transcribe does, and must give the same text and the engine's model name on the same row.
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -59,6 +61,8 @@ for r in rows:
     errors += e; ref_words += len(ref)
     assert r["inserted_text"] == r["text"], (name, "field holds something else", r["inserted_text"])
     assert r["paste_landed"] and r["clipboard_restored"], (name, "paste", r)
+    assert r["pasteboard"].startswith("io.backant.shepetal.e2e."), (name, "not the private pasteboard", r["pasteboard"])
+    assert not r["window_visible"], (name, "the test put a window on screen")
     if not os.environ.get("ENGINE"):
         assert r["ready_ms"] <= 700, (name, "slow", r["ready_ms"])
     p = r["audio_path"]
@@ -77,5 +81,17 @@ for r in rows:
 wer = errors / ref_words
 print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows)} clips ({ref_words} words)")
 assert wer <= 0.08, f"WER {wer:.1%} > 8%"
+PY
+
+# A paste that does not land (the target lost focus) must leave the text on the clipboard.
+"$BIN" --e2e "$FIX/e01.wav" --drop-paste ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" > "$WORK/dropped.jsonl" || true
+python3 - "$WORK/dropped.jsonl" <<'PY'
+import json, sys
+r = [json.loads(l) for l in open(sys.argv[1]) if l.strip()][0]
+assert not r["paste_landed"] and not r["clipboard_restored"], r
+assert r["pasteboard_text"] == r["text"] != "", ("text not on the clipboard", r["pasteboard_text"])
+assert "clipboard" in r["error"] and r["history_outcome"] == "paste_failed", r
+assert r["inserted_text"] == "" and not r["window_visible"], r
+print("paste not landed: text left on the clipboard")
 print("e2e-mac: OK")
 PY

@@ -23,9 +23,11 @@ final class Pipeline {
 
     let store: AudioStore
     let history: History
-    let inserter = Inserter()
+    let inserter: Inserter
 
-    init() throws {
+    /// No default: a forgotten argument must not fall back to the user's clipboard.
+    init(pasteboard: NSPasteboard) throws {
+        inserter = Inserter(pasteboard: pasteboard)
         try AudioStore.makeOwnerOnlyDirectory(Paths.root)
         store = try AudioStore(dir: Paths.audio)
         history = try History(path: Paths.history)
@@ -63,7 +65,7 @@ final class Pipeline {
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
-        return paste.landed ? nil : "Paste did not land. The text is in Recent."
+        return paste.landed ? nil : "Paste did not land. The text is on the clipboard: press ⌘V to paste it."
     }
 
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
