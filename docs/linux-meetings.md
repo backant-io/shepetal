@@ -1,6 +1,7 @@
 # Meeting recording on Linux
 
-`shepetal daemon` records meetings on its own (goal rule 7). The code is in
+`shepetal daemon` detects meetings on its own (goal rule 7). It records one only after you click
+Record on a Record? prompt, or always with `SHEPETAL_MEETING_AUTO_RECORD=1`. The code is in
 `linux/src/meeting_rec.rs`, and the pw-dump parsing it uses is in `linux/src/meeting.rs`.
 
 ## What it does
@@ -10,7 +11,20 @@
    Discord, Chrome/Chromium or Firefox. shepetal's own streams never count. They are named
    `shepetal`, and Others.wav records a monitor. If `pw-dump` is missing, or both `pw-record`
    and `parecord` are, the daemon says so at startup and records no meetings.
-2. Once a meeting app has held the mic for the start grace, it creates
+2. Once a meeting app has held the mic for the start grace, it asks first. A desktop
+   notification, "Record this meeting?", shows one Record button. It is sent through
+   org.freedesktop.Notifications with `notify-send --action=record=Record`, which waits and
+   prints `record` on a click.
+   - Only a click on Record starts the recording. The click is seen at the next poll, so up to
+     2 s later.
+   - Dismissed, or Record not clicked within 20 s (`prompt`): nothing is recorded for that
+     meeting, and it does not ask again until the next one. An unanswered prompt is withdrawn
+     (notify-send gets SIGINT and closes it).
+   - If the call ends first, the prompt is withdrawn too.
+   - With `SHEPETAL_MEETING_AUTO_RECORD=1` it records right away, with no prompt.
+   - Without `notify-send` (package libnotify-bin) and without auto-record, the daemon says so
+     at startup and records no meetings.
+3. On Record (or right away with auto-record), it creates
    `$XDG_DATA_HOME/shepetal/meetings/<unix-ms>/` (default `~/.local/share/...`) and records two
    16 kHz mono WAVs there:
    - `Me.wav`: the default mic.
@@ -19,10 +33,10 @@
    `pw-record -P '{ stream.capture.sink = true }'` lets WirePlumber link it to the default
    sink's monitor and move it when the default sink changes. `parecord` uses
    `--device=@DEFAULT_MONITOR@`.
-3. When every meeting app has let go of the mic, it waits out the end thresholds, stops both
+4. When every meeting app has let go of the mic, it waits out the end thresholds, stops both
    recorders with SIGINT (so the WAV header is written) and starts transcribing on another
    thread. Detection goes on meanwhile.
-4. It runs `whisper-cli` on each file, keeping the segment times, and writes `transcript.md` next
+5. It runs `whisper-cli` on each file, keeping the segment times, and writes `transcript.md` next
    to the audio:
 
    ```
@@ -40,7 +54,22 @@
    joined into one turn. If a channel can't be transcribed, the reason is listed in the header
    and the other channel is still written.
 
-The audio is always kept. Nothing is deleted, and nothing leaves the machine.
+Nothing leaves the machine.
+
+## Settings
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SHEPETAL_MEETING_AUTO_RECORD` | unset (ask) | `1` records every detected meeting without the Record? prompt ("Always record automatically"). Unset or `0` asks first. Any other value stops the daemon with an error |
+| `SHEPETAL_MEETING_THRESHOLDS` | see below | The detection and prompt thresholds |
+
+These are environment variables, like `SHEPETAL_KEY` and `SHEPETAL_MODEL` (docs/linux.md).
+
+## Retention
+
+Meeting audio follows the same retention as dictation. On Linux that means every recording is
+kept: the daemon has no retention setting yet (docs/linux.md, known gaps). The 24 h option for
+dictation in #67 must also cover `meetings/` when it lands (#141).
 
 ## Thresholds
 
@@ -52,11 +81,12 @@ an error.
 | Name | Default | Meaning |
 | --- | --- | --- |
 | `poll` | 2 | Seconds between `pw-dump` reads |
-| `start_after` | 5 | How long a meeting app must hold the mic before recording starts. A miss starts the count again |
+| `start_after` | 5 | How long a meeting app must hold the mic before the Record? prompt (or, with auto-record, the recording). A miss starts the count again |
 | `min_session` | 15 | No end in the first 15 s of a recording |
 | `end_with_evidence` | 3 | Wait after the last meeting app lets go of the mic (bound silence) |
 | `reacquire` | 4 | If the mic comes back within this time, it is the same meeting. The end waits for the longer of this and `end_with_evidence` |
 | `device_change` | 10 | A change of the default mic or speakers holds off an end this long |
+| `prompt` | 20 | An unanswered Record? prompt is withdrawn after this long, and nothing is recorded (docs/re/meetings.md: the card's 20 s timeout) |
 
 On Linux the mic holder is the only evidence, so every end is the bound kind. The 30 s unbound
 silence never applies.
@@ -71,6 +101,9 @@ the error.
 
 ## Security
 
+- Nothing records without a click on Record, unless `SHEPETAL_MEETING_AUTO_RECORD=1` is set.
+  With Do Not Disturb on, GNOME shows no banner. The meeting then records only if Record is
+  clicked in the notification list within 20 s.
 - The `meetings` directory and each meeting folder are 0700. `Me.wav`, `Others.wav` and
   `transcript.md` are 0600 and created with `O_CREAT|O_EXCL`, so an existing folder or file
   (or a planted symlink) is never reused or overwritten.
@@ -88,22 +121,35 @@ the error.
 - Folder and file permissions.
 - The recorder and whisper-cli arguments, and whisper output parsing.
 - Transcript formatting.
-- One whole meeting against fake `pw-dump`, `pw-record` and `whisper-cli`, run in a child copy
-  of the test binary so it can set its own PATH.
+- The `notify-send` arguments, the 20 s default, and that only `SHEPETAL_MEETING_AUTO_RECORD=1`
+  turns auto-record on.
+- Whole meetings against fake `pw-dump`, `pw-record`, `whisper-cli` and `notify-send`, each run
+  in a child copy of the test binary so it can set its own PATH:
+  - Record clicked: recorded and transcribed.
+  - Dismissed: no recorder runs and no folder is made, and it is not asked again.
+  - No answer: the prompt is withdrawn at the timeout, and nothing is recorded.
+  - Call ended first: the prompt is withdrawn, and nothing is recorded.
+  - Auto-record on: recorded with no prompt.
 - On Linux only: the recorder gets SIGINT when the thread that started it ends.
 
 ## Hand test (Ubuntu 24.04 desktop, GNOME)
 
-Prerequisites: steps 1 to 3 of the manual test in docs/linux.md, plus `whisper-cli` on PATH
-and `ggml-large-v3-turbo-q5_0.bin` in `~/.local/share/shepetal/`. Use headphones for steps 2
-to 5 (see the known gaps).
+Prerequisites: steps 1 to 3 of the manual test in docs/linux.md, plus `whisper-cli` on PATH,
+`ggml-large-v3-turbo-q5_0.bin` in `~/.local/share/shepetal/` and `notify-send` (libnotify-bin).
+Do Not Disturb off. Use headphones for steps 2 to 5 (see the known gaps). In steps 7 to 9,
+click Record on the prompt.
 
-1. `./target/release/shepetal daemon`. It must print `meeting detection on, Thresholds { poll: 2000, ... }`.
+1. `./target/release/shepetal daemon`. It must print
+   `meeting detection on, asking before each recording, Thresholds { poll: 2000, ... prompt: 20000 }`.
    If whisper-cli or the model is missing, it must also print the
    `meetings are recorded but not transcribed` line.
-2. Join a Zoom test call (https://zoom.us/test) or a Google Meet in Firefox. Within about 8 s,
-   the daemon must print `meeting (Zoom) recording to ~/.local/share/shepetal/meetings/<ms>,
-   system audio Some("<sink>.monitor")`.
+2. Join a Zoom test call (https://zoom.us/test) or a Google Meet in Firefox. Within about 8 s:
+   - A notification "Record this meeting?" with a Record button must show, and the daemon must
+     print `meeting (Zoom) detected, asking: Record this meeting?`.
+   - `ls ~/.local/share/shepetal/meetings/` shows no new folder yet, and `pgrep -a pw-record`
+     shows nothing.
+   - Click Record. Within about 2 s the daemon must print `meeting (Zoom) recording to
+     ~/.local/share/shepetal/meetings/<ms>, system audio Some("<sink>.monitor")`.
 3. While it records, run `./target/release/shepetal probe`. It must list the call app as a mic
    user. It must not list `shepetal` or `pw-record`. If it does, the `-P application.name`
    rename does not work (docs/linux.md, known gaps).
@@ -122,6 +168,19 @@ to 5 (see the known gaps).
    about a second later, and both WAVs must play up to the kill.
 9. With Zoom and a Meet tab both in a call, leave Zoom. The recording must go on until the Meet
    call ends too, and the header must name both apps.
+10. Join a call and close the notification without clicking Record. The daemon must print
+    `the Record? prompt was dismissed`. For the rest of the call: no new folder in `meetings/`,
+    no `pw-record` in `pgrep -a pw-record`, and no second prompt.
+11. Join a call and leave the notification alone. About 20 s later it must disappear, from the
+    screen and from the notification list, and the daemon must print
+    `Record was not clicked within 20 s`. Nothing is recorded. If the notification stays, the
+    SIGINT does not close it on this notify-send version (see the known gaps).
+12. Join a call and leave it within 10 s, before clicking. When the daemon prints
+    `meeting ended before Record was clicked`, the notification must disappear.
+13. Restart the daemon with `SHEPETAL_MEETING_AUTO_RECORD=1`. The startup line must say
+    `recording every meeting`. Join a call: it must record within about 8 s with no
+    notification. `SHEPETAL_MEETING_AUTO_RECORD=yes` must stop the daemon at startup with an
+    error.
 
 ## Known gaps
 
@@ -138,8 +197,15 @@ to 5 (see the known gaps).
   pw-record gets the raw mic without echo cancellation. Their words then show up under Me too.
 - An app that closes its mic stream while muted ends the recording after `reacquire`. Step 4
   checks this. Raise `reacquire` if it happens.
-- There is no detection card (a prompt with a 20 s timeout), no wake holdoff, and no re-stop
-  suppression. Recording starts without asking, as rule 7 says.
+- The Record? prompt is a plain desktop notification, not a card in 🤫 (docs/re/meetings.md
+  draws a card in its own window).
+- The call before the click is not recorded, and a click is seen up to 2 s late.
+- notify-send older than libnotify 0.7.10 (Ubuntu 22.04 has 0.7.9) has no `--action`. The
+  prompt then fails, the daemon prints `notify-send failed`, and nothing is recorded. Set
+  auto-record, or upgrade.
+- That SIGINT makes notify-send close the notification is from libnotify's source, not tested
+  on hardware. Step 11 checks it.
+- There is no wake holdoff and no re-stop suppression.
 - The daemon records meetings only when dictation can start too (fn keyboard and model
   present).
 - Ctrl+C or SIGKILL on the daemon keeps the audio but writes no transcript.

@@ -1,13 +1,15 @@
 //! Meeting recording in `shepetal daemon` (goal rule 7, docs/re/meetings.md section 7).
 //! Every 2 s it reads `pw-dump`. Once a meeting app has held the mic for the start grace, it
-//! records the mic and the default sink's monitor into two WAVs. When the call ends, it stops
-//! them and writes a Me / Others transcript next to them. The audio is always kept (rule 4).
+//! shows a Record? notification. Only a click on Record starts the recording of the mic and
+//! the default sink's monitor into two WAVs (`SHEPETAL_MEETING_AUTO_RECORD=1` records without
+//! asking). When the call ends, it stops them and writes a Me / Others transcript next to them.
+//! The audio is always kept (rule 4).
 
 use serde_json::Value;
 use shepetal::{insert, meeting, model};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 const ME: &str = "Me.wav";
@@ -30,11 +32,13 @@ struct Thresholds {
     reacquire: u64,
     /// A change of the default mic or speakers holds off an end this long.
     device_change: u64,
+    /// An unanswered Record? prompt is withdrawn after this long, and nothing is recorded.
+    prompt: u64,
 }
 
 impl Default for Thresholds {
     fn default() -> Self {
-        Thresholds { poll: 2000, start_after: 5000, min_session: 15000, end_with_evidence: 3000, reacquire: 4000, device_change: 10000 }
+        Thresholds { poll: 2000, start_after: 5000, min_session: 15000, end_with_evidence: 3000, reacquire: 4000, device_change: 10000, prompt: 20000 }
     }
 }
 
@@ -52,11 +56,35 @@ impl Thresholds {
                 "end_with_evidence" => &mut t.end_with_evidence,
                 "reacquire" => &mut t.reacquire,
                 "device_change" => &mut t.device_change,
+                "prompt" => &mut t.prompt,
                 k => return Err(format!("unknown threshold {k:?}")),
             } = (secs * 1000.0).round() as u64;
         }
         Ok(t)
     }
+}
+
+/// `SHEPETAL_MEETING_AUTO_RECORD`: 1 records every detected meeting without asking. Unset or 0
+/// (the default) asks first with the Record? prompt.
+fn auto_record(v: &str) -> Result<bool, String> {
+    match v.trim() {
+        "" | "0" => Ok(false),
+        "1" => Ok(true),
+        v => Err(format!("SHEPETAL_MEETING_AUTO_RECORD={v:?}: want 1 (always record) or 0 (ask first, the default)")),
+    }
+}
+
+/// The Record? prompt: a desktop notification (org.freedesktop.Notifications, through
+/// notify-send) with one Record button. notify-send waits for the answer and prints `record`
+/// when Record is clicked. A dismissed or expired notification prints nothing. SIGINT makes
+/// notify-send close the notification.
+fn prompt_cmd(apps: &[&str], timeout_ms: u64) -> Command {
+    let mut c = Command::new("notify-send");
+    c.args(["--app-name=shepetal", "--action=record=Record", &format!("--expire-time={timeout_ms}"), "Record this meeting?"])
+        .arg(format!("{} is using the microphone. Nothing is recorded unless you click Record.", apps.join(", ")))
+        .stdout(Stdio::piped());
+    die_with_parent(&mut c);
+    c
 }
 
 /// What one pw-dump shows: the meeting apps on the mic and the default mic and speakers.
@@ -317,10 +345,15 @@ fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
 /// recording is lost, and the thread says so.
 pub fn spawn(stt: &model::Choice) -> Result<(), String> {
     let t = Thresholds::parse(&crate::env("SHEPETAL_MEETING_THRESHOLDS")).map_err(|e| format!("SHEPETAL_MEETING_THRESHOLDS: {e}"))?;
+    let auto = auto_record(&crate::env("SHEPETAL_MEETING_AUTO_RECORD"))?;
     // Checked on PATH: Rust 1.75 (Ubuntu 24.04) spawns a missing program as a child that exits
     // 127, so a spawn error alone would not say that the tool is missing.
     if !insert::on_path("pw-dump") || !(insert::on_path("pw-record") || insert::on_path("parecord")) {
         eprintln!("shepetal: meetings are not recorded: install pw-dump and pw-record (pipewire-bin), or parecord");
+        return Ok(());
+    }
+    if !auto && !insert::on_path("notify-send") {
+        eprintln!("shepetal: meetings are not recorded: the Record? prompt needs notify-send (libnotify-bin), or set SHEPETAL_MEETING_AUTO_RECORD=1 to record every meeting without asking");
         return Ok(());
     }
     let data_home = PathBuf::from(crate::data_home());
@@ -333,17 +366,21 @@ pub fn spawn(stt: &model::Choice) -> Result<(), String> {
     if !model.exists() || !insert::on_path("whisper-cli") {
         eprintln!("shepetal: meetings are recorded but not transcribed until whisper-cli and {} are installed", model.display());
     }
-    eprintln!("shepetal: meeting detection on, {t:?} ms (SHEPETAL_MEETING_THRESHOLDS)");
-    std::thread::spawn(move || run(&t, &data_home, &model));
+    let how = if auto { "recording every meeting (SHEPETAL_MEETING_AUTO_RECORD=1)" } else { "asking before each recording" };
+    eprintln!("shepetal: meeting detection on, {how}, {t:?} ms (SHEPETAL_MEETING_THRESHOLDS)");
+    std::thread::spawn(move || run(&t, auto, &data_home, &model));
     Ok(())
 }
 
-fn run(t: &Thresholds, data_home: &Path, model: &Path) {
-    // ponytail: polls pw-dump; `pw-dump --monitor` or a registry listener reacts sooner.
+fn run(t: &Thresholds, auto_record: bool, data_home: &Path, model: &Path) {
+    // ponytail: polls pw-dump; `pw-dump --monitor` or a registry listener reacts sooner. A click
+    // on Record is also seen at the next poll, so up to `poll` late.
     let pw_record = insert::on_path("pw-record");
     let t0 = Instant::now();
     let mut det = Detector { t: t.clone(), ..Default::default() };
     let mut rec: Option<Session> = None;
+    // The Record? prompt waiting for an answer, and when it was shown.
+    let mut asking: Option<(Child, u64)> = None;
     let mut warned = false;
     loop {
         std::thread::sleep(Duration::from_millis(t.poll));
@@ -362,15 +399,22 @@ fn run(t: &Thresholds, data_home: &Path, model: &Path) {
         };
         warned = false;
         let snap = snapshot(&dump);
-        match det.feed(t0.elapsed().as_millis() as u64, &snap) {
-            Some(Step::Start) => match start(data_home, pw_record) {
-                Ok(s) => {
-                    eprintln!("shepetal: meeting ({}) recording to {}, system audio {:?}", snap.apps.join(", "), s.dir.display(), meeting::system_audio_source(&dump));
-                    rec = Some(s);
+        let now = t0.elapsed().as_millis() as u64;
+        let mut begin = false;
+        match det.feed(now, &snap) {
+            Some(Step::Start) if auto_record => begin = true,
+            Some(Step::Start) => match prompt_cmd(&snap.apps, t.prompt).spawn() {
+                Ok(c) => {
+                    eprintln!("shepetal: meeting ({}) detected, asking: Record this meeting?", snap.apps.join(", "));
+                    asking = Some((c, now));
                 }
-                Err(e) => eprintln!("shepetal: meeting not recorded: {e}"),
+                Err(e) => eprintln!("shepetal: meeting not recorded: notify-send: {e}"),
             },
             Some(Step::Stop) => {
+                if let Some((c, _)) = asking.take() {
+                    crate::stop(c); // the call ended before an answer: withdraw the prompt
+                    eprintln!("shepetal: meeting ended before Record was clicked, nothing recorded");
+                }
                 if let Some(Session { dir, me, others, apps }) = rec.take() {
                     crate::stop(me);
                     crate::stop(others);
@@ -381,6 +425,34 @@ fn run(t: &Thresholds, data_home: &Path, model: &Path) {
                 }
             }
             None => {}
+        }
+        if let Some((mut c, since)) = asking.take() {
+            match c.try_wait() {
+                Ok(None) if now - since < t.prompt => asking = Some((c, since)),
+                Ok(None) => {
+                    crate::stop(c);
+                    eprintln!("shepetal: meeting not recorded: Record was not clicked within {} s", t.prompt / 1000);
+                }
+                Ok(Some(status)) => {
+                    let mut out = String::new();
+                    let _ = c.stdout.take().map(|mut o| o.read_to_string(&mut out));
+                    match out.trim() {
+                        "record" => begin = true,
+                        _ if status.success() => eprintln!("shepetal: meeting not recorded: the Record? prompt was dismissed"),
+                        _ => eprintln!("shepetal: meeting not recorded: notify-send failed ({status}). The Record? prompt needs a notification daemon and libnotify 0.7.10 or later, or set SHEPETAL_MEETING_AUTO_RECORD=1"),
+                    }
+                }
+                Err(e) => eprintln!("shepetal: meeting not recorded: notify-send: {e}"),
+            }
+        }
+        if begin {
+            match start(data_home, pw_record) {
+                Ok(s) => {
+                    eprintln!("shepetal: meeting ({}) recording to {}, system audio {:?}", snap.apps.join(", "), s.dir.display(), meeting::system_audio_source(&dump));
+                    rec = Some(s);
+                }
+                Err(e) => eprintln!("shepetal: meeting not recorded: {e}"),
+            }
         }
         if let Some(s) = rec.as_mut() {
             for a in &snap.apps {
@@ -531,9 +603,28 @@ mod tests {
             let t = Thresholds::parse(spec).unwrap();
             assert_eq!(play(&mut Detector { t, ..Default::default() }, &seq), [(6000, Start), (42000, Stop)], "{spec}");
         }
+        assert_eq!((Thresholds::default().prompt, Thresholds::parse("prompt=30").unwrap().prompt), (20000, 30000), "docs/re/meetings.md: 20 s card");
         for bad in ["startafter=5", "reacquire", "reacquire=-1", "reacquire=soon"] {
             assert!(Thresholds::parse(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn auto_record_is_opt_in() {
+        // Pavel's rule: a detected meeting records only after one click, unless the user turned on
+        // always-record. Anything but an explicit 1 must not record silently.
+        assert_eq!((auto_record(""), auto_record("0"), auto_record("1")), (Ok(false), Ok(false), Ok(true)));
+        for bad in ["true", "yes", "2"] {
+            assert!(auto_record(bad).is_err(), "{bad} stops the daemon instead of guessing");
+        }
+    }
+
+    #[test]
+    fn the_prompt_has_one_record_button_and_expires_with_the_threshold() {
+        let c = prompt_cmd(&["Zoom", "Browser (Firefox)"], 20000);
+        let args: Vec<_> = std::iter::once(c.get_program()).chain(c.get_args()).map(|a| a.to_string_lossy().into_owned()).collect();
+        assert_eq!(args, ["notify-send", "--app-name=shepetal", "--action=record=Record", "--expire-time=20000", "Record this meeting?",
+            "Zoom, Browser (Firefox) is using the microphone. Nothing is recorded unless you click Record."]);
     }
 
     #[test]
@@ -614,30 +705,43 @@ mod tests {
         std::fs::remove_dir_all(&d).unwrap();
     }
 
-    #[test]
-    fn a_meeting_is_recorded_stopped_and_transcribed() {
-        // The whole loop against fake pw-dump, pw-record and whisper-cli. It runs in a child copy
-        // of this test binary, because the tests in main.rs swap PATH for their own fakes.
+    /// One Zoom call (the first 12 pw-dump reads, 0.1 s apart) through the whole loop against
+    /// fake pw-dump, pw-record, whisper-cli and notify-send. It runs in a child copy of this test
+    /// binary, because the tests in main.rs swap PATH for their own fakes. The fake notify-send
+    /// does `answer`: `record` (Record clicked), `dismiss`, or `ignore` (waits until SIGINT).
+    /// `extra` adds thresholds. Returns the fakes' dir in the parent, None in the child.
+    fn call(test: &str, auto_record: bool, answer: &str, extra: &str) -> Option<PathBuf> {
         const HOME: &str = "SHEPETAL_TEST_MEETING_HOME";
         if let Ok(home) = std::env::var(HOME) {
             let home = PathBuf::from(home);
-            let t = Thresholds::parse("poll=0.1,start_after=0.3,min_session=0.5,reacquire=0.3").unwrap();
+            // The call ends after read 12, so the meeting ends at about read 16.
+            let t = Thresholds::parse(&format!("poll=0.1,start_after=0.3,min_session=0.5,reacquire=0.3,end_with_evidence=0.3,{extra}")).unwrap();
             let h = home.clone();
-            std::thread::spawn(move || run(&t, &h, Path::new("/models/ggml.bin")));
+            std::thread::spawn(move || run(&t, auto_record, &h, Path::new("/models/ggml.bin")));
+            let reads = home.parent().unwrap().join("reads");
             for _ in 0..400 {
-                let dirs = std::fs::read_dir(home.join("shepetal/meetings")).into_iter().flatten().flatten();
-                if dirs.into_iter().any(|e| e.path().join("transcript.md").exists()) {
-                    return std::thread::sleep(Duration::from_millis(200)); // let the write finish
-                }
                 std::thread::sleep(Duration::from_millis(50));
+                // Done when the call is long over and every meeting recorded has its transcript.
+                let n: u32 = std::fs::read_to_string(&reads).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+                let mut dirs = std::fs::read_dir(home.join("shepetal/meetings")).into_iter().flatten().flatten();
+                if n >= 30 && dirs.all(|e| e.path().join("transcript.md").exists()) {
+                    std::thread::sleep(Duration::from_millis(200)); // let the write finish
+                    return None;
+                }
             }
-            panic!("no transcript.md within 20 s");
+            panic!("not done within 20 s");
         }
         use std::os::unix::fs::PermissionsExt;
-        let d = std::env::temp_dir().join(format!("shepetal-meet-e2e-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("shepetal-meet-{}-{}", test.rsplit(':').next().unwrap(), std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("bin")).unwrap();
         let (dd, call, idle) = (d.display(), pw(&[zoom()], BUILTIN), pw(&[], BUILTIN));
         let tools = [
+            ("notify-send", format!("exec 2>/dev/null\necho \"$*\" >> {dd}/prompt.args\ncase {answer} in\n\
+                record) sleep 0.2; echo record ;;\n\
+                dismiss) sleep 0.2 ;;\n\
+                *) trap 'echo \"closed after read $(cat {dd}/reads)\" >> {dd}/prompt.log; exit 0' INT\n\
+                   i=0; while [ $i -lt 3000 ]; do sleep 0.01; i=$((i+1)); done ;;\nesac\n")),
             // The call holds the mic for the first 12 reads, then it is gone.
             ("pw-dump", format!("n=$(cat {dd}/reads 2>/dev/null || echo 0); echo $((n+1)) > {dd}/reads\n\
                 [ $n -lt 12 ] && printf '%s' '{call}' || printf '%s' '{idle}'\n")),
@@ -654,13 +758,29 @@ mod tests {
             std::fs::set_permissions(d.join("bin").join(bin), std::fs::Permissions::from_mode(0o700)).unwrap();
         }
         let out = Command::new(std::env::current_exe().unwrap())
-            .args(["meeting_rec::tests::a_meeting_is_recorded_stopped_and_transcribed", "--exact", "--nocapture"])
+            .args([test, "--exact", "--nocapture"])
             .env("PATH", format!("{dd}/bin:{}", std::env::var("PATH").unwrap_or_default()))
             .env(HOME, d.join("home"))
             .output().unwrap();
         let log = String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout);
         assert!(out.status.success(), "{log}");
+        Some(d)
+    }
 
+    fn read(p: PathBuf) -> String {
+        std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("{}: {e}", p.display()))
+    }
+
+    /// Nothing was recorded: no recorder ever ran and no meeting folder was even made.
+    fn nothing_recorded(d: &Path) {
+        assert!(!d.join("rec.args").exists(), "a recorder ran: {}", std::fs::read_to_string(d.join("rec.args")).unwrap_or_default());
+        assert!(!d.join("home/shepetal/meetings").exists());
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// The call was recorded, stopped and transcribed.
+    fn recorded(d: &Path) {
+        use std::os::unix::fs::PermissionsExt;
         let dirs: Vec<_> = std::fs::read_dir(d.join("home/shepetal/meetings")).unwrap().flatten().map(|e| e.path()).collect();
         assert_eq!(dirs.len(), 1, "one call, one meeting: {dirs:?}");
         let dir = &dirs[0];
@@ -676,7 +796,51 @@ mod tests {
             [00:00:01] Me: Hello from me.\n\n[00:00:01] Others: Hi from them.\n");
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!([mode(dir), mode(&dir.join(ME)), mode(&dir.join("transcript.md"))], [0o700, 0o600, 0o600]);
-        std::fs::remove_dir_all(&d).unwrap();
+        std::fs::remove_dir_all(d).unwrap();
+    }
+
+    /// The pw-dump read after which the fake notify-send got SIGINT (the prompt was withdrawn).
+    fn closed_after(d: &Path) -> u32 {
+        let log = read(d.join("prompt.log"));
+        log.trim().strip_prefix("closed after read ").and_then(|n| n.parse().ok()).unwrap_or_else(|| panic!("{log}"))
+    }
+
+    #[test]
+    fn a_meeting_records_only_after_record_is_clicked() {
+        let Some(d) = call("meeting_rec::tests::a_meeting_records_only_after_record_is_clicked", false, "record", "") else { return };
+        let asked = read(d.join("prompt.args"));
+        assert_eq!(asked.lines().count(), 1, "one prompt per meeting: {asked}");
+        assert!(asked.contains("--action=record=Record") && asked.contains("Zoom is using the microphone"), "{asked}");
+        recorded(&d);
+    }
+
+    #[test]
+    fn a_dismissed_prompt_records_nothing_for_that_meeting() {
+        let Some(d) = call("meeting_rec::tests::a_dismissed_prompt_records_nothing_for_that_meeting", false, "dismiss", "") else { return };
+        assert_eq!(read(d.join("prompt.args")).lines().count(), 1, "not asked again in the same meeting");
+        nothing_recorded(&d);
+    }
+
+    #[test]
+    fn an_unanswered_prompt_is_withdrawn_and_records_nothing() {
+        // The call lasts 12 reads. A 0.5 s prompt shown at about read 3 must go well before that.
+        let Some(d) = call("meeting_rec::tests::an_unanswered_prompt_is_withdrawn_and_records_nothing", false, "ignore", "prompt=0.5") else { return };
+        assert!(closed_after(&d) < 12, "withdrawn by the timeout, not by the end of the call");
+        nothing_recorded(&d);
+    }
+
+    #[test]
+    fn the_prompt_is_withdrawn_when_the_call_ends_first() {
+        let Some(d) = call("meeting_rec::tests::the_prompt_is_withdrawn_when_the_call_ends_first", false, "ignore", "prompt=60") else { return };
+        assert!(closed_after(&d) >= 12, "withdrawn when the call ended");
+        nothing_recorded(&d);
+    }
+
+    #[test]
+    fn auto_record_records_without_asking() {
+        let Some(d) = call("meeting_rec::tests::auto_record_records_without_asking", true, "record", "") else { return };
+        assert!(!d.join("prompt.args").exists(), "no prompt with SHEPETAL_MEETING_AUTO_RECORD=1");
+        recorded(&d);
     }
 
     #[test]
