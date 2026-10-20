@@ -4,12 +4,18 @@ import ShepetalCore
 /// Listens for fn (keycode 63, Globe 179) with a listen-only CGEventTap. Re-enables the tap when
 /// macOS turns it off, and releases fn if its key-up was lost while the tap was off.
 /// `onOtherKey` reports any other key pressed while fn is held (fn+Delete, fn+arrows).
+/// Both pass the uptime when the key moved (`FnClock`), which can be well before the main thread reads it.
 final class FnTap {
-    var onChange: ((Bool) -> Void)?
-    var onOtherKey: (() -> Void)?
+    var onChange: ((Bool, TimeInterval) -> Void)?
+    var onOtherKey: ((TimeInterval) -> Void)?
     private var tap: CFMachPort?
     private var isDown = false
     private var watchdog: Timer?
+    private let fnHeld: () -> Bool
+
+    init(fnHeld: @escaping () -> Bool = { CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn) }) {
+        self.fnHeld = fnHeld
+    }
 
     var isRunning: Bool { tap != nil }
 
@@ -30,25 +36,25 @@ final class FnTap {
         return true
     }
 
-    fileprivate func handle(_ type: CGEventType, _ event: CGEvent) {
+    func handle(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { return reenable() }
         let keyDown: Bool? = type == .keyDown ? true : type == .keyUp ? false : nil
+        let t = FnClock.seconds(timestamp: event.timestamp, now: ProcessInfo.processInfo.systemUptime)
         guard let down = FnKey.transition(keycode: event.getIntegerValueField(.keyboardEventKeycode),
                                           secondaryFn: event.flags.contains(.maskSecondaryFn), isKeyDown: keyDown) else {
-            if keyDown == true, isDown { onOtherKey?() }
+            if keyDown == true, isDown { onOtherKey?(t) }
             return
         }
         guard down != isDown else { return }
         isDown = down
-        onChange?(down)
+        onChange?(down, t)
     }
 
     private func reenable() {
-        guard let tap else { return }
-        CGEvent.tapEnable(tap: tap, enable: true)
-        if isDown && !CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn) {
+        if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+        if isDown && !fnHeld() {
             isDown = false
-            onChange?(false)
+            onChange?(false, ProcessInfo.processInfo.systemUptime)
         }
     }
 }

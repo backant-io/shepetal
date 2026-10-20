@@ -49,22 +49,37 @@ final class Resampler {
 }
 
 /// Opens the mic for each dictation (so the macOS mic indicator is on only while dictating)
-/// and collects 16 kHz mono samples.
+/// and collects 16 kHz mono samples. Opening the mic can take half a second or more, and fn is read on the
+/// main thread, so every engine call runs on `queue`: `start` returns at once and `stop` waits for it.
+/// The one capture runs from the first fn press through hands-free; nothing restarts it.
 final class Recorder {
     private let engine = AVAudioEngine()
+    private let queue = DispatchQueue(label: "io.backant.shepetal.mic")
     private let lock = NSLock()
     private var samples: [Float] = []
     private var resampler: Resampler?
+    /// On the main queue, when the mic did not open. The recording then ends with no audio.
+    var onError: ((String) -> Void)?
 
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
 
-    func start() throws {
+    func start() {
+        queue.async { [self] in
+            do { try open() } catch {
+                let message = "Microphone: \(error.localizedDescription)"
+                DispatchQueue.main.async { self.onError?(message) }
+            }
+        }
+    }
+
+    private func open() throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
+        lock.withLock { samples = []; resampler = nil }
         guard format.sampleRate > 0, format.channelCount > 0, let r = Resampler(from: format) else {
             throw SpeechError("No microphone")
         }
-        lock.withLock { samples = []; resampler = r }
+        lock.withLock { resampler = r }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in
             guard let self else { return }
             self.lock.withLock { self.samples += self.resampler?.convert(buf) ?? [] }
@@ -77,8 +92,10 @@ final class Recorder {
     }
 
     func stop() -> [Float] {
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        queue.sync {
+            engine.inputNode.removeTap(onBus: 0)
+            engine.stop()
+        }
         return lock.withLock {
             defer { resampler = nil }
             return samples + (resampler?.convert(nil) ?? [])

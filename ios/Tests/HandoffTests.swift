@@ -1,4 +1,5 @@
 import UIKit
+import UniformTypeIdentifiers
 import XCTest
 @testable import ShepetalSessionCore
 
@@ -24,7 +25,7 @@ final class HandoffTests: XCTestCase {
 
     func testHappyPathInsertsTextExactlyOnce() {
         var h = ready(a, text: "hello", at: t0)
-        XCTAssertEqual(h.consume(a, document: field, now: t0), "hello")
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("hello"))
         XCTAssertEqual(h.phase, .inserted)
         // A second keyboard appearance must not paste the same dictation again.
         XCTAssertNil(h.consume(a, document: field, now: t0))
@@ -113,7 +114,7 @@ final class HandoffTests: XCTestCase {
         let atCap = t0.addingTimeInterval(Handoff.maxRecording + 1)
         XCTAssertTrue(h.finishRecording(a, now: atCap))
         XCTAssertTrue(h.deliver(a, text: "long", now: atCap))
-        XCTAssertEqual(h.consume(a, document: field, now: atCap), "long")
+        XCTAssertEqual(h.consume(a, document: field, now: atCap), .insert("long"))
     }
 
     func testAbandonedRecordingExpires() {
@@ -138,17 +139,90 @@ final class HandoffTests: XCTestCase {
         XCTAssertFalse(h.finishRecording(a, now: t0))
     }
 
-    // MARK: Security fix 3: text goes only into the field the dictation started in.
+    // MARK: Security fix 3 and goal rule 8: text is inserted only into the field the dictation started in.
+    // A result for a different field goes to the clipboard instead of being discarded.
 
-    func testResultForAnotherFieldIsDiscardedNotInserted() {
+    func testResultForAnotherFieldIsCopiedNotInserted() {
         var h = ready(a, text: "private", at: t0)
-        XCTAssertNil(h.consume(a, document: otherField, now: t0))
+        XCTAssertEqual(h.consume(a, document: otherField, now: t0), .copy("private"))
         XCTAssertNil(h.text)
-        // The keyboard says so instead of sitting on "Transcribing..." until the session expires.
+        // The hint says to paste, without an error ring: the text was not lost.
+        XCTAssertEqual(h.phase, .inserted)
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("clipboard"), true)
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("Paste"), true)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .idle)
+        // Delivered once: going back to the original field must not insert it as well.
+        XCTAssertNil(h.consume(a, document: field, now: t0))
+    }
+
+    func testClipboardWriteThatDidNotLandSaysTheTextIsInHistory() {
+        var h = ready(a, text: "private", at: t0)
+        XCTAssertEqual(h.consume(a, document: otherField, now: t0), .copy("private"))
+        XCTAssertFalse(h.copyFailed(b, now: t0)) // another session's failure changes nothing
+        XCTAssertTrue(h.copyFailed(a, now: t0))
         XCTAssertEqual(h.phase, .failed)
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("history"), true)
-        // Discarded for good: going back to the original field must not insert it either.
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("clipboard"), false) // no wrong paste hint
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .error)
+        XCTAssertFalse(h.copyFailed(a, now: t0)) // once
         XCTAssertNil(h.consume(a, document: field, now: t0))
+    }
+
+    func testCopyHintKeepsTheNoteDeliveredWithTheText() {
+        var h = Handoff()
+        h.request(a, document: field, now: t0)
+        h.startRecording(a, now: t0) {}
+        h.finishRecording(a, now: t0)
+        h.deliver(a, text: "long", note: "Stopped at the 5-minute limit.", now: t0)
+        XCTAssertEqual(h.consume(a, document: otherField, now: t0), .copy("long"))
+        let status = h.keyboardStatus(for: a, now: t0) ?? ""
+        XCTAssertTrue(status.contains("clipboard"))
+        XCTAssertTrue(status.hasSuffix("Stopped at the 5-minute limit."))
+    }
+
+    func testResultForTheSameFieldIsInserted() {
+        var h = ready(a, text: "hi", at: t0)
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("hi"))
+    }
+
+    func testCopyLeavesThePlainTextOnThePasteboardWithoutRestoringTheOldOne() throws {
+        // A private named pasteboard: tests never touch the user's clipboard.
+        let board = try XCTUnwrap(UIPasteboard(name: UIPasteboard.Name("io.backant.shepetal.tests.\(UUID().uuidString)"), create: true))
+        defer { UIPasteboard.remove(withName: board.name) }
+        board.string = "old clipboard"
+        XCTAssertTrue(Clipboard.copy("dictated text", to: board)) // the write is checked
+        XCTAssertEqual(board.string, "dictated text")
+        XCTAssertEqual(board.numberOfItems, 1)
+        XCTAssertTrue(board.contains(pasteboardTypes: [UTType.utf8PlainText.identifier]))
+    }
+
+    // MARK: The keyboard skips opening the app only while the app's heartbeat is fresh.
+
+    func testReadingTheSharedStateNeverWritesIt() throws {
+        // A read that wrote back could erase a request the keyboard wrote between the read and the write.
+        let suite = "shepetal-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        XCTAssertEqual(SharedHandoff.read(in: defaults), Handoff())
+        XCTAssertNil(defaults.data(forKey: "handoff"))
+        SharedHandoff.update(in: defaults) { $0.request(a, document: field, now: t0) }
+        let written = defaults.data(forKey: "handoff")
+        XCTAssertEqual(SharedHandoff.read(in: defaults).sessionID, a)
+        XCTAssertEqual(defaults.data(forKey: "handoff"), written)
+    }
+
+    func testKeyboardSeesTheAppListeningOnlyWhileItsHeartbeatIsFresh() throws {
+        let suite = "shepetal-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0, in: defaults)) // never written
+        SharedHandoff.markListening(t0, in: defaults)
+        XCTAssertTrue(SharedHandoff.isAppListening(now: t0, in: defaults))
+        XCTAssertTrue(SharedHandoff.isAppListening(now: t0 + SharedHandoff.listeningWindow - 0.1, in: defaults))
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0 + SharedHandoff.listeningWindow, in: defaults)) // the app died or was suspended
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0 - 10, in: defaults)) // a heartbeat from the future
+        SharedHandoff.markListening(nil, in: defaults) // the app closed the mic
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0, in: defaults))
     }
 
     // MARK: Timeouts
@@ -162,7 +236,7 @@ final class HandoffTests: XCTestCase {
 
     func testReadyResultIsInsertedRightAtTheTimeout() {
         var h = ready(a, text: "edge", at: t0)
-        XCTAssertEqual(h.consume(a, document: field, now: t0.addingTimeInterval(Handoff.timeout)), "edge")
+        XCTAssertEqual(h.consume(a, document: field, now: t0.addingTimeInterval(Handoff.timeout)), .insert("edge"))
     }
 
     // MARK: The keyboard is told how every dictation ended (product rule 3: errors show at the indicator).
@@ -190,8 +264,58 @@ final class HandoffTests: XCTestCase {
         var h = recording(a, at: t0)
         h.finishRecording(a, now: t0)
         h.deliver(a, text: "partial", note: "Recording stopped early", now: t0)
-        XCTAssertEqual(h.consume(a, document: field, now: t0), "partial")
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("partial"))
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Recording stopped early")
+    }
+
+    // MARK: Issue #14: the stop notification carries no sender, so the stop request lives in the App Group.
+
+    func testStopRequestIsOnlyAcceptedForTheRecordingSession() {
+        var h = Handoff()
+        h.request(a, document: field, now: t0)
+        XCTAssertFalse(h.requestStop(a, now: t0)) // not recording yet: the keyboard starts over instead
+        XCTAssertTrue(h.startRecording(a, now: t0) {})
+        XCTAssertFalse(h.stopRequested)
+        XCTAssertFalse(h.requestStop(b, now: t0))
+        XCTAssertFalse(h.stopRequested)
+        XCTAssertTrue(h.requestStop(a, now: t0))
+        XCTAssertTrue(h.stopRequested)
+        XCTAssertTrue(h.shouldKeepRecording(a, now: t0)) // the request does not reset the 5-minute cap clock
+        XCTAssertFalse(h.shouldKeepRecording(a, now: t0 + Handoff.maxRecording))
+        var abandoned = recording(a, at: t0) // the app died mid-recording: the keyboard must start over, not wait on it
+        XCTAssertFalse(abandoned.requestStop(a, now: t0 + Handoff.maxRecording + Handoff.timeout + 1))
+        XCTAssertFalse(abandoned.stopRequested)
+        h.request(b, document: field, now: t0) // a new session never inherits the old stop
+        XCTAssertFalse(h.stopRequested)
+    }
+
+    // MARK: Goal rule 3: the keyboard's 🤫 ring follows the keyboard's own session.
+
+    func testKeyboardIndicatorFollowsTheSession() {
+        var h = Handoff()
+        XCTAssertEqual(h.indicatorMode(for: nil, now: t0), .idle)
+        h.request(a, document: field, now: t0)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .processing) // opening the app
+        h.startRecording(a, now: t0) {}
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .recording)
+        h.finishRecording(a, now: t0)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .processing)
+        h.deliver(a, text: "hi", now: t0)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .processing)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0 + Handoff.timeout + 1), .error) // timed out
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("hi"))
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .idle)
+        XCTAssertEqual(h.indicatorMode(for: b, now: t0), .error) // the keyboard's session is gone
+
+        var wrongField = ready(a, text: "hi", at: t0)
+        XCTAssertEqual(wrongField.consume(a, document: otherField, now: t0), .copy("hi"))
+        XCTAssertEqual(wrongField.indicatorMode(for: a, now: t0), .idle) // copied, not lost
+        wrongField.copyFailed(a, now: t0)
+        XCTAssertEqual(wrongField.indicatorMode(for: a, now: t0), .error)
+
+        var cancelled = recording(a, at: t0)
+        cancelled.cancel(a, now: t0)
+        XCTAssertEqual(cancelled.indicatorMode(for: a, now: t0), .idle)
     }
 
     func testOutOfOrderTransitionsAreRejected() {
@@ -291,15 +415,41 @@ final class AudioArchiveTests: XCTestCase {
 final class IndicatorTests: XCTestCase {
     func testIndicatorIsInTheBottomLeftCornerWithTheStateNextToIt() throws {
         let view = UIView(frame: CGRect(x: 0, y: 0, width: 375, height: 180))
-        let status = Indicator.install(in: view)
-        status.text = "Could not transcribe"
+        let indicator = Indicator(in: view)
+        indicator.show(.error, "Could not transcribe")
         view.layoutIfNeeded()
         let psst = try XCTUnwrap(view.subviews.compactMap { $0 as? UILabel }.first { $0.text == "🤫" })
+        let status = indicator.status
+        XCTAssertEqual(status.text, "Could not transcribe")
         XCTAssertEqual(psst.font.pointSize, 18)
         XCTAssertEqual(psst.frame.minX, 8, accuracy: 0.5)
         XCTAssertEqual(psst.frame.maxY, 172, accuracy: 0.5)
         XCTAssertFalse(psst.isUserInteractionEnabled) // never takes a tap meant for a key
         XCTAssertGreaterThanOrEqual(status.frame.minX, psst.frame.maxX)
         XCTAssertLessThanOrEqual(status.frame.maxX, 367)
+    }
+
+    /// Goal rule 3: the states show at the indicator, in the same colors as on the Mac
+    /// (Sources/Shepetal/Indicator.swift: recording red, processing blue, error yellow, idle no ring).
+    func testStateRingUsesTheMacColors() {
+        XCTAssertNil(Indicator.Mode.idle.color)
+        XCTAssertEqual(Indicator.Mode.recording.color, .systemRed)
+        XCTAssertEqual(Indicator.Mode.processing.color, .systemBlue)
+        XCTAssertEqual(Indicator.Mode.error.color, .systemYellow)
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 375, height: 180))
+        let indicator = Indicator(in: view)
+        indicator.show(.recording, nil)
+        XCTAssertEqual(indicator.psst.layer.borderWidth, 2)
+        XCTAssertEqual(indicator.psst.layer.borderColor, UIColor.systemRed.cgColor)
+        indicator.show(.idle, nil)
+        XCTAssertEqual(indicator.psst.layer.borderWidth, 0) // idle: just 🤫, no ring
+    }
+
+    func testLiveActivityGoesStaleOnlyAfterTheStatesTimeout() {
+        // A Live Activity left by an app that died says so instead of "Listening" or "Ready" for hours.
+        XCTAssertEqual(Indicator.Mode.recording.staleAfter, Handoff.maxRecording + Handoff.timeout)
+        XCTAssertEqual(Indicator.Mode.processing.staleAfter, Handoff.timeout)
+        XCTAssertEqual(Indicator.Mode.idle.staleAfter, DictationSession.activityRefresh + 30) // re-sent every minute while open
+        XCTAssertEqual(Indicator.Mode.error.staleAfter, DictationSession.activityRefresh + 30)
     }
 }

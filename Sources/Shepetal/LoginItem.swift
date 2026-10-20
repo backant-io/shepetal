@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 import ShepetalCore
 
-/// "Open at login" through `SMAppService.mainApp`. Only a person toggling the menu item registers or
+/// "Start at login" through `SMAppService.mainApp`. A person toggling the menu item, or the installer (`--postinstall`), registers or
 /// unregisters it; tests and the end-to-end run never do.
 @MainActor
 final class LoginItem: NSObject {
@@ -11,7 +11,7 @@ final class LoginItem: NSObject {
     init(say: @escaping (String) -> Void) { self.say = say }
 
     var menuItem: NSMenuItem {
-        let i = NSMenuItem(title: "Open at login", action: #selector(toggle), keyEquivalent: "")
+        let i = NSMenuItem(title: "Start at login", action: #selector(toggle), keyEquivalent: "")
         i.target = self
         i.state = LoginItemMenu.state(Self.status).checked ? .on : .off
         return i
@@ -22,7 +22,7 @@ final class LoginItem: NSObject {
         do {
             if service.status == .enabled { try service.unregister() } else { try service.register() }
         } catch {
-            say("Open at login: \(error.localizedDescription)")
+            say("Start at login: \(error.localizedDescription)")
         }
         if let message = LoginItemMenu.state(Self.status).message {
             say(message)

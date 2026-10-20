@@ -1,9 +1,12 @@
 use std::path::{Path, PathBuf};
 
+pub mod focus;
 pub mod gesture;
+pub mod indicator;
 pub mod insert;
 pub mod meeting;
 pub mod model;
+pub mod text_rules;
 
 pub const EV_KEY: u16 = 1;
 /// evdev KEY_FN (0x1d0), the default hotkey. Apple keyboards send it through hid-apple.
