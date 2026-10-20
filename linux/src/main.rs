@@ -320,6 +320,7 @@ fn next_key(rx: &mpsc::Receiver<(u16, i32)>, t0: Instant) -> Result<(Option<(u16
 }
 
 /// The dictation loop. It returns only on an error, and never with a recorder still running.
+#[allow(clippy::too_many_arguments)]
 fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: &Path, stt: &model::Choice, typer: insert::Backend, ind: &Indicator, keys: &shortcuts::Config) -> Res {
     let t0 = Instant::now();
     let mut s = Shortcuts::new(key, keys.clone());
@@ -358,6 +359,9 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
     }
 }
 
+/// A running dictation: the recorder, the WAV it writes, and the window focused when it started.
+type Rec = (Child, PathBuf, Option<String>);
+
 /// The paste-last key types `last` at the cursor again; copy-last puts it on the clipboard.
 // ponytail: the text of this daemon run only; read the history store instead once it lands, so
 // it survives a restart.
@@ -375,13 +379,11 @@ fn again(cmd: Cmd, last: &str, typer: insert::Backend) -> Result<(), String> {
     to.insert(last).map_err(|e| format!("{}: {e}", if cmd == Cmd::CopyLast { "copy-last" } else { "paste-last" }))
 }
 
-/// A running dictation: the recorder, the WAV it writes, and the window focused when it started.
-type Rec = (Child, PathBuf, Option<String>);
-
 /// Carry out one gesture action. `rec` is the running dictation; `last` gets the text of a
 /// transcribed one.
 /// Returns the hint to show next to 🤫: after a too-short press, or when the text was left on the
 /// clipboard. `ind` gets the ring state.
+#[allow(clippy::too_many_arguments)]
 fn act(a: Action, rec: &mut Option<Rec>, data_home: &Path, stt: &model::Choice, typer: insert::Backend, key_name: &str, ind: &Indicator, last: &mut String) -> Result<Option<String>, String> {
     match a {
         Action::Start => {
@@ -546,6 +548,10 @@ mod tests {
         std::fs::remove_dir_all(&home).unwrap();
     }
 
+    fn defaults() -> shortcuts::Config {
+        shortcuts::parse("", shepetal::KEY_FN).unwrap()
+    }
+
     #[test]
     fn evdev_key_events_reach_the_shortcut_layer_as_is() {
         // value 1 is a press, 0 a release, 2 autorepeat; the codes and values go through
@@ -585,29 +591,29 @@ mod tests {
         assert!(t >= 30, "fn pressed at 30 ms or later, stamped {t} ms");
     }
 
-    /// The default shortcuts with fn as the hotkey.
-    fn defaults() -> shortcuts::Config {
-        shortcuts::parse("", shepetal::KEY_FN).unwrap()
-    }
-
     #[test]
     fn esc_in_the_daemon_cancels_and_keeps_the_audio() {
         // Goal rule 4: Esc ends the dictation with nothing transcribed or typed, and the clip
         // is kept as cancelled, with the recorder finished by SIGINT.
         with_fake_tools("esc", |d| {
-            let audio = d.join("home/shepetal/audio");
+            let home = d.join("home");
+            let audio = home.join("shepetal/audio");
+            let (tx, rx) = mpsc::channel();
             let watched = audio.clone();
-            listen_with(d, &Indicator::default(), move |tx, recording| {
+            let keyboard = std::thread::spawn(move || {
                 tx.send((shepetal::KEY_FN, 1)).unwrap();
                 tx.send((shepetal::KEY_FN, 0)).unwrap();
                 tx.send((shepetal::KEY_FN, 1)).unwrap(); // double tap: hands-free
                 tx.send((shepetal::KEY_FN, 0)).unwrap();
-                recording();
+                wait_until("the recorder", || clips(&watched).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
                 std::thread::sleep(Duration::from_millis(600)); // past the double-tap window
                 tx.send((shortcuts::KEY_ESC, 1)).unwrap();
                 tx.send((shortcuts::KEY_ESC, 0)).unwrap();
                 wait_until("the cancel", || clips(&watched).iter().any(|p| p.to_string_lossy().ends_with(".cancelled.wav")));
             });
+            let keys = shortcuts::parse("", shepetal::KEY_FN).unwrap();
+            assert_eq!(listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &keys).unwrap_err(), "all input devices closed");
+            keyboard.join().unwrap();
             let kept = clips(&audio);
             assert_eq!(kept.len(), 1, "{kept:?}");
             assert!(kept[0].to_string_lossy().ends_with(".cancelled.wav"), "{kept:?}");
@@ -619,11 +625,15 @@ mod tests {
 
     #[test]
     fn paste_last_and_copy_last_keys_repeat_the_last_dictation() {
-        // F21 without the history store: Shift+Alt+Z types the newest dictated text again,
-        // Shift+Alt+X puts it on the clipboard. Before any dictation they do nothing.
+        // F21 on main without the history store: Shift+Alt+Z types the newest dictated text
+        // again, Shift+Alt+X puts it on the clipboard. Before any dictation they do nothing.
         with_fake_tools("last", |d| {
+            let home = d.join("home");
+            let audio = home.join("shepetal/audio");
+            std::env::set_var("XDG_SESSION_TYPE", "wayland"); // with_fake_tools puts it back
+            let (tx, rx) = mpsc::channel();
             let dir = d.to_path_buf();
-            listen_with(d, &Indicator::default(), move |tx, recording| {
+            let keyboard = std::thread::spawn(move || {
                 let combo = |keys: [u16; 3]| {
                     keys.iter().for_each(|&k| tx.send((k, 1)).unwrap());
                     keys.iter().rev().for_each(|&k| tx.send((k, 0)).unwrap());
@@ -632,7 +642,7 @@ mod tests {
                 combo(paste);
                 combo(copy);
                 tx.send((shepetal::KEY_FN, 1)).unwrap();
-                recording();
+                wait_until("the recorder", || clips(&audio).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
                 assert!(!dir.join("typed").exists() && !dir.join("clipboard").exists(), "nothing dictated yet: nothing typed or copied");
                 std::thread::sleep(Duration::from_millis(600)); // a hold, not a tap
                 tx.send((shepetal::KEY_FN, 0)).unwrap();
@@ -643,6 +653,9 @@ mod tests {
                 combo(copy);
                 wait_until("copy-last", || dir.join("clipboard").exists());
             });
+            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
+            keyboard.join().unwrap();
+            assert_eq!(err, "all input devices closed");
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.", "typed again at the cursor");
             assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "Hello world.", "on the clipboard");
         });

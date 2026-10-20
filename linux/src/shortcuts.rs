@@ -235,7 +235,7 @@ impl Shortcuts {
         Shortcuts { hotkey, cfg, gesture: Gesture::default(), held: BTreeSet::new(), rec: None, warned: false, pending: None }
     }
 
-    /// A hands-free dictation runs: double-tapped, or started by the toggle (🤫 shows it).
+    /// Recording hands-free: after a double tap, or started by the toggle.
     pub fn hands_free(&self) -> bool {
         self.gesture.hands_free() || matches!(self.rec, Some((_, true)))
     }
@@ -414,17 +414,17 @@ mod tests {
     }
 
     #[test]
-    fn hands_free_is_a_double_tap_or_the_toggle_not_a_hold() {
+    fn hands_free_is_reported_for_the_toggle_and_the_double_tap() {
+        // 🤫 turns orange for both ways into hands-free, and not for a hold.
         let mut s = Shortcuts::new(FN, defaults());
-        run(&mut s, &[(FN, 1, 0)]);
-        assert!(!s.hands_free(), "holding fn");
-        run(&mut s, &[(FN, 0, 100), (FN, 1, 300)]);
-        assert!(s.hands_free(), "double tap");
-        run(&mut s, &[(FN, 0, 400), (FN, 1, 5000)]);
-        assert!(!s.hands_free(), "stopped");
-        run(&mut s, &[(FN, 0, 5100)]);
-        run(&mut s, &press(&[LCTRL, LMETA, SPACE], 10_000));
+        run(&mut s, &press(&[LCTRL, LMETA, SPACE], 0));
         assert!(s.hands_free(), "toggle");
+        run(&mut s, &press(&[LCTRL, LMETA, SPACE], 5000));
+        assert!(!s.hands_free(), "stopped");
+        run(&mut s, &[(FN, 1, 10_000)]);
+        assert!(!s.hands_free(), "a hold");
+        run(&mut s, &[(FN, 0, 10_100), (FN, 1, 10_300)]);
+        assert!(s.hands_free(), "double tap");
         run(&mut s, &[(KEY_ESC, 1, 20_000)]);
         assert!(!s.hands_free(), "cancelled");
     }
