@@ -13,15 +13,6 @@ final class MicAudioTests: XCTestCase {
         XCTAssertEqual(FnClock.seconds(timestamp: 900_000_000_000, now: now), now)
     }
 
-    // "No audio" means the mic gave nothing at all. Quiet speech, or a recording that starts with the mic's
-    // warm-up zeros (about 130 ms on Pavel's Mac), is audio and goes to the model.
-    func testNoAudioOnlyWhenEverySampleIsZero() {
-        XCTAssertTrue(MicAudio.isSilent([]))
-        XCTAssertTrue(MicAudio.isSilent([Float](repeating: 0, count: 8000)))
-        XCTAssertFalse(MicAudio.isSilent([Float](repeating: 0, count: 2076) + [0.0004, -0.0002]))
-        XCTAssertFalse(MicAudio.isSilent([1e-6]))
-    }
-
     // Parakeet refuses under 300 ms. Trailing zeros fill the rest; the samples themselves are kept as they are.
     func testPaddingKeepsTheSamplesAndOnlyAppendsZeros() {
         let short: [Float] = [0.1, -0.2, 0.3]

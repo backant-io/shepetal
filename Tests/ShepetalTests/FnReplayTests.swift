@@ -123,11 +123,11 @@ final class FnReplayTests: XCTestCase {
     }
 }
 
-/// "No audio" is said only when the mic gave nothing, and then the model is not asked; anything else reaches
-/// the model, where a short clip used to fail as "Must be at least 300ms of 16kHz audio".
+/// SpeechGuard (F51) alone decides what reaches the model; a recording with no samples at all (the mic did
+/// not open in time) only gets its own wording, so the user knows the mic, not their voice, was the problem.
 @MainActor
 final class NoAudioPipelineTests: XCTestCase {
-    func testAllZeroSamplesSayNoAudioWithoutTheModel() async throws {
+    func testNoSamplesSayNoAudioAndSilenceSaysNoSpeech() async throws {
         let root = scratch("no-audio")
         defer { try? FileManager.default.removeItem(at: root) }
         let pasteboard = NSPasteboard(name: .init("io.backant.shepetal.test.\(UUID().uuidString)"))
@@ -135,18 +135,19 @@ final class NoAudioPipelineTests: XCTestCase {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         let engine = CountingEngine()
 
-        for samples in [[], [Float](repeating: 0, count: 8000)] {
+        for (samples, message) in [([Float](), MicAudio.noAudio), ([Float](repeating: 0, count: 8000), "No speech heard")] {
             let run = await pipeline.process(samples, engine: engine, context: { ("", "") }, sendPaste: { _ in
                 XCTFail("nothing may be pasted")
             })
-            XCTAssertEqual(run.error, MicAudio.noAudio)
+            XCTAssertEqual(run.error, message)
+            XCTAssertEqual(run.entry.outcome, .noSpeech, "one outcome for both, as on main")
             XCTAssertTrue(FileManager.default.fileExists(atPath: run.entry.audioPath), "the audio is kept (rule 4)")
         }
         XCTAssertEqual(engine.calls, 0)
 
-        // Quiet audio after the mic's warm-up zeros is audio.
-        let quiet = [Float](repeating: 0, count: 2076) + (0..<5769).map { Float(sin(Double($0) * 0.2)) * 0.0004 }
-        let run = await pipeline.process(quiet, engine: engine, context: { ("", "") }, sendPaste: { _ in })
+        // Speech after the mic's warm-up zeros (about 130 ms on Pavel's Mac) is speech.
+        let warmUp = [Float](repeating: 0, count: 2076) + (0..<5769).map { Float(sin(Double($0) * 0.2)) * 0.05 }
+        let run = await pipeline.process(warmUp, engine: engine, context: { ("", "") }, sendPaste: { _ in })
         XCTAssertEqual(engine.calls, 1)
         XCTAssertNotEqual(run.error, MicAudio.noAudio)
     }

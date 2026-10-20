@@ -15,13 +15,10 @@ public enum FnClock {
     }
 }
 
-/// How the pipeline judges the mic samples before the model sees them.
 public enum MicAudio {
+    /// Said instead of "No speech heard" when the recording has no samples at all (the mic did not open, or
+    /// opened after fn was released). SpeechGuard (F51) still decides: the outcome is no_speech either way.
     public static let noAudio = "No audio from the microphone"
-
-    /// No sample is nonzero, or there are none: the mic delivered nothing (not open yet, dead, a driver bug).
-    /// A quiet room is never exactly zero, so this is the only "no audio" (docs/re/dictation-input.md 2.5).
-    public static func isSilent(_ samples: [Float]) -> Bool { !samples.contains { $0 != 0 } }
 
     /// Trailing zeros up to `count` samples, for a model that rejects shorter input.
     public static func padded(_ samples: [Float], to count: Int) -> [Float] {

@@ -24,7 +24,8 @@ final class Pipeline {
     let history: History
     let inserter: Inserter
 
-    /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard. Tests pass a temp `root`.
+    /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
+    /// Tests pass a temp `root` and a private named pasteboard.
     init(root: URL = Paths.root, pasteboard: NSPasteboard) throws {
         inserter = Inserter(pasteboard: pasteboard)
         try AudioStore.makeOwnerOnlyDirectory(root)
@@ -56,8 +57,11 @@ final class Pipeline {
                                      _ context: () -> (before: String, after: String), _ selection: () -> String,
                                      _ focusKept: () -> Bool?, _ secureInput: () -> String?,
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
-        if MicAudio.isSilent(samples) { return MicAudio.noAudio }  // the mic gave nothing; the model is not asked
         guard let engine else { return "Speech model is not loaded" }
+        guard SpeechGuard.isSpeech(samples) else {  // silence never reaches the model
+            let message = noSpeech(&run)
+            return samples.isEmpty ? MicAudio.noAudio : message  // the mic never delivered a buffer
+        }
         run.entry.model = engine.name
         do {
             run.entry.rawText = try await engine.transcribe(samples, wav: URL(fileURLWithPath: run.entry.audioPath))
@@ -66,7 +70,7 @@ final class Pipeline {
         }
         run.entry.text = Self.finishText(run.entry.rawText)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
-        guard !run.entry.text.isEmpty else { return "No speech heard" }
+        guard !run.entry.text.isEmpty else { return noSpeech(&run) }
         let (before, after) = context()
         run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selection())
         if let message = PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) {
@@ -80,9 +84,15 @@ final class Pipeline {
         return paste.landed ? nil : PasteGate.notLanded
     }
 
+    /// Silence, non-speech tags or fillers only: nothing is pasted and the clipboard is not touched.
+    private func noSpeech(_ run: inout Run) -> String {
+        run.entry.outcome = .noSpeech
+        return "No speech heard"
+    }
+
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
     static func finishText(_ raw: String) -> String {
-        Cleanup.apply(raw)
+        Cleanup.apply(SpeechGuard.stripTags(raw))
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {
