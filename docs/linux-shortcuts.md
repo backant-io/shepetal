@@ -7,7 +7,7 @@ docs/re/dictation-input.md, sections 1, 2.3 and 2.4.
 | Key | Default | What it does |
 | --- | --- | --- |
 | Esc | Esc (fixed) | Cancels a dictation in progress: nothing is transcribed or typed, and the audio is kept as `<stamp>.cancelled.wav` (goal rule 4). With nothing recording, Esc does nothing. |
-| paste_last | Shift+Alt+Z | Types the newest dictated text at the cursor again, once every key of the combo is up, so the held Shift and Alt do not change the typed text. |
+| paste_last | Shift+Alt+Z | Types the newest dictated text in the history (docs/linux.md, "History, retention and paste last") at the cursor again, once every key of the combo is up, so the held Shift and Alt do not change the typed text. If typing fails, the text goes on the clipboard with the `Typing failed. ...` hint. |
 | copy_last | Shift+Alt+X | Puts the newest dictated text on the clipboard (wl-copy, else xclip), the same way. |
 | hands_free | Ctrl+Meta+Space | Starts a hands-free dictation. The next press stops and transcribes it; a press within 500 ms of the start cancels it. The hotkey and Esc end it too. |
 | (cap) | 19 / 20 min | At 19 min the hint "Recording stops in 1 minute" shows; at 20 min the dictation stops and is transcribed as usual. |
@@ -53,9 +53,6 @@ refuses to start, naming the file, the shortcut and the reason, when the file is
   the app as normal, which is what we want there.
 - **Only the keyboards that can send the hotkey are read.** A shortcut typed on another keyboard
   is not seen.
-- **paste-last and copy-last remember only the current daemon run.** The daemon keeps the newest
-  transcribed text in memory, so after a restart the keys say "Nothing dictated yet" until the
-  next dictation. Once the history store is on main, they should read its newest entry instead.
 - **A key-up lost while shepetal was not reading** (for example across a suspend) leaves that key
   counted as held, so a combo does not match until the key is pressed and released again. Wispr
   reconciles stale keys; this does not yet.

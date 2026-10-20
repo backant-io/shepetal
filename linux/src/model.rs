@@ -53,6 +53,18 @@ pub fn choose(hw: &Hardware) -> Choice {
     }
 }
 
+/// The tier's fallback in docs/models.md, for re-transcribing a recording with the alternative
+/// engine: Parakeet 110M for Parakeet v3 on CPU, Whisper turbo for Parakeet v3 on CUDA, and
+/// Parakeet v3 on CPU for Whisper turbo on Vulkan (and for the 110M low-end pick).
+pub fn alternative(c: &Choice) -> Choice {
+    use Engine::*;
+    match (c.engine, c.backend) {
+        (SherpaTransducer, "cuda") => Choice { engine: Whisper, model: TURBO_Q5, backend: "cuda" },
+        (SherpaTransducer, _) => Choice { engine: SherpaCtc, model: PARAKEET_110M, backend: "cpu" },
+        _ => Choice { engine: SherpaTransducer, model: PARAKEET_V3, backend: "cpu" },
+    }
+}
+
 /// Read the hardware of this machine.
 pub fn detect() -> Hardware {
     let kb = std::fs::read_to_string("/proc/meminfo")
@@ -104,6 +116,19 @@ mod tests {
         for h in [hw(32, 16, false, false), hw(16, 8, false, false), hw(8, 2, false, false), hw(4, 4, false, false)] {
             assert_eq!(choose(&h), Choice { engine: SherpaTransducer, model: "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8", backend: "cpu" }, "{h:?}");
         }
+    }
+
+    #[test]
+    fn the_alternative_engine_is_the_tiers_fallback() {
+        // Goal rule 4: history re-transcribes with another model. Each Linux row's fallback
+        // column, and never the model that is already running.
+        for h in [hw(16, 8, false, false), hw(16, 8, true, false), hw(16, 8, false, true), hw(3, 4, false, false)] {
+            assert_ne!(alternative(&choose(&h)).model, choose(&h).model, "{h:?}");
+        }
+        assert_eq!(alternative(&choose(&hw(16, 8, false, false))), Choice { engine: SherpaCtc, model: PARAKEET_110M, backend: "cpu" });
+        assert_eq!(alternative(&choose(&hw(16, 8, true, false))), Choice { engine: Whisper, model: TURBO_Q5, backend: "cuda" });
+        assert_eq!(alternative(&choose(&hw(16, 8, false, true))), Choice { engine: SherpaTransducer, model: PARAKEET_V3, backend: "cpu" });
+        assert_eq!(alternative(&choose(&hw(3, 4, false, false))), Choice { engine: SherpaTransducer, model: PARAKEET_V3, backend: "cpu" });
     }
 
     #[test]

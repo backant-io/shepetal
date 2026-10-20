@@ -5,9 +5,8 @@
 //! - Esc cancels a running dictation. Its audio is kept as `*.cancelled.wav` (goal rule 4).
 //!   With nothing recording Esc does nothing. shepetal reads evdev without a grab, so no key,
 //!   Esc included, is ever swallowed: the focused app always gets it.
-//! - paste-last and copy-last (Wispr's Windows defaults Shift+Alt+Z and Shift+Alt+X) run
-//!   `shepetal paste-last` / `copy-last` once every key is up, so the held Shift and Alt do not
-//!   change the typed text.
+//! - paste-last and copy-last (Wispr's Windows defaults Shift+Alt+Z and Shift+Alt+X) fire once
+//!   every key is up, so the held Shift and Alt do not change the typed text.
 //! - A dedicated hands-free toggle (Wispr's Windows default Ctrl+Win+Space): one press starts,
 //!   the next stops, a second press within 500 ms of the start cancels. The hotkey stops it too.
 //! - A warning at 19 min and a stop (transcribed as usual) at 20 min, as Wispr
