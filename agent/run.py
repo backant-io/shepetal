@@ -1,8 +1,8 @@
 """Run shepetal's builder as a Claude Managed Agent whose tools execute on this Mac.
 
     agent/.venv/bin/python agent/run.py setup [cents]  # once: environment + agent + first session
-    agent/.venv/bin/python agent/run.py install        # run the worker permanently (login item via launchd)
-    agent/.venv/bin/python agent/run.py worker         # or run it in the foreground; executes the agent's tools here
+    agent/.venv/bin/python agent/run.py install [n]    # run n workers permanently (login item via launchd); one per parallel session
+    agent/.venv/bin/python agent/run.py worker [n]     # or run them in the foreground; executes the agent's tools here
     agent/.venv/bin/python agent/run.py start [cents]  # another budgeted session, kicked off with the outcome
     agent/.venv/bin/python agent/run.py configure      # push system.md, tools and parallel workflows to the agent
     agent/.venv/bin/python agent/run.py status [sesn]  # status and spend of the last (or given) session
@@ -101,42 +101,46 @@ def setup(cents="20000"):
     print(f"Next: generate an environment key for {env.id} (shepetal-mac) in the Console, then run install.")
 
 
-async def worker():
+async def worker(n="1"):
     # The agent's bash runs as this user and can read this process's launch environment
     # (ps -E), so the key comes from the Keychain rather than an env var.
     os.environ.pop("ANTHROPIC_API_KEY", None)
     key = secret("environment-key", ENV_KEY_PROMPT)
     WORKDIR.mkdir(exist_ok=True)
     async with anthropic.AsyncAnthropic(auth_token=key) as client:
-        w = EnvironmentWorker(client, environment_id=ids()["environment_id"], environment_key=key,
-                              workdir=WORKDIR, max_idle=None)
-        task = asyncio.create_task(w.run())
+        # one EnvironmentWorker serves one session at a time, so n of them serve n sessions in parallel
+        task = asyncio.ensure_future(asyncio.gather(*(
+            EnvironmentWorker(client, environment_id=ids()["environment_id"], environment_key=key,
+                              workdir=WORKDIR, max_idle=None).run() for _ in range(int(n)))))
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(signum, task.cancel)
-        print(f"worker polling, tools run in {WORKDIR}. Ctrl-C to stop.")
+        print(f"{n} worker(s) polling, tools run in {WORKDIR}. Ctrl-C to stop.")
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
 
-def install():
+def install(n="1"):
     secret("environment-key", ENV_KEY_PROMPT)  # launchd has no terminal to ask in
-    PLIST.parent.mkdir(parents=True, exist_ok=True)
-    with PLIST.open("wb") as f:
+    # a separate job per count, so adding workers never restarts the ones serving a session
+    label = LABEL if n == "1" else f"{LABEL}-{n}"
+    plist, log = PLIST.with_name(f"{label}.plist"), LOG.with_name(f"shepetal-worker{'' if n == '1' else '-' + n}.log")
+    plist.parent.mkdir(parents=True, exist_ok=True)
+    with plist.open("wb") as f:
         plistlib.dump({
             "Label": LABEL,
             # caffeinate -i keeps the Mac from idle-sleeping while the worker runs
-            "ProgramArguments": ["/usr/bin/caffeinate", "-i", sys.executable, str(Path(__file__).resolve()), "worker"],
+            "ProgramArguments": ["/usr/bin/caffeinate", "-i", sys.executable, str(Path(__file__).resolve()), "worker", n],
             "RunAtLoad": True,
             "KeepAlive": True,
-            "StandardOutPath": str(LOG),
-            "StandardErrorPath": str(LOG),
+            "StandardOutPath": str(log),
+            "StandardErrorPath": str(log),
         }, f)
     domain = f"gui/{os.getuid()}"
-    subprocess.run(["launchctl", "bootout", domain, str(PLIST)], capture_output=True)  # reload if already installed
-    subprocess.run(["launchctl", "bootstrap", domain, str(PLIST)], check=True)
-    print(f"worker installed and running, starts at every login. Log: {LOG}\n"
-          f"Stop for good: launchctl bootout {domain} {PLIST} && rm {PLIST}")
+    subprocess.run(["launchctl", "bootout", domain, str(plist)], capture_output=True)  # reload if already installed
+    subprocess.run(["launchctl", "bootstrap", domain, str(plist)], check=True)
+    print(f"{n} worker(s) installed and running, start at every login. Log: {log}\n"
+          f"Stop for good: launchctl bootout {domain} {plist} && rm {plist}")
 
 
 def check_cents(cents):
@@ -187,9 +191,9 @@ if __name__ == "__main__":
     if cmd == "setup":
         setup(*args)
     elif cmd == "install":
-        install()
+        install(*args)
     elif cmd == "worker":
-        asyncio.run(worker())
+        asyncio.run(worker(*args))
     elif cmd == "start":
         start(*args)
     elif cmd == "configure":
