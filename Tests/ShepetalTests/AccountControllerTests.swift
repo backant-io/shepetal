@@ -3,7 +3,8 @@ import XCTest
 import ShepetalCore
 @testable import Shepetal
 
-/// The account in the running app against a local stub server: the fn gate, sign-in, the license states,
+/// The account in the running app against a local stub server and a fake browser: the fn gate, Google sign-in
+/// with PKCE, the license states,
 /// sign-out, checkout, the offline grace and "never during dictation". Uses an in-memory token store and a
 /// temp state file, never the Keychain item or data dir of the real app.
 @MainActor
@@ -14,13 +15,29 @@ final class AccountControllerTests: XCTestCase {
     private var hints: [String] = []
     private var opened: [URL] = []
     private var dictating = false
+    /// The fake browser: the login URL it got, and what it answers.
+    private var loginURLs: [URL] = []
+    private var answer: (URLComponents) throws -> URL = { c in
+        let state = c.queryItems?.first { $0.name == "state" }?.value ?? ""
+        return URL(string: "shepetal://auth?code=abc123&state=\(state)")!
+    }
+
+    private func browser(_ url: URL, _ scheme: String) async throws -> URL {
+        XCTAssertEqual(scheme, "shepetal")
+        loginURLs.append(url)
+        return try answer(try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)))
+    }
+
+    private func query(_ url: URL?, _ name: String) -> String? {
+        url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == name }?.value }
+    }
     private let day: TimeInterval = 86_400
 
     override func setUp() async throws {
         server = try StubServer()
         dir = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-account-\(UUID().uuidString)")
         tokens = .memory()
-        hints = []; opened = []; dictating = false
+        hints = []; opened = []; dictating = false; loginURLs = []
     }
 
     override func tearDown() async throws {
@@ -32,7 +49,7 @@ final class AccountControllerTests: XCTestCase {
     private func account() -> Account {
         let a = Account(client: AccountClient(base: server.url), tokens: tokens, stateURL: stateURL)
         a.openURL = { [unowned self] in opened.append($0) }
-        a.sleep = { _ in }
+        a.authenticate = { [unowned self] url, scheme in try await browser(url, scheme) }
         a.start(isDictating: { [unowned self] in dictating }, hint: { [unowned self] in hints.append($0) })
         return a
     }
@@ -55,7 +72,7 @@ final class AccountControllerTests: XCTestCase {
         a.start(isDictating: { false }, hint: { [unowned self] in hints.append($0) })
         XCTAssertTrue(a.allowFnDown(), "signed out, but sign-in is not required yet")
         XCTAssertTrue(hints.isEmpty, "no sign-in hint at launch or on fn")
-        XCTAssertEqual(titles(a), ["Not signed in", "Sign in to start your free 30-day trial…"], "sign-in is still offered")
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"], "sign-in is still offered")
 
         XCTAssertFalse(Account.signInRequired(env: [:], info: [:]), "off unless the release turns it on")
         XCTAssertTrue(Account.signInRequired(env: [:], info: ["ShepetalRequiresSignIn": true]))
@@ -65,33 +82,70 @@ final class AccountControllerTests: XCTestCase {
 
     func testSignedOutAtFirstLaunchBlocksFnAndSaysSignIn() async throws {
         let a = account()
-        XCTAssertEqual(hints, ["Sign in to start your free 30-day trial"], "the 🤫 hint at launch")
+        XCTAssertEqual(hints, ["Sign in with Google to start your free 30-day trial"], "the 🤫 hint at launch")
         XCTAssertFalse(a.allowFnDown())
-        XCTAssertEqual(hints.last, "Sign in to start your free 30-day trial")
-        XCTAssertEqual(titles(a), ["Not signed in", "Sign in to start your free 30-day trial…"])
+        XCTAssertEqual(hints.last, "Sign in with Google to start your free 30-day trial")
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
         XCTAssertTrue(server.requests.isEmpty, "no network until the user signs in")
     }
 
-    func testDeviceSignInStoresTheTokenThenTheTrialAllowsDictation() async throws {
+    func testGoogleSignInWithPKCEStoresTheTokenThenTheTrialAllowsDictation() async throws {
         server.handler = { [unowned self] r in
             switch r.path {
-            case "/api/device/start":
-                return (200, ["device_code": "dev-1", "user_code": "WXYZ-9876", "expires_in": 600, "interval": 1,
-                              "verification_uri_complete": "https://example.test/device?code=WXYZ-9876"])
-            case "/api/device/token": return (200, ["access_token": "tok-1", "email": "a@example.com"])
+            case "/api/app/token":
+                // The service's side of PKCE: the verifier must hash to the challenge the browser carried.
+                let challenge = query(loginURLs.last, "code_challenge")
+                let ok = r.body["code"] as? String == "abc123" && r.body["redirect_uri"] as? String == "shepetal://auth"
+                    && (r.body["code_verifier"] as? String).map(PKCE.challenge(for:)) == challenge
+                return ok ? (200, ["access_token": "tok-1", "email": "a@example.com"]) : (400, ["error": "invalid_grant"])
             default: return license("trial", endsIn: 12 * day - 60)
             }
         }
         let a = account()
         a.signIn()
         try await until("signed in and checked") { a.access == .trial(daysLeft: 12) }
-        XCTAssertEqual(opened, [URL(string: "https://example.test/device?code=WXYZ-9876")!], "opens the browser page")
+        let login = try XCTUnwrap(loginURLs.first)
+        XCTAssertEqual(loginURLs.count, 1)
+        XCTAssertTrue(login.absoluteString.hasPrefix(server.url.absoluteString + "/app/login?"), login.absoluteString)
+        XCTAssertEqual(query(login, "redirect_uri"), "shepetal://auth")
+        XCTAssertEqual(query(login, "code_challenge_method"), "S256")
+        XCTAssertNil(query(login, "code_verifier"))
         XCTAssertEqual(tokens.read(), "tok-1")
+        XCTAssertEqual(server.requests.map(\.path), ["/api/app/token", "/api/license"])
         XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer tok-1")
         XCTAssertTrue(a.allowFnDown())
         XCTAssertEqual(titles(a), ["Free trial: 12 days left · a@example.com",
                                    "Get Shepetal for $4.99 (lifetime, updates included)…", "Sign out"])
         XCTAssertEqual(AccountState.load(stateURL).license?.status, .trial, "the status is cached")
+
+        // Each sign-in sends a fresh state and challenge.
+        a.signOut()
+        a.signIn()
+        try await until("signed in again") { a.access == .trial(daysLeft: 12) }
+        XCTAssertNotEqual(query(loginURLs[0], "state"), query(loginURLs[1], "state"))
+        XCTAssertNotEqual(query(loginURLs[0], "code_challenge"), query(loginURLs[1], "code_challenge"))
+    }
+
+    func testACallbackWithAnotherStateIsRejected() async throws {
+        answer = { _ in URL(string: "shepetal://auth?code=abc123&state=forged")! }
+        server.handler = { _ in (200, ["access_token": "tok-x", "email": "x@example.com"]) }
+        let a = account()
+        a.signIn()
+        try await until("sign-in ended") { !a.signingIn }
+        XCTAssertTrue(a.message.contains("did not match"), a.message)
+        XCTAssertTrue(server.requests.isEmpty, "the code is never traded")
+        XCTAssertNil(tokens.read())
+        XCTAssertEqual(a.access, .signedOut)
+    }
+
+    func testACancelledSheetIsNotAnError() async throws {
+        answer = { _ in throw CancellationError() }
+        let a = account()
+        a.signIn()
+        try await until("sign-in ended") { !a.signingIn }
+        XCTAssertEqual(a.message, "")
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
+        XCTAssertTrue(server.requests.isEmpty)
     }
 
     func testActiveIsYoursForever() async throws {
@@ -129,6 +183,7 @@ final class AccountControllerTests: XCTestCase {
         status = "active"  // paid on shepetal.backant.io
         let sent = server.requests.count
         XCTAssertFalse(a.allowFnDown(), "this press is still blocked")
+        try await Task.sleep(nanoseconds: 300_000_000)
         XCTAssertEqual(server.requests.count, sent, "a check was tried less than a minute ago")
         a.now = { Date() + 61 }
         XCTAssertFalse(a.allowFnDown())
@@ -161,7 +216,7 @@ final class AccountControllerTests: XCTestCase {
         a.buy()
         try await until("signed out") { a.access == .signedOut }
         XCTAssertNil(tokens.read())
-        XCTAssertEqual(titles(a).prefix(2), ["Not signed in", "Sign in to start your free 30-day trial…"])
+        XCTAssertEqual(titles(a).prefix(2), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
     }
 
     func testUnauthorizedSignsOut() async throws {

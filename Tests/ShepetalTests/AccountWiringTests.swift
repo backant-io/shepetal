@@ -6,9 +6,17 @@ import XCTest
 /// App.swift by its source: the fn gate before the gesture runs, the dictation check given to the license
 /// timer, and the menu items. Plus the speech error text the UI shows.
 final class AccountWiringTests: XCTestCase {
-    private func app() throws -> String {
+    private func source(_ file: String) throws -> String {
         try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("../../Sources/Shepetal/App.swift").standardizedFileURL, encoding: .utf8)
+            .appendingPathComponent("../../Sources/Shepetal/\(file)").standardizedFileURL, encoding: .utf8)
+    }
+
+    /// The source with comment lines dropped, so a commented-out line does not count.
+    private func app() throws -> String { try code(source("App.swift")) }
+
+    private func code(_ s: String) -> String {
+        s.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+            .joined(separator: "\n")
     }
 
     func testFnIsGatedBeforeTheGestureRuns() throws {
@@ -26,6 +34,18 @@ final class AccountWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },"),
                       "isDictating must cover recording (gesture) and transcribing (busy)")
         XCTAssertTrue(src.contains("Account.shared.menuItems().forEach(menu.addItem)"))
+    }
+
+    /// Every place an engine or download error reaches the screen goes through SpeechError(plain:).
+    func testEngineErrorsAreMadePlainWhereTheyReachTheUI() throws {
+        let speech = code(try source("Speech.swift"))
+        XCTAssertEqual(speech.components(separatedBy: "throw SpeechError(plain: error,").count - 1, 3,
+                       "engine(for:), the standard engine's transcribe and the alternative engine's transcribe")
+        let hub = code(try source("Hub.swift"))
+        XCTAssertTrue(hub.contains("message = \"Re-transcribe failed: \" + (SpeechError(plain: error,"))
+        XCTAssertFalse(hub.contains("failed: \\(error.localizedDescription)"))
+        let app = try app()
+        XCTAssertTrue(app.contains("engineStatus = \"Download failed: \" + (SpeechError(plain: error,"))
     }
 
     func testOnlyOurOwnSpeechErrorTextReachesTheUI() {

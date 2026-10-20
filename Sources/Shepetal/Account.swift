@@ -23,8 +23,6 @@ final class Account: NSObject, ObservableObject {
     let required: Bool
 
     @Published private(set) var access: Access = .signedOut
-    /// The code shown in the browser while a sign-in waits for the user.
-    @Published private(set) var pendingCode: String?
     /// The last error or progress line ("" when there is nothing to say).
     @Published private(set) var message = ""
 
@@ -34,7 +32,8 @@ final class Account: NSObject, ObservableObject {
 
     var now: () -> Date = Date.init
     var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
-    var sleep: DeviceFlow.Sleep = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) }
+    /// Shows the login page and returns the shepetal:// callback (ASWebAuthenticationSession; tests fake it).
+    var authenticate: (URL, String) async throws -> URL = { try await WebLogin.authenticate($0, scheme: $1) }
     private(set) var hint: (String) -> Void = { _ in }
     private var isDictating: () -> Bool = { false }
 
@@ -45,7 +44,6 @@ final class Account: NSObject, ObservableObject {
     private var token: String?
     private(set) var checkTask: Task<Void, Never>?
     private(set) var signInTask: Task<Void, Never>?
-    private var pendingURL: URL?
     private var signInRun = 0
     private var recheckUntil: Date?
     private var timer: Timer?
@@ -85,7 +83,7 @@ final class Account: NSObject, ObservableObject {
     func allowFnDown() -> Bool {
         refresh()
         guard access.allowsDictation || !required else {
-            hint(pendingCode.map { "Finish signing in: confirm code \($0) in your browser" } ?? access.blockedHint ?? "")
+            hint(signingIn ? "Finish signing in with Google first" : access.blockedHint ?? "")
             // Nothing is being dictated, so ask again: a purchase on the website or a network that came back
             // unlocks on the next press instead of the next day. At most once a minute.
             if signedIn, now().timeIntervalSince(state.lastAttempt ?? .distantPast) >= 60 { check() }
@@ -124,24 +122,30 @@ final class Account: NSObject, ObservableObject {
         refresh()
     }
 
-    /// Device flow: opens the sign-in page in the browser and waits for the user to confirm there.
+    /// Google sign-in with PKCE: the login page in an ASWebAuthenticationSession, the code from the
+    /// shepetal://auth callback (state checked), then the code and verifier traded for the token.
+    /// A cancelled sheet ends it quietly.
     @objc func signIn() {
-        if signingIn {
-            if let pendingURL { openURL(pendingURL) }
+        guard !signingIn else { return }
+        let pkce = PKCE.generate()
+        let url = AppLogin.loginURL(base: client.base, pkce: pkce)
+        guard AccountClient.isWebPage(url) else {
+            message = "Sign-in needs an https address for the account service"
             return
         }
-        message = "Opening your browser to sign in…"
+        message = "Signing in with Google…"
         signInRun += 1
         let run = signInRun
-        signInTask = Task { [client, sleep] in
+        signInTask = Task { [client, authenticate] in
             defer {
-                if run == signInRun { signInTask = nil; pendingCode = nil; pendingURL = nil }  // not a newer sign-in's
+                if run == signInRun { signInTask = nil }  // not a newer sign-in's
                 refresh()
             }
             do {
-                let (token, _) = try await DeviceFlow.signIn(client, open: { [weak self] start in
-                    await self?.showSignInPage(start)
-                }, sleep: sleep)
+                let callback = try await authenticate(url, AppLogin.callbackScheme)
+                let code = try AppLogin.code(from: callback, state: pkce.state)
+                let (token, _) = try await client.exchange(code: code, verifier: pkce.verifier)
+                try Task.checkCancellation()
                 try tokens.write(token)
                 self.token = token
                 state = AccountState()
@@ -157,18 +161,9 @@ final class Account: NSObject, ObservableObject {
         }
     }
 
-    private func showSignInPage(_ start: DeviceStart) {
-        pendingCode = start.userCode
-        pendingURL = start.verificationURIComplete
-        message = "Confirm code \(start.userCode) in your browser"
-        openURL(start.verificationURIComplete)
-    }
-
     @objc func signOut() {
         signInTask?.cancel()
         signInTask = nil
-        pendingCode = nil
-        pendingURL = nil
         checkTask?.cancel()
         checkTask = nil
         tokens.delete()
@@ -202,7 +197,7 @@ final class Account: NSObject, ObservableObject {
 
     /// One line for the menu and Home.
     var summaryLine: String {
-        if let pendingCode { return "Signing in: confirm code \(pendingCode) in your browser" }
+        if signingIn { return "Signing in with Google…" }
         if !email.isEmpty, access != .signedOut { return "\(access.summary) · \(email)" }
         return access.summary
     }
@@ -217,7 +212,7 @@ final class Account: NSObject, ObservableObject {
             items.append(i)
         }
         switch access {
-        case .signedOut: add(signingIn ? "Open the sign-in page again…" : AccountText.signIn + "…", #selector(signIn))
+        case .signedOut: if !signingIn { add(AccountText.signIn + "…", #selector(signIn)) }
         case .trial: add(AccountText.buy + "…", #selector(buy))
         case .expired:
             add(AccountText.buy + "…", #selector(buy))
@@ -226,7 +221,7 @@ final class Account: NSObject, ObservableObject {
         case .lifetime: break
         }
         if signedIn { add("Sign out", #selector(signOut)) }
-        if !message.isEmpty, pendingCode == nil { items.append(NSMenuItem(title: message, action: nil, keyEquivalent: "")) }
+        if !message.isEmpty, !signingIn { items.append(NSMenuItem(title: message, action: nil, keyEquivalent: "")) }
         return items
     }
 

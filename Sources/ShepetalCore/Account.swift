@@ -1,30 +1,70 @@
+import CryptoKit
 import Foundation
 #if canImport(FoundationNetworking)
 import FoundationNetworking
 #endif
 
-// Sign-in, free trial and lifetime license against the account service (web/API.md on feat/web).
+// Google sign-in, free trial and lifetime license against the account service (web/API.md on feat/web).
 // These calls are the app's only network use: sign-in, the license check and checkout. Nothing here
 // runs during dictation, and audio and text never go through it.
 
-/// POST /api/device/start
-public struct DeviceStart: Decodable, Equatable, Sendable {
-    public let deviceCode: String
-    public let userCode: String
-    public let verificationURIComplete: URL
-    public let expiresIn: Int
-    public let interval: Int
+/// Google sign-in for a native app (RFC 8252) with PKCE (RFC 7636): the app opens
+/// <base>/app/login?redirect_uri=shepetal://auth&state=…&code_challenge=…&code_challenge_method=S256 in an
+/// ASWebAuthenticationSession, gets shepetal://auth?code=…&state=… back, and trades the code and the verifier
+/// at POST /api/app/token for {access_token, email}.
+public struct PKCE: Equatable, Sendable {
+    public let verifier: String
+    public let challenge: String
+    public let state: String
 
-    enum CodingKeys: String, CodingKey {
-        case deviceCode = "device_code", userCode = "user_code"
-        case verificationURIComplete = "verification_uri_complete", expiresIn = "expires_in", interval
+    /// RFC 7636 4.1: 43 to 128 characters from the unreserved set.
+    public static let unreserved = Array("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    public init(verifier: String, state: String) {
+        self.verifier = verifier
+        self.challenge = Self.challenge(for: verifier)
+        self.state = state
+    }
+
+    /// A fresh 64-character verifier and a 32-character state from the system's secure random generator.
+    public static func generate() -> PKCE {
+        var rng = SystemRandomNumberGenerator()
+        func random(_ n: Int) -> String { String((0..<n).map { _ in unreserved.randomElement(using: &rng)! }) }
+        return PKCE(verifier: random(64), state: random(32))
+    }
+
+    /// S256: base64url(SHA-256(ASCII(verifier))) without padding.
+    public static func challenge(for verifier: String) -> String {
+        Data(SHA256.hash(data: Data(verifier.utf8))).base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
     }
 }
 
-/// One answer of POST /api/device/token.
-public enum TokenPoll: Equatable, Sendable {
-    case pending, slowDown, expired, denied
-    case granted(token: String, email: String)
+public enum AppLogin {
+    public static let redirectURI = "shepetal://auth"
+    public static let callbackScheme = "shepetal"
+
+    public static func loginURL(base: URL, pkce: PKCE) -> URL {
+        var c = URLComponents(url: base.appendingPathComponent("/app/login"), resolvingAgainstBaseURL: false)!
+        c.queryItems = [URLQueryItem(name: "redirect_uri", value: redirectURI),
+                        URLQueryItem(name: "state", value: pkce.state),
+                        URLQueryItem(name: "code_challenge", value: pkce.challenge),
+                        URLQueryItem(name: "code_challenge_method", value: "S256")]
+        return c.url!
+    }
+
+    /// The code from shepetal://auth?code=…&state=…, only when the state is the one this sign-in sent.
+    public static func code(from callback: URL, state: String) throws -> String {
+        let c = URLComponents(url: callback, resolvingAgainstBaseURL: false)
+        guard c?.scheme == callbackScheme, c?.host == "auth" else { throw AccountError("Sign-in came back to the wrong address") }
+        let items = c?.queryItems ?? []
+        func value(_ name: String) -> String? { items.first { $0.name == name }?.value }
+        guard value("state") == state else { throw AccountError("Sign-in answer did not match this sign-in. Try again.") }
+        if let error = value("error") { throw AccountError("Sign-in was refused (\(error))") }
+        guard let code = value("code"), !code.isEmpty else { throw AccountError("Sign-in came back without a code") }
+        return code
+    }
 }
 
 public enum LicenseStatus: String, Codable, Sendable { case trial, active, expired }
@@ -53,7 +93,6 @@ public struct AccountError: LocalizedError, Equatable {
 
     /// 401 from checkout: the token is gone, so the app signs out.
     public static let signedOut = AccountError("Signed out: sign in again to buy", status: 401)
-    public var isServerError: Bool { status >= 500 }
 }
 
 public struct AccountClient: Sendable {
@@ -71,28 +110,16 @@ public struct AccountClient: Sendable {
         self.session = session ?? URLSession(configuration: config)
     }
 
-    public func startDevice() async throws -> DeviceStart {
-        let (status, data) = try await send("POST", "/api/device/start", json: [:])
-        guard status == 200 else { throw Self.unexpected(status) }
-        return try JSONDecoder().decode(DeviceStart.self, from: data)
-    }
-
-    public func pollToken(deviceCode: String) async throws -> TokenPoll {
-        let (status, data) = try await send("POST", "/api/device/token", json: ["device_code": deviceCode])
+    /// POST /api/app/token: the code from the callback and the PKCE verifier for the account token.
+    public func exchange(code: String, verifier: String) async throws -> (token: String, email: String) {
+        let (status, data) = try await send("POST", "/api/app/token",
+                                            json: ["code": code, "code_verifier": verifier, "redirect_uri": AppLogin.redirectURI])
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-        if status == 200, let token = body["access_token"] as? String, !token.isEmpty {
-            return .granted(token: token, email: body["email"] as? String ?? "")
+        guard status == 200, let token = body["access_token"] as? String, !token.isEmpty else {
+            if let e = body["error"] as? String { throw AccountError("Sign-in failed on shepetal.backant.io (\(e))", status: status) }
+            throw Self.unexpected(status)
         }
-        if status == 400 {
-            switch body["error"] as? String {
-            case "authorization_pending": return .pending
-            case "slow_down": return .slowDown
-            case "expired_token": return .expired
-            case "access_denied": return .denied
-            default: break
-            }
-        }
-        throw Self.unexpected(status)
+        return (token, body["email"] as? String ?? "")
     }
 
     public func license(token: String) async throws -> LicenseReply {
@@ -111,7 +138,7 @@ public struct AccountClient: Sendable {
         let (status, data) = try await send("POST", "/api/checkout", token: token, json: [:])
         if status == 401 { throw AccountError.signedOut }
         guard status == 200, let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let s = body["url"] as? String, let url = URL(string: s), DeviceFlow.isWebPage(url)
+              let s = body["url"] as? String, let url = URL(string: s), AccountClient.isWebPage(url)
         else { throw Self.unexpected(status) }
         return url
     }
@@ -130,6 +157,11 @@ public struct AccountClient: Sendable {
         return ((response as? HTTPURLResponse)?.statusCode ?? 0, data)
     }
 
+    /// Only https pages are opened, plus http on this Mac for a local copy of the service.
+    public static func isWebPage(_ url: URL) -> Bool {
+        url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? ""))
+    }
+
     static func unexpected(_ status: Int) -> AccountError {
         AccountError("The account service answered \(status)", status: status)
     }
@@ -141,50 +173,6 @@ public struct AccountClient: Sendable {
         if let d = f.date(from: s) { return d }
         f.formatOptions = [.withInternetDateTime]
         return f.date(from: s)
-    }
-}
-
-/// The device flow (RFC 8628): start, show the page, poll at the given interval until the user confirms.
-public enum DeviceFlow {
-    public typealias Sleep = @Sendable (TimeInterval) async throws -> Void
-
-    /// `open` gets the start reply (open its page, show its code). A network error while polling is retried
-    /// until the code expires; slow_down adds 5 s to the interval, as RFC 8628 says.
-    public static func signIn(_ client: AccountClient, open: @Sendable (DeviceStart) async -> Void,
-                              sleep: Sleep = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
-                              now: @Sendable () -> Date = Date.init) async throws -> (token: String, email: String) {
-        let start = try await client.startDevice()
-        guard isWebPage(start.verificationURIComplete) else {
-            throw AccountError("The account service sent a sign-in page that is not a web address")
-        }
-        let deadline = now().addingTimeInterval(TimeInterval(start.expiresIn))
-        var interval = TimeInterval(max(1, start.interval))
-        await open(start)
-        while true {
-            try await sleep(interval)
-            try Task.checkCancellation()
-            guard now() < deadline else { throw AccountError("The sign-in code expired. Try again.") }
-            let reply: TokenPoll
-            do { reply = try await client.pollToken(deviceCode: start.deviceCode) } catch is CancellationError {
-                throw CancellationError()
-            } catch let e as AccountError where !e.isServerError {
-                throw e
-            } catch {
-                continue  // offline or a 5xx for a moment: keep polling until the code expires
-            }
-            switch reply {
-            case .pending: continue
-            case .slowDown: interval += 5
-            case .expired: throw AccountError("The sign-in code expired. Try again.")
-            case .denied: throw AccountError("Sign-in was cancelled in the browser")
-            case let .granted(token, email): return (token, email)
-            }
-        }
-    }
-
-    /// Only https pages are opened, plus http on this Mac for a local copy of the service.
-    public static func isWebPage(_ url: URL) -> Bool {
-        url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? ""))
     }
 }
 
@@ -227,7 +215,7 @@ public enum Access: Equatable, Sendable {
 }
 
 public enum AccountText {
-    public static let signIn = "Sign in to start your free 30-day trial"
+    public static let signIn = "Sign in with Google to start your free 30-day trial"
     public static let trialEnded = "Trial ended: get Shepetal for $4.99"
     public static let buy = "Get Shepetal for $4.99 (lifetime, updates included)"
 }

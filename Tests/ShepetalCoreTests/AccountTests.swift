@@ -2,7 +2,8 @@ import Foundation
 import XCTest
 @testable import ShepetalCore
 
-/// The account contract (web/API.md) against a local stub server, and the trial / license / offline rules.
+/// The account contract (web/API.md) against a local stub server: Google sign-in with PKCE, the license, checkout,
+/// and the trial / license / offline rules.
 final class AccountTests: XCTestCase {
     private var server: StubServer!
     private var client: AccountClient!
@@ -14,96 +15,86 @@ final class AccountTests: XCTestCase {
         client = AccountClient(base: server.url)
     }
 
-    private static let start: [String: Any] = ["device_code": "dev-1", "user_code": "ABCD-1234",
-                                               "verification_uri_complete": "https://example.test/device?code=ABCD-1234",
-                                               "expires_in": 600, "interval": 5]
+    // MARK: Google sign-in with PKCE
 
-    /// Replies to /api/device/token in order; the last one repeats.
-    private func deviceFlow(_ replies: [(Int, [String: Any])]) {
-        var left = replies
-        server.handler = { r in
-            if r.path == "/api/device/start" { return (200, Self.start) }
-            let next = left.count > 1 ? left.removeFirst() : left[0]
-            return next
+    func testPKCEVerifierLengthAndCharset() {
+        let allowed = Set(PKCE.unreserved)
+        var seen = Set<String>()
+        for _ in 0..<50 {
+            let p = PKCE.generate()
+            XCTAssertTrue((43...128).contains(p.verifier.count), "\(p.verifier.count)")
+            XCTAssertTrue(p.verifier.allSatisfy(allowed.contains), p.verifier)
+            XCTAssertGreaterThanOrEqual(p.state.count, 16)
+            XCTAssertTrue(p.state.allSatisfy(allowed.contains), p.state)
+            XCTAssertEqual(p.challenge, PKCE.challenge(for: p.verifier))
+            seen.insert(p.verifier)
         }
+        XCTAssertEqual(seen.count, 50, "a fresh verifier every time")
+        XCTAssertEqual(Set(PKCE.unreserved).count, 66, "A-Z a-z 0-9 - . _ ~")
     }
 
-    private func pending(_ e: String) -> (Int, [String: Any]) { (400, ["error": e]) }
-
-    // MARK: device flow
-
-    func testDeviceFlowPollsAtTheIntervalAndSlowsDownUntilGranted() async throws {
-        deviceFlow([pending("authorization_pending"), pending("slow_down"), pending("authorization_pending"),
-                    (200, ["access_token": "tok-1", "email": "a@example.com"])])
-        let slept = Box<[TimeInterval]>([])
-        let opened = Box<[URL]>([])
-        let (token, email) = try await DeviceFlow.signIn(client, open: { opened.value.append($0.verificationURIComplete) },
-                                                         sleep: { slept.value.append($0) })
-        XCTAssertEqual(token, "tok-1")
-        XCTAssertEqual(email, "a@example.com")
-        XCTAssertEqual(opened.value, [URL(string: "https://example.test/device?code=ABCD-1234")!])
-        XCTAssertEqual(slept.value, [5, 5, 10, 10], "waits the interval before each poll; slow_down adds 5 s")
-        let polls = server.requests.filter { $0.path == "/api/device/token" }
-        XCTAssertEqual(polls.count, 4)
-        XCTAssertTrue(polls.allSatisfy { $0.method == "POST" && $0.body["device_code"] as? String == "dev-1" })
-        XCTAssertEqual(server.requests.first?.method, "POST")
+    func testS256ChallengeMatchesTheRFC7636Vector() {
+        // RFC 7636 Appendix B.
+        XCTAssertEqual(PKCE.challenge(for: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"),
+                       "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM")
     }
 
-    func testDeviceFlowExpiredAndDeniedFail() async throws {
-        for (error, word) in [("expired_token", "expired"), ("access_denied", "cancelled")] {
-            deviceFlow([pending("authorization_pending"), pending(error)])
-            do {
-                _ = try await DeviceFlow.signIn(client, open: { _ in }, sleep: { _ in })
-                XCTFail("\(error) must end the sign-in")
-            } catch {
-                XCTAssertTrue(error.localizedDescription.contains(word), error.localizedDescription)
+    func testLoginURL() throws {
+        let p = PKCE(verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", state: "st4te")
+        let url = AppLogin.loginURL(base: URL(string: "https://shepetal.backant.io")!, pkce: p)
+        let c = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
+        XCTAssertEqual(c.scheme, "https")
+        XCTAssertEqual(c.host, "shepetal.backant.io")
+        XCTAssertEqual(c.path, "/app/login")
+        let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        XCTAssertEqual(q, ["redirect_uri": "shepetal://auth", "state": "st4te",
+                           "code_challenge": "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM", "code_challenge_method": "S256"])
+        XCTAssertFalse(q.keys.contains("code_verifier"), "the verifier never goes to the browser")
+    }
+
+    func testCallbackParsingAndStateCheck() throws {
+        XCTAssertEqual(try AppLogin.code(from: URL(string: "shepetal://auth?code=abc123&state=st4te")!, state: "st4te"), "abc123")
+        XCTAssertEqual(try AppLogin.code(from: URL(string: "shepetal://auth?state=st4te&code=a%2Bb")!, state: "st4te"), "a+b")
+        for (bad, why) in [("shepetal://auth?code=abc123&state=other", "did not match"),
+                           ("shepetal://auth?code=abc123", "did not match"),
+                           ("shepetal://auth?state=st4te", "without a code"),
+                           ("shepetal://auth?error=access_denied&state=st4te", "refused"),
+                           ("shepetal://elsewhere?code=abc123&state=st4te", "wrong address"),
+                           ("https://auth?code=abc123&state=st4te", "wrong address")] {
+            XCTAssertThrowsError(try AppLogin.code(from: URL(string: bad)!, state: "st4te"), bad) { e in
+                XCTAssertTrue(e.localizedDescription.contains(why), "\(bad): \(e.localizedDescription)")
             }
         }
     }
 
-    func testDeviceFlowGivesUpWhenTheCodeExpires() async throws {
-        deviceFlow([pending("authorization_pending")])
-        let clock = Box(Date(timeIntervalSince1970: 1_000_000))
-        do {
-            _ = try await DeviceFlow.signIn(client, open: { _ in }, sleep: { clock.value += $0 }, now: { clock.value })
-            XCTFail("polling must stop after expires_in")
-        } catch {
-            XCTAssertTrue(error.localizedDescription.contains("expired"))
-        }
-        let polls = server.requests.filter { $0.path == "/api/device/token" }.count
-        XCTAssertEqual(polls, 119, "600 s at 5 s, the poll at the deadline is not sent")
-    }
-
-    func testDeviceFlowKeepsPollingThroughADroppedConnection() async throws {
-        var n = 0
+    func testTokenExchange() async throws {
         server.handler = { r in
-            if r.path == "/api/device/start" { return (200, Self.start) }
-            n += 1
-            return n == 1 ? (0, [:]) : (200, ["access_token": "tok-2", "email": "b@example.com"])
+            r.body["code"] as? String == "abc123" ? (200, ["access_token": "tok-1", "email": "a@example.com"])
+                                                  : (400, ["error": "invalid_grant"])
         }
-        let (token, _) = try await DeviceFlow.signIn(client, open: { _ in }, sleep: { _ in })
-        XCTAssertEqual(token, "tok-2")
-    }
-
-    func testDeviceFlowKeepsPollingThroughAServerError() async throws {
-        deviceFlow([(502, ["error": "bad gateway"]), (503, [:]), (200, ["access_token": "tok-3", "email": "c@example.com"])])
-        let (token, _) = try await DeviceFlow.signIn(client, open: { _ in }, sleep: { _ in })
-        XCTAssertEqual(token, "tok-3")
-    }
-
-    func testDeviceFlowOpensOnlyWebPages() async throws {
-        var start = Self.start
-        start["verification_uri_complete"] = "file:///System/Applications/Calculator.app"
-        server.handler = { [start] _ in (200, start) }
-        let opened = Box(0)
+        let (token, email) = try await client.exchange(code: "abc123", verifier: "v-123")
+        XCTAssertEqual(token, "tok-1")
+        XCTAssertEqual(email, "a@example.com")
+        let r = try XCTUnwrap(server.requests.last)
+        XCTAssertEqual(r.method, "POST")
+        XCTAssertEqual(r.path, "/api/app/token")
+        XCTAssertEqual(r.headers["content-type"], "application/json")
+        XCTAssertEqual(r.body as? [String: String], ["code": "abc123", "code_verifier": "v-123", "redirect_uri": "shepetal://auth"])
         do {
-            _ = try await DeviceFlow.signIn(client, open: { _ in opened.value += 1 }, sleep: { _ in })
-            XCTFail("a file URL must not be opened")
-        } catch {}
-        XCTAssertEqual(opened.value, 0)
-        XCTAssertTrue(DeviceFlow.isWebPage(URL(string: "https://shepetal.backant.io/device?code=A")!))
-        XCTAssertTrue(DeviceFlow.isWebPage(URL(string: "http://localhost:3000/device")!))
-        XCTAssertFalse(DeviceFlow.isWebPage(URL(string: "http://evil.example/device")!))
+            _ = try await client.exchange(code: "stale", verifier: "v-123")
+            XCTFail("a refused code must throw")
+        } catch {
+            XCTAssertTrue(error.localizedDescription.contains("invalid_grant"), error.localizedDescription)
+        }
+        server.handler = { _ in (200, ["email": "a@example.com"]) }
+        do { _ = try await client.exchange(code: "abc123", verifier: "v"); XCTFail("no token, no sign-in") } catch {}
+    }
+
+    func testOnlyWebPagesAreOpened() {
+        XCTAssertTrue(AccountClient.isWebPage(URL(string: "https://shepetal.backant.io/app/login")!))
+        XCTAssertTrue(AccountClient.isWebPage(URL(string: "http://localhost:3000/app/login")!))
+        XCTAssertFalse(AccountClient.isWebPage(URL(string: "http://evil.example/app/login")!))
+        XCTAssertFalse(AccountClient.isWebPage(URL(string: "file:///System/Applications/Calculator.app")!))
     }
 
     // MARK: license and checkout
@@ -192,7 +183,7 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(Access.trial(daysLeft: 12).summary, "Free trial: 12 days left")
         XCTAssertEqual(Access.trial(daysLeft: 1).summary, "Free trial: 1 day left")
         XCTAssertEqual(Access.lifetime.summary, "Yours forever")
-        XCTAssertEqual(Access.signedOut.blockedHint, "Sign in to start your free 30-day trial")
+        XCTAssertEqual(Access.signedOut.blockedHint, "Sign in with Google to start your free 30-day trial")
         XCTAssertEqual(Access.expired.blockedHint, "Trial ended: get Shepetal for $4.99")
         XCTAssertNil(Access.lifetime.blockedHint)
         XCTAssertNil(Access.trial(daysLeft: 2).blockedHint)
@@ -266,9 +257,4 @@ final class AccountTests: XCTestCase {
         let all = titles + [EngineLabel.status("ggml-base.en-q5_1", tier: tier)]
         for t in all { XCTAssertNil(t.range(of: "parakeet|whisper|ggml|v3|turbo", options: [.regularExpression, .caseInsensitive]), t) }
     }
-}
-
-final class Box<T>: @unchecked Sendable {
-    var value: T
-    init(_ value: T) { self.value = value }
 }

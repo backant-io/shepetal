@@ -10,7 +10,7 @@ struct AccountSection: View {
             LabeledContent("License", value: account.summaryLine)
             switch account.access {
             case .signedOut:
-                Button(account.signingIn ? "Open the sign-in page again" : AccountText.signIn) { account.signIn() }
+                Button(AccountText.signIn) { account.signIn() }.disabled(account.signingIn)
             case .trial:
                 Button(AccountText.buy) { account.buy() }
             case .expired:
@@ -22,7 +22,7 @@ struct AccountSection: View {
                 EmptyView()
             }
             if account.signedIn { Button("Sign out") { account.signOut() } }
-            if !account.message.isEmpty, account.pendingCode == nil {
+            if !account.message.isEmpty, !account.signingIn {
                 Text(account.message).font(.caption).foregroundStyle(.secondary)
             }
         }
