@@ -79,6 +79,30 @@ How to read it:
 Not measured yet: WhisperKit (no Swift CLI in the harness), Whisper large-v3-turbo, the streaming models and
 the diarizers. All rows ran on one M4 Pro; no other Mac, iPhone or Linux machine was measured.
 
+### End to end in the Mac app (Parakeet v3, FluidAudio)
+
+`scripts/e2e-mac.sh` runs the app's own pipeline on 6 `say` clips (4.5 to 10.7 s, 127 words): capture resampler,
+Parakeet TDT 0.6B v3, cleanup, kept audio and history, then clipboard plus Cmd+V into a text view the app owns.
+Run on 2026-10-20 at `36f3e0d` (branch `feat/mac-mac-shell-tests`) from a clean clone, release build, with the
+network denied by `sandbox-exec`:
+
+| Clip | Audio | Word errors | Text ready after release |
+|---|---|---|---|
+| e01 | 6.2 s | 0 / 20 | 72 ms |
+| e02 | 5.4 s | 0 / 15 | 57 ms |
+| e03 | 4.5 s | 0 / 17 | 63 ms |
+| e04 | 6.6 s | 0 / 21 | 63 ms |
+| e05 | 10.7 s | 0 / 36 | 89 ms |
+| e06 | 5.8 s | 0 / 18 | 69 ms |
+
+- WER 0.0 % over 127 words, text ready 57 to 89 ms (mean 69 ms). The goal bar is WER ≤ 8 % and ≤ 700 ms for a 10 s
+  utterance; the 10.7 s clip took 89 ms. The earlier run on `982e547` gave 0.0 % and 58 to 78 ms.
+- These clips are easier than the bench fixtures above (no numbers, no product names), so the 0.0 % here and the
+  7.2 % above do not disagree.
+- Model load was 380 ms with CoreML's compiled cache warm. A second process right after it (the silent-WAV run)
+  took 38 s to load while the machine had a load average of about 45 from parallel builds. Cold and contended
+  load times are not measured yet (#17).
+
 ## Candidates (research)
 
 | Model | Params / disk | Languages | Streaming | Word timestamps | Custom vocab / hotwords | Runtimes | Published WER |
@@ -182,21 +206,28 @@ Goal rule 5: rewrite-type cleanup runs on a local model. The pipeline is `SmartC
    sentence punctuation at all. The model is `LlamaCleanup` (`Sources/ShepetalCleanup/Llama.swift`): llama.cpp
    b11450 (the official `llama-b11450-xcframework.zip`, Metal), greedy decoding, the instructions and 13
    examples decoded once at load, with that state restored for each dictation.
-3. **Guard** (`SmartCleanup.accepts`): the model's text is used only when it still holds what the user said.
-   It must have letters; at most 1 word in 10 may be new, and only list numbers at the start of a line are
-   free, so a "56" or "144" the user did not say counts; and no dictated word may be lost except list and
-   line-break markers ("first", "number one", "new line"). When the input has a self-correction cue, the cue
-   and up to half of the other words may go, which is what a correction takes back. Otherwise the rules'
+3. **Guard** (`SmartCleanup.accepts`): the model's text is used only when it is the user's own words in
+   the user's order, with nothing added: only list numbers at the start of a line may be new, and only
+   punctuation, case and line breaks may change. Words may be left out only in two cases. List and
+   line-break words ("first", "number one", "new line") may go when the text has such a cue. And a
+   self-correction may go: the whole cue ("I mean", "scratch that") together with at least one word it takes
+   back, from the words just before it in the same sentence (at most 8), or from the sentence before when the
+   cue opens a sentence (at most 20), and no more words than replace them, plus one. Otherwise the rules'
    text is inserted. Small models answer questions (Qwen3.5 0.8B turned "What is the capital of Australia?"
    into "The capital of Australia is Sydney.", "Sorry, what is seven times eight?" into "Seven times eight is
    56.", and Qwen3.5 2B turned "Sorry, what is twenty plus twenty two?" into "24") and follow instructions
-   (Qwen3.5 2B turned "...reply with the word banana." into "banana"). The gate and the guard together kept
-   all 6 passthrough fixtures as dictated, for every model. On 27 more questions from the review, 12 of them
-   arithmetic, no answer from either Qwen3.5 model got through (`SmartCleanupTests` keeps the ones that used
-   to). The ceiling: the guard compares words, not meaning, so a correction that keeps the wrong half of the
-   words gets through.
-4. **Fallback**: no model file, a load error, or a model error means the rules' text. The menu says which
-   ("Cleanup: rules only (...)").
+   (Qwen3.5 2B turned "...reply with the word banana." into "banana"). They also get corrections backwards:
+   Qwen3.5 0.8B turned "Send it to John, I mean Jane" into "Send it to John" and swapped "gate twelve.
+   Correction, gate fourteen." Since the PR #44 review, these are rejected: the order-aware check rejects
+   every such output in the committed results (sc01, sc02, sc06, sc11, sc13 for the 0.8B, sc11 for the 2B)
+   and keeps every exact match (`SmartCleanupTests.testCorrectionsThatKeepTheWrongHalfAreRejected`). The
+   ceiling: a correction said without a cue word stays as heard, and a correction that moves words (sc16,
+   "put the notes in the folder, no wait, send them to me") gets the rules' text.
+   Dictations over 150 words skip the model (`SmartCleanup.maxModelWords`), and a rewrite that runs past
+   1 s throws (`LlamaCleanup.deadline`), so the rules' text is used instead of holding up the paste.
+   `LlamaCleanup` serializes calls with a lock, because dictation and History's re-transcribe share it.
+4. **Fallback**: no model file, a load error, a model error or the deadline means the rules' text. The menu
+   says "Cleanup: on" or "Cleanup: rules only (...)" and names no model or file; details go to stderr.
 
 ### Measured on this Mac
 
@@ -209,8 +240,8 @@ app's own `LlamaCleanup` code.
 
 | Model (Q4_K_M) | File | Exact, model on every fixture | CER, model on every fixture | Exact, app path | CER, app path | Mean ms per model call | 10 s transcript, median / max ms | Load ms | Peak RSS | Peak footprint | License |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| **Qwen3.5 2B** | 1,281 MB | 81 % | 5.4 % | **89 %** | **2.8 %** | 155 | 297 / 313 | 2,188 | 1,545 MB | 356 MB | Apache-2.0 |
-| Qwen3.5 0.8B | 533 MB | 59 % | 18.4 % | 65 % | 13.5 % | 99 | 181 / 192 | 1,124 | 801 MB | 292 MB | Apache-2.0 |
+| **Qwen3.5 2B** | 1,281 MB | 81 % | 5.4 % | **89 %** | **3.2 %** | 155 | 297 / 313 | 2,188 | 1,545 MB | 356 MB | Apache-2.0 |
+| Qwen3.5 0.8B | 533 MB | 59 % | 18.4 % | 65 % | 15.1 % | 99 | 181 / 192 | 1,124 | 801 MB | 292 MB | Apache-2.0 |
 | Gemma 3 1B it | 806 MB | 54 % | 18.0 % | 60 % | 11.9 % | 122 | 230 / 242 | 1,411 | 987 MB | 230 MB | Gemma terms |
 | Rules only | - | - | - | 43 % | 28.3 % | - | - | 0 | 9 MB | 4 MB | |
 
@@ -219,6 +250,10 @@ How to read it:
 - **Exact** is the whole output string equal to the expected one, line breaks included. **CER** is characters
   changed per character of the expected text. "Model on every fixture" sends every fixture to the model with
   no cue gate and no guard; "app path" is what the user gets (rules, gate, model, guard).
+- The app-path columns of the two Qwen3.5 rows were rerun after the order-aware guard (PR #44 review, results in
+  `bench/cleanup/results/`): exact match is unchanged (89 % and 65 %); CER rose (2.8 to 3.2 %, 13.5 to 15.1 %)
+  because rejected wrong rewrites now give the rules' text, which keeps the cue words. The other columns are
+  from the first run. Gemma 3 1B was not rerun.
 - **10 s transcript** is the model's time on the four fixtures of 24 or more words (about 10 s of speech),
   five runs each: 20 calls, median and max. It is time added on top of speech-to-text. Peak RSS includes the
   memory-mapped model file; peak footprint is `ri_lifetime_max_phys_footprint`, closer to what Activity
@@ -262,8 +297,8 @@ skip the model and were ready in 61 to 91 ms (52 to 76 ms in an earlier run, and
 
 | Mac | Default | Why | Status |
 |---|---|---|---|
-| Apple Silicon, 8 GB | Qwen3.5 0.8B Q4_K_M | Half the resident memory of the 2B (801 vs 1,545 MB) next to Parakeet and the user's apps. It still fixes lists, and some corrections | measured on the M4 Pro 24 GB only, not on an 8 GB Mac or a base M1/M2 |
-| Apple Silicon, 16 GB+ | **Qwen3.5 2B Q4_K_M** | Best accuracy here (89 % exact, 2.8 % CER) and 297 ms median, 313 ms max for a 10 s transcript | measured (this Mac's class); 16 GB not measured |
+| Apple Silicon, 8 GB | Qwen3.5 0.8B Q4_K_M | Half the resident memory of the 2B (801 vs 1,545 MB) next to Parakeet and the user's apps. It still fixes lists and some corrections; the guard rejects its corrections that keep the wrong half | measured on the M4 Pro 24 GB only, not on an 8 GB Mac or a base M1/M2 |
+| Apple Silicon, 16 GB+ | **Qwen3.5 2B Q4_K_M** | Best accuracy here (89 % exact, 3.2 % CER) and 297 ms median, 313 ms max for a 10 s transcript | measured (this Mac's class); 16 GB not measured |
 | Intel Mac | rules only | No Apple GPU; llama.cpp would run on the CPU and was not measured | research |
 
 The model runs only on transcripts with a cue, even though Qwen3.5 2B would also meet the 700 ms bar on every

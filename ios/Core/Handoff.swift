@@ -19,6 +19,9 @@ public struct Handoff: Codable, Equatable {
     public private(set) var text: String?
     /// Shown by the keyboard: why the session failed, or a note on delivered text (for example a recording cut short).
     public private(set) var message: String?
+    /// Set by the keyboard when the user taps the mic to finish. The stop notification only wakes the app;
+    /// the app stops only when this is set for its own recording.
+    public private(set) var stopRequested = false
     public private(set) var updatedAt: Date = .distantPast
 
     public init() {}
@@ -55,6 +58,15 @@ public struct Handoff: Codable, Equatable {
     /// cancelled or expired, or has reached `maxRecording`.
     public func shouldKeepRecording(_ id: UUID, now: Date = Date()) -> Bool {
         phase == .recording && sessionID == id && now.timeIntervalSince(updatedAt) < Self.maxRecording
+    }
+
+    /// Keyboard: ask the app to finish the recording `id`, before posting the stop notification.
+    /// False when `id` is not recording, so the keyboard starts a new dictation instead.
+    @discardableResult
+    public mutating func requestStop(_ id: UUID, now: Date = Date()) -> Bool {
+        guard phase == .recording, sessionID == id, !isExpired(now: now) else { return false }
+        stopRequested = true
+        return true
     }
 
     /// App: the user stopped; transcription is running.
@@ -114,6 +126,18 @@ public struct Handoff: Codable, Equatable {
         case .ready, .idle: return nil
         case .inserted, .failed: return message
         case .cancelled: return "Cancelled. Shepetal kept the audio."
+        }
+    }
+
+    /// Keyboard: the ring color of 🤫 for the keyboard's own session `id`, matching `keyboardStatus`.
+    public func indicatorMode(for id: UUID?, now: Date = Date()) -> Indicator.Mode {
+        guard let id else { return .idle }
+        guard sessionID == id, !isExpired(now: now) else { return .error }
+        switch phase {
+        case .recording: return .recording
+        case .requested, .transcribing, .ready: return .processing
+        case .failed: return .error
+        case .idle, .inserted, .cancelled: return .idle
         }
     }
 
@@ -259,7 +283,8 @@ public enum SharedHandoff {
     public static func read(in defaults: UserDefaults? = shared) -> Handoff { update(in: defaults) { $0 } }
 
     // ponytail: read-modify-write on UserDefaults is not atomic across processes. Each phase has a
-    // single writer (keyboard or app), so it holds; switch to a file lock if both ever write at once.
+    // single writer (keyboard or app), except `recording`, where the keyboard's stop request can race the
+    // app ending the recording itself (cap, dead mic); switch to a file lock if that race shows up.
     @discardableResult
     public static func update<T>(in defaults: UserDefaults? = shared, _ body: (inout Handoff) throws -> T) rethrows -> T {
         var handoff = defaults?.data(forKey: key).flatMap { try? JSONDecoder().decode(Handoff.self, from: $0) } ?? Handoff()

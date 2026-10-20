@@ -4,9 +4,13 @@ import ShepetalCore
 
 /// The cleanup model on llama.cpp with Metal, loaded once and kept in memory. The instructions and
 /// examples are decoded once at load; each rewrite restores that state and decodes only the dictation.
-/// Not thread-safe (`@unchecked`): the pipeline sends one dictation at a time.
+/// One rewrite at a time, by its own lock: dictation and History's re-transcribe share one context.
 public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
     public let name: String
+    /// A rewrite that takes longer than this throws, so the rules' text is used: decode time grows with the
+    /// text, and on a slow Mac a long rewrite would hold up the paste.
+    public let deadline: TimeInterval
+    private let lock = NSLock()
     private let model: OpaquePointer
     private let ctx: OpaquePointer
     private let vocab: OpaquePointer
@@ -18,7 +22,8 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         public let errorDescription: String?
     }
 
-    public init(path: String) throws {
+    public init(path: String, deadline: TimeInterval = 1.0) throws {
+        self.deadline = deadline
         guard FileManager.default.fileExists(atPath: path) else { throw LoadError(errorDescription: "\(path) not found") }
         if ProcessInfo.processInfo.environment["SHEPETAL_LLAMA_LOG"] == nil { llama_log_set({ _, _, _ in }, nil) }
         llama_backend_init()
@@ -48,7 +53,8 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         guard llama_state_seq_get_data(c, &prefixState, size, 0) == size else {
             throw LoadError(errorDescription: "llama.cpp could not save the prompt state")
         }
-        _ = try rewrite("Warm up the GPU, actually the model.")  // compiles the Metal kernels before the user speaks
+        // Compiles the Metal kernels before the user speaks; this first run may take longer than the deadline.
+        _ = try generate("Warm up the GPU, actually the model.", until: .infinity)
     }
 
     deinit {
@@ -59,22 +65,31 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
     // ggml's Metal device aborts at exit while a model still holds GPU memory, so every model that is
     // still open when the process exits is freed first. Registered after the first load, the handler runs
     // before ggml's own exit handlers.
-    // ponytail: unsynchronized; the app holds one model, loaded and freed on one task at a time.
+    // Loads run on detached tasks, so the table has its own lock.
     nonisolated(unsafe) private static var open: [OpaquePointer: OpaquePointer] = [:]  // context: model
-    private static let freeAtExit: Void = { atexit { for c in Array(LlamaCleanup.open.keys) { LlamaCleanup.close(c) } } }()
+    private static let openLock = NSLock()
+    private static let freeAtExit: Void = {
+        atexit { for c in openLock.withLock({ Array(LlamaCleanup.open.keys) }) { LlamaCleanup.close(c) } }
+    }()
 
     private static func track(_ ctx: OpaquePointer, _ model: OpaquePointer) {
         _ = freeAtExit
-        open[ctx] = model
+        openLock.withLock { open[ctx] = model }
     }
 
     private static func close(_ ctx: OpaquePointer) {
-        guard let model = open.removeValue(forKey: ctx) else { return }
+        guard let model = openLock.withLock({ open.removeValue(forKey: ctx) }) else { return }
         llama_free(ctx)
         llama_model_free(model)
     }
 
     public func rewrite(_ text: String) throws -> String {
+        try generate(text, until: ProcessInfo.processInfo.systemUptime + deadline)
+    }
+
+    private func generate(_ text: String, until end: TimeInterval) throws -> String {
+        lock.lock()
+        defer { lock.unlock() }
         let mem = llama_get_memory(ctx)
         llama_memory_clear(mem, true)
         guard llama_state_seq_set_data(ctx, prefixState, prefixState.count, 0) > 0 else {
@@ -91,6 +106,9 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
             let n = llama_token_to_piece(vocab, token, &piece, Int32(piece.count), 0, false)
             if n > 0 { bytes += piece[0..<Int(n)].map { UInt8(bitPattern: $0) } }
             try decode([token])
+            guard ProcessInfo.processInfo.systemUptime < end else {
+                throw LoadError(errorDescription: "cleanup took longer than \(deadline) s")
+            }
         }
         return Self.clean(String(decoding: bytes, as: UTF8.self))
     }

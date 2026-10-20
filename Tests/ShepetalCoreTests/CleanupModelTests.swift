@@ -82,6 +82,57 @@ final class SmartCleanupTests: XCTestCase {
         }
     }
 
+    // Real Qwen3.5 0.8B and 2B outputs from bench/cleanup/results at bb239f7. The old word-set guard used all of
+    // them; each keeps the taken-back half, swaps the halves or drops a cue without taking anything back.
+    func testCorrectionsThatKeepTheWrongHalfAreRejected() {
+        for (said, out) in [
+            ("Send it to John, I mean Jane, by the end of the day.", "Send it to John by the end of the day."),
+            ("Our flight leaves from gate twelve. Correction, gate fourteen.", "Our flight leaves from gate fourteen. Correction, gate twelve."),
+            ("Please call the London office, or rather the Berlin office, tomorrow morning.",
+             "Please call the London office or the Berlin office tomorrow morning."),
+            ("Let's meet on Tuesday, actually Wednesday, at three.", "Let's meet on Tuesday, Wednesday, at three."),
+            ("Can you review my pull request today, actually, tomorrow?", "Can you review my pull request today, tomorrow?"),
+        ] {
+            XCTAssertEqual(SmartCleanup.apply(said, model: FakeCleanupModel { _ in out }), .init(text: said, usedModel: false), out)
+        }
+    }
+
+    // The same fixtures, rewritten right (the 2B's outputs), still pass.
+    func testCorrectionsThatTakeBackTheRightWordsAreAccepted() {
+        for (said, meant) in [
+            ("Send it to John, I mean Jane, by the end of the day.", "Send it to Jane by the end of the day."),
+            ("Our flight leaves from gate twelve. Correction, gate fourteen.", "Our flight leaves from gate fourteen."),
+            ("Please call the London office, or rather the Berlin office, tomorrow morning.", "Please call the Berlin office tomorrow morning."),
+            ("Book a table for four people. Scratch that. Book a table for six people at eight.", "Book a table for six people at eight."),
+            ("The meeting is at 2 p.m., no wait, 3 p.m.", "The meeting is at 3 p.m."),
+            ("I'll be there at nine, wait, no, ten thirty.", "I'll be there at ten thirty."),
+            ("Next week's priorities. Number one, fix the login bug. Number two, the billing page, actually no, the invoice export.",
+             "Next week's priorities:\n1. Fix the login bug\n2. The invoice export"),
+        ] {
+            XCTAssertEqual(SmartCleanup.apply(said, model: FakeCleanupModel { _ in meant }), .init(text: meant, usedModel: true), said)
+        }
+    }
+
+    // The allowances no longer grow with the dictation: one new word in a long text, or a clause dropped far
+    // from the correction, is rejected.
+    func testLongTextGetsNoExtraAllowance() {
+        let sum = "Sorry, can you tell me what twenty plus twenty two is for the report?"
+        XCTAssertFalse(SmartCleanup.accepts(sum + " 42", for: sum))
+        let invoice = "Sorry for the delay. The invoice for March is attached and the invoice for April follows next week."
+        XCTAssertFalse(SmartCleanup.accepts("The invoice for March is attached.", for: invoice))
+        let far = "Please send the slides to the whole team before lunch, actually after lunch."
+        XCTAssertFalse(SmartCleanup.accepts("Please send the slides after lunch.", for: far), "only words just before the cue")
+        XCTAssertTrue(SmartCleanup.accepts("Please send the slides to the whole team after lunch.", for: far))
+    }
+
+    // Long dictations skip the model: decode time grows with the text.
+    func testLongDictationSkipsTheModel() {
+        let long = Array(repeating: "first we ship it", count: 40).joined(separator: " ")
+        let model = FakeCleanupModel { _ in XCTFail("model called"); return "" }
+        XCTAssertFalse(SmartCleanup.apply(long, model: model).usedModel)
+        XCTAssertEqual(model.calls, [])
+    }
+
     // List numbers and dropped words are what a rewrite is for, so they pass the guard.
     func testListNumbersAndDroppedWordsAreAccepted() {
         let model = FakeCleanupModel { _ in "Pack:\n1. Passport\n2. Charger" }

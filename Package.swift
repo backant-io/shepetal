@@ -25,6 +25,9 @@ let package = Package(
         // bench/cleanup/run.sh: scores cleanup models on bench/cleanup/fixtures.
         .executableTarget(name: "cleanup-bench", dependencies: ["ShepetalCleanup"], path: "bench/cleanup/Sources"),
         .testTarget(name: "ShepetalCoreTests", dependencies: ["ShepetalCore"]),
+        .testTarget(name: "ShepetalTests", dependencies: ["Shepetal"]),
+        // Runs the real cleanup model when SHEPETAL_CLEANUP_MODEL names a GGUF; skipped otherwise.
+        .testTarget(name: "ShepetalCleanupTests", dependencies: ["ShepetalCleanup"]),
     ],
     swiftLanguageModes: [.v5]
 )
