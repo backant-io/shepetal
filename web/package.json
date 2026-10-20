@@ -8,6 +8,7 @@
     "build": "next build",
     "type-check": "tsc --noEmit",
     "test": "vitest run",
+    "e2e": "node e2e/run.mjs",
     "preview": "opennextjs-cloudflare build && opennextjs-cloudflare preview",
     "deploy": "opennextjs-cloudflare build && opennextjs-cloudflare deploy",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",

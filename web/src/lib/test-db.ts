@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { getPlatformProxy } from 'wrangler';
 
@@ -16,14 +16,16 @@ export function useTestDb() {
     const proxy = await getPlatformProxy<CloudflareEnv>({ persist: false });
     ({ DB } = proxy.env);
     dispose = proxy.dispose;
-    const sql = readFileSync(new URL('../../migrations/0001_init.sql', import.meta.url), 'utf8')
-      .replace(/--.*$/gm, '')
-      .split(';')
+    const dir = new URL('../../migrations/', import.meta.url);
+    const sql = readdirSync(dir)
+      .filter((f) => f.endsWith('.sql'))
+      .sort()
+      .flatMap((f) => readFileSync(new URL(f, dir), 'utf8').replace(/--.*$/gm, '').split(';'))
       .filter((s) => s.trim());
     await DB.batch(sql.map((s) => DB.prepare(s)));
   });
   afterAll(() => dispose());
   beforeEach(async () => {
-    await DB.batch(['DELETE FROM tokens', 'DELETE FROM device_codes', 'DELETE FROM users'].map((s) => DB.prepare(s)));
+    await DB.batch(['DELETE FROM tokens', 'DELETE FROM app_codes', 'DELETE FROM users'].map((s) => DB.prepare(s)));
   });
 }

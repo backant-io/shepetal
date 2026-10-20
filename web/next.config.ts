@@ -21,7 +21,8 @@ const securityHeaders = [
       "connect-src 'self'",
       "frame-src 'self'",
       "frame-ancestors 'none'",
-      "form-action 'self' https://accounts.google.com https://checkout.stripe.com",
+      // shepetal: and the loopback: where the /app/login consent form redirects with the code.
+      "form-action 'self' https://accounts.google.com https://checkout.stripe.com shepetal: http://127.0.0.1:*",
       "base-uri 'self'",
       "object-src 'none'",
     ].join('; '),

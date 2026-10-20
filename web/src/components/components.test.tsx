@@ -1,6 +1,5 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { decideDevice } from './ApproveDevice';
 import { startCheckout } from './BuyButton';
 import { daysLeft, LicenseSummary } from './LicenseSummary';
 
@@ -23,30 +22,6 @@ describe('Buy button', () => {
     for (const f of [json(500, { url: 'https://checkout.stripe.com/x' }), json(200, {}), vi.fn<typeof fetch>(async () => Promise.reject(new Error('offline')))]) {
       expect(await startCheckout(f)).toEqual({ error: expect.stringMatching(/did not open/) });
     }
-  });
-});
-
-describe('/device approve', () => {
-  it('sends the code the app showed with approve true, which signs the app in', async () => {
-    const f = json(200, { ok: true });
-    expect(await decideDevice('ABCD-EFGH', true, f)).toBe('approved');
-    const [url, init] = f.mock.calls[0];
-    expect(url).toBe('/api/device/approve');
-    expect(init?.method).toBe('POST');
-    expect(JSON.parse(String(init?.body))).toEqual({ user_code: 'ABCD-EFGH', approve: true });
-  });
-
-  it('denies with approve false', async () => {
-    const f = json(200, { ok: true });
-    expect(await decideDevice('ABCD-EFGH', false, f)).toBe('denied');
-    expect(JSON.parse(String(f.mock.calls[0][1]?.body))).toEqual({ user_code: 'ABCD-EFGH', approve: false });
-  });
-
-  it('says an unknown, expired or used code is invalid, so the user starts over in the app', async () => {
-    expect(await decideDevice('NOPE', true, json(404, { error: 'invalid_code' }))).toBe('invalid');
-    expect(await decideDevice('', true, json(400, { error: 'invalid_request' }))).toBe('invalid');
-    expect(await decideDevice('ABCD-EFGH', true, json(401, { error: 'unauthorized' }))).toBe('signed_out');
-    expect(await decideDevice('ABCD-EFGH', true, json(500, {}))).toBe('error');
   });
 });
 

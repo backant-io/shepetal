@@ -1,14 +1,14 @@
 # shepetal web
 
-The website and account service at https://shepetal.backant.io: the landing page, Google sign-in, the 30-day free trial with no card, the $4.99 one-time purchase, the installer download, and the device login the apps use. The API the apps call is in [API.md](API.md).
+The website and account service at https://shepetal.backant.io: the landing page, Google sign-in, the 30-day free trial with no card, the $4.99 one-time purchase, the installer download, and the app sign-in (OAuth with PKCE). The API the apps call is in [API.md](API.md).
 
 ## Architecture
 
 - **Runtime:** Next.js 15 (App Router), built with `@opennextjs/cloudflare` and served by its own Cloudflare Worker, `shepetal-web`. It runs on workers.dev until launch. The shepetal.backant.io custom domain is added then.
 - **Sign-in:** next-auth v5 with Google, JWT sessions and no adapter, the same setup as backant.io. Cookies are host-only, so a shepetal session never reaches backant.io.
-- **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens` and `device_codes`, and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
+- **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens` and `app_codes`, and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
 - **Payments:** Stripe Checkout in backant's Stripe account for the one-time price `STRIPE_PRICE_ID`. The webhook at `/api/stripe/webhook` sets the user to `active`.
-- **Apps:** the device flow (`/api/device/start`, then `/device` in the browser, then `/api/device/token`) gives the app an opaque bearer token. Only the token's SHA-256 hash is stored, in `tokens`. `/api/license` checks the token.
+- **Apps:** OAuth for native apps with PKCE (RFC 8252, RFC 7636): the app opens `/app/login`, which signs in with Google, asks the user to confirm on a consent page, and redirects to `shepetal://auth` or `http://127.0.0.1:<port>/callback` with a one-time code, and `/api/app/token` trades the code for an opaque bearer token. Only the token's SHA-256 hash is stored, in `tokens`. It ends 90 days after its last use, and `/api/app/revoke` ends it on Sign out. `/api/license` checks the token.
 
 | Path | What |
 |---|---|
@@ -16,7 +16,8 @@ The website and account service at https://shepetal.backant.io: the landing page
 | `src/lib/auth.ts` | next-auth (Google). The first sign-in creates the user and starts the trial |
 | `src/lib/account.ts` | `upsertUser`, `getLicense`, `licenseOf` (the trial rule, tested in `account.test.ts`) |
 | `src/lib/stripe.ts` | `getStripe()` |
-| `src/app/(site)/` | pages: the landing page, `/device`, `/download` and the account page |
+| `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |
+| `src/app/(site)/` | pages: the landing page and the account page |
 | `src/app/api/` | the API routes in API.md |
 
 ## What comes from backant.io
@@ -100,6 +101,6 @@ https://shepetal-web.business-c0d.workers.dev (workers.dev only, no custom domai
 ## Pavel actions
 
 1. In Google Cloud Console, go to APIs & Services, then Credentials, and open backant's OAuth client (the one `GOOGLE_CLIENT_ID` names). Add the authorized redirect URI `https://shepetal.backant.io/api/auth/callback/google` and the JavaScript origin `https://shepetal.backant.io`. Add `http://localhost:3000/api/auth/callback/google` too if it is missing. The Google consent screen will show backant's app name.
-2. In the backant Stripe account (live), create a "Shepetal" product with a one-time $4.99 USD price and put its ID in `STRIPE_PRICE_ID` in `wrangler.toml`. Then create a webhook endpoint at `https://shepetal.backant.io/api/stripe/webhook` for `checkout.session.completed`, and set its signing secret as `STRIPE_WEBHOOK_SECRET`. The Stripe MCP can do both.
-3. After action 2: put the price ID in `STRIPE_PRICE_ID` in `wrangler.toml`, run `npx wrangler secret put STRIPE_WEBHOOK_SECRET` with the endpoint's signing secret, and `npm run deploy`. The other deploy steps above are done.
+2. In the backant Stripe account (live), create a "Shepetal" product with a one-time $4.99 USD price and put its ID in `STRIPE_PRICE_ID` in `wrangler.toml`. Then create a webhook endpoint at `https://shepetal.backant.io/api/stripe/webhook` for `checkout.session.completed` and `checkout.session.async_payment_succeeded`, and set its signing secret as `STRIPE_WEBHOOK_SECRET`. The Stripe MCP can do both.
+3. After action 2: put the price ID in `STRIPE_PRICE_ID` in `wrangler.toml`, run `npm run db:migrate:remote` (0002_app_login), `npx wrangler secret put STRIPE_WEBHOOK_SECRET` with the endpoint's signing secret, and `npm run deploy`. The other deploy steps above are done. The full ordered list, with smoke tests, is [GO-LIVE.md](GO-LIVE.md).
 4. Go live: `cd web && sed -i '' 's/^# routes = /routes = /' wrangler.toml && npm run deploy`.
