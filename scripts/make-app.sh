@@ -129,7 +129,12 @@ if [ "$INSTALL" = 1 ]; then
     for _ in $(seq 1 40); do pgrep -qx Shepetal || break; sleep 0.25; done
     if pgrep -qx Shepetal; then echo "Shepetal did not quit; quit it from its 🤫 menu and retry" >&2; exit 1; fi
   fi
-  rm -rf "$DEST"
+  rm -rf "$DEST" 2>/dev/null || true  # set -e: a root-owned copy must reach the message below
+  if [ -e "$DEST" ]; then
+    echo "Cannot replace $DEST: the .pkg installer made it root-owned. Install with dist/Shepetal-<version>.pkg (scripts/make-pkg.sh), or remove it in Finder first." >&2
+    [ "$WAS_RUNNING" = 1 ] && open "$DEST"
+    exit 1
+  fi
   ditto "$APP" "$DEST"
   echo "Installed $DEST"
   OLD="$HOME/Applications/Shepetal.app"
