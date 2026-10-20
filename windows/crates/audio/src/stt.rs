@@ -63,9 +63,9 @@ impl Whisper {
         // whisper.cpp logs every load step to stderr; errors still come back as Results.
         whisper_rs::install_logging_hooks();
         let ctx = WhisperContext::new_with_params(model, WhisperContextParameters::default())
-            .map_err(|e| format!("Could not load the speech model: {e}"))?;
+            .map_err(|e| hide("Could not load the speech model. Delete it to download it again.", e))?;
         let multilingual = ctx.is_multilingual();
-        let state = ctx.create_state().map_err(|e| format!("Could not start the speech model: {e}"))?;
+        let state = ctx.create_state().map_err(|e| hide("Could not start the speech model.", e))?;
         Ok(Whisper { state, multilingual })
     }
 }
@@ -82,13 +82,19 @@ impl Stt for Whisper {
         p.set_print_realtime(false);
         p.set_print_special(false);
         p.set_print_timestamps(false);
-        self.state.full(p, samples).map_err(|e| format!("Speech recognition failed: {e}"))?;
+        self.state.full(p, samples).map_err(|e| hide("Speech recognition failed.", e))?;
         let mut text = String::new();
         for seg in self.state.as_iter() {
-            text.push_str(&seg.to_str_lossy().map_err(|e| format!("Speech recognition failed: {e}"))?);
+            text.push_str(&seg.to_str_lossy().map_err(|e| hide("Speech recognition failed.", e))?);
         }
         Ok(text)
     }
+}
+
+/// The user sees `msg`; whisper-rs's own text names the engine, so it goes to the log only.
+fn hide(msg: &str, e: whisper_rs::WhisperError) -> String {
+    eprintln!("shepetal: speech-to-text: {e}");
+    msg.into()
 }
 
 #[cfg(test)]
@@ -138,6 +144,18 @@ mod tests {
         assert_eq!(transcribe(&mut f, &[0.0, -0.0, 0.0]), Err(SttError::NoAudio));
         assert_eq!(transcribe(&mut f, &[]), Err(SttError::NoAudio));
         assert_eq!(f.heard.len(), 1, "the model never runs on no audio");
+    }
+
+    #[test]
+    fn a_broken_model_file_error_never_names_the_model() {
+        // whisper-rs errors say "whisper"; the app shows this text, and the UI names no model.
+        let p = std::env::temp_dir().join(format!("shepetal-stt-{}-junk.bin", std::process::id()));
+        std::fs::write(&p, b"not a model").unwrap();
+        let err = Whisper::load(&p).err().unwrap().to_lowercase();
+        assert!(err.contains("speech model"), "{err}");
+        for name in ["whisper", "ggml", "junk.bin"] {
+            assert!(!err.contains(name), "{err}");
+        }
     }
 
     #[test]
