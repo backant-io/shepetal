@@ -143,6 +143,12 @@ final class AccountTests: XCTestCase {
         do { _ = try await client.checkout(token: "tok-1"); XCTFail("401 must throw") } catch let e as AccountError {
             XCTAssertEqual(e, .signedOut)
         }
+
+        // Bought already: a dedicated error, so the app re-checks instead of saying "answered 409".
+        server.handler = { _ in (409, ["error": "already_active"]) }
+        do { _ = try await client.checkout(token: "tok-1"); XCTFail("409 must throw") } catch let e as AccountError {
+            XCTAssertEqual(e, .alreadyBought)
+        }
     }
 
     func testBaseURLDefaultsToTheServiceAndHonorsTheOverride() {
