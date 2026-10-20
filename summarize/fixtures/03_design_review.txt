@@ -1,0 +1,33 @@
+Lena: Welcome to the design review for the meeting notes feature. Today I want to settle the layout of the summary panel and how we handle speaker names.
+Omar: Before we start, I shared two mockups in the design folder, option A with a sidebar and option B with a bottom sheet.
+Lena: Thanks. Let's look at option A first.
+Omar: Option A puts the summary in a right sidebar next to the transcript. On a laptop it's great because you see both at once. The problem is on small windows the transcript gets squeezed to about forty characters per line.
+Grace: I tried both prototypes with five users last week. Four of the five preferred the sidebar on desktop. On the phone, everyone preferred the bottom sheet.
+Lena: So it's not either or. It depends on the screen size.
+Grace: Exactly. My suggestion is sidebar above nine hundred points of width and bottom sheet below.
+Omar: That's easy to do with the adaptive layout we already use for settings.
+Lena: Okay, I like that. Decision: we use the sidebar on wide windows and the bottom sheet on narrow windows and phones, with the breakpoint at nine hundred points.
+Omar: Agreed.
+Grace: Agreed.
+Lena: Next topic, speaker names. Right now the transcript shows Speaker 1, Speaker 2 and so on.
+Grace: Users hated that in testing. Two people said it made the notes useless to forward.
+Omar: We could let people rename speakers by tapping the label.
+Lena: And remember the name for that voice in future meetings?
+Omar: That needs voice embeddings stored on the device. Technically possible, but it is a privacy question.
+Grace: I'd keep it simple for the first version. Rename per meeting only, nothing remembered across meetings.
+Lena: I agree. We don't store voiceprints in version one. Decision: tap to rename speakers, per meeting only, no cross-meeting voice memory.
+Omar: Fine by me. We can revisit voice memory later with an explicit opt-in.
+Lena: Yes, that should be opt-in if we ever do it. What about the export format?
+Grace: People asked for Markdown and plain text. Nobody asked for PDF.
+Omar: Markdown export is basically free since the summary is already Markdown internally.
+Lena: Let's ship Markdown and plain text, and skip PDF for now.
+Grace: Sounds right.
+Lena: Okay, action items. Omar, can you update the mockups with the breakpoint and the rename interaction?
+Omar: Yes, I'll update the mockups by Tuesday.
+Lena: Grace, can you write up the user testing findings so engineering can read them?
+Grace: I'll write the testing summary and share it by Wednesday.
+Lena: I'll write the spec for speaker renaming and the export formats by Friday, and send it to engineering.
+Omar: Should we schedule another review after the mockups?
+Lena: Yes. I'll book a follow-up review for next Thursday.
+Grace: Great.
+Lena: Thanks both, good session.
