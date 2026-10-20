@@ -50,7 +50,7 @@ final class PipelineTests: XCTestCase {
     func process(_ samples: [Float], _ engine: SpeechEngine?, before: String = "",
                  sendPaste: @escaping (CGEvent) -> Void = { _ in }) async throws -> (Pipeline.Run, HistoryEntry) {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let run = await pipeline.process(samples, engine: engine, context: { (before, "") }, sendPaste: { [unowned self] in
+        let run = await pipeline.process(samples, engine: engine, context: { (before, "", "") }, sendPaste: { [unowned self] in
             self.pastes += 1
             sendPaste($0)
         })

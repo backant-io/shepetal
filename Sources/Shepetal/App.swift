@@ -211,7 +211,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Task {
             let app = await appAtStart?.value ?? AppContext()
             let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
-                                             selection: FocusedText.selected,
                                              focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
                                              secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false

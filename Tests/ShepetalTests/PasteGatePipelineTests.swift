@@ -31,7 +31,7 @@ final class PasteGatePipelineTests: XCTestCase {
     private func process(_ engine: StubEngine, focusKept: @escaping () -> Bool?,
                          secureInput: @escaping () -> String?) async throws -> (Pipeline.Run, HistoryEntry) {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let run = await pipeline.process(samples, engine: engine, context: { ("", "") }, focusKept: focusKept,
+        let run = await pipeline.process(samples, engine: engine, context: { ("", "", "") }, focusKept: focusKept,
                                          secureInput: secureInput, sendPaste: { [unowned self] event in
             // The target app reading the promised item is what makes the paste land.
             if event.type == .keyDown { pastes += 1; _ = pasteboard.string(forType: .string) }
@@ -77,8 +77,7 @@ final class PasteGatePipelineTests: XCTestCase {
         var decidedAfter: TimeInterval?
         let engine = StubEngine("hello there")
         let run = await pipeline.process(samples, engine: engine,
-                                         context: { slowField(); return ("", "") },
-                                         selection: { slowField(); return "" },
+                                         context: { slowField(); return ("", "", "") },
                                          focusKept: {
                                              decidedAfter = ProcessInfo.processInfo.systemUptime - (engine.doneAt ?? 0)
                                              return false

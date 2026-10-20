@@ -179,7 +179,7 @@ final class NoAudioPipelineTests: XCTestCase {
         let engine = CountingEngine()
 
         for (samples, message) in [([Float](), MicAudio.noAudio), ([Float](repeating: 0, count: 8000), "No speech heard")] {
-            let run = await pipeline.process(samples, engine: engine, context: { ("", "") }, sendPaste: { _ in
+            let run = await pipeline.process(samples, engine: engine, context: { ("", "", "") }, sendPaste: { _ in
                 XCTFail("nothing may be pasted")
             })
             XCTAssertEqual(run.error, message)
@@ -190,7 +190,7 @@ final class NoAudioPipelineTests: XCTestCase {
 
         // Speech after the mic's warm-up zeros (about 130 ms on Pavel's Mac) is speech.
         let warmUp = [Float](repeating: 0, count: 2076) + (0..<5769).map { Float(sin(Double($0) * 0.2)) * 0.05 }
-        let run = await pipeline.process(warmUp, engine: engine, context: { ("", "") }, sendPaste: { _ in })
+        let run = await pipeline.process(warmUp, engine: engine, context: { ("", "", "") }, sendPaste: { _ in })
         XCTAssertEqual(engine.calls, 1)
         XCTAssertNotEqual(run.error, MicAudio.noAudio)
     }
