@@ -300,7 +300,8 @@ pub fn cli(dir: &Path, args: &[String]) -> Result<String, String> {
         }
         (Some("dict"), Some("remove")) if !rest.trim().is_empty() => {
             let old = read(DICTIONARY);
-            let body = without_entry(&old, rest.trim_start_matches('*'));
+            let key = Entry::parse(&rest).map_or(rest.clone(), |e| e.spoken); // `*x` and `x => y` name entry x
+            let body = without_entry(&old, &key);
             if body == old {
                 return Err(format!("not in the dictionary: {}", rest.trim()));
             }
@@ -454,7 +455,7 @@ mod tests {
         run(&["dict", "add", "btw", "=>", "by", "the", "way"]).unwrap();
         run(&["dict", "add", "github"]).unwrap();
         assert_eq!(run(&["dict", "list"]).unwrap(), "btw => by the way\ngithub\n", "re-adding replaces");
-        run(&["dict", "remove", "BTW"]).unwrap();
+        run(&["dict", "remove", "BTW", "=>", "by", "the", "way"]).unwrap();
         assert!(run(&["dict", "remove", "nope"]).is_err());
         assert_eq!(run(&["dict", "list"]).unwrap(), "github\n");
         assert!(std::fs::read_to_string(dir.join(DICTIONARY)).unwrap().starts_with("# shepetal"), "comments kept");
