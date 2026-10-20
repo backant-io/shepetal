@@ -270,23 +270,31 @@ final class HandoffTests: XCTestCase {
 
     // MARK: Issue #14: the stop notification carries no sender, so the stop request lives in the App Group.
 
-    func testStopRequestIsOnlyAcceptedForTheRecordingSession() {
-        var h = Handoff()
-        h.request(a, document: field, now: t0)
-        XCTAssertFalse(h.requestStop(a, now: t0)) // not recording yet: the keyboard starts over instead
-        XCTAssertTrue(h.startRecording(a, now: t0) {})
-        XCTAssertFalse(h.stopRequested)
-        XCTAssertFalse(h.requestStop(b, now: t0))
-        XCTAssertFalse(h.stopRequested)
-        XCTAssertTrue(h.requestStop(a, now: t0))
-        XCTAssertTrue(h.stopRequested)
-        XCTAssertTrue(h.shouldKeepRecording(a, now: t0)) // the request does not reset the 5-minute cap clock
-        XCTAssertFalse(h.shouldKeepRecording(a, now: t0 + Handoff.maxRecording))
-        var abandoned = recording(a, at: t0) // the app died mid-recording: the keyboard must start over, not wait on it
-        XCTAssertFalse(abandoned.requestStop(a, now: t0 + Handoff.maxRecording + Handoff.timeout + 1))
-        XCTAssertFalse(abandoned.stopRequested)
-        h.request(b, document: field, now: t0) // a new session never inherits the old stop
-        XCTAssertFalse(h.stopRequested)
+    func testStopRequestIsOnlyAcceptedForTheRecordingSession() throws {
+        let suite = "shepetal-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        SharedHandoff.update(in: defaults) { $0.request(a, document: field, now: t0) }
+        XCTAssertFalse(SharedHandoff.requestStop(a, now: t0, in: defaults)) // not recording yet: the keyboard starts over instead
+        SharedHandoff.update(in: defaults) { _ = $0.startRecording(a, now: t0) {} }
+        XCTAssertFalse(SharedHandoff.isStopRequested(a, in: defaults))
+        XCTAssertFalse(SharedHandoff.requestStop(b, now: t0, in: defaults))
+        XCTAssertFalse(SharedHandoff.isStopRequested(b, in: defaults))
+        // An extra field the decoder ignores: any rewrite of the record by the keyboard drops it.
+        var fields = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(defaults.data(forKey: "handoff"))) as? [String: Any])
+        fields["untouched"] = true
+        let record = try JSONSerialization.data(withJSONObject: fields)
+        defaults.set(record, forKey: "handoff")
+        XCTAssertTrue(SharedHandoff.read(in: defaults).canStop(a, now: t0))
+        XCTAssertTrue(SharedHandoff.requestStop(a, now: t0, in: defaults))
+        XCTAssertTrue(SharedHandoff.isStopRequested(a, in: defaults))
+        XCTAssertEqual(defaults.data(forKey: "handoff"), record) // #63: the keyboard never writes the app's record here
+        XCTAssertTrue(SharedHandoff.read(in: defaults).shouldKeepRecording(a, now: t0)) // the request does not reset the cap clock
+        // The app died mid-recording: the keyboard must start over, not wait on it.
+        XCTAssertFalse(SharedHandoff.read(in: defaults).canStop(a, now: t0 + Handoff.maxRecording + Handoff.timeout + 1))
+        SharedHandoff.update(in: defaults) { $0.request(b, document: field, now: t0) } // a new session never inherits the old stop
+        SharedHandoff.update(in: defaults) { _ = $0.startRecording(b, now: t0) {} }
+        XCTAssertFalse(SharedHandoff.isStopRequested(b, in: defaults))
     }
 
     // MARK: Goal rule 3: the keyboard's 🤫 ring follows the keyboard's own session.
