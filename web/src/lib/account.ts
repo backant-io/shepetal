@@ -47,3 +47,12 @@ export async function upsertUser(email: string): Promise<User> {
 export async function getLicense(email: string): Promise<License> {
   return licenseOf(await upsertUser(email));
 }
+
+/** A paid purchase: the user is 'active' forever. Idempotent (Stripe retries webhooks). False if no such user. */
+export async function activate(userId: number, now = Date.now()): Promise<boolean> {
+  const r = await db()
+    .prepare("UPDATE users SET status = 'active', purchased_at = COALESCE(purchased_at, ?2) WHERE id = ?1")
+    .bind(userId, new Date(now).toISOString())
+    .run();
+  return r.meta.changes === 1;
+}
