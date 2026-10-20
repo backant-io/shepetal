@@ -1,12 +1,12 @@
 use shepetal::gesture::{Action, Event, Gesture};
-use shepetal::{insert, meeting, model};
+use shepetal::{insert, meeting, model, vocab};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon\n\
+const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon | shepetal dict|snippet add|remove|list\n\
 env: SHEPETAL_KEY (default fn), SHEPETAL_MODEL (path to the model `probe` names: a sherpa-onnx dir or a ggml .bin)";
 
 fn main() {
@@ -14,6 +14,7 @@ fn main() {
     let res = match args.first().map(String::as_str) {
         Some("probe") => probe(args.get(1).filter(|a| *a == "--pw-dump").and(args.get(2))),
         Some("daemon") => daemon(),
+        Some("dict" | "snippet") => vocab::cli(&vocab::default_dir(), &args).map(|out| print!("{out}")),
         _ => Err(USAGE.into()),
     };
     if let Err(e) = res {
@@ -186,6 +187,7 @@ fn stop(mut child: Child) {
 fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
     use model::Engine::*;
     let path = model_path(m);
+    let vocab = vocab::Vocab::load(&vocab::default_dir());
     let file = |flag: &str, name: &str| {
         let mut a = std::ffi::OsString::from(format!("--{flag}="));
         a.push(path.join(name));
@@ -199,6 +201,9 @@ fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
             .arg("--model-type=nemo_transducer"),
         SherpaCtc => cmd.arg(file("nemo-ctc-model", "model.int8.onnx")),
     };
+    if let (Whisper, Some(p)) = (m.engine, vocab.prompt()) {
+        cmd.arg("--prompt").arg(p);
+    }
     if m.engine != Whisper {
         // A CPU-only sherpa-onnx build logs "Fallback to cpu!" for --provider=cuda and still runs.
         cmd.arg(file("tokens", "tokens.txt")).arg(format!("--provider={}", m.backend)).arg("--num-threads=4").arg(wav);
@@ -216,7 +221,7 @@ fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
         let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("{bin} output: {e}"))?;
         v["text"].as_str().ok_or(format!("{bin} output has no text"))?.to_string()
     };
-    Ok(text.split_whitespace().collect::<Vec<_>>().join(" "))
+    Ok(vocab.apply(&text.split_whitespace().collect::<Vec<_>>().join(" ")))
 }
 
 /// whisper.cpp writes non-speech as bracketed markers (`[BLANK_AUDIO]`, `[Music]`); they must
@@ -498,8 +503,11 @@ mod tests {
         }
         let path = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", format!("{d_}:{path}"));
+        let conf = std::env::var_os("XDG_CONFIG_HOME"); // the user's own dictionary stays out
+        std::env::set_var("XDG_CONFIG_HOME", &d);
         f(&d);
         std::env::set_var("PATH", path);
+        conf.map_or_else(|| std::env::remove_var("XDG_CONFIG_HOME"), |c| std::env::set_var("XDG_CONFIG_HOME", c));
         std::fs::remove_dir_all(&d).unwrap();
     }
 
@@ -642,6 +650,26 @@ mod tests {
                 assert_eq!(std::fs::read_to_string(d.join("stt.args")).unwrap(), want + "\n", "{choice:?}");
                 assert_eq!(std::fs::read(d.join("heard.wav")).unwrap(), b"RIFF");
             }
+        });
+    }
+
+    #[test]
+    fn the_dictionary_biases_whisper_and_fixes_the_text() {
+        with_fake_tools("vocab", |d| {
+            let wav = d.join("clip.wav");
+            std::fs::write(&wav, b"RIFF").unwrap();
+            let conf = d.join("shepetal");
+            vocab::save(&conf, vocab::DICTIONARY, "*hello => Hi\nWORLD\n").unwrap();
+            vocab::save(&conf, vocab::SNIPPETS, "\"hello world\" = \"expanded\"\n").unwrap();
+            let whisper = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: true });
+            assert_eq!(transcribe(&whisper, &wav).as_deref(), Ok("expanded"), "whole dictation is a snippet trigger");
+            let args = std::fs::read_to_string(d.join("stt.args")).unwrap();
+            assert!(args.ends_with(" -l auto --prompt hello, WORLD\n"), "{args}");
+            vocab::save(&conf, vocab::SNIPPETS, "").unwrap();
+            assert_eq!(transcribe(&whisper, &wav).as_deref(), Ok("Hi WORLD."));
+            let sherpa = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: false });
+            assert_eq!(transcribe(&sherpa, &wav).as_deref(), Ok("Hi WORLD."), "the text fix applies to every engine");
+            assert!(!std::fs::read_to_string(d.join("stt.args")).unwrap().contains("--prompt"));
         });
     }
 }
