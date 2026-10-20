@@ -73,3 +73,48 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
+
+### M-INS-5: space before the following word (F109)
+1. In TextEdit type "Hello world", then put the cursor right before "world". Hold fn, say "big", then release.
+2. Expected: "Hello big world", with one space on each side of "big".
+3. Select "big world" and press Cmd+C. In Terminal run `pbpaste | xxd | head -2`. Expected: `c2 a0` (a non-breaking space) right after "big", not `20`.
+
+### M-INS-6: replace a selection (F109)
+1. In TextEdit type "Send the draft today." Double-click "draft". Hold fn, say "Final version.", then release.
+2. Expected: "Send the final version today." The new words are lowercase like "draft", and there is no period after them.
+3. Select "today." including its period. Hold fn and say "Tomorrow". Expected: "Send the final version tomorrow." with the period kept.
+4. Select " version " with the spaces on both sides. Say "copy". Expected: "Send the final copy tomorrow." with no double or missing spaces.
+
+### M-FOC-1: focus goes back to where you started (F27)
+1. Open a TextEdit document and Notes. Click into the TextEdit document. Double-tap fn and say a sentence.
+2. Click into a Notes note, then tap fn once to stop.
+3. Expected: TextEdit comes to the front and the sentence lands in the TextEdit document. Notes gets nothing.
+4. Repeat steps 1 and 2, but close the TextEdit document (Don't Save) before tapping fn. Expected: TextEdit comes to the front. With no text field, "Paste did not land. The text is in Recent." shows next to 🤫.
+5. Repeat steps 1 and 2, but quit TextEdit before tapping fn. Expected: the sentence lands in the Notes note.
+
+### M-SEC-1: Secure Input (F17)
+1. Open Terminal and turn on Terminal > Secure Keyboard Entry. Keep Terminal in front for about 3 s.
+2. Expected: "Secure input is on in Terminal, so fn can't be heard" shows next to 🤫 once. It does not come back every 2 s.
+3. Still in Terminal, hold fn, speak, then release. Expected: either nothing records (macOS hides fn from Shepetal), or "Secure input is on in Terminal. The text is in Recent." shows, nothing is pasted, the clipboard holds what you copied before, and Recent has the text. Write down which one happened.
+4. Click into another app, so Terminal no longer holds secure input. Expected: the note is gone if it was still showing. Click back into Terminal. Expected: the note shows once more.
+5. Turn Secure Keyboard Entry off again.
+
+### M-PERM-5: a permission turned off while Shepetal runs (F90)
+1. Start Shepetal with all three permissions ✅. Open System Settings > Privacy & Security > Accessibility and turn Shepetal off.
+2. Expected: within 2 s, a yellow ring and "Accessibility access was turned off" next to 🤫, and the Permissions window opens with Accessibility ⚠️. The message shows once, not every 2 s.
+3. Turn Shepetal back on. Expected: the yellow ring clears within 2 s. Turn it off again. Expected: the message shows again.
+4. Repeat steps 1 to 3 with Microphone and with Input Monitoring. After turning Input Monitoring back on, hold fn in TextEdit and speak. Expected: it records and inserts. If fn does nothing until Shepetal restarts, note it on #32.
+5. Quit Shepetal, run `open dist/Shepetal.app --args --no-permission-prompts`, and turn Accessibility off. Expected: the message and the yellow ring show, but no window opens.
+
+### M-LOGIN-1: Open at login (F92)
+1. Open the 🤫 menu and choose Open at login.
+2. Expected: the item is checked. If macOS wants approval instead, "Allow Shepetal in System Settings > General > Login Items" shows next to 🤫 and System Settings opens at Login Items. Allow Shepetal there. The item is then checked the next time you open the menu.
+3. Log out and log back in. Expected: 🤫 is in the bottom-left corner and in the menu bar without you opening Shepetal, and there is no Dock icon.
+4. Choose Open at login again. Expected: unchecked, and Shepetal is gone from Login Items. Every `scripts/make-app.sh` build has a new ad-hoc signature, so turn it off and on again after a rebuild.
+
+### M-SND-1: sounds (F06)
+1. Turn the volume up. Hold fn, speak, and release. Expected: a short rising blip when the ring turns red and a short falling blip on release. Neither is loud.
+2. Double-tap fn. Expected: a quick double blip when the ring turns orange. Tap fn to stop: the falling blip.
+3. Press fn+Delete. Expected: a low tone. Tap fn briefly once. Expected: no sound, only the hint.
+4. Play the newest WAV in Open recordings folder. The start blip may be faint at the very start. Expected: the transcript in Recent has no extra word from it.
+5. Uncheck Sounds in the 🤫 menu. Expected: steps 1 to 3 make no sound. Quit and reopen Shepetal: Sounds is still unchecked.

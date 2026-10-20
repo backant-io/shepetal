@@ -70,8 +70,9 @@ final class InsertionRulesTests: XCTestCase {
 
     // The spaces around the selection are the user's; the paste replaces them, so they go back.
     func testSelectionKeepsItsSpaces() {
-        XCTAssertEqual(fit("Bar baz.", "a", "b", selected: " Foo "), " Bar baz ")
+        XCTAssertEqual(fit("Bar baz.", "(", ")", selected: " Foo "), " Bar baz ")
         XCTAssertEqual(fit("Bar baz.", "a", "b", selected: " foo "), " bar baz ")
+        XCTAssertEqual(fit("Bar baz.", "", "", selected: "\tfoo\n"), "\tbar baz\n")
     }
 
     // "I" and acronyms keep their capital, and a selected "I" or acronym says nothing about sentence position.
