@@ -5,20 +5,21 @@ import ShepetalCore
 
 /// Goal rule 3: 🤫 is tiny, sits in the bottom-left corner of the main display, is on top on every Space and
 /// over full-screen apps, never takes focus or clicks, and shows at all times. States show at it.
+/// The panels here are never put on screen: `present` only counts, and the display is a fixed frame.
 final class IndicatorTests: XCTestCase {
-    var made: [Indicator] = []
+    var presented = 0
+
+    /// A main display that is not at the origin of the global space, so a frame that ignores it is caught.
+    let mainScreen = NSRect(x: 100, y: 50, width: 1440, height: 900)
 
     override func setUp() {
         _ = NSApplication.shared  // a window needs the app object, even in the test bundle
+        presented = 0
     }
 
-    override func tearDown() {
-        for i in made { i.panel.orderOut(nil) }  // don't leave test panels on screen
-    }
-
-    func make() -> Indicator {
-        let i = Indicator()
-        made.append(i)
+    func make(file: StaticString = #filePath, line: UInt = #line) -> Indicator {
+        let i = Indicator(screen: { [mainScreen] in mainScreen }, present: { [unowned self] _ in self.presented += 1 })
+        XCTAssertFalse(i.panel.isVisible, "tests must not put 🤫 on screen", file: file, line: line)
         return i
     }
 
@@ -29,9 +30,6 @@ final class IndicatorTests: XCTestCase {
         XCTAssertEqual(Indicator.frame(screen: NSRect(x: -1920, y: -200, width: 1920, height: 1080), labelWidth: nil),
                        NSRect(x: -1912, y: -192, width: 18, height: 18))
     }
-
-    /// The main display holds the menu bar; with no display (headless) layout() falls back to .zero.
-    var mainScreen: NSRect { NSScreen.screens.first?.frame ?? .zero }
 
     func testLivePanelSitsInTheBottomLeftCorner() {
         let indicator = make()
@@ -60,14 +58,18 @@ final class IndicatorTests: XCTestCase {
         XCTAssertFalse(panel.canBecomeKey)
         XCTAssertFalse(panel.canBecomeMain)
         XCTAssertFalse(panel.hidesOnDeactivate, "an accessory app is never active, so this would hide 🤫")
-        XCTAssertTrue(panel.isVisible, "🤫 shows from launch, idle included")
     }
 
-    func testIdleStaysVisible() {
+    /// 🤫 is presented once at launch and never hidden: no state, hint or hint ending orders it out.
+    func testPresentedOnceAndNeverHidden() {
         let indicator = make()
-        indicator.set(.recording)
-        indicator.set(.idle)
-        XCTAssertTrue(indicator.panel.isVisible)
+        XCTAssertEqual(presented, 1, "🤫 shows from launch, idle included")
+        for mode: Indicator.Mode in [.recording, .idle, .handsFree, .processing, .error, .idle] { indicator.set(mode) }
+        indicator.show(Hint.shortPress, seconds: 0.05)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertNil(indicator.labelText)
+        XCTAssertEqual(indicator.panel.orderedOut, 0, "🤫 must never be ordered out")
+        XCTAssertEqual(presented, 1)
     }
 
     func testHintShowsThenHides() throws {
