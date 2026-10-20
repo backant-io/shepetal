@@ -21,6 +21,7 @@ public struct FnGesture: Equatable {
     }
 
     public var holdThreshold: TimeInterval = 0.5
+    /// From the first tap's release to the second press ("0.5 s between fns"). There is no minimum tap length.
     public var doubleTapWindow: TimeInterval = 0.5
     public var chordWindow: TimeInterval = 1.0
     public private(set) var state: State = .idle
@@ -84,10 +85,12 @@ public struct FnGesture: Equatable {
 /// The short-press hint shown next to the indicator. Our own wording.
 public enum Hint {
     public static let shortPress = "Hold fn to talk · double-tap for hands-free"
-    public static let seconds: TimeInterval = 2
+    public static let seconds: TimeInterval = 3
 }
 
-/// Which events are fn. fn is keycode 63 on flagsChanged; newer Apple keyboards send the Globe key as 179.
+/// Which events are fn: keycode 63 on flagsChanged. macOS also sends the Globe key as keycode 179 key events, which
+/// are not presses: read as fn, the pair after a release made one tap a double-tap. Wispr drops them too
+/// ("doubleFn", docs/re/dictation-input.md 2.2). The tap ignores `globe` entirely.
 public enum FnKey {
     public static let keycode: Int64 = 63
     public static let globe: Int64 = 179
@@ -95,7 +98,7 @@ public enum FnKey {
     /// `isKeyDown` is nil for flagsChanged, true/false for keyDown/keyUp.
     /// Returns true when fn went down, false when it went up, nil when the event is not fn.
     public static func transition(keycode: Int64, secondaryFn: Bool, isKeyDown: Bool?) -> Bool? {
-        guard keycode == Self.keycode || keycode == globe else { return nil }
+        guard keycode == Self.keycode else { return nil }
         return isKeyDown ?? secondaryFn
     }
 }

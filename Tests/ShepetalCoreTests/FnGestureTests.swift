@@ -8,6 +8,7 @@ final class FnGestureTests: XCTestCase {
         XCTAssertEqual(g.fnDown(at: 10), [.start])
         XCTAssertEqual(g.fnUp(at: 10.6), [.stop])
         XCTAssertEqual(g.state, .idle)
+        XCTAssertNil(g.deadline, "the transcript starts on the release; nothing waits for a timer or another fn press")
     }
 
     // The 500 ms threshold is a product decision: 0.49 s is a tap, 0.5 s is a hold.
@@ -36,7 +37,47 @@ final class FnGestureTests: XCTestCase {
     func testHintWordingAndDuration() {
         XCTAssertTrue(Hint.shortPress.contains("Hold fn"), Hint.shortPress)
         XCTAssertTrue(Hint.shortPress.contains("double-tap"), Hint.shortPress)
-        XCTAssertEqual(Hint.seconds, 2, accuracy: 0.5)
+        XCTAssertEqual(Hint.seconds, 3, accuracy: 0.5, "Pavel: a lone short tap gets a 3 second notice")
+    }
+
+    // "0.5 seconds between fns": the window runs from the first release to the second press (as in docs/linux.md
+    // and the Windows gesture). 0.5 s after the release is still a double-tap; any later and the first tap was
+    // too short, and the timer settles it when the window closes, without another fn press.
+    func testDoubleTapWindowBoundary() {
+        var g = FnGesture()
+        _ = g.fnDown(at: 0)
+        _ = g.fnUp(at: 0.25)
+        XCTAssertEqual(g.fnDown(at: 0.75), [.lockHandsFree], "second press 0.5 s after the release")
+
+        var late = FnGesture()
+        _ = late.fnDown(at: 0)
+        _ = late.fnUp(at: 0.25)
+        XCTAssertEqual(late.fnDown(at: 0.751), [.tooShort, .start], "0.501 s after the release is not a double-tap")
+
+        var lone = FnGesture()
+        _ = lone.fnDown(at: 0)
+        _ = lone.fnUp(at: 0.25)
+        XCTAssertEqual(lone.deadline, 0.75)
+        XCTAssertEqual(lone.tick(at: 0.7499), [])
+        XCTAssertEqual(lone.tick(at: 0.75), [.tooShort])
+    }
+
+    // Pavel (2026-10-21): a double-tap can be very quick, 30-60 ms taps with 40-80 ms between them. There is no
+    // minimum tap length: each locks hands-free on the second press with nothing left pending, and one tap ends it
+    // with the transcript on that tap's press, not on a timer or a later fn event.
+    func testQuickDoubleTapsLockAndOneTapTranscribes() {
+        for (tap, gap) in [(0.03, 0.04), (0.045, 0.06), (0.06, 0.08), (0.005, 0.005)] {
+            var g = FnGesture()
+            XCTAssertEqual(g.fnDown(at: 0), [.start])
+            XCTAssertEqual(g.fnUp(at: tap), [], "\(tap) s tap")
+            XCTAssertEqual(g.fnDown(at: tap + gap), [.lockHandsFree], "\(tap) s tap, \(gap) s gap")
+            XCTAssertEqual(g.fnUp(at: 2 * tap + gap), [])
+            XCTAssertNil(g.deadline, "hands-free waits for nothing")
+            XCTAssertEqual(g.fnDown(at: 9), [.stop], "the ending tap transcribes on its press")
+            XCTAssertEqual(g.state, .idle)
+            XCTAssertNil(g.deadline)
+            XCTAssertEqual(g.fnUp(at: 9 + tap), [])
+        }
     }
 
     // Double-tap: the second press inside the window locks hands-free; release does not stop it;
@@ -109,8 +150,9 @@ final class FnGestureTests: XCTestCase {
     func testFnKeyClassification() {
         XCTAssertEqual(FnKey.transition(keycode: 63, secondaryFn: true, isKeyDown: nil), true)
         XCTAssertEqual(FnKey.transition(keycode: 63, secondaryFn: false, isKeyDown: nil), false)
-        XCTAssertEqual(FnKey.transition(keycode: 179, secondaryFn: false, isKeyDown: true), true)
-        XCTAssertEqual(FnKey.transition(keycode: 179, secondaryFn: true, isKeyDown: false), false)
+        // The Globe key's extra keycode 179 events are not fn presses (FnTapTests.testGlobeKeyEventsAreIgnored).
+        XCTAssertNil(FnKey.transition(keycode: 179, secondaryFn: true, isKeyDown: true))
+        XCTAssertNil(FnKey.transition(keycode: 179, secondaryFn: false, isKeyDown: false))
         // Arrow keys carry the secondary-fn flag too; they are not fn.
         XCTAssertNil(FnKey.transition(keycode: 123, secondaryFn: true, isKeyDown: true))
         XCTAssertNil(FnKey.transition(keycode: 56, secondaryFn: false, isKeyDown: nil))

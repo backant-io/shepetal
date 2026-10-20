@@ -44,7 +44,7 @@ No code is shared across platforms yet. Each platform implements the same rules 
 **Mac** (`Sources/Shepetal/`, built into `dist/Shepetal.app` by `scripts/make-app.sh`):
 - `App.swift`: menu-bar item (Recent, Recordings retention, Permissions, Donate, Quit) and the hourly retention sweep.
 - `Indicator.swift`: borderless, non-activating `NSPanel`, 18 pt, 8 pt from the bottom-left corner, on all Spaces, click-through.
-- `FnTap.swift`: listen-only `CGEventTap` for fn (63) and Globe (179), re-enabled when macOS disables it.
+- `FnTap.swift`: listen-only `CGEventTap` for fn (63, flagsChanged), re-enabled when macOS disables it. The Globe key's extra keycode 179 key events are ignored.
 - `Audio.swift`: `AVAudioEngine` capture, resampled to 16 kHz mono.
 - `Speech.swift`: FluidAudio Parakeet TDT 0.6B v3 from its local cache, with whisper.cpp `whisper-cli` as the fallback.
 - `Inserter.swift`: promised pasteboard item, Cmd+V, paste check, clipboard restore, and the text around the cursor read through Accessibility.

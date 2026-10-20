@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The one Shepetal window: Home, History and Settings. It opens from the 🤫 menu and when the app is
 /// opened again while it runs, never at launch. Settings added by other parts (shortcuts, mic,
-/// languages, dictionary, sounds, login) stay in the 🤫 menu for now.
+/// languages, dictionary, login) stay in the 🤫 menu for now.
 @MainActor
 final class Hub {
     private let window: NSWindow
@@ -215,9 +215,14 @@ private struct HistoryTab: View {
 
 private struct SettingsTab: View {
     @ObservedObject var model: HubModel
+    @AppStorage(MeetingRecorder.autoRecordKey) private var autoRecordMeetings = false
 
     var body: some View {
         Form {
+            Toggle("Always record meetings automatically", isOn: $autoRecordMeetings)
+            Text(autoRecordMeetings ? "A detected meeting records right away, with the red ring next to 🤫 the whole time."
+                                    : "A detected meeting records only after you click Record next to 🤫.")
+                .font(.caption).foregroundStyle(.secondary)
             Picker("Recordings", selection: Binding(get: model.retention, set: model.changeRetention)) {
                 Text("Keep recordings").tag(Retention.keep)
                 Text("Delete recordings after 24 hours").tag(Retention.delete24h)
