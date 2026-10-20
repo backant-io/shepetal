@@ -59,9 +59,12 @@ installer\test-install.ps1 target\installer\shepetal-setup-0.1.0.exe   # silent 
 
 CI (`.github/workflows/windows.yml`, job `windows`, on windows-latest) runs all of the above and uploads `shepetal-setup-<version>.exe` as the `shepetal-windows-setup` artifact.
 
-The pure crates also test on Linux or macOS (`app` takes only `core` and the pure half of `input` off Windows):
+The pure crates also test on Linux or macOS (`app` takes only `core` and the pure half of `input` off Windows). CI runs this as the `windows-pure-on-linux` job:
 
 ```sh
+cd windows
+cargo test -p app -p shepetal-core -p input -p insert -p meetings
+# or, without a Rust toolchain, from the repo root:
 docker run --rm -v "$PWD/windows":/src -w /src -e CARGO_TARGET_DIR=/tmp/target rust:1-slim \
   cargo test -p app -p shepetal-core -p input -p insert -p meetings
 ```

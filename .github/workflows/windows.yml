@@ -54,3 +54,15 @@ jobs:
           name: shepetal-windows-setup
           path: windows/target/installer/shepetal-setup-*.exe
           if-no-files-found: error
+
+  windows-pure-on-linux:
+    # The platform-free crates, and the app's flow on top of them, test on Linux too. audio is
+    # Windows-only here: it builds whisper.cpp and needs WASAPI through cpal.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v7
+      - run: cargo test --locked -p app -p shepetal-core -p input -p insert -p meetings

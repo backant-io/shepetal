@@ -5,8 +5,11 @@
 //! caller passes the result to `transcribed`.
 
 use input::{Key, KeyEvent, Mode};
-use shepetal_core::gesture::Key::{Ctrl, Esc, Win};
-use shepetal_core::gesture::{Action, Gesture, Key as GestureKey, HINT_MS, SHORT_PRESS_HINT};
+use shepetal_core::gesture::{short_press_hint, Action, Gesture, HINT_MS, VK_ESCAPE};
+
+/// The dictation hotkey. Windows keyboards don't report fn, so it is Ctrl+Win, the default of
+/// Wispr's Windows app. `win.rs` parses it for the hook, and the short-press hint names it.
+pub const HOTKEY: &str = "Ctrl+Win";
 
 /// Why a clip was kept. Every recording is kept (goal rule 4); cancelled and too-short ones are
 /// marked as such.
@@ -43,15 +46,13 @@ pub trait Show {
     fn hint(&mut self, text: &str);
 }
 
-/// Feeds one key event from the input hook into the core gesture. The hook reports the whole
-/// hotkey going down or up; the gesture tracks Ctrl and Win itself, so both go in, released in
-/// the order the core's own tests use.
+/// Feeds one key event from the input hook into the core gesture.
 pub fn feed(g: &mut Gesture, ev: KeyEvent, t: u64) -> Vec<Action> {
     match (ev.key, ev.down) {
-        (Key::Hotkey, true) => [g.key_down(Ctrl, t), g.key_down(Win, t)].concat(),
-        (Key::Hotkey, false) => [g.key_up(Win, t), g.key_up(Ctrl, t)].concat(),
-        (Key::Esc, true) => g.key_down(Esc, t),
-        (Key::Other(vk), true) => g.key_down(GestureKey::from_vk(vk.into()), t),
+        (Key::Hotkey, true) => g.hotkey_down(t),
+        (Key::Hotkey, false) => g.hotkey_up(t),
+        (Key::Esc, true) => g.key_down(VK_ESCAPE, t),
+        (Key::Other(vk), true) => g.key_down(vk, t),
         _ => vec![],
     }
 }
@@ -118,7 +119,7 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
                     Ok(()) => {
                         self.mode(Mode::Idle);
                         if why == Kept::TooShort {
-                            self.show.hint(SHORT_PRESS_HINT);
+                            self.show.hint(&short_press_hint(HOTKEY));
                         }
                     }
                 }
@@ -245,6 +246,13 @@ mod tests {
     }
 
     #[test]
+    fn the_hotkey_is_ctrl_win_and_the_hint_names_it() {
+        // Windows keyboards don't report fn, so the default is Ctrl+Win, as in Wispr's Windows
+        // app. The hook's key and the hint's wording come from the same constant.
+        assert_eq!(input::Hotkey::parse(HOTKEY), Ok(input::Hotkey::default()));
+    }
+
+    #[test]
     fn hook_events_drive_the_core_gesture() {
         // input reports the hotkey as one key; the core gesture wants Ctrl and Win. If the glue
         // drops either, Ctrl+Win never starts a dictation.
@@ -299,7 +307,8 @@ mod tests {
         f.action(Action::Start, 0);
         take(&log);
         assert_eq!(f.action(Action::TooShort, 600), None);
-        assert_eq!(take(&log), ["mic stop".to_string(), "keep 16 TooShort".into(), "mode Idle".into(), format!("hint {SHORT_PRESS_HINT}")]);
+        let hint = "hint Hold Ctrl+Win to talk · double-tap for hands-free";
+        assert_eq!(take(&log), ["mic stop", "keep 16 TooShort", "mode Idle", hint]);
         f.action(Action::Start, 5000);
         take(&log);
         assert_eq!(f.action(Action::Cancel, 5200), None);

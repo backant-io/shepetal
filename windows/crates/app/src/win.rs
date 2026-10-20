@@ -217,7 +217,7 @@ pub fn run() {
     if !onboarding(&data.join("models"), model) {
         return;
     }
-    let (ui, events) = match input::spawn(input::Hotkey::default()) {
+    let (ui, events) = match input::spawn(input::Hotkey::parse(flow::HOTKEY).unwrap_or_default()) {
         Ok(x) => x,
         Err(e) => return message(&format!("Shepetal can't watch the keyboard or show its 🤫: {e}")),
     };
