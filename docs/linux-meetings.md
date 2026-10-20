@@ -1,7 +1,7 @@
 # Meeting recording on Linux
 
 `shepetal daemon` detects meetings on its own (goal rule 7). It records one only after you click
-Record on a Record? prompt, or always with `SHEPETAL_MEETING_AUTO_RECORD=1`. The code is in
+Record on a Record? prompt, or always with auto-record on (see Settings). The code is in
 `linux/src/meeting_rec.rs`, and the pw-dump parsing it uses is in `linux/src/meeting.rs`.
 
 ## What it does
@@ -21,7 +21,8 @@ Record on a Record? prompt, or always with `SHEPETAL_MEETING_AUTO_RECORD=1`. The
      meeting, and it does not ask again until the next one. An unanswered prompt is withdrawn
      (notify-send gets SIGINT and closes it).
    - If the call ends first, the prompt is withdrawn too.
-   - With `SHEPETAL_MEETING_AUTO_RECORD=1` it records right away, with no prompt.
+   - With auto-record on (`{"meetings": {"auto_record": true}}` in config.json) it records
+     right away, with no prompt.
    - Without `notify-send` (package libnotify-bin) and without auto-record, the daemon says so
      at startup and records no meetings.
 3. On Record (or right away with auto-record), it creates
@@ -58,12 +59,21 @@ Nothing leaves the machine.
 
 ## Settings
 
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `SHEPETAL_MEETING_AUTO_RECORD` | unset (ask) | `1` records every detected meeting without the Record? prompt ("Always record automatically"). Unset or `0` asks first. Any other value stops the daemon with an error |
-| `SHEPETAL_MEETING_THRESHOLDS` | see below | The detection and prompt thresholds |
+"Always record automatically" is off by default. Turn it on in the daemon's settings file,
+`$XDG_CONFIG_HOME/shepetal/config.json` (else `~/.config/shepetal/config.json`), next to the
+shortcuts (docs/linux-shortcuts.md):
 
-These are environment variables, like `SHEPETAL_KEY` and `SHEPETAL_MODEL` (docs/linux.md).
+```json
+{"meetings": {"auto_record": true}}
+```
+
+- Then every detected meeting records with no Record? prompt.
+- Missing, or `false`: ask first.
+- A typo in `meetings`, a value that is not `true` or `false`, or broken JSON stops the daemon
+  at startup with an error that names the file. It never falls back to recording silently.
+
+The detection and prompt thresholds are a tuning knob in `SHEPETAL_MEETING_THRESHOLDS`
+(see Thresholds).
 
 ## Retention
 
@@ -101,7 +111,7 @@ the error.
 
 ## Security
 
-- Nothing records without a click on Record, unless `SHEPETAL_MEETING_AUTO_RECORD=1` is set.
+- Nothing records without a click on Record, unless auto-record is on.
   With Do Not Disturb on, GNOME shows no banner. The meeting then records only if Record is
   clicked in the notification list within 20 s.
 - The `meetings` directory and each meeting folder are 0700. `Me.wav`, `Others.wav` and
@@ -121,8 +131,9 @@ the error.
 - Folder and file permissions.
 - The recorder and whisper-cli arguments, and whisper output parsing.
 - Transcript formatting.
-- The `notify-send` arguments, the 20 s default, and that only `SHEPETAL_MEETING_AUTO_RECORD=1`
-  turns auto-record on.
+- The `notify-send` arguments, the 20 s default, and that only `"auto_record": true` turns
+  auto-record on: a missing file, other features' keys, and `false` ask first, and a typo is an
+  error.
 - Whole meetings against fake `pw-dump`, `pw-record`, `whisper-cli` and `notify-send`, each run
   in a child copy of the test binary so it can set its own PATH:
   - Record clicked: recorded and transcribed.
@@ -177,10 +188,11 @@ click Record on the prompt.
     SIGINT does not close it on this notify-send version (see the known gaps).
 12. Join a call and leave it within 10 s, before clicking. When the daemon prints
     `meeting ended before Record was clicked`, the notification must disappear.
-13. Restart the daemon with `SHEPETAL_MEETING_AUTO_RECORD=1`. The startup line must say
-    `recording every meeting`. Join a call: it must record within about 8 s with no
-    notification. `SHEPETAL_MEETING_AUTO_RECORD=yes` must stop the daemon at startup with an
-    error.
+13. Put `{"meetings": {"auto_record": true}}` in `~/.config/shepetal/config.json` and restart
+    the daemon. The startup line must say `recording every meeting`. Join a call: it must
+    record within about 8 s with no notification. With `"auto_record": "yes"` instead, the
+    daemon must stop at startup with `...config.json: meetings.auto_record: expected true or
+    false`. Remove the key afterwards.
 
 ## Known gaps
 
@@ -201,8 +213,10 @@ click Record on the prompt.
   draws a card in its own window).
 - The call before the click is not recorded, and a click is seen up to 2 s late.
 - notify-send older than libnotify 0.7.10 (Ubuntu 22.04 has 0.7.9) has no `--action`. The
-  prompt then fails, the daemon prints `notify-send failed`, and nothing is recorded. Set
+  prompt then fails, the daemon prints `notify-send failed`, and nothing is recorded. Turn on
   auto-record, or upgrade.
+- The settings file is config.json (shortcuts, meetings), but the mic ranking reads
+  config.toml (docs/linux-mic.md). Tracked in #144.
 - That SIGINT makes notify-send close the notification is from libnotify's source, not tested
   on hardware. Step 11 checks it.
 - There is no wake holdoff and no re-stop suppression.

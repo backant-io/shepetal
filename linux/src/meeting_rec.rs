@@ -1,12 +1,12 @@
 //! Meeting recording in `shepetal daemon` (goal rule 7, docs/re/meetings.md section 7).
 //! Every 2 s it reads `pw-dump`. Once a meeting app has held the mic for the start grace, it
 //! shows a Record? notification. Only a click on Record starts the recording of the mic and
-//! the default sink's monitor into two WAVs (`SHEPETAL_MEETING_AUTO_RECORD=1` records without
-//! asking). When the call ends, it stops them and writes a Me / Others transcript next to them.
+//! the default sink's monitor into two WAVs (`{"meetings": {"auto_record": true}}` in config.json
+//! records without asking). When the call ends, it stops them and writes a Me / Others transcript next to them.
 //! The audio is always kept (rule 4).
 
 use serde_json::Value;
-use shepetal::{insert, meeting, model};
+use shepetal::{insert, meeting, model, shortcuts};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -64,14 +64,32 @@ impl Thresholds {
     }
 }
 
-/// `SHEPETAL_MEETING_AUTO_RECORD`: 1 records every detected meeting without asking. Unset or 0
-/// (the default) asks first with the Record? prompt.
-fn auto_record(v: &str) -> Result<bool, String> {
-    match v.trim() {
-        "" | "0" => Ok(false),
-        "1" => Ok(true),
-        v => Err(format!("SHEPETAL_MEETING_AUTO_RECORD={v:?}: want 1 (always record) or 0 (ask first, the default)")),
+/// "Always record automatically": `{"meetings": {"auto_record": true}}` in config.json (the
+/// daemon's one settings file, `shortcuts::config_file`) records every detected meeting without
+/// asking. Missing or false (the default) asks first with the Record? prompt. As for the
+/// shortcuts, other features' keys are skipped, and a typo or a wrong type is an error.
+fn auto_record(json: &str) -> Result<bool, String> {
+    let v: Value = if json.trim().is_empty() { Value::Null } else { serde_json::from_str(json).map_err(|e| e.to_string())? };
+    let mut auto = false;
+    if let Some(m) = v.get("meetings") {
+        for (k, val) in m.as_object().ok_or("\"meetings\" must be an object")? {
+            match k.as_str() {
+                "auto_record" => auto = val.as_bool().ok_or("meetings.auto_record: expected true or false")?,
+                k => return Err(format!("unknown meetings setting {k:?} (auto_record)")),
+            }
+        }
     }
+    Ok(auto)
+}
+
+/// `auto_record` from the config file. A missing file means the default (ask first).
+fn load_auto_record(path: &Path) -> Result<bool, String> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(format!("{}: {e}", path.display())),
+    };
+    auto_record(&text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The Record? prompt: a desktop notification (org.freedesktop.Notifications, through
@@ -345,7 +363,8 @@ fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
 /// recording is lost, and the thread says so.
 pub fn spawn(stt: &model::Choice) -> Result<(), String> {
     let t = Thresholds::parse(&crate::env("SHEPETAL_MEETING_THRESHOLDS")).map_err(|e| format!("SHEPETAL_MEETING_THRESHOLDS: {e}"))?;
-    let auto = auto_record(&crate::env("SHEPETAL_MEETING_AUTO_RECORD"))?;
+    let config = shortcuts::config_file(std::env::var("XDG_CONFIG_HOME").ok().as_deref(), &crate::env("HOME"));
+    let auto = load_auto_record(&config)?;
     // Checked on PATH: Rust 1.75 (Ubuntu 24.04) spawns a missing program as a child that exits
     // 127, so a spawn error alone would not say that the tool is missing.
     if !insert::on_path("pw-dump") || !(insert::on_path("pw-record") || insert::on_path("parecord")) {
@@ -353,7 +372,7 @@ pub fn spawn(stt: &model::Choice) -> Result<(), String> {
         return Ok(());
     }
     if !auto && !insert::on_path("notify-send") {
-        eprintln!("shepetal: meetings are not recorded: the Record? prompt needs notify-send (libnotify-bin), or set SHEPETAL_MEETING_AUTO_RECORD=1 to record every meeting without asking");
+        eprintln!("shepetal: meetings are not recorded: the Record? prompt needs notify-send (libnotify-bin), or put {{\"meetings\": {{\"auto_record\": true}}}} in {} to record every meeting without asking", config.display());
         return Ok(());
     }
     let data_home = PathBuf::from(crate::data_home());
@@ -366,7 +385,7 @@ pub fn spawn(stt: &model::Choice) -> Result<(), String> {
     if !model.exists() || !insert::on_path("whisper-cli") {
         eprintln!("shepetal: meetings are recorded but not transcribed until whisper-cli and {} are installed", model.display());
     }
-    let how = if auto { "recording every meeting (SHEPETAL_MEETING_AUTO_RECORD=1)" } else { "asking before each recording" };
+    let how = if auto { "recording every meeting (meetings.auto_record)" } else { "asking before each recording" };
     eprintln!("shepetal: meeting detection on, {how}, {t:?} ms (SHEPETAL_MEETING_THRESHOLDS)");
     std::thread::spawn(move || run(&t, auto, &data_home, &model));
     Ok(())
@@ -439,7 +458,7 @@ fn run(t: &Thresholds, auto_record: bool, data_home: &Path, model: &Path) {
                     match out.trim() {
                         "record" => begin = true,
                         _ if status.success() => eprintln!("shepetal: meeting not recorded: the Record? prompt was dismissed"),
-                        _ => eprintln!("shepetal: meeting not recorded: notify-send failed ({status}). The Record? prompt needs a notification daemon and libnotify 0.7.10 or later, or set SHEPETAL_MEETING_AUTO_RECORD=1"),
+                        _ => eprintln!("shepetal: meeting not recorded: notify-send failed ({status}). The Record? prompt needs a notification daemon and libnotify 0.7.10 or later, or set meetings.auto_record in config.json"),
                     }
                 }
                 Err(e) => eprintln!("shepetal: meeting not recorded: notify-send: {e}"),
@@ -612,11 +631,24 @@ mod tests {
     #[test]
     fn auto_record_is_opt_in() {
         // Pavel's rule: a detected meeting records only after one click, unless the user turned on
-        // always-record. Anything but an explicit 1 must not record silently.
-        assert_eq!((auto_record(""), auto_record("0"), auto_record("1")), (Ok(false), Ok(false), Ok(true)));
-        for bad in ["true", "yes", "2"] {
-            assert!(auto_record(bad).is_err(), "{bad} stops the daemon instead of guessing");
+        // always-record. Only an explicit `true` records without asking.
+        for off in ["", "{}", r#"{"shortcuts": {"paste_last": "shift+alt+z"}}"#, r#"{"meetings": {}}"#, r#"{"meetings": {"auto_record": false}}"#] {
+            assert_eq!(auto_record(off), Ok(false), "{off}");
         }
+        assert_eq!(auto_record(r#"{"retention": "keep", "meetings": {"auto_record": true}}"#), Ok(true));
+        // A typo or a wrong type stops the daemon instead of guessing either way.
+        for bad in [r#"{"meetings": {"auto_record": "yes"}}"#, r#"{"meetings": {"autorecord": true}}"#, r#"{"meetings": true}"#, "{"] {
+            assert!(auto_record(bad).is_err(), "{bad}");
+        }
+        assert_eq!(auto_record(r#"{"meetings": {"auto_recrd": true}}"#), Err("unknown meetings setting \"auto_recrd\" (auto_record)".into()));
+
+        let d = std::env::temp_dir().join(format!("shepetal-autorec-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        assert_eq!(load_auto_record(&d.join("missing.json")), Ok(false), "no config file: ask first");
+        std::fs::write(d.join("config.json"), r#"{"meetings": {"auto_record": true}}"#).unwrap();
+        assert_eq!(load_auto_record(&d.join("config.json")), Ok(true));
+        assert!(load_auto_record(&d).unwrap_err().starts_with(&d.display().to_string()), "an unreadable config names the file");
+        std::fs::remove_dir_all(&d).unwrap();
     }
 
     #[test]
@@ -839,7 +871,7 @@ mod tests {
     #[test]
     fn auto_record_records_without_asking() {
         let Some(d) = call("meeting_rec::tests::auto_record_records_without_asking", true, "record", "") else { return };
-        assert!(!d.join("prompt.args").exists(), "no prompt with SHEPETAL_MEETING_AUTO_RECORD=1");
+        assert!(!d.join("prompt.args").exists(), "no prompt with meetings.auto_record");
         recorded(&d);
     }
 
