@@ -1,0 +1,46 @@
+#!/bin/bash
+# Installer postinstall. Runs as root; everything below runs as the logged-in user:
+#   1. "Press 🌐 key to" -> Do Nothing (com.apple.HIToolbox AppleFnUsageType = 0), keeping the old value
+#      once in Shepetal's defaults for "Restore 🌐 key setting" and the uninstaller. TextInputMenuAgent
+#      and TextInputSwitcher cache the value, so they are restarted (TextInputSwitcher ignores SIGTERM,
+#      so it gets SIGKILL; launchd starts both again on demand). Read back to verify. Nothing else is touched.
+#   2. Start at login (SMAppService.mainApp, through the app's --postinstall).
+#   3. Opens Shepetal, so only the three permissions are left to grant.
+# A `dry-run` file next to this script (scripts/make-pkg.sh --test) prints the commands instead.
+DRY=0; [ -e "$(dirname "$0")/dry-run" ] && DRY=1
+USER_NAME=$(stat -f %Su /dev/console)
+USER_ID=$(id -u "$USER_NAME")
+as_user() {
+  if [ "$DRY" = 1 ]; then echo "dry-run as $USER_NAME: $*"; return 0; fi
+  if [ "$(id -u)" = 0 ]; then launchctl asuser "$USER_ID" sudo -u "$USER_NAME" "$@"; else "$@"; fi
+}
+read_user() {  # reads are safe to run for real, also in a dry run
+  if [ "$(id -u)" = 0 ]; then sudo -u "$USER_NAME" "$@"; else "$@"; fi
+}
+APP="$2/Shepetal.app"
+log() { echo "shepetal postinstall: $*"; logger -t shepetal-postinstall "$*" 2>/dev/null || true; }
+
+if [ -z "$USER_NAME" ] || [ "$USER_NAME" = root ] || [ "$USER_NAME" = loginwindow ]; then
+  log "no user logged in at the console; Shepetal sets the 🌐 key at its first launch instead"
+  exit 0
+fi
+
+# 1. The 🌐 key.
+CUR=$(read_user defaults read com.apple.HIToolbox AppleFnUsageType 2>/dev/null) || CUR=unset
+if [ "$CUR" = 0 ]; then
+  log "🌐 key already set to Do Nothing"
+else
+  if ! read_user defaults read io.backant.shepetal previousAppleFnUsageType >/dev/null 2>&1; then
+    as_user defaults write io.backant.shepetal previousAppleFnUsageType -int "${CUR/unset/-1}"
+  fi
+  as_user defaults write com.apple.HIToolbox AppleFnUsageType -int 0
+  as_user killall TextInputMenuAgent || true
+  as_user killall -9 TextInputSwitcher || true
+  NOW=$(read_user defaults read com.apple.HIToolbox AppleFnUsageType 2>/dev/null) || NOW=unset
+  if [ "$DRY" = 1 ] || [ "$NOW" = 0 ]; then log "🌐 key set to Do Nothing (was $CUR)"; else log "🌐 key still $NOW; set it in System Settings > Keyboard"; fi
+fi
+
+# 2. Start at login, 3. open the app.
+as_user "$APP/Contents/MacOS/Shepetal" --postinstall || log "could not turn on Start at login"
+as_user open "$APP"
+exit 0
