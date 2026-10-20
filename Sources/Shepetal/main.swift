@@ -4,7 +4,9 @@ import AppKit
 // shepetal --no-permission-prompts   never asks macOS for a permission (checks only)
 // shepetal --show-hint               shows the short-press hint once at launch (for screenshots)
 // shepetal --e2e <wav>... [--engine fallback] [--drop-paste]   real pipeline on audio files, JSON lines out
+// shepetal --e2e-meeting <me.wav> <others.wav>   meeting transcriber, store and summary on two files, JSON out
 let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--e2e-meeting") { MeetingE2E.main(Array(args[(i + 1)...])) }
 MainActor.assumeIsolated {
     let delegate: NSApplicationDelegate
     if let i = args.firstIndex(of: "--e2e") {
