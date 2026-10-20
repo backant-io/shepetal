@@ -4,6 +4,9 @@
     agent/.venv/bin/python agent/run.py install        # run the worker permanently (login item via launchd)
     agent/.venv/bin/python agent/run.py worker         # or run it in the foreground; executes the agent's tools here
     agent/.venv/bin/python agent/run.py start [cents]  # another budgeted session, kicked off with the outcome
+    agent/.venv/bin/python agent/run.py configure      # push system.md, tools and parallel workflows to the agent
+    agent/.venv/bin/python agent/run.py status [sesn]  # status and spend of the last (or given) session
+    agent/.venv/bin/python agent/run.py interrupt sesn # stop a session's current work (nothing is deleted)
 
 Keys are asked for once and kept in the login Keychain (services shepetal-api-key, shepetal-environment-key).
 """
@@ -66,6 +69,21 @@ def ids():
     return json.loads(IDS.read_text())
 
 
+def agent_config():
+    return dict(
+        model={"id": "claude-opus-5-5", "effort": "high"},
+        system=(HERE / "system.md").read_text(),
+        tools=[{
+            "type": "agent_toolset_20260401",
+            "default_config": {"enabled": True, "permission_policy": {"type": "auto"}},
+            # web tools run on Anthropic's servers; needed to research current on-device speech models
+            "configs": [{"name": "web_search", "enabled": True}, {"name": "web_fetch", "enabled": True}],
+        }],
+        # workflow runs fan independent items out to parallel agents; the session budget caps their spend
+        multiagent={"type": "multiagent_20261001", "workflows": {"type": "enabled"}},
+    )
+
+
 def setup(cents="20000"):
     if IDS.exists():
         sys.exit(f"{IDS} exists, delete it to recreate the agent and environment")
@@ -75,17 +93,7 @@ def setup(cents="20000"):
     # reuse the environment if an earlier setup got that far before failing
     env = next((e for e in client.beta.environments.list() if e.name == "shepetal-mac" and e.config.type == "self_hosted"), None) \
         or client.beta.environments.create(name="shepetal-mac", config={"type": "self_hosted"})
-    agent = client.beta.agents.create(
-        name="shepetal-builder",
-        model={"id": "claude-opus-5-5", "effort": "high"},
-        system=(HERE / "system.md").read_text(),
-        tools=[{
-            "type": "agent_toolset_20260401",
-            "default_config": {"enabled": True, "permission_policy": {"type": "auto"}},
-            # web tools run on Anthropic's servers; needed to research current on-device speech models
-            "configs": [{"name": "web_search", "enabled": True}, {"name": "web_fetch", "enabled": True}],
-        }],
-    )
+    agent = client.beta.agents.create(name="shepetal-builder", **agent_config())
     IDS.write_text(json.dumps({"environment_id": env.id, "agent_id": agent.id, "workspace_id": ws}, indent=2) + "\n")
     print(f"environment {env.id}\nagent       {agent.id}")
     # Start the first session now so the API key is only needed once; it waits until a worker polls.
@@ -147,11 +155,31 @@ def start(cents="20000", client=None):
     )
     client.beta.sessions.events.send(session_id=session.id, events=[{
         "type": "user.define_outcome",
-        "description": "Build shepetal v1 and land it as a pull request on backant-io/shepetal",
+        "description": "Work toward the goal in agent/goal.md on origin/main, iteration by iteration: "
+                       "100% of Wispr Flow's features on Mac, iPhone and Linux with local models, "
+                       "each one verified and merged to main.",
         "rubric": {"type": "text", "content": (HERE / "rubric.md").read_text()},
-        "max_iterations": 5,
+        "max_iterations": 20,
     }])
+    IDS.write_text(json.dumps({**i, "session_id": session.id}, indent=2) + "\n")
     print(f"session {session.id} started with a ${int(cents) / 100:.2f} cap. Watch it in the Console under Managed Agents > Sessions.")
+
+
+def configure():
+    agent = api(workspace()).beta.agents.update(ids()["agent_id"], **agent_config())
+    print(f"agent {agent.id} is now version {agent.version}; new sessions use it")
+
+
+def status(session_id=None):
+    s = api(workspace()).beta.sessions.retrieve(session_id or ids()["session_id"])
+    dollars = lambda m: f"${int(m.amount) / 100:.2f}"  # amounts are in cents
+    spent = dollars(s.usage.list_cost) if s.usage.list_cost else "n/a"
+    print(f"{s.id} {s.status}, spent {spent}" + (f" of {dollars(s.budget.max_list_cost)}" if s.budget else ""))
+
+
+def interrupt(session_id):
+    api(workspace()).beta.sessions.events.send(session_id=session_id, events=[{"type": "user.interrupt"}])
+    print(f"interrupt sent to {session_id}; it goes idle and keeps its history")
 
 
 if __name__ == "__main__":
@@ -164,5 +192,11 @@ if __name__ == "__main__":
         asyncio.run(worker())
     elif cmd == "start":
         start(*args)
+    elif cmd == "configure":
+        configure()
+    elif cmd == "status":
+        status(*args)
+    elif cmd == "interrupt" and args:
+        interrupt(args[0])
     else:
         sys.exit(__doc__)
