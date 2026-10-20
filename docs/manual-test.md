@@ -110,6 +110,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
+3. Meetings follow the same choice. Record a short meeting (M-MTG-1, or start and stop one by hand) and leave Shepetal running. Expected about 25 h later: its folder (Me.wav, Others.wav) is gone from `~/Library/Application Support/Shepetal/meetings/`, but the meeting is still in Meetings with its transcript and summary, and search still finds it. Only the audio is deleted, as with dictation. A meeting recorded in the last 24 h keeps its folder, and so does one that is still recording. (The timing is covered by `MeetingStoreTests.testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording`.)
 
 ### M-INS-5: space before the following word (F109)
 1. In TextEdit type "Hello world", then put the cursor right before "world". Hold fn, say "big", then release.
@@ -212,6 +213,10 @@ Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and 
 ### M-MTG-4: quit during a meeting
 1. Start a meeting recording, talk for a minute, then quit Shepetal from the 🤫 menu.
 2. Expected: both WAVs are kept and play to the end. The meeting is listed as ended, with the transcript up to the last 30 s live pass. It gets no summary: a meeting cut off by quitting is not transcribed again at the next launch.
+
+### M-MTG-5: killed during a meeting (#100)
+1. Start a meeting recording and talk for about 20 s. Then, in Terminal, run `pkill -9 -x Shepetal`, as a crash would end it.
+2. Run `afinfo ~/Library/Application\ Support/Shepetal/meetings/<newest>/Me.wav` (and `Others.wav` if it is there). Expected: `estimated duration` is about 20 s, not 0. Both files play in QuickTime up to the kill.
 
 ### M-ACC-1: first launch, sign-in and the free trial
 Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.

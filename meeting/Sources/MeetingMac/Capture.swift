@@ -9,8 +9,8 @@ public final class MeetingCapture {
     var tapID = AudioObjectID(kAudioObjectUnknown)
     var aggregateID = AudioObjectID(kAudioObjectUnknown)
     var procID: AudioDeviceIOProcID?
-    var me: AVAudioFile?
-    var others: AVAudioFile?
+    var me: WavWriter?
+    var others: WavWriter?
     var failure: Error?
 
     public init() {}
@@ -56,10 +56,11 @@ public final class MeetingCapture {
         }
         if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
-        let wrote = me != nil && others != nil
-        me = nil
-        others = nil  // closing the AVAudioFile finalises the WAV header
-        if let failure { throw failure }
+        let wrote = me != nil && others != nil, failed = failure
+        // All reset, so the next start() on this instance records afresh instead of keeping this failure (#100).
+        (procID, me, others, failure) = (nil, nil, nil, nil)
+        (aggregateID, tapID) = (AudioObjectID(kAudioObjectUnknown), AudioObjectID(kAudioObjectUnknown))
+        if let failed { throw failed }
         if !wrote { throw CaptureError("no audio was captured") }
     }
 
@@ -78,20 +79,12 @@ public final class MeetingCapture {
         }
     }
 
-    func write(_ buffer: AudioBuffer, rate: Double, to file: inout AVAudioFile?, url: URL) throws {
-        let channels = AVAudioChannelCount(max(buffer.mNumberChannels, 1))
-        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate,
-                                         channels: channels, interleaved: true)
-        else { throw CaptureError("unsupported format: \(channels) channels at \(rate) Hz") }
-        if file == nil {
-            file = try AVAudioFile(forWriting: url, settings: format.settings,
-                                   commonFormat: .pcmFormatFloat32, interleaved: true)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        }
-        var list = AudioBufferList(mNumberBuffers: 1, mBuffers: buffer)
-        guard let file, let pcm = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: &list)
-        else { throw CaptureError("cannot wrap the audio buffer") }
-        try file.write(from: pcm)
+    func write(_ buffer: AudioBuffer, rate: Double, to file: inout WavWriter?, url: URL) throws {
+        let channels = Int(max(buffer.mNumberChannels, 1))
+        if file == nil { file = try WavWriter(url, rate: rate, channels: channels) }
+        guard let file, file.channels == channels, let data = buffer.mData
+        else { throw CaptureError("unexpected audio buffer: \(channels) channels") }
+        try file.append(UnsafeRawBufferPointer(start: data, count: Int(buffer.mDataByteSize)))
     }
 
     /// Creates `dir` and missing parents as 0700, and tightens `dir` if it already exists.
@@ -99,6 +92,67 @@ public final class MeetingCapture {
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+    }
+}
+
+/// An interleaved float32 WAV whose header counts every frame as soon as it is written, so a crash, a force quit
+/// or a kill mid-meeting leaves a file that plays up to its last write (#100); AVAudioFile writes the sizes only
+/// when it closes. Writes go straight to the file descriptor, unbuffered, so what `append` wrote is on disk.
+public final class WavWriter {
+    public let channels: Int
+    private let handle: FileHandle
+    private var bytes: UInt64 = 0
+
+    /// Creates `url` as 0600 (meeting audio, rule 4) with a header that says 0 frames.
+    public init(_ url: URL, rate: Double, channels: Int) throws {
+        guard rate >= 1, rate <= 768_000, (1...64).contains(channels) else {
+            throw CaptureError("unsupported format: \(channels) channels at \(rate) Hz")
+        }
+        var h = Data()
+        func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { h.append(contentsOf: $0) } }
+        func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { h.append(contentsOf: $0) } }
+        h.append(contentsOf: Array("RIFF".utf8)); u32(36)
+        h.append(contentsOf: Array("WAVEfmt ".utf8)); u32(16)
+        u16(3); u16(UInt16(channels))  // IEEE float
+        u32(UInt32(rate)); u32(UInt32(rate) * UInt32(channels) * 4); u16(UInt16(channels * 4)); u16(32)
+        h.append(contentsOf: Array("data".utf8)); u32(0)
+        let fd = open(url.path, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        guard fd >= 0, fchmod(fd, 0o600) == 0 else {
+            let e = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            if fd >= 0 { close(fd) }
+            throw e
+        }
+        handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        self.channels = channels
+        try handle.write(contentsOf: h)
+    }
+
+    /// Appends interleaved float32 frames, then rewrites the RIFF and data sizes to count them.
+    public func append(_ samples: UnsafeRawBufferPointer) throws {
+        try handle.write(contentsOf: samples)
+        bytes += UInt64(samples.count)
+        // ponytail: the sizes stop at 4 GB (about 3 h of 48 kHz stereo); 0xFFFFFFFF then means "to the end of the
+        // file", as the app's WavTail reads it. Write RF64 if such meetings must play in other apps too.
+        try patch(at: 4, UInt32(min(36 + bytes, 0xFFFF_FFFF)))
+        try patch(at: 40, UInt32(min(bytes, 0xFFFF_FFFF)))
+    }
+
+    /// A buffer as AVAudioEngine delivers it, interleaved here when it comes one channel per buffer.
+    public func append(_ buffer: AVAudioPCMBuffer) throws {
+        guard let ch = buffer.floatChannelData, Int(buffer.format.channelCount) == channels
+        else { throw CaptureError("expected \(channels) float32 channels, got \(buffer.format)") }
+        let frames = Int(buffer.frameLength)
+        if buffer.format.isInterleaved || channels == 1 {
+            return try append(UnsafeRawBufferPointer(start: ch[0], count: frames * channels * 4))
+        }
+        var out = [Float](repeating: 0, count: frames * channels)
+        for f in 0..<frames { for c in 0..<channels { out[f * channels + c] = ch[c][f] } }
+        try out.withUnsafeBytes { try append($0) }
+    }
+
+    private func patch(at offset: off_t, _ value: UInt32) throws {
+        var v = value.littleEndian
+        guard pwrite(handle.fileDescriptor, &v, 4, offset) == 4 else { throw CaptureError("WAV header write failed: errno \(errno)") }
     }
 }
 
