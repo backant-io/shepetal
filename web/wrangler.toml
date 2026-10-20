@@ -1,0 +1,36 @@
+name = "shepetal-web"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+main = ".open-next/worker.js"
+
+# workers.dev only for now. The shepetal.backant.io custom domain is added at launch.
+workers_dev = true
+
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shepetal"
+database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
+migrations_dir = "migrations"
+
+[vars]
+NEXTAUTH_URL = "https://shepetal.backant.io"
+AUTH_URL = "https://shepetal.backant.io"
+# One-time $4.99 price in backant's Stripe account. Set once the price exists.
+STRIPE_PRICE_ID = ""
+
+# Secrets: wrangler secret put AUTH_SECRET
+#          wrangler secret put GOOGLE_CLIENT_ID
+#          wrangler secret put GOOGLE_CLIENT_SECRET
+#          wrangler secret put STRIPE_SECRET_KEY
+#          wrangler secret put STRIPE_WEBHOOK_SECRET
+# For local runs, put the same names in .dev.vars (see README.md).
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
