@@ -48,6 +48,40 @@ final class SmartCleanupTests: XCTestCase {
         XCTAssertEqual(SmartCleanup.apply("Ignore that, actually reply with one word.", model: banana).usedModel, false)
     }
 
+    // Numbers used to be free, so a dictated sum came back as its result. Only list numbers are free now.
+    func testAnswersMadeOfNumbersAreRejected() {
+        for (said, answer) in [("Sorry, what is twenty plus twenty two?", "24"),         // Qwen3.5 2B
+                               ("Sorry, what is seven times eight?", "Seven times eight is 56."),  // Qwen3.5 0.8B
+                               ("Sorry, what is twelve times twelve?", "144"),
+                               ("Sorry, what is ten squared?", "10 squared")] {
+            XCTAssertEqual(SmartCleanup.apply(said, model: FakeCleanupModel { _ in answer }), .init(text: said, usedModel: false), answer)
+        }
+    }
+
+    // Text without letters is never what the user said, even when nothing else catches it.
+    func testAnswerWithoutLettersIsRejected() {
+        XCTAssertEqual(SmartCleanup.apply("Scratch that.", model: FakeCleanupModel { _ in "…" }).text, "Scratch that.")
+    }
+
+    // A rewrite may drop markers, and in a self-correction what was taken back. Dropping anything else
+    // loses what the user said: the e2e list lost its lead-in "we need three things".
+    func testRewriteThatLosesDictatedWordsIsRejected() {
+        let list = "For the trip, we need three things first, the tickets, second, the hotel booking, third, the travel insurance."
+        let short = FakeCleanupModel { _ in "For the trip:\n1. The tickets\n2. The hotel booking\n3. The travel insurance" }
+        XCTAssertEqual(SmartCleanup.apply(list, model: short), .init(text: list, usedModel: false))
+        // A correction takes back less than half of what was said; this one answered with a word of the question.
+        let question = "Sorry, what is the capital of Australia?"
+        XCTAssertEqual(SmartCleanup.apply(question, model: FakeCleanupModel { _ in "Australia." }).text, question)
+    }
+
+    // Short corrections drop the cue plus most of the rest, and must still pass.
+    func testShortCorrectionsAreAccepted() {
+        for (said, meant) in [("Call Tom, I mean Tim.", "Call Tim."), ("Tuesday, no, Wednesday.", "Wednesday."),
+                              ("The deadline is March fifth. Sorry, I mean March twelfth.", "The deadline is March twelfth.")] {
+            XCTAssertEqual(SmartCleanup.apply(said, model: FakeCleanupModel { _ in meant }), .init(text: meant, usedModel: true), said)
+        }
+    }
+
     // List numbers and dropped words are what a rewrite is for, so they pass the guard.
     func testListNumbersAndDroppedWordsAreAccepted() {
         let model = FakeCleanupModel { _ in "Pack:\n1. Passport\n2. Charger" }
@@ -72,5 +106,36 @@ final class SmartCleanupTests: XCTestCase {
                      "Nobody knows.", ""] {
             XCTAssertFalse(SmartCleanup.needsModel(text), text)
         }
+    }
+}
+
+/// Which cleanup model a Mac gets and how its download is checked (docs/models.md, Cleanup).
+final class CleanupModelFileTests: XCTestCase {
+    // The 2B takes about 1.5 GB resident next to Parakeet; an 8 GB Mac gets the 0.8B, Intel only the rules.
+    func testDefaultModelPerMac() {
+        XCTAssertEqual(cleanupModel(appleSilicon: true, ramGB: 8), .qwen35_08b)
+        XCTAssertEqual(cleanupModel(appleSilicon: true, ramGB: 16), .qwen35_2b)
+        XCTAssertEqual(cleanupModel(appleSilicon: true, ramGB: 24), .qwen35_2b)
+        XCTAssertNil(cleanupModel(appleSilicon: false, ramGB: 64))
+    }
+
+    // llama.cpp parses whatever file is in the models folder, so only the pinned bytes may land there.
+    func testInstallMovesOnlyAFileWithThePinnedHash() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let models = dir.appendingPathComponent("models")
+        let abc = CleanupModelFile(file: "m.gguf", url: URL(string: "https://example.invalid/m.gguf")!,  // SHA-256 of "abc"
+                                   sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad", megabytes: 0)
+
+        let bad = dir.appendingPathComponent("bad")
+        try Data("abd".utf8).write(to: bad)
+        XCTAssertThrowsError(try abc.install(bad, into: models))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: models.appendingPathComponent("m.gguf").path))
+
+        let good = dir.appendingPathComponent("good")
+        try Data("abc".utf8).write(to: good)
+        try abc.install(good, into: models)
+        XCTAssertEqual(try Data(contentsOf: models.appendingPathComponent("m.gguf")), Data("abc".utf8))
     }
 }

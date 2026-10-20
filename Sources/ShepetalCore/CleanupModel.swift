@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 /// A local text model that rewrites dictation (goal rule 5): self-corrections, spoken lists, punctuation and
@@ -26,31 +27,52 @@ public enum SmartCleanup {
         return Result(text: out, usedModel: true)
     }
 
-    static let cues = try! NSRegularExpression(pattern: #"""
+    static let corrections = try! NSRegularExpression(pattern: #"""
         (?xi) \b(?: actually | i\ mean | no,?\ wait | wait,?\ no | scratch\ that | strike\ that | cancel\ that
           | forget\ that | never\ mind | or\ rather | make\ that | sorry | correction | let\ me\ rephrase )\b
         | ,\ no\b
-        | \b(?: first | second | third | finally | number\ (?:one|two|1|2) | step\ (?:one|two|1|2) | bullet\ point
+        """#)
+    static let layout = try! NSRegularExpression(pattern: #"""
+        (?xi) \b(?: first | second | third | finally | number\ (?:one|two|1|2) | step\ (?:one|two|1|2) | bullet\ point
           | new\ line | new\ paragraph )\b
         | \bone,.*\btwo,
         """#)
+    /// The spoken words a list or line break turns into layout.
+    static let layoutWords: Set = ["first", "second", "third", "fourth", "fifth", "finally", "and", "number", "step",
+                                   "one", "two", "three", "four", "five", "bullet", "point", "new", "line", "paragraph"]
+    /// "1. " or "2) " at the start of a line: the model's list numbers.
+    static let listNumber = try! NSRegularExpression(pattern: #"(?m)^\s*\d+[.)]\s"#)
 
     /// Self-correction, list and line-break cues, or no sentence punctuation at all.
     /// ponytail: cue words only; a correction said without one ("Tuesday, Wednesday") stays as heard.
     public static func needsModel(_ text: String) -> Bool {
         if text.isEmpty { return false }
         if !text.contains(where: { ".?!".contains($0) }) { return true }
-        return cues.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
+        return has(corrections, text) || has(layout, text)
     }
 
-    /// Rejects an empty answer, and one where more than 1 word in 10 is not in the input (digits don't
-    /// count: list numbers are new). That catches answers, translations and made-up text.
+    /// The model's text is used only when it is still what the user said:
+    /// - it has letters ("24" is an answer, not a rewrite);
+    /// - at most 1 word in 10 is new; only list numbers at the start of a line are free, so "56" and "144" count;
+    /// - nothing said is lost except list and line-break markers, and in a self-correction (a cue in the
+    ///   input) the cue plus at most half of the other words, which is what it takes back.
+    /// ponytail: word sets, not meaning; a correction that keeps the wrong half of the words gets through.
     public static func accepts(_ out: String, for input: String) -> Bool {
+        guard out.contains(where: \.isLetter) else { return false }
         let said = Set(words(input))
-        let written = words(out)
-        guard !written.isEmpty else { return false }
-        let new = written.filter { !said.contains($0) && !$0.allSatisfy(\.isNumber) }
-        return new.count * 10 <= written.count
+        let written = words(replace(listNumber, in: out))
+        guard written.filter({ !said.contains($0) }).count * 10 <= written.count else { return false }
+        let content = Set(words(replace(corrections, in: input))).subtracting(layoutWords)
+        let lost = content.subtracting(written)
+        return has(corrections, input) ? lost.count * 2 <= content.count : lost.isEmpty
+    }
+
+    static func has(_ re: NSRegularExpression, _ s: String) -> Bool {
+        re.firstMatch(in: s, range: NSRange(s.startIndex..., in: s)) != nil
+    }
+
+    static func replace(_ re: NSRegularExpression, in s: String) -> String {
+        re.stringByReplacingMatches(in: s, range: NSRange(s.startIndex..., in: s), withTemplate: " ")
     }
 
     static func words(_ s: String) -> [String] {
@@ -71,6 +93,23 @@ public struct CleanupModelFile: Equatable, Sendable {
 public func cleanupModel(appleSilicon: Bool, ramGB: Int) -> CleanupModelFile? {
     guard appleSilicon else { return nil }
     return ramGB < 16 ? .qwen35_08b : .qwen35_2b
+}
+
+extension CleanupModelFile {
+    /// Moves a downloaded file into `dir` under this model's name, only when it has the pinned SHA-256.
+    /// A file that does not match is not moved: llama.cpp would parse whatever lands there.
+    public func install(_ downloaded: URL, into dir: URL) throws {
+        let handle = try FileHandle(forReadingFrom: downloaded)
+        defer { try? handle.close() }
+        var hash = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 24), !chunk.isEmpty { hash.update(data: chunk) }
+        let hex = hash.finalize().map { String(format: "%02x", $0) }.joined()
+        guard hex == sha256 else {
+            throw CocoaError(.fileReadCorruptFile, userInfo: [NSLocalizedDescriptionKey: "\(file) does not match its checksum"])
+        }
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: downloaded, to: dir.appendingPathComponent(file))
+    }
 }
 
 extension CleanupModelFile {

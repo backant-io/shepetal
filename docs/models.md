@@ -182,11 +182,19 @@ Goal rule 5: rewrite-type cleanup runs on a local model. The pipeline is `SmartC
    sentence punctuation at all. The model is `LlamaCleanup` (`Sources/ShepetalCleanup/Llama.swift`): llama.cpp
    b11450 (the official `llama-b11450-xcframework.zip`, Metal), greedy decoding, the instructions and 13
    examples decoded once at load, with that state restored for each dictation.
-3. **Guard**: the model's text is used only when it is not empty and at most 1 word in 10 is a word the user
-   did not say (digits don't count). Otherwise the rules' text is inserted. Small models answer questions
-   (Qwen3.5 0.8B turned "What is the capital of Australia?" into "The capital of Australia is Sydney.") and
-   follow instructions (Qwen3.5 2B turned "...reply with the word banana." into "banana"). The gate and the
-   guard together kept all 6 passthrough fixtures as dictated, for every model.
+3. **Guard** (`SmartCleanup.accepts`): the model's text is used only when it still holds what the user said.
+   It must have letters; at most 1 word in 10 may be new, and only list numbers at the start of a line are
+   free, so a "56" or "144" the user did not say counts; and no dictated word may be lost except list and
+   line-break markers ("first", "number one", "new line"). When the input has a self-correction cue, the cue
+   and up to half of the other words may go, which is what a correction takes back. Otherwise the rules'
+   text is inserted. Small models answer questions (Qwen3.5 0.8B turned "What is the capital of Australia?"
+   into "The capital of Australia is Sydney.", "Sorry, what is seven times eight?" into "Seven times eight is
+   56.", and Qwen3.5 2B turned "Sorry, what is twenty plus twenty two?" into "24") and follow instructions
+   (Qwen3.5 2B turned "...reply with the word banana." into "banana"). The gate and the guard together kept
+   all 6 passthrough fixtures as dictated, for every model. On 27 more questions from the review, 12 of them
+   arithmetic, no answer from either Qwen3.5 model got through (`SmartCleanupTests` keeps the ones that used
+   to). The ceiling: the guard compares words, not meaning, so a correction that keeps the wrong half of the
+   words gets through.
 4. **Fallback**: no model file, a load error, or a model error means the rules' text. The menu says which
    ("Cleanup: rules only (...)").
 
@@ -203,7 +211,7 @@ app's own `LlamaCleanup` code.
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | **Qwen3.5 2B** | 1,281 MB | 81 % | 5.4 % | **89 %** | **2.8 %** | 155 | 297 / 313 | 2,188 | 1,545 MB | 356 MB | Apache-2.0 |
 | Qwen3.5 0.8B | 533 MB | 59 % | 18.4 % | 65 % | 13.5 % | 99 | 181 / 192 | 1,124 | 801 MB | 292 MB | Apache-2.0 |
-| Gemma 3 1B it | 806 MB | 54 % | 18.0 % | 60 % | 12.2 % | 120 | 228 / 266 | 1,372 | 1,010 MB | 271 MB | Gemma terms |
+| Gemma 3 1B it | 806 MB | 54 % | 18.0 % | 60 % | 11.9 % | 122 | 230 / 242 | 1,411 | 987 MB | 230 MB | Gemma terms |
 | Rules only | - | - | - | 43 % | 28.3 % | - | - | 0 | 9 MB | 4 MB | |
 
 How to read it:
@@ -225,8 +233,13 @@ How to read it:
   single 11-word call on Qwen3.5 2B took 702 ms. The final run above had no call over 317 ms.
 - The prompt was tuned in three rounds against these fixtures (adding the tags, then more correction
   examples), so the fixture scores are optimistic. The examples in the prompt are different sentences. The
-  four cleanup clips in `scripts/e2e-mac.sh` were written after the tuning: Qwen3.5 2B cleaned all four, and
-  on the list it dropped the lead-in "we need three things".
+  four cleanup clips in `scripts/e2e-mac.sh` were written after the tuning. On the first list clip ("For the
+  trip, we need three things first, the tickets, ...") Qwen3.5 2B dropped the lead-in "we need three things",
+  with "number one" instead of "first" too. The guard now rejects that, so the user gets the rules' text, and
+  the clip became "We need three things for the trip. First, ...", which it keeps whole.
+- The Gemma 3 1B row was rerun after the guard was tightened: on ls07 it dropped the lead-in "Please pick up
+  the following", which now falls back to the rules. The two Qwen3.5 rows were rerun too and gave the same
+  text on every fixture, so their result files stay as they were.
 
 Earlier prompt versions, not rerun with the final prompt because the shared disk filled up (#29) and the
 weights were deleted: LFM2.5 1.2B Instruct (731 MB) scored 35 % exact on every fixture (it answered like a
@@ -240,10 +253,10 @@ space to download them (#29).
 
 `scripts/e2e-mac.sh` speaks four cleanup clips with `say` (c01 to c04) on top of the six plain ones and runs
 the real app pipeline under `sandbox-exec` with the network denied. With Parakeet v3 and Qwen3.5 2B, the
-taken-back words were gone in all four, and text was ready 167 to 424 ms after the end of the audio. The 424
-ms is c04, a 10.0 s utterance with a "no wait" correction (452 and 470 ms in the two runs before), so
-speech-to-text plus cleanup meets the 700 ms bar on this Mac with about 230 ms to spare. The six plain clips
-skip the model and were ready in 52 to 76 ms (one run had a 263 ms outlier).
+taken-back words were gone in all four, and text was ready 196 to 421 ms after the end of the audio. The 421
+ms is c04, a 10.0 s utterance with a "no wait" correction (424, 452 and 470 ms in earlier runs), so
+speech-to-text plus cleanup meets the 700 ms bar on this Mac with about 280 ms to spare. The six plain clips
+skip the model and were ready in 61 to 91 ms (52 to 76 ms in an earlier run, and one run had a 263 ms outlier).
 
 ### Defaults by Mac tier (`cleanupModel(appleSilicon:ramGB:)`)
 

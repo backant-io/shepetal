@@ -8,8 +8,9 @@
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
 # default model only).
-# The c* clips need the local cleanup model: SHEPETAL_CLEANUP_MODEL (default: this Mac's default model in
-# bench/.cache/cleanup, see bench/cleanup/run.sh). CLEANUP=rules skips them and says so.
+# The c* clips need the local cleanup model: SHEPETAL_CLEANUP_MODEL (default: Qwen3.5 2B in bench/.cache/cleanup,
+# downloaded there on the first run, about 1.3 GB, so run once with the network on). CLEANUP=rules skips them
+# and says so.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=${SHEPETAL_BIN:-.build/release/shepetal}
@@ -38,7 +39,9 @@ if [ "${CLEANUP:-}" = rules ]; then
   echo "SKIPPED: cleanup clips (CLEANUP=rules)"
 else
   export SHEPETAL_CLEANUP_MODEL=${SHEPETAL_CLEANUP_MODEL:-$PWD/bench/.cache/cleanup/Qwen3.5-2B-Q4_K_M.gguf}
-  [ -f "$SHEPETAL_CLEANUP_MODEL" ] || { echo "no cleanup model at $SHEPETAL_CLEANUP_MODEL (bench/cleanup/run.sh Qwen3.5-2B-Q4_K_M.gguf, or CLEANUP=rules)" >&2; exit 1; }
+  [ -f "$SHEPETAL_CLEANUP_MODEL" ] ||
+    CLEANUP_MODELS=$(dirname "$SHEPETAL_CLEANUP_MODEL") bench/cleanup/run.sh --fetch "$(basename "$SHEPETAL_CLEANUP_MODEL")" ||
+    { echo "no cleanup model at $SHEPETAL_CLEANUP_MODEL and the download failed (run once with the network on, or CLEANUP=rules)" >&2; exit 1; }
   while IFS='|' read -r id voice text expected gone; do
     [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "$text"
     printf '%b\n' "$expected" > "$FIX/$id.txt"
@@ -47,7 +50,7 @@ else
   done <<'CLEANUP'
 c01|Samantha|Let's move the review to Tuesday, actually Wednesday, at four.|Let's move the review to Wednesday at four.|tuesday actually
 c02|Daniel|Send the contract to Laura, I mean Linda, before lunch.|Send the contract to Linda before lunch.|laura mean
-c03|Samantha|For the trip we need three things. First, the tickets. Second, the hotel booking. Third, the travel insurance.|For the trip we need three things:\n1. The tickets\n2. The hotel booking\n3. The travel insurance|first second third
+c03|Samantha|We need three things for the trip. First, the tickets. Second, the hotel booking. Third, the travel insurance.|We need three things for the trip:\n1. The tickets\n2. The hotel booking\n3. The travel insurance|first second third
 c04|Daniel|I think we should ship the new search page on Monday, no wait, on Thursday, so the support team has enough time to read the new docs and test the export with a few customers.|I think we should ship the new search page on Thursday, so the support team has enough time to read the new docs and test the export with a few customers.|monday wait
 CLEANUP
 fi

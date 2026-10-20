@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import ShepetalCleanup
 import ShepetalCore
 
@@ -103,14 +102,7 @@ final class Pipeline {
         let (tmp, response) = try await URLSession.shared.download(from: m.url)
         defer { try? FileManager.default.removeItem(at: tmp) }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SpeechError("Download failed: \(response)") }
-        let handle = try FileHandle(forReadingFrom: tmp)
-        var hash = SHA256()
-        while let chunk = try handle.read(upToCount: 1 << 24), !chunk.isEmpty { hash.update(data: chunk) }
-        try handle.close()
-        let hex = hash.finalize().map { String(format: "%02x", $0) }.joined()
-        guard hex == m.sha256 else { throw SpeechError("\(m.file) does not match its checksum") }
-        try FileManager.default.createDirectory(at: Paths.models, withIntermediateDirectories: true)
-        try FileManager.default.moveItem(at: tmp, to: Paths.models.appendingPathComponent(m.file))
+        try m.install(tmp, into: Paths.models)
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {

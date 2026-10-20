@@ -3,6 +3,7 @@
 # llama.cpp with Metal). One process per model, so peak memory is per model.
 #   bench/cleanup/run.sh                 the rules baseline and every model below
 #   bench/cleanup/run.sh Qwen3.5-0.8B-Q4_K_M.gguf ...   only these
+#   bench/cleanup/run.sh --fetch Qwen3.5-2B-Q4_K_M.gguf ...   only download (scripts/e2e-mac.sh uses this)
 # Weights go to $CLEANUP_MODELS (default bench/.cache/cleanup, gitignored). A file.part younger than two
 # minutes means another process is downloading it, so this script waits instead of fetching it twice.
 set -euo pipefail
@@ -29,6 +30,7 @@ fetch() {
   curl -fL --retry 5 -C - -o "$MODELS/$file.part" "https://huggingface.co/$repo/resolve/main/$file"
   mv "$MODELS/$file.part" "$MODELS/$file"
 }
+if [ "${1:-}" = --fetch ]; then shift; for file; do fetch "$file"; done; exit 0; fi
 
 swift build -c release --product cleanup-bench
 BIN=$(swift build -c release --show-bin-path)/cleanup-bench
