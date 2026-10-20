@@ -1,0 +1,35 @@
+Daniel: Thanks for jumping on. We have an escalation from Northwind Clinics. Their dictation accuracy dropped badly after last week's update, and they are threatening to pause the rollout to their remaining four sites.
+Aisha: How bad is the drop?
+Daniel: They measured it themselves. Word error rate went from about six percent to eleven percent on medical terms. Drug names especially.
+Kenji: That lines up with the vocabulary change. In the last update we replaced the custom vocabulary loader, and the new one silently ignores entries longer than thirty-two characters. Some of their drug names plus dosage strings are longer than that.
+Aisha: So it's a regression on our side, not their audio.
+Kenji: I'm fairly sure. I'll confirm with their sample files, but the timing matches exactly.
+Daniel: What can we tell them today? They want an answer before their board call on Friday.
+Aisha: I don't want to promise a date before we have confirmed the cause.
+Daniel: Understood, but we need to say something concrete.
+Aisha: Okay. We tell them we have identified a likely cause, we will confirm it within twenty-four hours, and we will ship a fix or a rollback by Friday.
+Kenji: A rollback is easy. The old loader is still behind a feature flag. We can switch their tenant back today if they want.
+Daniel: That's great. Let's offer the rollback immediately as the safe option.
+Aisha: Agreed. Decision: we offer Northwind an immediate rollback to the old vocabulary loader for their tenant, and we fix the length limit properly for everyone.
+Kenji: For the proper fix, I'd raise the limit to two hundred fifty-six characters and log a warning instead of dropping entries silently.
+Aisha: Yes, and add a test with their longest entries. Silent drops are the real bug here.
+Daniel: Should we also give them a credit? They lost a week of good accuracy.
+Aisha: I'd rather not set a precedent with credits for one regression.
+Daniel: Their contract renewal is in two months, though.
+Aisha: Fair point. Let's not decide the credit today. I'll talk to finance and we decide next week.
+Daniel: Okay, credit is postponed to next week.
+Kenji: One more question. Do other customers have long vocabulary entries? If so they are affected too and haven't noticed.
+Aisha: Good question. Can you check?
+Kenji: Yes. I'll query all tenants for entries over thirty-two characters by tomorrow and send the list to Daniel.
+Daniel: And I'll reach out to any affected customers proactively once I have the list.
+Aisha: Good. Let's assign the rest. Kenji, the rollback for Northwind?
+Kenji: I'll switch the Northwind tenant to the old loader today, right after this call.
+Aisha: And the fix?
+Kenji: I'll have the fix with the new limit and the warning ready for review by Thursday.
+Aisha: I'll review it Thursday afternoon so it can ship Friday morning.
+Daniel: I'll email Northwind today with the explanation and the rollback offer, and I'll join their Friday call if they want us there.
+Aisha: Perfect. Let's also write a short incident report. Silent data loss deserves one.
+Daniel: Who owns that?
+Aisha: I'll write the incident report by Monday.
+Daniel: Okay, so to recap: likely cause is the new vocabulary loader dropping entries over thirty-two characters. We roll back Northwind today, fix the limit with a warning and a test by Thursday, review Thursday, ship Friday. Kenji checks other tenants by tomorrow. I contact Northwind today and other affected customers after that. Credit decision next week. Aisha writes the incident report by Monday.
+Aisha: That's it. Thanks both.

@@ -1,0 +1,8 @@
+Good morning everyone, let's get started with the weekly sync. First item is the release planning for version two.
+Thanks. The beta build is ready, but we still have three open bugs in the audio capture module that block the release.
+Are any of those bugs critical, or can we ship with known issues and fix them in a patch next week?
+One is critical. The microphone stops recording after the laptop wakes from sleep, so dictation silently fails.
+Okay, that has to be fixed before launch. Can you own that one and give us an estimate by tomorrow afternoon?
+Yes, I will take it. I think it is a two day fix, mostly testing on different hardware and operating system versions.
+Great. Next item is the transcription model. We are benchmarking Parakeet, Whisper, and Moonshine on the M4 Pro this week.
+Sounds good. Please share the word error rate and latency numbers in the channel so we can decide on Friday.

@@ -4,3 +4,6 @@ agent/ids.json
 /.swiftpm/
 /.cache/
 /dist/
+bench/.cache/
+bench/.venv/
+bench/__pycache__/

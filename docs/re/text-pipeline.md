@@ -5,7 +5,7 @@ Method: static reading of the bundled JS and the Swift helper with grep and Pyth
 Behavior is paraphrased. No code, prompts or assets are copied.
 
 Evidence key:
-- `main` = `/Users/sorcecoder/shepetal-re/asar/.webpack/main/index.js` (Electron main bundle, minified). Symbols are class/static/string names in that file.
+- `main` = `/Users/sorcecoder/shepetal-re/asar/.webpack/main/index.js` (Electron main bundle, minified). Symbols are class/static/string names in that file; `main@N` is character offset N.
 - `helper` = `/Applications/Wispr Flow.app/Contents/Resources/swift-helper-app-dist/Wispr Flow.app/Contents/MacOS/Wispr Flow`.
 - Extracted context dumps: `/Users/sorcecoder/shepetal-re/textpipe/ctx1.txt`, `/Users/sorcecoder/shepetal-re/textpipe/ctx2.txt`.
 
@@ -36,38 +36,38 @@ Evidence key:
 | Whisper mode | Detects quiet speech, used in onboarding and the mic quiz | Server ASR or gain handling | `usedWhisperMode`, `OnboardingWhisperIntro` |
 | Context awareness | Sends words from the accessibility tree, OCR words (opt-in screen OCR), VS Code variable and file names, textbox before/selected/after text, nearby text, chat conversation and an optional screenshot | Client collects, server uses | `serializeFlowRequest` context; proto `Context{textbox,vocabulary,content_text,content_html,screenshot,conversation}`; `DynamicVocabulary{screen_content_ax,screen_content_ocr,variable_names,file_names}` |
 | Voice profile ("MyVoice") | Builds a per-user profile of your writing style for personalization | Cloud | `/llm/voice_profile`, `GenerateVoiceProfile`, flag `MyVoice` |
-| "Canto" | Only a launch modal and analytics events in this build (`CantoLaunchModalShown/Clicked`). No model name or route called "canto" was found in `main`. Canto is most likely the server-side model behind `inference.wisprflow.com`. | Cloud | `CantoLaunchModal` |
+| "Canto" | Only a launch modal and analytics events in this build (`CantoLaunchModalShown/Clicked`). No model name or route called "canto" was found in `main`. Canto is most likely the server-side model behind Wispr's own gRPC inference host. | Cloud | `CantoLaunchModal` |
 
 ## 2. Pipeline: audio, then ASR, then post-processing, then insertion
 
 1. **Capture**: 16 kHz mono PCM. The client cuts it into 20 ms packets and keeps a volume value per packet. A chunk has a hard cap of 28 s.
    - Evidence: `main` constants `O=16e3, C=28, I=C*O, z=C/.02`; the packet serializer (`packets`, `volumes`, `packet_duration`, `audio_encoding`, `byte_encoding: binary|ascii85`).
 2. **Encode**: Opus is used when it is supported and the `use-opus` / `opus-desktop-experiment` flags are on. Otherwise WAV/PCM16.
-   - Evidence: `.webpack/main/opusEncoder.worker.js`, `.webpack/main/incrementalOpusEncoder.worker.js`, `opusscript_native_wasm.wasm` (Opus compiled to WASM, running in a worker); the log text "OPUS encoder unsupported ... will use wav"; proto `AudioEncoding{WAV, OPUS}`. MessagePack is behind the `use-msgpack` flag.
+   - Evidence: `.webpack/main/opusEncoder.worker.js`, `.webpack/main/incrementalOpusEncoder.worker.js`, `opusscript_native_wasm.wasm` (Opus compiled to WASM, running in a worker); a log line at `main@4348787` that falls back to WAV when Opus is unsupported; proto `AudioEncoding{WAV, OPUS}`. MessagePack is behind the `use-msgpack` flag.
 3. **Transport**: the primary path first, then the fallbacks:
-   - (a) **Primary: bidirectional gRPC stream** `flow_api.v1.TranscriptionService/TranscribeStream`, which takes client and server streams. A unary `Transcribe` also exists. The host comes from `https://inference-info.wisprflow.com/dictation_url.txt` and must be on an allow-list: `inference.wisprflow.com`, `model-v31pl413.grpc.api.baseten.co`, `wispr-ai-prod--prod-grpc-server-flowgrpcserver.us-east.modal.direct`. The audio is served on Baseten and Modal GPUs.
+   - (a) **Primary: bidirectional gRPC stream** `flow_api.v1.TranscriptionService/TranscribeStream`, which takes client and server streams. A unary `Transcribe` also exists. The client fetches the host at runtime from a small text file on a Wispr info host, and the host must be on a hard-coded allow-list of three: one on Wispr's own domain, one Baseten gRPC model host and one Modal host. So the audio is served on Baseten and Modal GPUs.
      - Stream messages: `Request{init, context, payload, commit}`.
      - `Init{metadata, preferences, state}`. `Preferences{user, language, vocabulary(StaticVocabulary), replacements(Replacements incl. snippets), style_config}`.
      - `Payload{audio_packets | audio_file}`. `commit` ends the utterance. There are heartbeats (`Heartbeat{audio_received_seconds, commit_ack}`) and timeouts `COMMIT_HEARTBEAT_TIMEOUT_MS` / `COMMIT_COMPLETION_BACKSTOP_MS`.
      - Server stream: `Response{result, state, all_states, heartbeat}`.
      - `State` carries `progress{transcriber, formatter, ...}`, `raw_text`, `formatted_text`, `candidate_beams`, `audio_snr`, `audio_volume` and `mean_alignment_score`. Partial results stream back while you speak (flag `stream-text`).
-   - (b) **Fallback: websocket** `wss://api.wisprflow.ai/` or `wss://api-east.wisprflow.ai/`. Analytics events `grpc_fallback_to_websocket` and `grpc_disabled_temporarily`. A `grpc-http-race` flag races the protocols.
+   - (b) **Fallback: websocket** to Wispr's API host or its US-east twin. Analytics events `grpc_fallback_to_websocket` and `grpc_disabled_temporarily`. A `grpc-http-race` flag races the protocols.
    - (c) **Older/backup paths** in `AriaWebClient`:
      - `transcribeOpenAI` posts base64 audio to `/llm/asr` with a language hint (set only if the user picked exactly one language) and an empty prompt. The finalErrorReason `OpenAINoResponseData` points to OpenAI's ASR behind it.
      - `transcribeOpenAIAudioChunks` does the same for chunked audio (`/llm/asr_audio_chunks`).
      - `transcribeAndFormat` posts to `/llm/api` with audio plus `properties{app_type, language, before_text, after_text, selected_text, dictionary}`. Here `dictionary` is a deduplicated list of at most 200 words, built from AX words, OCR words, the user's first and last name and the dictionary. This is exactly the hotword/prompt-biasing list that shepetal should build.
-   - (d) **Fallback: one-shot HTTPS POST** of the whole utterance as JSON or msgpack ("binary") to a Baseten Chain, `https://chain-o232k03l.api.baseten.co/environments/production/run_remote`, with an `Api-Key` header. Behind the `wispr-chain-via-aria-web` flag it goes through `<aria-web>/llm/dictation` instead. There are also HTTP chunk paths `/llm/asr` and `/llm/asr_audio_chunks` (`httpChunksSent`).
+   - (d) **Fallback: one-shot HTTPS POST** of the whole utterance as JSON or msgpack ("binary") to the production environment of a Baseten Chain, authenticated with an API key header. Behind the `wispr-chain-via-aria-web` flag it goes through `<aria-web>/llm/dictation` instead. There are also HTTP chunk paths `/llm/asr` and `/llm/asr_audio_chunks` (`httpChunksSent`).
      - Evidence: `class C` with `BASE10_PRODUCTION_ENDPOINT`, `serializeFlowRequest`, `sendFlowRequest`, `secondFallbackReason`.
 4. **Server ASR**: an ensemble. The proto enum `Origin` lists `MIXTURE, WHISPER, SCRIBE, VOXTRAL, QWEN`. SCRIBE is ElevenLabs Scribe, VOXTRAL is Mistral Voxtral and QWEN is Qwen ASR; these are inferences from the names.
    - Every `CandidateBeam{text, score, confidence, origin, alignment_score, word_alignments[]}` is labeled with its origin. `ResponseTime.external_asr_time` points to third-party ASR calls, and `Metadata.always_wait_scribe` exists.
    - So the server runs several ASR engines and merges them ("MIXTURE"), probably with alignment-based scoring. That would be the `align` pipeline step.
-   - A `UseCandidateAsr` flag routes to `wispr-ai--*.modal.direct` candidate models.
+   - A `UseCandidateAsr` flag routes to candidate models hosted on Modal.
 5. **Server LLM formatting** (pipeline steps `transcribe, align, format`, plus optionally `lowercase_sentences`, `slack_tagging`, `email_signature`):
    - The LLM rewrites the raw transcript using style, editing strength, dictionary, app context and the previous ASR/LLM text of this session.
    - It returns `asr_text`, `llm_text` / `formatted_text` (HTML), `detected_language`, `average_log_prob`, `starts_with_proper_noun`, `stats{word_deletions, word_substitutions, context_word_count}` and `format_skip_reason`.
    - `external_llm_time` exists, and the client has a model enum: `claude-haiku-4-5`, `claude-sonnet-4-5`, `claude-opus-4-6`, `gpt-oss-120b` (Cerebras), `gpt-realtime-2`, `gpt-5.5`. A provider enum `GROQ / OPENAI` sits on `CompletionRequestError`.
    - The current gRPC path does not name the dictation formatting model on the client. An older direct-call path, still in the bundle, does name it.
-     - `AriaWebClient.formatEnglish` posts to `/llm/formatting` with `model_name` set to an OpenPipe fine-tune of **Llama 3.1 8B**: `openpipe:llama3-1-8b-12-09-2024` in general, and an email-specific fine-tune, `openpipe:llama3-1-05-21-data-email`, when the app type is email.
+     - `AriaWebClient.formatEnglish` posts to `/llm/formatting` with `model_name` set to an OpenPipe-hosted fine-tune of **Llama 3.1 8B**: a general one, and an email-specific one when the app type is email.
      - Non-English text goes to `/llm/format_non_english` (`formatNonEnglish(app_type, content, detected_language, user_languages)`).
      - So Wispr's formatter has been a **fine-tuned 8B model**, which is good news for local inference. Canto is probably the successor.
 6. **Client post-processing**, in order, from the result handler around `findAndReplaceDictionaryWords` in `main`:

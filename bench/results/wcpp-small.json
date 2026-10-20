@@ -1,0 +1,74 @@
+[
+ {
+  "f": "d01.wav",
+  "sec": 6.2790625,
+  "lat": 0.36395000000000005,
+  "ref": "please schedule the quarterly review with the design team for thursday at 3 pm and send the agenda to everyone on the list",
+  "hyp": "please schedule the quarterly review with the design team for thursday at 3 pm and send the agenda to everyone on the list",
+  "raw": "Please schedule the quarterly review with the design team for Thursday at 3pm and send the agenda to everyone on the list."
+ },
+ {
+  "f": "d02.wav",
+  "sec": 7.1824375,
+  "lat": 0.2763,
+  "ref": "deploy the kubernetes cluster with terraform then point the graphql gateway at the postgres replica behind the load balancer",
+  "hyp": "deploy the kubernetes cluster with terraform then point the graphql gateway at the postgres replica behind the load balancer",
+  "raw": "Deploy the Kubernetes cluster with Terraform, then point the GraphQL gateway at the Postgres replica behind the load balancer."
+ },
+ {
+  "f": "d03.wav",
+  "sec": 9.2285,
+  "lat": 0.65967,
+  "ref": "the invoice total is 4250 dollars and 75 cents due on march 15 with a 2 percent discount if paid within 10 days",
+  "hyp": "the invoice total is dollars 425075 due on march 15 with a 2 percent discount if paid within 10 days",
+  "raw": "The invoice total is $4,250.75 due on March 15, with a 2% discount if paid within 10 days."
+ },
+ {
+  "f": "d04.wav",
+  "sec": 5.7276875,
+  "lat": 0.29462,
+  "ref": "let's meet on tuesday no wait actually make it wednesday morning because tuesday is fully booked",
+  "hyp": "let's meet on tuesday no wait actually make it wednesday morning because tuesday is fully booked",
+  "raw": "Let's meet on Tuesday. No wait, actually make it Wednesday morning because Tuesday is fully booked."
+ },
+ {
+  "f": "d05.wav",
+  "sec": 7.216875,
+  "lat": 0.39028999999999997,
+  "ref": "run npm install then call the useeffect hook inside the react component and log the json response to the console",
+  "hyp": "run npm install then call the use effect hook inside the react component and log the json response to the console",
+  "raw": "Run npm install, then call the use effect hook inside the react component and log the json response to the console."
+ },
+ {
+  "f": "d06.wav",
+  "sec": 6.602,
+  "lat": 0.51243,
+  "ref": "hey sarah thanks for the quick turnaround on the contract i made a few edits in section 2 and left comments for legal",
+  "hyp": "hey sarah thanks for the quick turnaround on the contract i made a few edits in section 2 and left comments for legal",
+  "raw": "Hey Sarah, thanks for the quick turnaround on the contract. I made a few edits in section 2 and left comments for legal."
+ },
+ {
+  "f": "d07.wav",
+  "sec": 7.72875,
+  "lat": 0.3451700000000001,
+  "ref": "our latency dropped from 180 milliseconds to 45 milliseconds after we moved the redis cache onto the same availability zone",
+  "hyp": "our latency dropped from 180 milliseconds to 45 milliseconds after we moved the redis cache onto the same availability zone",
+  "raw": "Our latency dropped from 180 milliseconds to 45 milliseconds after we moved the Redis cache onto the same availability zone."
+ },
+ {
+  "f": "d08.wav",
+  "sec": 7.1125625,
+  "lat": 0.35307,
+  "ref": "remind me to buy milk eggs and coffee on the way home and also to call the dentist about rescheduling my appointment",
+  "hyp": "remind me to buy milk eggs and coffee on the way home and also to call the dentist about rescheduling my appointment",
+  "raw": "Remind me to buy milk, eggs, and coffee on the way home, and also to call the dentist about rescheduling my appointment."
+ },
+ {
+  "f": "meeting.wav",
+  "sec": 56.6739375,
+  "lat": 1.2891699999999997,
+  "ref": "good morning everyone let's get started with the weekly sync first item is the release planning for version 2 thanks the beta build is ready but we still have 3 open bugs in the audio capture module that block the release are any of those bugs critical or can we ship with known issues and fix them in a patch next week 1 is critical the microphone stops recording after the laptop wakes from sleep so dictation silently fails okay that has to be fixed before launch can you own that 1 and give us an estimate by tomorrow afternoon yes i will take it i think it is a 2 day fix mostly testing on different hardware and operating system versions great next item is the transcription model we are benchmarking parakeet whisper and moonshine on the m4 pro this week sounds good please share the word error rate and latency numbers in the channel so we can decide on friday",
+  "hyp": "good morning everyone let's get started with the weekly sync first item is the release planning for version 2 thanks the beta build is ready but we still have 3 open bugs in the audio capture module that block the release are any of those bugs critical or can we ship with known issues and fix them in a patch next week 1 is critical the microphone stops recording after the laptop wakes from sleep so dictation silently fails okay that has to be fixed before launch can you own that 1 and give us an estimate by tomorrow afternoon yes i will take it i think it is a 2 day fix mostly testing on different hardware and operating system versions great next item is the transcription model we are benchmarking perrapeet whisper and moonshine on the m4 pro this week sounds good please share the word error rate and latency numbers in the channel so we can decide on friday",
+  "raw": "Good morning everyone. Let's get started with the weekly sync. First item is the release planning for version 2. Thanks. The beta build is ready, but we still have 3 open bugs in the audio capture module that block the release. Are any of those bugs critical, or can we ship with known issues and fix them in a patch next week? One is critical. The microphone stops recording after the laptop wakes from sleep, so dictation silently fails. Okay. That has to be fixed before launch. Can you own that one and give us an estimate by tomorrow afternoon? Yes, I will take it. I think it is a two-day fix, mostly testing on different hardware and operating system versions. Great. Next item is the transcription model. We are benchmarking Perrapeet, Whisper, and Moonshine on the M4 Pro this week. Sounds good. Please share the word error rate and latency numbers in the channel so we can decide on Friday."
+ }
+]

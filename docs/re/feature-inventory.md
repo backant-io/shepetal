@@ -4,7 +4,7 @@ One line per user-visible feature. The depth lives in the sibling docs: `/Users/
 
 Evidence keys (short): **S** = `prefs.user` setting key in `~/Library/Application Support/Wispr Flow/config.json`; **N** = notification type in `config.json` `notifications`; **F** = feature flag string in `.webpack/main/index.js`; **T** = flow.sqlite table; **H** = HelperAPI message; **K** = shortcut action id in `prefs.user.shortcuts`; **P** = onboarding page id.
 
-Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-platforms.md`; i is marked only where Wispr documents it). Cloud = whether Wispr needs its servers for the feature. Priority: P0 = core dictation, P1 = meetings and major features, P2 = nice-to-have, Skip = billing, growth or telemetry (listed so nothing is silently dropped).
+Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-platforms.md`; i is marked only where Wispr documents it). Cloud = whether Wispr needs its servers for the feature. Priority: P0 = core dictation, P1 = meetings and major features, P2 = nice-to-have, n/a = exists only to serve Wispr's servers or business, in a category `agent/goal.md` allows (billing, subscriptions, referrals, telemetry, remote-flags, ab-tests, account-admin); the plan cell names the category and the reason. Cloud-backed user features (share links, team dictionaries, sync) are never n/a: they get a local-first plan and a P priority. `python3 scripts/check_re_docs.py` checks this.
 
 ## Core dictation and input
 
@@ -28,6 +28,9 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F16 | Jabra headset button and wear detection | M W | n | HID button as hotkey | P2 | S `jabraWearDetectionEnabled`; dep `@gnaudio/jabra-js` |
 | F17 | Secure Input detection (warns when hotkeys are blocked) | M | n | `IsSecureEventInputEnabled` poll | P0 | H `SecureInputStatus`; N `SecureInputBlockingShortcuts` |
 | F18 | Slow-processing and degraded-network notices | M W | y | local latency notice only | P2 | N `ProcessingDelayNotification`, `DegradedNetwork`; S `processingDelayNotificationEnabled` |
+| F114 | Creator mode: an optional on-screen label while dictating, for screen recordings and streams | M W | n | settings toggle, off by default: while recording, a short text in our own wording sits next to the 🤫 indicator, which stays tiny and click-through; iPhone shows it in the keyboard corner | P2 | S `creatorMode`; N `DictatingWithWisprFlow` |
+| F115 | Microphone advice quiz (environment and gear questions, a whisper try-out, a recommended mic setup) | M W | n | offline page under mic settings: a few questions plus a level and noise test on the local mic, then advice in our own words; can move a better mic to the top of the F07 ranked list; no shop links, email or network | P2 | S `microphoneQuizBannerDismissed`; event `mic_quiz_completed` |
+| F116 | Start dictation from the iPhone Action Button, with a setup guide and keyboard tips | i | y | App Intent (`AudioRecordingIntent`) the user assigns to the Action Button: starts or stops a local session, shows 🤫 in the Live Activity, puts the text on the clipboard and in history; a short setup screen explains the assignment | P2 | event `action_button_setup_complete`; `mobile-and-platforms.md` (starting without the keyboard) |
 
 ## Insertion and context
 
@@ -71,6 +74,7 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F49 | Flow Lens: ask about the screen or context via a shortcut chat | M W | y | local VLM, optional | P2 | K `lens`; T `FlowLensHistory` |
 | F50 | Stacked messages: in personal messaging apps, one dictation is split into several chat messages | M W | y | split on sentence or LLM boundaries, send each with Return | P2 | S `stackedMessagesEnabled` (only applies to the PERSONAL app type, in the `index.js` formatter path) |
 | F51 | Nonsense or empty transcript guard | M W | n | min speech duration + VAD | P0 | N `TranscriptionEmpty`, `VoidDictation`; F `nonsense-transcription-toast` |
+| F117 | Bulk import of dictionary words and snippets from a file, with a preview | M W | n | Import from file: parse local JSON or CSV, preview per-row errors and duplicates, then insert marked as imported; same format as the F64 export, so lists round-trip between devices | P2 | event `snippets_bulk_import_started`; dictionary source `BULK_IMPORT` (`text-pipeline.md`) |
 
 ## History, notes, stats
 
@@ -82,13 +86,14 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F55 | Scratchpad notes window (tabs, pinning, open from a shortcut) | M W | n | Markdown notes in SQLite | P1 | renderer `scratchpad`; T `Notes`; F `scratchpad` |
 | F56 | Note version history and AI transforms on notes | M W | y | versions table + local LLM | P2 | T `NoteVersions.transformPrompt` |
 | F57 | Images in notes | M W | n | local blobs | P2 | T `NoteImages` |
-| F58 | Shareable note links | M W | y | export to a file instead | Skip | T `SharedNotes`; host `notes.wisprflow.ai` |
+| F58 | Shareable note links | M W | y | share by exported file: export the note as Markdown or HTML and hand it to the system share sheet; nothing is uploaded | P2 | T `SharedNotes`; host `notes.wisprflow.ai` |
 | F59 | Cloud sync across devices | M W i | y | optional later (Syncthing / iCloud folder) | P2 | S `cloudSync`; F `cloud-sync`, `enable-sync-ws` |
 | F60 | Stats: words dictated, WPM, time saved, per-app usage | M W i | n | SQL over `History` | P1 | index `idx_history_per_app_stats`; hub `wpm` |
 | F61 | Daily streak and milestones | M W | n | local streak calc | P2 | F `daily-streak`; S `notificationSettings.milestonesAndProgress` |
 | F62 | Insights heatmap and "voice profile" persona card | M W | y | local aggregates, no LLM persona | P2 | `config.json` `voiceProfile`; N `InsightsReady` |
-| F63 | Team leaderboard | M W | y | none | Skip | F `pro-team-leaderboard` |
+| F63 | Team leaderboard | M W | y | opt-in: each member's app writes a stats file to a folder the team shares (Syncthing, iCloud Drive); the leaderboard reads those files | P2 | F `pro-team-leaderboard` |
 | F64 | Data export (self-serve) | M W | y | local export (JSON/CSV/Markdown) | P1 | F `member-self-serve-data-export` |
+| F118 | Share usage stats as an image card (copy, save, post) | M W | n | render the stats card (words, WPM, streak) locally to PNG; copy or save it; a prefilled share URL opens in the browser only on click; nothing is uploaded | P2 | event `insights_share_modal_opened`, `insights_share_copy_clicked` |
 
 ## Meetings / notetaker (detail in `meetings.md`)
 
@@ -106,7 +111,7 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F74 | Calendar integration (Google, Microsoft), upcoming-meeting reminders | M W | y | read EventKit / ICS locally | P2 | T `CalendarEvents`; S `notetakerCalendarNotificationsEnabled`; F `notetaker-microsoft-calendar` |
 | F75 | Pre-read briefs before a meeting | M W | y | local LLM over past notes | P2 | T `CalendarEvents.prereadSummary`; F `preread-config` |
 | F76 | Recording consent notice posted to the meeting chat | M W | n | optional AX chat post | P2 | H `PostConsentChatMessage`; S `notetakerCalendarNotice` |
-| F77 | Auto-share notes with participants | M W | y | none (export) | Skip | S `notetakerAutoShareNotes` |
+| F77 | Auto-share notes with participants | M W | y | off by default: after the meeting, export the notes to a file and open a mail draft or share sheet addressed to the calendar participants | P2 | S `notetakerAutoShareNotes` |
 | F78 | Folders for meetings | M W | n | local folders | P2 | T `Folders`, `FolderMeetings`; F `notetaker-folders` |
 | F79 | Automations on meetings or notes | M W | y | local hooks (run a script on summary) | P2 | T `Automations`; F `automations` |
 | F80 | Import from Granola / Otter | M W | y | file import | P2 | T `GranolaImportRun`; S `granolaImported`, `otterImported` |
@@ -114,9 +119,14 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F82 | Hide the recorder in screen share; split-screen next to the call; menu-bar meeting control | M W | n | window sharingType=none; layout helper | P2 | S `hideMeetingRecorderInScreenShare`, `notetakerSplitScreenJoinEnabled`, `notetakerMenuBarMeetingEnabled` |
 | F83 | Long-meeting check-in and max length | M W | n | timer prompts | P2 | S `notetakerLongMeetingCheckInEnabled`, `notetakerMaxRecordingLength` |
 | F84 | Meeting translation | M W | y | local LLM | P2 | N `NotetakerTranslationIntroModal` |
-| F85 | Org insights (team-level analytics over meetings) | M W | y | none | Skip | S `notetakerOrgInsightsDefault`; F `org-insights` |
+| F85 | Org insights (team-level analytics over meetings) | M W | y | n/a account-admin: an analytics view for admins of Wispr org accounts; shepetal has no accounts or orgs | n/a | S `notetakerOrgInsightsDefault`; F `org-insights` |
 | F86 | MCP server exposing notes and meetings to AI clients | M W | y | local stdio MCP over SQLite | P1 | dep `@modelcontextprotocol/sdk`; S `notetakerMCPVisibilityState` |
 | F87 | Connectors / connect apps (e.g. Atlassian, Loom) for context | M W | y | none initially | P2 | `e2e:setConnectorCatalog`; P `connect-apps` |
+| F119 | Meeting recorder from the keyboard (triple-tap of the dictation key, or a rebindable shortcut) | M W | n | a fn triple-tap from idle (setting, on by default) and an optional rebindable shortcut open the recorder, start a detected meeting or stop the active one; a shortcut the user removed is never re-added; iPhone gets a start-meeting button instead | P1 | K `open_meeting_recorder`; S `notetakerTripleTapShortcutEnabled`, `meetingRecorderShortcutRemoved`, `stashedMeetingRecorderShortcuts` |
+| F120 | Meeting notes library in the hub with tabs and search | M W | n | hub meeting list with All and Folders tabs; SQLite FTS5 search over title, attendees, transcript, summary and notes, with snippets; debounced, on device only | P1 | event `notetaker_notes_search_performed`, `notetaker_notes_tab_changed`; `meetings.md` section 5 |
+| F121 | Keep or discard a very short or accidental meeting recording | M W | n | when a recording stops under a tunable threshold (about 60 s, or no speech on either channel), a small card next to 🤫 offers keep or discard; discard hides the meeting, and its raw audio stays, marked (product rule 4) | P2 | N `MeetingStartedByMistake`; event `notetaker_short_capture_decision` |
+| F122 | Warn when the call app's mic differs from the one the meeting recorder captures | M | n | during a recording, read the call app's input device (AX in Zoom, Meet and Teams, or the Core Audio process object; the PipeWire stream node on Linux) and, when it differs from the recorder's mic and the user is not muted, show a notice next to 🤫 with switch-mic and don't-show-again | P2 | H `ZoomMeetingAudioChanged`, `GoogleMeetAudioDeviceChanged`, `TeamsMeetingAudioChanged`; N `NotetakerMicMismatch` |
+| F123 | Latin-script view of non-Latin meeting transcripts | M W | y | deterministic local transliteration (Foundation's to-Latin string transform on Apple, ICU Any-Latin on Linux) stored next to the original, with a toggle; no model, no network | P2 | task enum `TranscriptRomanization`; event `notetaker_transcript_romanized` |
 
 ## App shell, onboarding, system
 
@@ -129,7 +139,7 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F92 | Launch at login, hide the Dock icon, menu-bar presence | M W | n | SMAppService / XDG autostart | P0 | S `openAtLogin`, `hideAppInDock` |
 | F93 | Dark mode / theme | M W | n | follow the system | P2 | S `theme`; F `dark-mode` |
 | F94 | UI localization | M W i | n | i18n later | P2 | S `uiLocale`; F `localization-framework`; dep `i18next` |
-| F95 | Focus mode (block distracting apps and URLs) | M W | n | out of scope | Skip | S `focusModeEnabled`, `focusModeBlockedApps`; H `SetFocusMode` |
+| F95 | Focus mode (block distracting apps and URLs) | M W | n | local block list: during a focus session, watch the frontmost app and the browser URL (F23) and hide or cover blocked ones | P2 | S `focusModeEnabled`, `focusModeBlockedApps`; H `SetFocusMode` |
 | F96 | Typing reminder (nudges you to use voice when you type a lot) | M W | n | optional | P2 | N `TypingReminderEnabled` |
 | F97 | Deep links (`wispr-flow://`) for login and actions | M W | n | `shepetal://` for settings | P2 | `setAsDefaultProtocolClient("wispr-flow")` |
 | F98 | Auto-updater (deferred while dictating) | M W | y | opt-in GitHub Releases updater | P1 | `autoUpdater.setFeedURL` dl.wisprflow.com; F `defer-updates-while-active` |
@@ -137,22 +147,24 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F100 | In-app notifications center (tips, server announcements) | M W | y | local error toasts only | P2 | T `RemoteNotifications`; S `notificationSettings` |
 | F101 | Extensions / agent tool bridge (spawns external agent CLIs) | M | y | later plugin hook | P2 | `agentToolBridge.js`; F `extension-system` |
 | F102 | Admin app deny-list (dictation blocked in some apps) | M W | y | local per-app disable list | P1 | N `AppDictationBlocked`; F `app-deny-list-enforcement` |
-| F103 | HIPAA mode / enterprise data controls | M W | y | moot (all local) | Skip | `cache.hipaaBaaSigned`; N `HipaaCloudSyncGate` |
-| F104 | Accounts, SSO, teams, team dictionary / snippets | M W i | y | none (single-user local) | Skip | deps supabase, workos; T `Dictionary.teamDictionaryId`; F `department-scoped-snippets` |
-| F105 | Subscriptions, trials, weekly word limit, referrals, student plan, paywalls | M W i | y | none | Skip | N `WeeklyWordsLimitReached`, `ProTrialUpgradeCTA`; F `student-plan-free` |
-| F106 | Product analytics, session telemetry, Sentry, Datadog logs | M W i | y | none: local logs only | Skip | posthog, segment, sentry, datadog hosts in `index.js` |
-| F107 | Remote feature flags and A/B experiments | M W i | y | compile-time features | Skip | about 230 flags in the `index.js` enum |
+| F103 | HIPAA mode / enterprise data controls | M W | y | n/a account-admin: a data-control setting tied to a signed BAA on a Wispr org account; shepetal sends no data anywhere | n/a | `cache.hipaaBaaSigned`; N `HipaaCloudSyncGate` |
+| F104 | Accounts, SSO, team administration | M W i | y | n/a account-admin: sign-in, SSO and team management exist for Wispr accounts; shepetal is a single-user local app | n/a | deps supabase, workos |
+| F113 | Team dictionary and snippets (shared with a team, scoped by department) | M W i | y | dictionary and snippet files in a folder the team shares (Syncthing, iCloud Drive, a git checkout), merged read-only into the local dictionary | P2 | T `Dictionary.teamDictionaryId`; F `department-scoped-snippets` |
+| F105 | Subscriptions, trials, weekly word limit, referrals, student plan, paywalls | M W i | y | n/a subscriptions: plans, trials, word limits, referrals and paywalls only serve Wispr's billing; shepetal is free | n/a | N `WeeklyWordsLimitReached`, `ProTrialUpgradeCTA`; F `student-plan-free` |
+| F106 | Product analytics, session telemetry, Sentry, Datadog logs | M W i | y | n/a telemetry: analytics and crash or log upload only serve Wispr; shepetal keeps logs local | n/a | posthog, segment, sentry, datadog hosts in `index.js` |
+| F107 | Remote feature flags and A/B experiments | M W i | y | n/a remote-flags: remote flags and A/B experiments only serve Wispr; shepetal uses compile-time features | n/a | about 230 flags in the `index.js` enum |
 | F108 | Mobile keyboard dictation (iPhone keyboard extension + app) | i | y | see `mobile-and-platforms.md` | P1 | `mobile-and-platforms.md` |
 | F109 | Smart spacing at insertion boundaries (leading or trailing space, nbsp, capitalization based on surrounding text) | M W | n | read the characters around the cursor via AX, then adjust | P0 | F `trailing-boundary-nbsp`; H `TextBoxInfo` |
 | F110 | Formality mismatch detection (notices when the tone does not fit the app) | M W | y | none | P2 | N `FormalityMismatchDetected` |
 | F111 | Feature tour / what's-new / changelog | M W | n | release notes page | P2 | renderer `feature_tour`; event `changelog_opened` |
 | F112 | Double-trigger debounce (ignores accidental double presses, conflicting shortcuts) | M W | n | debounce in the hotkey state machine | P0 | N `Debounce`, `DictationCancelledOtherShortcut` |
+| F124 | Prompt to move the app into Applications when launched from elsewhere | M | n | Mac: at launch, if the bundle is outside /Applications and ~/Applications (a DMG or Downloads breaks permissions and launch at login), offer to move it; declining never blocks | P2 | event `app_not_in_applications_folder` |
 
 ## Counts
 - P0: F01, F02, F03, F04, F05, F06, F07, F08, F10, F12, F17, F19, F20, F21, F23, F27, F32, F39, F51, F52, F53, F88, F89, F90, F91, F92, F99, F109, F112 = **29**
-- P1: F09, F11, F13, F22, F24, F26, F33, F34, F35, F37, F40, F42, F43, F45, F48, F55, F60, F64, F65, F66, F67, F68, F69, F70, F71, F72, F73, F81, F86, F98, F102, F108 = **32**
-- P2: F14, F15, F16, F18, F25, F28, F29, F30, F31, F36, F38, F41, F44, F46, F47, F49, F50, F54, F56, F57, F59, F61, F62, F74, F75, F76, F78, F79, F80, F82, F83, F84, F87, F93, F94, F96, F97, F100, F101, F110, F111 = **41**
-- Skip: F58, F63, F77, F85, F95, F103, F104, F105, F106, F107 = **10**
-- Total: **112**
+- P1: F09, F11, F13, F22, F24, F26, F33, F34, F35, F37, F40, F42, F43, F45, F48, F55, F60, F64, F65, F66, F67, F68, F69, F70, F71, F72, F73, F81, F86, F98, F102, F108, F119, F120 = **34**
+- P2: F14, F15, F16, F18, F25, F28, F29, F30, F31, F36, F38, F41, F44, F46, F47, F49, F50, F54, F56, F57, F58, F59, F61, F62, F63, F74, F75, F76, F77, F78, F79, F80, F82, F83, F84, F87, F93, F94, F95, F96, F97, F100, F101, F110, F111, F113, F114, F115, F116, F117, F118, F121, F122, F123, F124 = **55**
+- n/a: F85, F103, F104, F105, F106, F107 = **6**
+- Total: **124**
 
 Open questions: helper flag `flow-fetch` (enabled-only payload, purpose unknown) was not resolved in the time available. Flags `canto-launch-modal` and `linkedin-apps` are unidentified product surfaces.
