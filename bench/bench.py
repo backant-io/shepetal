@@ -44,18 +44,21 @@ def sherpa(kind):
         d = glob.glob(f"{C}/sherpa-onnx-sense-voice-*")[0]
         r = so.OfflineRecognizer.from_sense_voice(model=f"{d}/model.int8.onnx", tokens=f"{d}/tokens.txt", use_itn=True, num_threads=4)
     load = time.perf_counter() - t
-    def run(p):
-        a, sr = sf.read(p, dtype="float32")
-        t = time.perf_counter(); s = r.create_stream(); s.accept_waveform(sr, a); r.decode_stream(s)
-        return s.result.text, time.perf_counter() - t
-    return run, load, d
+    return (lambda p: timed(r, *sf.read(p, dtype="float32"))), load, d
+
+def timed(r, a, sr):  # time-to-text for one utterance already in memory
+    t = time.perf_counter(); s = r.create_stream(); s.accept_waveform(sr, a); r.decode_stream(s)
+    return s.result.text, time.perf_counter() - t
+
+def wcpp_lat(stderr):  # whisper-cli's own timings: decode time without model load, in seconds
+    ms = lambda k: float(re.search(k + r"\s*=\s*([\d.]+) ms", stderr).group(1)) / 1000
+    return ms("total time") - ms("load time")
 
 def wcpp(model):
     m = f"{C}/ggml-{model}.bin"; cli = f"{C}/whisper.cpp/build/bin/whisper-cli"
     def run(p):
         out = subprocess.run([cli, "-m", m, "-f", p, "-nt", "-l", "en", "-t", "4"], capture_output=True, text=True)
-        ms = lambda k: float(re.search(k + r"\s*=\s*([\d.]+) ms", out.stderr).group(1)) / 1000
-        return out.stdout.strip(), ms("total time") - ms("load time")
+        return out.stdout.strip(), wcpp_lat(out.stderr)
     return run, None, m
 
 def fluid(opt):  # "" (FluidAudio defaults) | "int8-v2" | "int4" encoder | "itn" (default encoder + ITN)
@@ -64,6 +67,18 @@ def fluid(opt):  # "" (FluidAudio defaults) | "int8-v2" | "int4" encoder | "itn"
     head, *rows = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
     res = {r["f"]: (r["text"], r["lat"]) for r in rows}  # the CLI warms up and times every file itself
     return (lambda p: res[os.path.basename(p)]), head["load"], head["dir"]
+
+def score(rows):  # rows as saved in results/<engine>.json
+    dic = [r for r in rows if r["f"].startswith("d")]; meet = [r for r in rows if r["f"].startswith("m")]
+    return dict(
+        wer_dictation=round(jiwer.wer([r["ref"] for r in dic], [r["hyp"] for r in dic]) * 100, 1),
+        wer_meeting=round(jiwer.wer(meet[0]["ref"], meet[0]["hyp"]) * 100, 1),
+        latency_dictation_ms_mean=round(sum(r["lat"] for r in dic) / len(dic) * 1000),
+        latency_meeting_ms=round(meet[0]["lat"] * 1000),
+        rtf=round(sum(r["lat"] for r in rows) / sum(r["sec"] for r in rows), 4))
+
+def rss_mb(maxrss, platform=sys.platform):  # ru_maxrss is bytes on macOS, kilobytes on Linux
+    return round(maxrss / (2**20 if platform == "darwin" else 2**10))
 
 def size(p):
     if os.path.isfile(p): return os.path.getsize(p)
@@ -80,14 +95,8 @@ if __name__ == "__main__":
         txt, lat = run(p)
         ref = open(p[:-4] + ".txt").read()
         rows.append(dict(f=os.path.basename(p), sec=dur(p), lat=lat, ref=norm(ref), hyp=norm(txt), raw=txt.strip()))
-    dic = [r for r in rows if r["f"].startswith("d")]; meet = [r for r in rows if r["f"].startswith("m")]
     rss = max(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss, resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)
-    res = dict(engine=e,
-        wer_dictation=round(jiwer.wer([r["ref"] for r in dic], [r["hyp"] for r in dic]) * 100, 1),
-        wer_meeting=round(jiwer.wer(meet[0]["ref"], meet[0]["hyp"]) * 100, 1),
-        latency_dictation_ms_mean=round(sum(r["lat"] for r in dic) / len(dic) * 1000),
-        latency_meeting_ms=round(meet[0]["lat"] * 1000),
-        rtf=round(sum(r["lat"] for r in rows) / sum(r["sec"] for r in rows), 4),
-        load_s=load and round(load, 2), peak_rss_mb=round(rss / 2**20), model_mb=round(size(mpath) / 2**20))
+    res = dict(engine=e, **score(rows),
+        load_s=load and round(load, 2), peak_rss_mb=rss_mb(rss), model_mb=round(size(mpath) / 2**20))
     json.dump(rows, open(os.path.join(HERE, "results", e + ".json"), "w"), indent=1)
     print(json.dumps(res))
