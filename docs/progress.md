@@ -8,7 +8,7 @@ Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shar
 
 Pavel ran `docs/manual-test.md#mac` on the v0.1.0-mac build (`ShepetalCommit` 6298f40, the #112 merge). It predates #94 (fn gestures) and #113 (meetings), so the meeting steps could not work there. His report: M-FN-2 does not work, M-FN-3 starts hands-free, M-INS-1 capitalizes and adds a period mid-sentence, M-NS-1 "no focus ... took forever to realize the window changed", M-MTG-1 and M-MTG-2 do not detect Zoom or a browser meeting. Everything else on the Mac works.
 
-A Mac `hand-test` cell moved to `confirmed` only when every hand step it cites passed and every PR its Mac evidence cites is an ancestor of 6298f40. Measured with `python3 scripts/parity.py` against main at 047cde9:
+A Mac `hand-test` cell moved to `confirmed` only when every hand step it cites passed and every PR its Mac evidence cites is an ancestor of 6298f40. Measured with `python3 scripts/parity.py` against main at 10edd42:
 
 | | Before | After |
 |---|---|---|

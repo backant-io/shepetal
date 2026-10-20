@@ -2,7 +2,7 @@
 
 One row per feature ID in `docs/re/feature-inventory.md`, one column per shepetal platform. `python3 scripts/parity.py` checks this table and prints the coverage; the goal is 100% automated and 100% confirmed coverage (see `agent/goal.md`, "The finish line").
 
-Last audited against main at 45e8bf4 (2026-10-20); Pavel's Mac hand-test results on build 6298f40 recorded against main at 047cde9 (2026-10-21). See `docs/progress.md`. A cell is `done` only with a named test on main plus its PR, and `hand-test` only when the automatable part is on main and a `docs/manual-test.md` step exists. Work in open PRs counts for nothing until it merges.
+Last audited against main at 45e8bf4 (2026-10-20); Pavel's Mac hand-test results on build 6298f40 recorded against main at 10edd42 (2026-10-21). See `docs/progress.md`. A cell is `done` only with a named test on main plus its PR, and `hand-test` only when the automatable part is on main and a `docs/manual-test.md` step exists. Work in open PRs counts for nothing until it merges.
 
 Platform mapping: Mac covers Wispr's Mac features, Linux covers Wispr's desktop features (Mac and Windows), iPhone covers Wispr's iOS features plus every desktop feature iOS allows.
 
