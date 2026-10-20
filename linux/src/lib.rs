@@ -7,6 +7,7 @@ pub mod insert;
 pub mod meeting;
 pub mod mic;
 pub mod model;
+pub mod shortcuts;
 pub mod text_rules;
 pub mod vocab;
 
