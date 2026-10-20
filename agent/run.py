@@ -30,8 +30,12 @@ LOG = Path.home() / "Library/Logs/shepetal-worker.log"
 ENV_KEY_PROMPT = "environment key for shepetal-mac (sk-ant-oat01-...): "
 
 
-def secret(name, prompt):
-    """Read a key from the login Keychain; the first time, ask for it and save it there."""
+def secret(name, prompt, confirm=False):
+    """Read a key from the login Keychain; the first time, ask for it and save it there.
+
+    confirm=True trusts no app (-T ""), so every read shows a macOS Allow dialog: a silent read by the
+    agent's bash is then impossible. The worker's key can't use it because launchd has nobody to click.
+    """
     service = f"shepetal-{name}"
     found = subprocess.run(["security", "find-generic-password", "-s", service, "-w"], capture_output=True, text=True)
     if found.returncode == 0:
@@ -39,7 +43,7 @@ def secret(name, prompt):
     value = getpass.getpass(prompt).strip()
     if not value:
         sys.exit(f"no {name} entered")
-    subprocess.run(["security", "add-generic-password", "-U", "-s", service, "-a", "shepetal", "-w", value], check=True)
+    subprocess.run(["security", "add-generic-password", "-U", "-s", service, "-a", "shepetal", *(["-T", ""] if confirm else []), "-w", value], check=True)
     print(f"saved to the login Keychain as {service} (remove with: security delete-generic-password -s {service})")
     return value
 
@@ -54,7 +58,7 @@ def workspace():
 
 
 def api(ws):
-    key = os.environ.get("ANTHROPIC_API_KEY") or secret("api-key", "Anthropic API key: ")
+    key = os.environ.get("ANTHROPIC_API_KEY") or secret("api-key", "Anthropic API key: ", confirm=True)
     return anthropic.Anthropic(api_key=key, default_headers={"anthropic-workspace-id": ws} if ws else None)
 
 
@@ -68,7 +72,9 @@ def setup(cents="20000"):
     check_cents(cents)
     ws = workspace()
     client = api(ws)
-    env = client.beta.environments.create(name="shepetal-mac", config={"type": "self_hosted"})
+    # reuse the environment if an earlier setup got that far before failing
+    env = next((e for e in client.beta.environments.list() if e.name == "shepetal-mac"), None) \
+        or client.beta.environments.create(name="shepetal-mac", config={"type": "self_hosted"})
     agent = client.beta.agents.create(
         name="shepetal-builder",
         model={"id": "claude-opus-5-5", "effort": "high"},
