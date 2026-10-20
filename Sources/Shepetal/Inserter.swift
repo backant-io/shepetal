@@ -42,16 +42,21 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
         }
         let landed = PasteCheck.verdict(postedAt: posted, requestedAt: requestedAt, now: now) == .landed
         if !landed {
-            // Nothing took the paste (focus moved, or the app ignores Cmd+V): leave the text on the
-            // clipboard as plain text so the user can paste it themselves.
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
+            // Nothing took the paste (focus moved, or the app ignores Cmd+V).
+            leaveOnClipboard(text)
             return Result(landed: false, restored: false)
         }
         let wait = PasteCheck.restoreAt(postedAt: posted, requestedAt: requestedAt) - now
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         restore(saved)
         return Result(landed: landed, restored: snapshot() == saved)
+    }
+
+    /// Rule 8: text that is not pasted stays on the clipboard as plain text, so the user can press ⌘V.
+    /// The user's old clipboard is not restored then.
+    func leaveOnClipboard(_ text: String) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 
     nonisolated func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
@@ -129,6 +134,22 @@ enum FocusedText {
             let start = min(max(r.location, 0), ns.length)
             return ns.substring(with: NSRange(location: start, length: min(max(r.length, 0), ns.length - start)))
         } ?? ""
+    }
+
+    /// The focused app's pid and its focused window, to tell at paste time whether focus moved (rule 8).
+    /// Without Accessibility only the frontmost app is known, and the window is nil.
+    static func window() -> (app: Int32, window: AXUIElement?)? {
+        var app: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString,
+                                            &app) == .success, let app else {
+            return NSWorkspace.shared.frontmostApplication.map { ($0.processIdentifier, nil) }
+        }
+        let element = app as! AXUIElement
+        var pid: pid_t = 0
+        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
+        var window: CFTypeRef?
+        let ok = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success
+        return (pid, ok ? (window as! AXUIElement) : nil)
     }
 
     private static func read() -> (String, NSRange)? {

@@ -10,17 +10,6 @@ public enum Chime: CaseIterable {
     static let rate = Double(AudioStore.sampleRate)
     static let fade = AudioStore.sampleRate / 200  // 5 ms
 
-    /// The sound for a gesture. A too-short press plays nothing: the hint covers it.
-    public init?(_ action: GestureAction) {
-        switch action {
-        case .start: self = .start
-        case .stop: self = .stop
-        case .lockHandsFree: self = .lock
-        case .cancel: self = .cancel
-        case .tooShort: return nil
-        }
-    }
-
     public var samples: [Float] {
         switch self {
         case .start: Self.tone(from: 660, to: 990, ms: 120)                // rising
@@ -41,5 +30,31 @@ public enum Chime: CaseIterable {
             phase += 2 * .pi * (f0 + (f1 - f0) * Double(i) / Double(n)) / rate
             return s
         }
+    }
+}
+
+/// When each sound plays. fn-down opens the mic at once, but nothing is heard until the press is a
+/// dictation: the start sound waits for the hold threshold, so a too-short tap and an fn shortcut
+/// (fn+Delete, fn+arrow) stay silent (M-SND-1), and the cancel sound only follows a start the user heard.
+public struct ChimeCue {
+    private var heard = false
+
+    public init() {}
+
+    /// The sound for a gesture action, if any.
+    public mutating func sound(for action: GestureAction) -> Chime? {
+        switch action {
+        case .start, .tooShort: heard = false; return nil
+        case .lockHandsFree: heard = true; return .lock
+        case .stop: heard = false; return .stop
+        case .cancel: defer { heard = false }; return heard ? .cancel : nil
+        }
+    }
+
+    /// The shell calls this `gesture.holdThreshold` after `.start`: the start sound, if fn is still held.
+    public mutating func holdCheck(_ gesture: FnGesture, at t: TimeInterval) -> Chime? {
+        guard !heard, case .holding(let since) = gesture.state, t - since >= gesture.holdThreshold else { return nil }
+        heard = true
+        return .start
     }
 }

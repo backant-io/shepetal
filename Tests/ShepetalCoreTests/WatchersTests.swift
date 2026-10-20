@@ -26,6 +26,29 @@ final class WatchersTests: XCTestCase {
         XCTAssertEqual(w.observe([.mic: false, .ax: true]), [.mic], "a second revocation is reported again")
     }
 
+    // Turning the permission back on clears the yellow ring within one poll, without waiting for a dictation.
+    func testRegrantAfterRevocationIsReportedOnce() {
+        var w = PermissionWatch<P>()
+        _ = w.observe([.mic: true, .ax: true])
+        XCTAssertFalse(w.restored, "nothing was revoked")
+        _ = w.observe([.mic: false, .ax: false])
+        XCTAssertFalse(w.restored)
+        _ = w.observe([.mic: true, .ax: false])
+        XCTAssertFalse(w.restored, "Accessibility is still off, so the ring stays")
+        _ = w.observe([.mic: true, .ax: true])
+        XCTAssertTrue(w.restored)
+        _ = w.observe([.mic: true, .ax: true])
+        XCTAssertFalse(w.restored, "once, not on every poll")
+    }
+
+    // A permission missing at launch and granted later is onboarding, not a re-grant.
+    func testGrantAfterLaunchIsNotARestore() {
+        var w = PermissionWatch<P>()
+        _ = w.observe([.mic: false, .ax: true])
+        _ = w.observe([.mic: true, .ax: true])
+        XCTAssertFalse(w.restored)
+    }
+
     // Terminal's Secure Keyboard Entry can stay on for hours; one notice per episode, not one every 2 s.
     func testSecureInputNoticeOnRisingEdgeOnly() {
         var w = SecureInputWatch()
@@ -53,8 +76,8 @@ final class WatchersTests: XCTestCase {
         var w = SecureInputWatch()
         XCTAssertEqual(w.poll(enabled: true, ownerPid: nil, ownerName: nil, selfPid: 1),
                        .on("Secure input is on in another app, so fn can't be heard"))
-        XCTAssertEqual(SecureInputWatch.pasteMessage(SecureInputWatch.appName(nil)),
-                       "Secure input is on in another app. The text is in Recent.")
+        XCTAssertEqual(PasteGate.secureInput(SecureInputWatch.appName(nil)),
+                       "Secure input is on in another app. The text is on the clipboard: press ⌘V to paste it.")
     }
 
     func testLoginStatusMapping() {

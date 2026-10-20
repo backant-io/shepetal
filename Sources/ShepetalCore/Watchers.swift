@@ -2,14 +2,21 @@
 /// The first poll only records: a permission missing at launch is onboarding, not a revocation.
 public struct PermissionWatch<P: Hashable> {
     private var granted: [P: Bool]?
+    private var revoked = false
+    /// True on the one poll where every permission is back on after a revocation: the shell clears the
+    /// error ring then (M-PERM-5 step 3).
+    public private(set) var restored = false
 
     public init() {}
 
     /// Returns the permissions that went from granted to missing since the last poll.
     public mutating func observe(_ now: [P: Bool]) -> [P] {
         defer { granted = now }
+        restored = false
         guard let granted else { return [] }
-        return now.filter { !$0.value && granted[$0.key] == true }.map(\.key)
+        let off = now.filter { !$0.value && granted[$0.key] == true }.map(\.key)
+        if !off.isEmpty { revoked = true } else if revoked, !now.values.contains(false) { revoked = false; restored = true }
+        return off
     }
 
     public static func message(_ permission: String) -> String { "\(permission) access was turned off" }
@@ -38,7 +45,6 @@ public struct SecureInputWatch {
 
     public static func appName(_ name: String?) -> String { name ?? "another app" }
     public static func notice(_ app: String) -> String { "Secure input is on in \(app), so fn can't be heard" }
-    public static func pasteMessage(_ app: String) -> String { "Secure input is on in \(app). The text is in Recent." }
 }
 
 /// "Open at login" menu state from `SMAppService.Status` (app-architecture.md 4, `openAtLogin`).

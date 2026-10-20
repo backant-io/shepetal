@@ -18,7 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
-    private let focus = FocusRestore()
+    private var focusAtStart: (app: Int32, window: AXUIElement?)?
     private let sounds = Sounds()
     private lazy var secureInput = SecureInput(indicator: indicator)
     private var permissions: PermissionMonitor!
@@ -64,10 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         })
         Task { await loadEngine() }
 
-        permissions = PermissionMonitor { [weak self] message in
+        permissions = PermissionMonitor(revoked: { [weak self] message in
             self?.fail(message)
             if self?.allowPrompts == true { self?.showOnboarding() }
-        }
+        }, restored: { [weak self] in
+            if self?.indicator.mode == .error { self?.indicator.set(.idle) }
+        })
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
         }
@@ -110,8 +112,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sounds.play(action)
         switch action {
         case .start:
-            focus.store()
+            focusAtStart = FocusedText.window()
             indicator.set(.recording)
+            if let g = dictation?.gesture {  // the start sound waits until the press is a hold
+                DispatchQueue.main.asyncAfter(deadline: .now() + g.holdThreshold + 0.01) { [weak self] in
+                    MainActor.assumeIsolated { if let g = self?.dictation?.gesture { self?.sounds.holdCheck(g) } }
+                }
+            }
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
@@ -134,8 +141,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busy = true
         indicator.set(.processing)
         Task {
+            let start = focusAtStart
             let run = await pipeline.process(samples, engine: engine, context: FocusedText.context,
-                                             selection: FocusedText.selected, refocus: focus.restore,
+                                             selection: FocusedText.selected,
+                                             focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
                                              secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false
             if let error = run.error { fail(error) } else { indicator.set(.idle) }
