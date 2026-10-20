@@ -193,7 +193,7 @@ Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and 
 
 ### M-MTG-2: Google Meet in a browser
 1. Meet in Chrome or Safari is found by the tab's window title, which macOS only shows to apps with screen recording access. Add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording (the upper list), then quit and reopen Shepetal.
-2. Join a Google Meet call in Chrome with the mic on. Expected: "Meeting detected · recording", and the meeting is listed as "Google Meet (Google Chrome)" (or Safari). Repeat steps 3 to 7 of M-MTG-1.
+2. Join a Google Meet call in Chrome with the mic on. Expected: "Meeting detected · recording", and the meeting is listed as "Google Meet (Chrome)" (or "Google Meet (Safari)"). Repeat steps 3 to 7 of M-MTG-1.
 3. Without screen recording access, Meet is not detected. Use 🤫 > Start meeting recording before the call and Stop meeting recording after it. Expected: the same transcript and summary, listed as "Manual".
 
 ### M-MTG-3: dictation during a meeting
