@@ -230,7 +230,8 @@ fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
         let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("{bin} output: {e}"))?;
         v["text"].as_str().ok_or(format!("{bin} output has no text"))?.to_string()
     };
-    Ok(text.split_whitespace().collect::<Vec<_>>().join(" "))
+    // The Mac's rules (TextRules.swift Cleanup): fillers and stutters never reach the cursor or the history.
+    Ok(shepetal::text_rules::cleanup(&text.split_whitespace().collect::<Vec<_>>().join(" ")))
 }
 
 /// whisper.cpp writes non-speech as bracketed markers (`[BLANK_AUDIO]`, `[Music]`); they must
@@ -1024,6 +1025,15 @@ mod tests {
             let took = keyboard.join().unwrap();
             assert!(took < Duration::from_millis(900), "too short only {took:?} after the release, while the key repeated");
             assert!(!d.join("typed").exists());
+        });
+    }
+
+    #[test]
+    fn fillers_and_stutters_never_reach_the_cursor() {
+        with_fake_tools("cleanup", |d| {
+            std::fs::write(d.join("whisper-cli"), "#!/bin/sh\nprintf ' Um, the the build is, uh, green.\\n'\n").unwrap();
+            let gpu = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: true });
+            assert_eq!(transcribe(&gpu, &d.join("clip.wav")).as_deref(), Ok("The build is, green."));
         });
     }
 
