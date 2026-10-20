@@ -64,7 +64,7 @@ final class E2E: NSObject, NSApplicationDelegate {
         let resolveStart = ProcessInfo.processInfo.systemUptime
         let lookup = AppContext.resolve(AppContext(name: "E2E Browser", bundleId: "com.apple.Safari"), pid: 0) { _ in
             Thread.sleep(forTimeInterval: 0.3)
-            return Thread.isMainThread ? "looked up on the main thread" : "https://example.com/e2e?page=1"
+            return Thread.isMainThread ? "looked up on the main thread" : "https://user:secret@example.com:8443/e2e/page?code=abc#token"
         }
         let resolveMs = (ProcessInfo.processInfo.systemUptime - resolveStart) * 1000
         let app = await lookup.value

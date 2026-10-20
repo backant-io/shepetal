@@ -53,10 +53,27 @@ final class HistoryTests: XCTestCase {
     func testAppBundleAndUrlRoundTrip() throws {
         let history = try History(path: dbURL)
         var e = entry("a", text: "hello")
-        e.app = "Safari"; e.bundleId = "com.apple.Safari"; e.url = "https://example.com/a?b=1"
+        e.app = "Safari"; e.bundleId = "com.apple.Safari"; e.url = "https://example.com/a"
         try history.add(e)
         try history.add(entry("b", at: 900))
         XCTAssertEqual(try history.recent(), [e, entry("b", at: 900)])
+    }
+
+    // Issue #37: query, fragment, user, password and port can hold secrets; only scheme, host and path are kept.
+    func testUrlKeepsOnlySchemeHostAndPath() throws {
+        let history = try History(path: dbURL)
+        var e = entry("a", text: "hello")
+        e.url = "https://alice:hunter2@docs.example.com:8443/d/abc%20def/edit?code=SECRET&state=x#access_token=TOKEN"
+        try history.add(e)
+        let stored = try XCTUnwrap(history.recent().first).url
+        XCTAssertEqual(stored, "https://docs.example.com/d/abc%20def/edit")
+        for secret in ["alice", "hunter2", "8443", "SECRET", "state", "TOKEN", "?", "#", "@"] {
+            XCTAssertFalse(stored.contains(secret), secret)
+        }
+        XCTAssertEqual(Browser.historyURL("http://example.com"), "http://example.com")
+        XCTAssertEqual(Browser.historyURL("file:///Users/me/private.html"), "")
+        XCTAssertEqual(Browser.historyURL("about:blank"), "")
+        XCTAssertEqual(Browser.historyURL("not a url"), "")
     }
 
     func testSearchMatchesTextAndRawTextCaseInsensitively() throws {

@@ -21,7 +21,7 @@ struct AppContext: Equatable {
         guard Browser.contains(app.bundleId) else { return Task { app } }
         return Task.detached {
             var app = app
-            app.url = pageURL(pid)
+            app.url = Browser.historyURL(pageURL(pid))
             return app
         }
     }

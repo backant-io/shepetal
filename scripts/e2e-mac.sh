@@ -72,7 +72,7 @@ for r in rows:
     assert not p.startswith(("/tmp", "/private/tmp")), p
     assert r["history_outcome"] == "inserted" and r["history_audio_path"] == p, (name, r["history_outcome"])
     app = (r["history_app"], r["history_bundle_id"], r["history_url"])
-    assert app == ("E2E Browser", "com.apple.Safari", "https://example.com/e2e?page=1"), (name, "app at dictation start", app)
+    assert app == ("E2E Browser", "com.apple.Safari", "https://example.com/e2e/page"), (name, "app at dictation start", app)
     assert r["app_resolve_ms"] < 100, (name, "page-URL lookup held the main thread", r["app_resolve_ms"])
     assert r["retranscribed_text"] == r["text"] and r["retranscribed_row_kept"], (name, "re-transcribe", r)
     assert r["retranscribed_model"] == r["model"], (name, "re-transcribe model", r["retranscribed_model"])

@@ -53,6 +53,18 @@ public enum Browser {
     ]
 
     public static func contains(_ bundleId: String) -> Bool { bundleIds.contains(bundleId) }
+
+    /// The part of a page URL that history keeps: scheme, host and path. Query, fragment, user, password and
+    /// port are dropped, because they can carry sign-in codes, session ids and reset tokens the user never
+    /// dictated. A URL without a host (file:, about:, data:) is not kept at all.
+    public static func historyURL(_ s: String) -> String {
+        guard let c = URLComponents(string: s), let scheme = c.scheme, let host = c.host, !host.isEmpty else { return "" }
+        var kept = URLComponents()
+        kept.scheme = scheme
+        kept.host = host
+        kept.percentEncodedPath = c.percentEncodedPath
+        return kept.string ?? ""
+    }
 }
 
 /// One row per recording, in SQLite through the system library. The file is owner-only (0600).
@@ -121,7 +133,7 @@ public final class History {
         bind(stmt, 8, e.text)
         bind(stmt, 9, e.app)
         bind(stmt, 10, e.bundleId)
-        bind(stmt, 11, e.url)
+        bind(stmt, 11, Browser.historyURL(e.url))
         sqlite3_bind_int64(stmt, 12, e.archived ? 1 : 0)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error("insert") }
     }
