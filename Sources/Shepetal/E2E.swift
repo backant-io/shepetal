@@ -57,7 +57,7 @@ final class E2E: NSObject, NSApplicationDelegate {
                 failed = true
                 continue
             }
-            let run = await pipeline.process(samples, engine: engine, context: { [textView] in
+            let run = await pipeline.process(samples, engine: engine, app: AppContext.capture(), context: { [textView] in
                 FocusedText.split(textView!.string, textView!.selectedRange())
             }, sendPaste: { event in
                 // In-process delivery of the same Cmd+V event the app posts to the system.
@@ -79,6 +79,13 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["audio_dir_mode"] = Self.mode(dir)
             out["history_outcome"] = stored?.outcome.rawValue ?? "missing"
             out["history_audio_path"] = stored?.audioPath ?? ""
+            out["history_app"] = stored?.app ?? ""
+            // History's re-transcribe: the kept WAV, the same text step, the same row.
+            do { _ = try await pipeline.retranscribe(run.entry, with: engine) } catch { out["retranscribe_error"] = "\(error)" }
+            let again = (try? pipeline.history.recent(limit: 50))?.first { $0.id == run.entry.id }
+            out["retranscribed_text"] = again?.text ?? ""
+            out["retranscribed_row_kept"] = again != nil && again?.createdAt == stored?.createdAt
+                && again?.outcome == stored?.outcome && again?.audioPath == stored?.audioPath
             out["error"] = run.error ?? ""
             print(json(out))
         }

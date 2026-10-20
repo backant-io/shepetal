@@ -1,7 +1,9 @@
 #!/bin/bash
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
 # cleanup -> audio store + history -> clipboard + Cmd+V into a text view the app owns.
-# Asserts WER <= 8 %, text ready <= 700 ms after release, and an owner-only audio file per recording.
+# Asserts WER <= 8 %, text ready <= 700 ms after release, an owner-only audio file per recording, and
+# that history recorded this process as the app each dictation went to. Each clip is then re-transcribed
+# from its kept WAV, as History's re-transcribe does, and must give the same text on the same row.
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -29,7 +31,7 @@ FIXTURES
 
 "$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl"
 
-python3 - "$WORK/results.jsonl" "$FIX" <<'PY'
+python3 - "$WORK/results.jsonl" "$FIX" "$(basename "$BIN")" <<'PY'
 import json, os, re, stat, struct, sys
 
 def words(s):
@@ -45,7 +47,7 @@ def edits(a, b):
 
 assert edits("a b c".split(), "a x c d".split()) == 2  # self-check of the WER math
 
-results, fix = sys.argv[1], sys.argv[2]
+results, fix, app_name = sys.argv[1], sys.argv[2], sys.argv[3]
 rows = [json.loads(l) for l in open(results) if l.strip()]
 assert rows and all("wav" in r for r in rows), f"no results: {rows}"
 errors = ref_words = 0
@@ -65,6 +67,8 @@ for r in rows:
     assert stat.S_IMODE(os.stat(os.path.dirname(p)).st_mode) == 0o700, name
     assert not p.startswith(("/tmp", "/private/tmp")), p
     assert r["history_outcome"] == "inserted" and r["history_audio_path"] == p, (name, r["history_outcome"])
+    assert r["history_app"] == app_name, (name, "frontmost app at dictation start", r["history_app"], app_name)
+    assert r["retranscribed_text"] == r["text"] and r["retranscribed_row_kept"], (name, "re-transcribe", r)
     data = open(p, "rb").read()
     fmt, ch, rate = struct.unpack("<HHI", data[20:28])
     assert (fmt, ch, rate) == (3, 1, 16000), (name, fmt, ch, rate)
