@@ -104,26 +104,26 @@ where N is the length of our output, so the comparison is at equal length.
 
 | Corpus | Meetings | ROUGE-1 | ROUGE-2 | ROUGE-L | LEAD R-1 | LEAD R-2 | LEAD R-L | Sentences | Output / reference words | Latency mean / max |
 |---|---|---|---|---|---|---|---|---|---|---|
-| AMI | 137 | 0.219 | 0.042 | 0.116 | 0.203 | 0.041 | 0.113 | 675 | 380 / 112 | 88 / 267 ms |
-| ICSI | 59 | 0.154 | 0.017 | 0.086 | 0.141 | 0.015 | 0.078 | 1205 | 500 / 97 | 236 / 713 ms |
-| Committee | 36 | 0.204 | 0.043 | 0.115 | 0.211 | 0.066 | 0.136 | 801 | 586 / 135 | 491 / 1407 ms |
-| **All** | 232 | **0.200** | **0.036** | **0.108** | 0.189 | 0.038 | 0.108 | 829 | 442 / 112 | 188 / 1407 ms |
+| AMI | 137 | 0.219 | 0.042 | 0.116 | 0.203 | 0.041 | 0.113 | 675 | 378 / 112 | 81 / 278 ms |
+| ICSI | 59 | 0.154 | 0.017 | 0.086 | 0.141 | 0.015 | 0.078 | 1205 | 501 / 97 | 238 / 763 ms |
+| Committee | 36 | 0.204 | 0.043 | 0.115 | 0.212 | 0.066 | 0.136 | 801 | 584 / 135 | 492 / 1451 ms |
+| **All** | 232 | **0.200** | **0.036** | **0.108** | 0.189 | 0.038 | 0.108 | 829 | 441 / 112 | 185 / 1451 ms |
 
-A second run while other jobs shared the machine gave the same ROUGE and 355 / 2986 ms latency.
+An earlier run while other jobs shared the machine gave the same ROUGE and 355 / 2986 ms latency.
 
 - **ROUGE is about a third of the fixture score** (ROUGE-1 0.200 against 0.654) and only just above LEAD:
   +0.011 ROUGE-1, -0.002 ROUGE-2, a tie on ROUGE-L. On the committee meetings LEAD wins on all three scores. The
   Overview and Key points alone score 0.222 / 0.031 / 0.126 against LEAD 0.216 / 0.041 / 0.122 at the same length
   (237 words).
-- The output is 3.9 times longer than the reference (442 against 112 words). The AMI-trained action items made it
-  longer: 6.3 items per meeting on average against 3.8 with the old first-person rule (AMI 7.0, ICSI 5.9, committee
+- The output is 3.9 times longer than the reference (441 against 112 words). The AMI-trained action items made it
+  longer: 6.3 items per meeting on average against 3.8 with the old first-person rule (AMI 6.9, ICSI 5.9, committee
   4.7), plus 3.0 decisions. The QMSum references mention few action items, so ROUGE-1 fell from 0.212 to 0.200.
   Part of the AMI rows are meetings the classifier was trained on, so this table is not an action-item score; that
   score is in the next section.
 - The references are third-person prose ("The team agreed on ..."). Extracted sentences are first-person speech
   ("Okay, so um, we ..."), which hurts ROUGE-2 most. This gap is the case for an abstractive Overview model later.
-- **Speed and memory on real lengths:** 188 ms per meeting on average (AMI 88 ms, ICSI 236 ms, committee
-  491 ms). The slowest meeting took 1.4 to 3.0 s across runs, because other jobs shared the machine. In iteration 1
+- **Speed and memory on real lengths:** 185 ms per meeting on average (AMI 81 ms, ICSI 238 ms, committee
+  492 ms). The slowest meeting took 1.4 to 3.0 s across runs, because other jobs shared the machine. In iteration 1
   the longest meeting (ICSI Bmr003: 2,393 sentences, 21.6k words) took 1.0 s and about 210 MB peak RSS on its own
   (not re-measured; the action items add about 10 ms per AMI meeting). The whole 232-meeting run peaks at 355 to
   720 MB across runs. The dense TF-IDF and similarity matrices dominate, so the fixtures' 30 MB does
@@ -138,7 +138,7 @@ A second run while other jobs shared the machine gave the same ROUGE and 355 / 2
 | Committee | 0.234 | 0.051 | 0.132 | 0.236 | 0.073 | 0.151 | 440 / 135 | 4.1 / 12.5 s |
 | **All** | **0.226** | **0.037** | **0.120** | 0.208 | 0.040 | 0.119 | 299 / 112 | 3.6 / 26.4 s |
 
-MiniLM picks shorter sentences, so its output is 299 words instead of 442 and its raw ROUGE is higher. Against
+MiniLM picks shorter sentences, so its output is 299 words instead of 441 and its raw ROUGE is higher. Against
 LEAD at the same length the gain is about the same as TF-IDF's (+0.018 ROUGE-1 against +0.011), and both lose to
 LEAD on ROUGE-2. It is 10 to 20 times slower; this run's latency is inflated because the machine had a load average
 above 100 (iteration 1 measured 2.9 s mean, 12.2 s max). The harness peaks at 4.1 GB RSS because it embeds all of a
@@ -158,10 +158,17 @@ owner is the role named in the subject of that sentence (PM, ID and UI are accep
 "they" have no single owner. The transcript is built from the AMI words, one dialogue act per sentence, with role
 labels as speaker names (as QMSum does) and spelled letters joined (`T_V_` becomes `TV`, as STT writes it).
 
+**Speaker labels.** Role labels are the best case for the owner rules. AMI speakers often say the roles aloud ("the
+ID", "the Marketing Expert"), so the named-participant rule works as if everyone called each other by their calendar
+name. The app never has role labels: it has calendar names or, without them, the local diarizer's
+"Speaker 1", "Speaker 2". So every split is scored twice: with the role labels, and with the speakers renamed
+Speaker 1 to 4 in order of first appearance, the owners mapped back to roles afterwards (`score(..., labels=SPEAKERS)`).
+Nobody says "Speaker 2", so that row is the case where no owner comes from a name.
+
 **Split.** The corpus's own partition (`seen_type` in `corpusResources/meetings.xml`), which is the standard AMI
 scenario-only split. Test is the unseen series ES2004, ES2014, IS1009, TS3003 and TS3007, four meetings each. The
-model is trained on train only, the threshold is picked on dev only, and the test split was scored once, after
-everything was frozen.
+model is trained on train only, the threshold is picked on dev only, and the test split was first scored after
+everything was frozen. One owner-rule change came after that (see below).
 
 | Split | Meetings | Dialogue acts | Action-item acts | Gold items | with a named owner | team items |
 |---|---|---|---|---|---|---|
@@ -182,11 +189,17 @@ needs no scikit-learn, numpy or model runtime, and a Swift or Rust port is a dic
 section use):
 - A sentence is an action item when the model scores it at or above the threshold, or when it is a first-person
   commitment with a date ("I'll send the notes by Friday"). Questions are never action items.
-- Owner, first rule that applies: (1) a participant named in the sentence: the speaker label, a word of it, its
-  initials ("ID" for Industrial Designer), or a name someone introduced themselves with ("I'm Kate"); (2) "I'll",
+- Owner, first rule that applies: (1) a participant named in the sentence, matched as written: the speaker label or
+  a word of it when capitalized, its initials in capitals ("ID" for Industrial Designer), or a name someone
+  introduced themselves with ("I'm Kate"; not "This is Friday's plan"); (2) "I'll",
   "I'm going to", "let me" and the like: the speaker, unless a name comes first or they ask someone else ("I'll ask
   Ben to ..."); (3) "you", or no person at all: the addressee, taken as the next other speaker within three sentences
   (they usually acknowledge), else the previous one.
+- Why "as written": calendar names are often words too. Matched in lowercase, "you will" named Will, "it is" named
+  Ian Smith and "look at" named Amy Thompson. On the test split, labels with such names (Ian Smith, Amy Thompson, Tom
+  Owens, Will Fern) scored 5 of 20 against 8 for Speaker 1 to 4. Now they score the same, and a test pins that. The
+  ceiling: an all-caps word equal to someone's initials ("OK" for Olga Kim, "PM" as a time for Paul Miller) still names
+  them, and so does a name that is also a word at the start of a sentence ("Will do.").
 - Due date: the date phrase, preferring a "by" or "before" deadline ("follow up today and send it by Friday" is due
   Friday).
 - The same task said twice to or by the same person is kept once, at the later mention (the recap).
@@ -206,22 +219,37 @@ meeting, in CPython on the M4 Pro.
 | Split | Approach | Recovered with right owner | Found (any owner) | Team items found | Precision (linked act) | Precision (within 2 acts) | Items / meeting | Latency mean / max |
 |---|---|---|---|---|---|---|---|---|
 | test | first-person rule (iteration 1) | 1/20 = 5.0% | 1/20 = 5.0% | 0/10 | 1/116 = 0.9% | 3/116 = 2.6% | 5.8 | under 1 ms |
-| test | **AMI classifier + owner rules** | **14/20 = 70.0%** | 17/20 = 85.0% | 7/10 | 30/155 = 19.4% | 44/155 = 28.4% | 7.8 | 8 / 12 ms |
+| test | **AMI classifier + owner rules, role labels (best case)** | **13/20 = 65.0%** | 17/20 = 85.0% | 7/10 | 30/155 = 19.4% | 44/155 = 28.4% | 7.8 | 8 / 12 ms |
+| test | **AMI classifier + owner rules, Speaker 1..4 labels** | **8/20 = 40.0%** | 15/20 = 75.0% | 7/10 | 28/152 = 18.4% | 42/152 = 27.6% | 7.6 | 8 / 12 ms |
 | dev | first-person rule (iteration 1) | 1/34 = 2.9% | 1/34 = 2.9% | 1/7 | 3/91 = 3.3% | 9/91 = 9.9% | 4.5 | under 1 ms |
-| dev | AMI classifier + owner rules | 19/34 = 55.9% | 26/34 = 76.5% | 5/7 | 35/151 = 23.2% | 49/151 = 32.5% | 7.5 | 8 / 13 ms |
+| dev | AMI classifier + owner rules, role labels (best case) | 20/34 = 58.8% | 26/34 = 76.5% | 5/7 | 35/151 = 23.2% | 49/151 = 32.5% | 7.5 | 8 / 13 ms |
+| dev | AMI classifier + owner rules, Speaker 1..4 labels | 18/34 = 52.9% | 26/34 = 76.5% | 5/7 | 35/151 = 23.2% | 49/151 = 32.5% | 7.5 | 8 / 13 ms |
 
 Memory: the longest test meeting (1,483 dialogue acts) peaks at 3.5 MB of Python heap in `action_items()`; the whole
 eval process peaks at 33 to 42 MB RSS, corpus included.
 
 **This still fails the goal's bar of at least 80%** (issue https://github.com/backant-io/shepetal/issues/8 stays
-open). On the test split 14 of 20 items are recovered with the right owner: 70%, with a 95% Wilson interval of 48 to
-85%, because the test split has only 20 owned items. Dev is lower at 56%, and dev plus test together are 33 of 54 =
-61%. The old rule scores 3 to 5% under the same metric, close to the 4.4% measured on QMSum in iteration 1.
+open), and how far below depends on the speaker labels. With AMI's role labels, 13 of 20 test items are recovered
+with the right owner: 65%, with a 95% Wilson interval of 43 to 82%, because the test split has only 20 owned items.
+That is the best case (see Speaker labels above). With Speaker 1 to 4 labels, which is what the app has without
+calendar names, the same model and rules recover 8 of 20: **40%** (22 to 61%). Dev is 59% with role labels and 53%
+with Speaker labels. The old rule scores 3 to 5% under the same metric, close to the 4.4% measured on QMSum in
+iteration 1.
+
+The first version of this section reported 14 of 20 (70%) on test and 19 of 34 on dev, with role labels only and
+with the owner matched in lowercase. Review found that the 70% held only for role labels and that lowercase matching
+breaks on name labels, so the owner is now matched as written. With role labels this cost one test item and gained
+one dev item: the two test items it lost were said with lowercase role words ("And the marketing manager is coming
+up with ...", "The user interface design, it's the same story."), and it gained one by chance. The test split had
+been scored before this change, so it is no longer untouched. The change was made for name labels, not for the
+score, and Speaker 1 to 4 numbers did not move.
 
 Where the remaining gap is:
-- **Owner, more than detection.** The classifier finds 85% of the test items and 77% of the dev items, but the
-  owner is wrong on 3 of the 17 found test items and 7 of the 26 found dev items. Even with perfect detection (every
-  linked act), the owner rules are right on 72% of train items and 85% of dev items.
+- **Owner, more than detection.** The classifier finds 85% of the test items and 77% of the dev items. With role
+  labels the owner is wrong on 4 of the 17 found test items and 6 of the 26 found dev items; with Speaker labels on 7
+  of 15 and 8 of 26. Even with perfect detection (every linked act), the owner rules are right on 65% of train items
+  and 82% of dev items with role labels (72% and 85% when roles were matched in lowercase), and 54% and 82% with
+  Speaker labels.
 - Most wrong owners are tasks handed out with "you ..." while the speaker looks at someone. Text does not say who,
   and the next speaker is often someone else. AMI speakers also use names that are never introduced in the same
   meeting ("Kate will be looking at ...") and abbreviations such as "UID".
@@ -238,7 +266,7 @@ Tried and not kept (dev numbers, same metric):
 |---|---|
 | MiniLM-L6 embeddings of the sentence and its neighbours (1,152 dims) + logistic head | Worse: 20/34 at 13.7 items per meeting at best, the sparse model reaches 20/34 at 8.9 in the same harness |
 | Sparse features + MiniLM embeddings | Same as sparse alone (19/34 at 6.3 items per meeting) |
-| Learned owner ranker: logistic regression over speaker, next/previous speaker, named, pronoun and acknowledgment features | With perfect detection 72% train / 79% dev, the rules get 72% / 85% |
+| Learned owner ranker: logistic regression over speaker, next/previous speaker, named, pronoun and acknowledgment features | With perfect detection 72% train / 79% dev, the rules (then matching in lowercase) got 72% / 85%, role labels |
 | Speaker-topic affinity (owner = whoever's own speech is closest to the task) | 26% / 36% alone, no gain as a ranker feature |
 | Names carried across the four meetings of a series | +1 of 177 items |
 | Previous short sentence as a vocative ("And marketing," then "you'll ..."), addressee window 3 to 20 sentences, self-mentions | within 1 item |
@@ -250,8 +278,9 @@ Not tried: a model that learns which role does which task. AMI's role play gives
 marketing expert always does trend watching), so it would score higher on AMI and mean nothing in a real meeting.
 
 What would close the gap, not done here:
-- Calendar names as speaker labels (goal rule 7), so "Kate, you'll ..." resolves to a speaker. AMI's labels are
-  roles, so this is not measured.
+- Calendar names as speaker labels (goal rule 7), so "Kate, you'll ..." resolves to a speaker. AMI cannot measure
+  this: its names are not tied to speakers. The two rows bracket it: role labels are the case where people say each
+  other's label aloud (65%), Speaker 1 to 4 the case where nobody does (40%).
 - The addressee from the audio or video (who the speaker faces), which text cannot give.
 - More labelled meetings: there are only 255 action-item acts in AMI train.
 
@@ -264,7 +293,7 @@ Decisions were not scored on real data: AMI also has a `decisions` list, but it 
 | Meetings | 3, self-written | 232 real (137 AMI, 59 ICSI, 36 committee) |
 | Length | 480-690 words | 6k-14k words on average, up to 23.7k |
 | ROUGE-1 / 2 / L | 0.654 / 0.432 / 0.444 | 0.200 / 0.036 / 0.108 (LEAD 0.189 / 0.038 / 0.108) |
-| Action items with right owner | 15 / 16 | AMI test split 70% (old rule 5%) |
+| Action items with right owner | 15 / 16 | AMI test split 65% with role labels, 40% with Speaker 1..4 labels (old rule 5%) |
 | Latency per meeting | 19-25 ms | about 190 ms mean, 1.4-3.0 s max |
 | Peak RSS | 31 MB | 210 MB for the longest meeting alone, 355-720 MB for a full run |
 
@@ -281,8 +310,8 @@ The fixtures overstate quality badly. Treat them as a regression test for the ru
 MiniLM did not clearly beat TF-IDF on the fixtures or on QMSum (about +0.007 ROUGE-1 more over LEAD, at 10 to 20
 times the latency plus a 90 MB model and a runtime), so TF-IDF stays the default and MiniLM stays optional. Both paths are deterministic and
 hallucination-free. Action items come from the AMI-trained logistic regression plus owner rules on every platform:
-it is a 106 KB JSON file and a sum of weights, so it needs no runtime. It reaches 70% on the AMI test split, short of
-the goal's 80% (issue #8). Add a seq2seq model only for the Overview line, once it has been measured: distilBART-CNN-12-6 or
+it is a 106 KB JSON file and a sum of weights, so it needs no runtime. It reaches 65% on the AMI test split with role labels and 40% with
+Speaker 1 to 4 labels, short of the goal's 80% (issue #8). Add a seq2seq model only for the Overview line, once it has been measured: distilBART-CNN-12-6 or
 a SAMSum fine-tune on Mac and Linux. Re-evaluate NCM when a meeting or dialogue checkpoint and a non-CUDA path
 exist; issue #12 tracks this.
 

@@ -18,6 +18,7 @@ AMI = os.path.join(HERE, ".cache", "ami")
 ROLE = {"PM": "Project Manager", "ID": "Industrial Designer", "UI": "User Interface", "ME": "Marketing"}
 OWNER = [(r"project manager|\bpm\b", "Project Manager"), (r"industrial|\bid\b", "Industrial Designer"),
          (r"interface|\bui\b", "User Interface"), (r"marketing", "Marketing")]
+SPEAKERS = [f"Speaker {k}" for k in range(1, 5)]  # what local diarization labels look like without calendar names
 
 
 def read(path):
@@ -104,15 +105,21 @@ def train(C=0.03, prune=0.02):
             "trained_on": "AMI manual annotations 1.6.2 (CC BY 4.0), scenario train split", "C": C}
 
 
-def score(split, model, rule=None):
-    """Gold action items with a named owner that some predicted item recovers (a linked dialogue act, same owner)."""
+def score(split, model, rule=None, labels=None):
+    """Gold action items with a named owner that some predicted item recovers (a linked dialogue act, same owner).
+    labels: rename the speakers, in order of first appearance, before the summarizer sees them, and map the owners back.
+    None keeps AMI's role labels. Speakers say those roles aloud ("the ID", "the Marketing Expert"): the best case."""
     r = dict.fromkeys(["meetings", "owned", "hit", "found", "team", "team_found", "pred", "tp", "near", "ms", "ms_max"], 0)
     for das, gold in corpus(split).values():
-        sents = sents_of(das)
+        sents, back = sents_of(das), {}
+        if labels:
+            new = dict(zip(dict.fromkeys(spk for spk, _ in sents), labels))
+            back = {v: k for k, v in new.items()}
+            sents = [(new[spk], t) for spk, t in sents]
         t = time.perf_counter()
         items = rule(sents) if rule else [(i, who) for i, who, _, _ in S.action_items(sents, model)]
         dt = (time.perf_counter() - t) * 1000
-        got = {das[i][0]: who for i, who in items}
+        got = {das[i][0]: back.get(who, who) for i, who in items}
         pos = set().union(*(links for _, _, links in gold))
         near = {das[j][0] for d in pos for i, x in enumerate(das) if x[0] == d for j in range(max(0, i - 2), min(len(das), i + 3))}
         r["meetings"] += 1; r["pred"] += len(items); r["tp"] += len(got.keys() & pos); r["near"] += len(got.keys() & near)
@@ -163,11 +170,14 @@ def main():
           "Precision (within 2 acts) | Items / meeting | Latency mean / max |")
     print("|---|---|---|---|---|---|---|---|")
     report("first-person rule (iteration 1)", score(split, model, first_person_rule))
-    r = score(split, model)
-    report("AMI classifier + owner rules", r)
-    k, n, z = r["hit"], r["owned"], 1.96  # Wilson 95% interval: the test split is small
-    c, h = (k + z * z / 2) / (n + z * z), z * math.sqrt(k * (n - k) / n + z * z / 4) / (n + z * z)
-    print(f"95% interval for recovered with right owner: {c - h:.0%} to {c + h:.0%}")
+    ci = []
+    for name, labels in [("role labels", None), ("Speaker 1..4 labels", SPEAKERS)]:
+        r = score(split, model, labels=labels)
+        report(f"AMI classifier + owner rules, {name}", r)
+        k, n, z = r["hit"], r["owned"], 1.96  # Wilson 95% interval: the test split is small
+        c, h = (k + z * z / 2) / (n + z * z), z * math.sqrt(k * (n - k) / n + z * z / 4) / (n + z * z)
+        ci.append(f"{name} {c - h:.0%} to {c + h:.0%}")
+    print("95% interval for recovered with right owner: " + "; ".join(ci))
     das = max((d for d, _ in corpus(split).values()), key=len)
     tracemalloc.start()
     S.action_items(sents_of(das), model)

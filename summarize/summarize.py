@@ -63,7 +63,7 @@ SELF = re.compile(r"\b(?:i'll|i will|i'm going to|i'm gonna|i can|let me|i have 
 YOU = re.compile(r"\b(?:you|you'll|you're|your|you've|you'd)\b")
 ME = re.compile(r"\b(?:i|i'll|i'm|i've|i'd|me|my)\b")
 DELEGATE = re.compile(r"\s*(?:\w+\s+)?(?:ask|want|like|need|tell|get)\b")
-INTRO = re.compile(r"\b(?:I'm|I am|my name is|my name's|[Tt]his is)\s+([A-Z][a-z]+)")
+INTRO = re.compile(r"\b(?:I'm|I am|my name is|my name's|[Tt]his is)\s+([A-Z][a-z]+)\b(?!')")  # "This is Kate's laptop" is no intro
 FILLER = re.compile(r"^(?:(?:um|uh|so|and|okay|ok|well|yeah|right|but|then|also|now|alright)\b[,.]?\s*)+", re.I)
 
 
@@ -95,29 +95,39 @@ def action_scores(sents, model):
     return [1 / (1 + math.exp(-(b + sum(w.get(x, 0.0) for x in f)))) for f in action_features(sents)]
 
 
+def tokens(s):
+    """words() with the case kept: names are matched as written."""
+    return re.findall(r"[A-Za-z0-9']+", s)
+
+
 def aliases(sents):
-    """-> {spoken phrase: speaker label}: the label, its words, its initials, and names people introduce themselves with."""
+    """-> {spoken phrase: speaker label}: the label, its words, its initials, and names people introduce themselves with.
+    owner() matches them as written: a name only when capitalized, initials only in capitals. With calendar names,
+    "you will", "it is" and "look at" must not hand the task to Will, Ian Smith or Amy Thompson."""
     labels = sorted({s for s, _ in sents if s})
     out = {}
     for lab in labels:
-        toks = words(lab)
+        toks = [w[:1].upper() + w[1:] for w in tokens(lab)]  # a lowercase calendar name "will" must not match "will"
         others = {w for l in labels if l != lab for w in words(l)}
         out[" ".join(toks)] = lab
-        out.update({w: lab for w in toks if len(w) >= 3 and w not in others and not w.isdigit()})  # "Speaker 1" gives nothing
+        out.update({w: lab for w in toks if len(w) >= 3 and w.lower() not in others and not w.isdigit()})  # "Speaker 1" gives nothing
         if len(toks) > 1:
-            out["".join(w[0] for w in toks)] = lab  # "Industrial Designer" is called "ID"
+            # "Industrial Designer" is called "ID". ponytail: an acronym equal to someone's initials ("OK" for Olga Kim,
+            # "PM" as a time for Paul Miller) still names them; drop initials for name labels if that shows up.
+            out["".join(w[0] for w in toks)] = lab
     for spk, t in sents:
         for m in INTRO.finditer(t):
-            if spk:
-                out.setdefault(m.group(1).lower(), spk)
+            if spk and not re.fullmatch(DAYS, m.group(1), re.I):  # "This is Friday" is a date, not a name
+                out.setdefault(m.group(1), spk)
     return out
 
 
 def owner(sents, i, al):
     """Who does it: a named participant, else "I" -> the speaker, "you" -> whoever answers, else the addressee."""
     spk, t = sents[i]
-    w = " ".join(words(t))
-    named = [(m.start(), lab) for k, lab in al.items() if lab != spk for m in [re.search(rf"\b{re.escape(k)}\b", w)] if m]
+    c = " ".join(tokens(t))
+    w = c.lower()  # same length as c, so match positions compare
+    named = [(m.start(), lab) for k, lab in al.items() if lab != spk for m in [re.search(rf"\b{re.escape(k)}\b", c)] if m]
     me = SELF.search(w)
     if me and not (named and (min(named)[0] < me.start() or DELEGATE.match(w, me.end()))):
         return spk  # "I'll send the list to Daniel" is mine; "I'll ask Daniel to send it" is his
