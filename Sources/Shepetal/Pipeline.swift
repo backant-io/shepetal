@@ -53,11 +53,13 @@ final class Pipeline {
         do {
             run.entry.rawText = try await engine.transcribe(samples, wav: URL(fileURLWithPath: run.entry.audioPath))
         } catch {
+            if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"
         }
         run.entry.text = Cleanup.apply(run.entry.rawText)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return "No speech heard" }
+        if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
         let (before, after) = context()
         run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after)
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
