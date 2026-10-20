@@ -25,7 +25,7 @@ Turning speech into text makes no network request.
 Sign-in is only for your license.
 
 - You sign in with Google on shepetal.backant.io. Shepetal stores your email address, when your trial started, and whether you have bought a license.
-- The app gets a private access token. Only a scrambled (hashed) copy of it is stored on our side, and it can be revoked.
+- The app gets a private access token. Only a scrambled (hashed) copy of it is stored on our side. It stops working when you sign out, or after 90 days without use.
 - When the app checks your license, it sends only that token. The answer is your license status, trial end date and email.
 - Payment goes through Stripe. Your card details go to Stripe, not to us.
 

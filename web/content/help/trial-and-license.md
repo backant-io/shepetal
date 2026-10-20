@@ -22,7 +22,9 @@ You pay through Stripe Checkout. Once the payment goes through, your account is 
 
 ## Signing in from the app
 
-**Coming soon.** The app will open a page on shepetal.backant.io in your browser with a short code. You sign in there and approve, and the app is connected. You never type your password into the app.
+**Coming soon.** The app will open shepetal.backant.io in your browser. You sign in with Google there, check the account it names, and click **Continue**. The browser hands you back to the app, and you're signed in. You never type your password into the app.
+
+The app stays signed in as long as you use it. After 90 days without use, you sign in again. **Sign out** in the app ends that sign-in right away.
 
 ## A new Mac
 
