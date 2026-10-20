@@ -1,0 +1,3 @@
+#!/bin/sh
+# The desktop entry's command: start the user service, so a second daemon never runs next to it.
+exec systemctl --user start shepetal.service

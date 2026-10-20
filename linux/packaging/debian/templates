@@ -1,0 +1,13 @@
+Template: shepetal/enable-user-service
+Type: boolean
+Default: false
+Description: Start shepetal automatically when ${user} logs in?
+ shepetal runs as a systemd user service (shepetal.service). If you agree,
+ it is enabled for ${user} only and starts at the next graphical login.
+ Other users can turn it on for themselves with
+ "systemctl --user enable --now shepetal.service".
+
+Template: shepetal/service-user
+Type: string
+Description: for internal use: the user the start-at-login answer belongs to
+ The answer to shepetal/enable-user-service applies to this user only.

@@ -1,0 +1,67 @@
+name: linux-release
+
+# Builds the Linux .deb and AppImage, tests them, installs the .deb in a clean
+# ubuntu:24.04 container and uploads both packages.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+    paths: ['linux/**', '.github/workflows/linux-release.yml']
+  pull_request:
+    paths: ['linux/**', '.github/workflows/linux-release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: linux
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq desktop-file-utils lintian
+          cargo install cargo-deb --version 3.8.0 --locked
+      - name: Tests
+        run: cargo test --locked
+      - name: Packaging file checks
+        run: packaging/test-files.sh
+      - name: Build .deb
+        run: packaging/build-deb.sh
+      - name: Lintian
+        run: lintian --fail-on error target/debian/*.deb
+      - name: Build AppImage
+        run: packaging/build-appimage.sh
+      - name: Smoke-test the AppImage
+        run: |
+          out=$(APPIMAGE_EXTRACT_AND_RUN=1 target/appimage/shepetal-*-x86_64.AppImage probe --pw-dump fixtures/pw-dump-meeting.json)
+          echo "$out"
+          echo "$out" | grep -q 'meeting=Some("Zoom")'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shepetal-deb
+          path: linux/target/debian/*.deb
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shepetal-appimage
+          path: linux/target/appimage/*.AppImage
+          if-no-files-found: error
+
+  install-deb:
+    needs: build
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: shepetal-deb
+          path: deb
+      - name: Install in a clean ubuntu:24.04 and smoke-test
+        run: linux/packaging/test-deb.sh deb/*.deb

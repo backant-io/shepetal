@@ -1,0 +1,53 @@
+#!/bin/sh
+# Turns the shepetal systemd user unit on or off for one user, from a root maintainer script.
+# Installed as /usr/lib/shepetal/user-service.
+#
+#   user-service installing-user   print the user who ran sudo/pkexec (nothing for root)
+#   user-service enable USER       start shepetal at USER's next login
+#   user-service disable-all       undo every enable (package removal)
+#
+# Links are made as the user (runuser), never as root inside their home.
+set -e
+
+state=${SHEPETAL_STATE_DIR:-/var/lib/shepetal}/service-users
+unit=/usr/lib/systemd/user/shepetal.service
+wants=.config/systemd/user/graphical-session.target.wants
+
+home_of() { getent passwd "$1" | cut -d: -f6; }
+
+case "$1" in
+installing-user)
+    user=${SUDO_USER:-}
+    if [ -z "$user" ] && [ -n "${PKEXEC_UID:-}" ]; then
+        user=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+    fi
+    [ -n "$user" ] || exit 0
+    uid=$(id -u "$user" 2>/dev/null) || exit 0
+    [ "$uid" != 0 ] && echo "$user"
+    ;;
+enable)
+    user=$2
+    uid=$(id -u "$user") || exit 1
+    [ "$uid" != 0 ] || { echo "user-service: refusing to enable for root" >&2; exit 1; }
+    home=$(home_of "$user")
+    [ -d "$home" ] || { echo "user-service: $user has no home directory" >&2; exit 1; }
+    runuser -u "$user" -- sh -c 'cd && mkdir -p "$1" && ln -sfn "$2" "$1/shepetal.service"' sh "$wants" "$unit"
+    mkdir -p "$(dirname "$state")"
+    touch "$state"
+    grep -qx "$user" "$state" || echo "$user" >> "$state"
+    ;;
+disable-all)
+    [ -f "$state" ] || exit 0
+    while read -r user; do
+        id -u "$user" >/dev/null 2>&1 || continue
+        systemctl --user --machine="$user@" stop shepetal.service >/dev/null 2>&1 || true
+        # Remove only our own link, nothing the user made.
+        runuser -u "$user" -- sh -c 'cd && [ "$(readlink "$1/shepetal.service")" = "$2" ] && rm -f "$1/shepetal.service"; true' sh "$wants" "$unit" || true
+    done < "$state"
+    rm -f "$state"
+    ;;
+*)
+    echo "usage: user-service installing-user | enable USER | disable-all" >&2
+    exit 2
+    ;;
+esac

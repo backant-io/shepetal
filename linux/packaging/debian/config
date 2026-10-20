@@ -1,0 +1,22 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+# Same rule as /usr/lib/shepetal/user-service installing-user, which is not unpacked yet
+# when apt preconfigures.
+user=${SUDO_USER:-}
+if [ -z "$user" ] && [ -n "${PKEXEC_UID:-}" ]; then
+    user=$(getent passwd "$PKEXEC_UID" | cut -d: -f1)
+fi
+if [ -n "$user" ] && [ "$(id -u "$user" 2>/dev/null)" != 0 ] && id -u "$user" >/dev/null 2>&1; then
+    # An answer belongs to the user who gave it: ask again when someone else installs.
+    db_get shepetal/service-user || RET=
+    if [ "$RET" != "$user" ]; then
+        db_reset shepetal/enable-user-service
+        db_fset shepetal/enable-user-service seen false
+        db_set shepetal/service-user "$user"
+    fi
+    db_subst shepetal/enable-user-service user "$user"
+    db_input high shepetal/enable-user-service || true
+    db_go || true
+fi

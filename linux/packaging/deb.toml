@@ -1,0 +1,25 @@
+
+# cargo-deb settings. build-deb.sh appends this to a copy of ../Cargo.toml, so the shared
+# manifest stays as it is. Paths are relative to linux/.
+[package.metadata.deb]
+maintainer = "Pavel Hegler <business@hegler.tech>"
+copyright = "2026 Pavel Hegler"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Hold fn to talk, double-tap it for hands-free, and the text is typed at the cursor. \
+Speech-to-text runs on this computer; nothing is uploaded. Works on X11 and Wayland."""
+section = "utils"
+priority = "optional"
+depends = "$auto, debconf (>= 0.5) | debconf-2.0, pipewire-bin | pulseaudio-utils"
+recommends = "wtype | xdotool | ydotool, wl-clipboard | xclip"
+maintainer-scripts = "packaging/debian/"
+changelog = "packaging/changelog"
+assets = [
+    ["target/release/shepetal", "usr/bin/", "755"],
+    ["packaging/user-service", "usr/lib/shepetal/", "755"],
+    ["packaging/launch", "usr/lib/shepetal/", "755"],
+    ["packaging/shepetal.service", "usr/lib/systemd/user/", "644"],
+    ["packaging/shepetal.desktop", "usr/share/applications/", "644"],
+    ["packaging/shepetal.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["README.md", "usr/share/doc/shepetal/", "644"],
+]
