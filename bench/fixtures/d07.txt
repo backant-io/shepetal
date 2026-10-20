@@ -1,0 +1,1 @@
+Our latency dropped from 180 milliseconds to 45 milliseconds after we moved the Redis cache onto the same availability zone.

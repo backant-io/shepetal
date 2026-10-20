@@ -1,0 +1,1 @@
+Run npm install, then call the useEffect hook inside the React component and log the JSON response to the console.

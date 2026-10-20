@@ -1,2 +1,4 @@
 agent/.venv/
 agent/ids.json
+bench/.cache/
+bench/.venv/
