@@ -378,8 +378,8 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
         // Type what was said now, and let the next press start a new dictation instead of
         // ending this one.
         if rec.as_mut().is_some_and(|(c, _, _)| matches!(c.try_wait(), Ok(Some(_)))) {
-            g = Gesture::default();
-            if let Some(hint) = act(Action::Stop, &mut rec, data_home, stt, typer, key_name, ind)? {
+            s.reset();
+            if let Some(hint) = act(Action::Stop, &mut rec, data_home, stt, typer, key_name, ind, &mut last)? {
                 eprintln!("shepetal: hint: {hint}");
                 ind.send(&format!("hint {hint}"));
             }
@@ -1066,7 +1066,7 @@ mod tests {
                 tx.send((shepetal::KEY_FN, 1)).unwrap();
                 wait_until("a second recording", || clips(&audio).len() == 2);
             });
-            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default()).unwrap_err();
+            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
             keyboard.join().unwrap();
             assert_eq!(err, "all input devices closed");
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");
