@@ -217,7 +217,7 @@ public enum Dates {
         }
         guard let monthText = group("month"), let mo = months[fold(monthText)], let dayText = group("day"),
               let d = dayValue(dayText) else { return nil }
-        if monthFirst, mo == 5, monthText != "May" { return nil }  // "you may first want to" is the verb
+        if monthFirst, fold(monthText) == "may", monthText != "May" { return nil }  // "you may first want to" is the verb
         let yearText = group("year")
         let yy = yearText.flatMap(yearValue)
         if yearText != nil, yy == nil { return nil }
