@@ -70,6 +70,42 @@ final class FnGestureTests: XCTestCase {
         XCTAssertEqual(g.fnUp(at: 1), [.stop])
     }
 
+    // fn is also a modifier: fn+Delete, fn+arrows (Page Up/Down, Home, End), fn+F-keys. Another key
+    // pressed in the first second of a hold means a shortcut, so nothing is transcribed or pasted
+    // (docs/re/dictation-input.md 1, "Chord collision cancels").
+    func testShortcutWithFnCancels() {
+        var g = FnGesture()
+        _ = g.fnDown(at: 0)
+        XCTAssertEqual(g.otherKeyDown(at: 0.2), [.cancel])
+        XCTAssertEqual(g.otherKeyDown(at: 0.3), [], "key repeat after the cancel")
+        XCTAssertEqual(g.fnUp(at: 0.8), [], "a long fn+Down must not transcribe")
+        XCTAssertNil(g.deadline, "no short-press hint either")
+        XCTAssertEqual(g.state, .idle)
+
+        var quick = FnGesture()
+        _ = quick.fnDown(at: 0)
+        XCTAssertEqual(quick.otherKeyDown(at: 0.05), [.cancel], "quick fn+Delete")
+        XCTAssertEqual(quick.fnUp(at: 0.1), [])
+        XCTAssertEqual(quick.tick(at: 5), [])
+    }
+
+    // After the first second the user is talking; a key pressed then does not throw the dictation away.
+    // Hands-free is not a held chord at all.
+    func testKeysAfterTheChordWindowOrInHandsFreeKeepRecording() {
+        var g = FnGesture()
+        _ = g.fnDown(at: 0)
+        XCTAssertEqual(g.otherKeyDown(at: 1.0), [])
+        XCTAssertEqual(g.fnUp(at: 3), [.stop])
+
+        var h = FnGesture()
+        _ = h.fnDown(at: 0)
+        _ = h.fnUp(at: 0.1)
+        _ = h.fnDown(at: 0.3)
+        XCTAssertEqual(h.otherKeyDown(at: 0.4), [])
+        XCTAssertEqual(h.state, .handsFree)
+        XCTAssertEqual(h.otherKeyDown(at: 9), [])
+    }
+
     func testFnKeyClassification() {
         XCTAssertEqual(FnKey.transition(keycode: 63, secondaryFn: true, isKeyDown: nil), true)
         XCTAssertEqual(FnKey.transition(keycode: 63, secondaryFn: false, isKeyDown: nil), false)

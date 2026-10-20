@@ -59,13 +59,15 @@ public enum PasteCheck {
 }
 
 /// Deterministic cleanup that runs before insertion: drops fillers and stutters, tidies spaces.
+/// Only words that are never doubled in correct English count as stutters ("the the"); "had had",
+/// "that that" and "very very" are what the user said.
 /// The local-LLM cleanup comes later and runs after this.
 public enum Cleanup {
     public static func apply(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let startsUpper = s.first?.isUppercase ?? false
-        s = s.replacingOccurrences(of: #"(?i)\b(?:u+m+|u+h+|uhm|erm|hmm+)\b[,.]?\s*"#, with: "", options: .regularExpression)
-        s = s.replacingOccurrences(of: #"(?i)\b(\w+)(?:\s+\1\b)+"#, with: "$1", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?i)(?<![\w-])(?:u+m+|u+h+|uhm|erm|hmm+)(?![\w-])[,.]?\s*"#, with: "", options: .regularExpression)
+        s = s.replacingOccurrences(of: #"(?i)\b(the|an?|and|i)(?:\s+\1\b)+"#, with: "$1", options: .regularExpression)
         s = s.replacingOccurrences(of: #"\s+([,.!?;:])"#, with: "$1", options: .regularExpression)
         s = s.replacingOccurrences(of: #"\s{2,}"#, with: " ", options: .regularExpression)
         s = s.trimmingCharacters(in: .whitespacesAndNewlines)

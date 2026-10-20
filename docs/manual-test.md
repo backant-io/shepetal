@@ -47,6 +47,13 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 2. Expected: nothing is inserted. "Hold fn to talk · double-tap for hands-free" shows next to 🤫 for about 2 s.
 3. Expected: Recent in the 🤫 menu has a "(too short)" entry, and a new WAV is in Open recordings folder.
 
+### M-FN-4: fn as a modifier
+1. In a long TextEdit document, hold fn and press Down arrow within the first second, keep both held for about 2 s, then release.
+2. Expected: the view pages down. No ring stays red, nothing is transcribed or pasted, and no hint shows.
+3. Type a word, then press fn+Delete quickly a few times.
+4. Expected: characters after the cursor are deleted, nothing is inserted, and no hint shows. Recent in the 🤫 menu has a "(cancelled)" entry for each press, and each has a WAV in Open recordings folder.
+5. Hold fn for about 2 s, then press Down arrow while still holding and speaking. Expected: the dictation goes on and is inserted on release.
+
 ### M-INS-1: TextEdit
 1. Type "Please" in a TextEdit document, leave the cursor right after it, then hold fn and say "Send the report today."
 2. Expected: "Please send the report today." The text starts with a space and a lowercase "send".

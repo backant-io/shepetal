@@ -6,6 +6,7 @@ public enum GestureAction: Equatable {
     case lockHandsFree  // second tap inside the window: keep recording without holding fn
     case stop           // transcribe and insert
     case tooShort       // nothing is transcribed or inserted; the audio is kept and the hint shows
+    case cancel         // fn was a modifier (fn+Delete, fn+arrow): nothing is transcribed, the audio is kept, no hint
 }
 
 /// fn gestures: hold to talk, double-tap for hands-free, a tap ends hands-free,
@@ -21,6 +22,7 @@ public struct FnGesture: Equatable {
 
     public var holdThreshold: TimeInterval = 0.5
     public var doubleTapWindow: TimeInterval = 0.5
+    public var chordWindow: TimeInterval = 1.0
     public private(set) var state: State = .idle
 
     public init() {}
@@ -59,6 +61,14 @@ public struct FnGesture: Equatable {
         }
         state = .idle
         return [.stop]
+    }
+
+    /// A key other than fn went down. In the first `chordWindow` of a hold that is a shortcut with fn,
+    /// not dictation (docs/re/dictation-input.md 1, "Chord collision cancels").
+    public mutating func otherKeyDown(at t: TimeInterval) -> [GestureAction] {
+        guard case .holding(let since) = state, t - since < chordWindow else { return [] }
+        state = .idle
+        return [.cancel]
     }
 
     public mutating func tick(at t: TimeInterval) -> [GestureAction] {

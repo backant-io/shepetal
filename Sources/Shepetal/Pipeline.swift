@@ -31,16 +31,6 @@ final class Pipeline {
         history = try History(path: Paths.history)
     }
 
-    /// Recordings that are not transcribed (too short, cancelled) are still kept and flagged.
-    @discardableResult
-    func keep(_ samples: [Float], as outcome: Outcome) -> Run {
-        var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: outcome, audioPath: "",
-                                          durationMs: Self.ms(samples)))
-        save(samples, &run)
-        record(&run)
-        return run
-    }
-
     func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
                  sendPaste: (CGEvent) -> Void) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime

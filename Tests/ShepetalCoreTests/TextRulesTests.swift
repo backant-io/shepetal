@@ -61,4 +61,22 @@ final class CleanupTests: XCTestCase {
     func testKeepsWordsThatContainFillers() {
         XCTAssertEqual(Cleanup.apply("Hummus and umbrellas."), "Hummus and umbrellas.")
     }
+
+    // Some doubled words are correct English. Dropping one changes what the user said.
+    func testKeepsGrammaticalRepeats() {
+        XCTAssertEqual(Cleanup.apply("I had had enough, and I think that that is fine."),
+                       "I had had enough, and I think that that is fine.")
+        XCTAssertEqual(Cleanup.apply("It is very very good, no no."), "It is very very good, no no.")
+    }
+
+    // Repeats that are never correct English are stutters and go.
+    func testDropsStuttersOnWordsThatNeverRepeat() {
+        XCTAssertEqual(Cleanup.apply("I I think a a test and and the the fix work."), "I think a test and the fix work.")
+    }
+
+    // "Uh-huh" and "mm-hmm" are answers, not fillers.
+    func testKeepsHyphenatedAnswers() {
+        XCTAssertEqual(Cleanup.apply("Uh-huh, sounds good."), "Uh-huh, sounds good.")
+        XCTAssertEqual(Cleanup.apply("Mm-hmm, ship it."), "Mm-hmm, ship it.")
+    }
 }

@@ -10,12 +10,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var indicator: Indicator!
     private let tap = FnTap()
     private let recorder = Recorder()
-    private var gesture = FnGesture()
+    private var dictation: Dictation?
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
     private var engineStatus = "Loading speech model…"
     private var busy = false
-    private var recording = false
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
@@ -41,8 +40,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu?.delegate = self
 
         do { pipeline = try Pipeline() } catch { fail("Storage: \(error.localizedDescription)") }
+        if let pipeline {
+            dictation = Dictation(store: pipeline.store, history: pipeline.history,
+                                  startMic: { [weak self] in try self?.openMic() },
+                                  stopMic: { [recorder] in recorder.stop() },
+                                  transcribe: { [weak self] in self?.transcribe($0) })
+        }
         applyRetention()
         tap.onChange = { [weak self] down in self?.fn(down) }
+        tap.onOtherKey = { [weak self] in self?.run { $0.otherKeyDown(at: ProcessInfo.processInfo.systemUptime) } }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -63,67 +69,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func fn(_ down: Bool) {
         let t = ProcessInfo.processInfo.systemUptime
-        if down, busy, gesture.state == .idle {
+        if down, busy, dictation?.gesture.state == .idle {
             indicator.show("Still transcribing the last one", seconds: Hint.seconds)
             return
         }
-        for action in down ? gesture.fnDown(at: t) : gesture.fnUp(at: t) { handle(action) }
+        run { down ? $0.fnDown(at: t) : $0.fnUp(at: t) }
+    }
+
+    /// One fn event through the session (mic, kept audio, transcription), then the indicator.
+    private func run(_ event: (inout FnGesture) -> [GestureAction]) {
+        guard let dictation else { return }
+        do {
+            for action in try dictation.run(event) { show(action) }
+        } catch {
+            fail(error.localizedDescription)
+        }
         scheduleTick()
     }
 
     private func scheduleTick() {
         tick?.cancel()
-        guard let deadline = gesture.deadline else { return }
+        guard let deadline = dictation?.gesture.deadline else { return }
         let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                for action in self.gesture.tick(at: ProcessInfo.processInfo.systemUptime) { self.handle(action) }
-            }
+            MainActor.assumeIsolated { self?.run { $0.tick(at: ProcessInfo.processInfo.systemUptime) } }
         }
         tick = work
         DispatchQueue.main.asyncAfter(deadline: .now() + max(0, deadline - ProcessInfo.processInfo.systemUptime), execute: work)
     }
 
-    private func handle(_ action: GestureAction) {
+    private func show(_ action: GestureAction) {
         switch action {
-        case .start:
-            guard Recorder.micAllowed else {
-                gesture.reset()
-                if allowPrompts { Permission.microphone.request() }
-                return fail("Microphone access is off")
-            }
-            do {
-                try recorder.start()
-                recording = true
-                indicator.set(.recording)
-            } catch {
-                gesture.reset()
-                fail("Microphone: \(error.localizedDescription)")
-            }
-        case .lockHandsFree:
-            indicator.set(.handsFree)
+        case .start: indicator.set(.recording)
+        case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
-            pipeline?.keep(stopRecording(), as: .tooShort)
             indicator.set(.idle)
             indicator.show(Hint.shortPress, seconds: Hint.seconds)
-        case .stop:
-            let samples = stopRecording()
-            guard let pipeline else { return }
-            busy = true
-            indicator.set(.processing)
-            Task {
-                let run = await pipeline.process(samples, engine: engine, context: FocusedText.context,
-                                                 sendPaste: Inserter.postCmdV)
-                busy = false
-                if let error = run.error { fail(error) } else { indicator.set(.idle) }
-            }
+        case .cancel: indicator.set(.idle)
+        case .stop: break  // transcribe(_:) shows processing
         }
     }
 
-    private func stopRecording() -> [Float] {
-        guard recording else { return [] }
-        recording = false
-        return recorder.stop()
+    private func openMic() throws {
+        guard Recorder.micAllowed else {
+            if allowPrompts { Permission.microphone.request() }
+            throw SpeechError("Microphone access is off")
+        }
+        do { try recorder.start() } catch { throw SpeechError("Microphone: \(error.localizedDescription)") }
+    }
+
+    private func transcribe(_ samples: [Float]) {
+        guard let pipeline else { return }
+        busy = true
+        indicator.set(.processing)
+        Task {
+            let run = await pipeline.process(samples, engine: engine, context: FocusedText.context,
+                                             sendPaste: Inserter.postCmdV)
+            busy = false
+            if let error = run.error { fail(error) } else { indicator.set(.idle) }
+        }
     }
 
     private func fail(_ message: String) {
