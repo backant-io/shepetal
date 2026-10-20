@@ -77,4 +77,50 @@ func mode(_ url: URL) throws -> Int {
     let write = #expect(throws: (any Error).self) { try missingDir.stop() }
     #expect(write != nil && !(write is CaptureError))  // the file system error itself
 }
+
+@Test func wavIsReadableWhileRecording() throws {
+    // #100: a crash or Ctrl-C before close must not leave a file whose header says 0 frames.
+    let root = scratchDir()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try MeetingCapture.makeOwnerOnlyDir(root)
+    let url = root.appending(path: "x.wav")
+    let writer = try WavWriter(url: url, rate: 48000, channels: 1)
+    let chunk = [Float](repeating: 0.25, count: 480)
+    for _ in 0..<300 { try chunk.withUnsafeBytes { try writer.append($0) } }  // 3 s, never closed below
+    let open = try AVAudioFile(forReading: url).length
+    #expect(open >= 144_000 - 48_000 && open <= 144_000)  // at most the last second is not in the header yet
+    try writer.close()
+    let closed = try AVAudioFile(forReading: url)
+    #expect(closed.length == 144_000)
+    #expect(closed.processingFormat.sampleRate == 48000 && closed.processingFormat.channelCount == 1)
+    let pcm = AVAudioPCMBuffer(pcmFormat: closed.processingFormat, frameCapacity: 10)!
+    try closed.read(into: pcm, frameCount: 10)
+    #expect(pcm.floatChannelData![0][9] == 0.25)  // the samples themselves, not only the size
+    #expect(throws: (any Error).self) { try WavWriter(url: url, rate: 48000, channels: 1) }  // never overwrites
+}
+
+@Test func meetingFilesHoldTheAudioBeforeStop() throws {
+    // The capture's own write path, then no stop(): what a crash mid-meeting leaves behind.
+    let dir = scratchDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try MeetingCapture.makeOwnerOnlyDir(dir)
+    let capture = MeetingCapture()
+    for _ in 0..<200 { feed(capture, buffers: 2, frames: 480, dir: dir) }  // 2 s
+    for name in ["Me.wav", "Others.wav"] {
+        #expect(try AVAudioFile(forReading: dir.appending(path: name)).length >= 48_000)
+    }
+}
+
+@Test func captureRecordsAgainAfterAFailure() throws {
+    // #100: stop() clears the first meeting's error and files, so the same instance records the next one.
+    let capture = MeetingCapture()
+    feed(capture, buffers: 1, frames: 480, dir: scratchDir())
+    #expect(throws: CaptureError.self) { try capture.stop() }
+    let dir = scratchDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try MeetingCapture.makeOwnerOnlyDir(dir)
+    feed(capture, buffers: 2, frames: 480, dir: dir)
+    try capture.stop()
+    #expect(try AVAudioFile(forReading: dir.appending(path: "Me.wav")).length == 480)
+}
 #endif

@@ -36,9 +36,19 @@ case "record":
     let dir = FileManager.default.homeDirectoryForCurrentUser
         .appending(path: "Library/Application Support/shepetal/meetings/\(stamp.string(from: Date()))")
     do {
+        // Ctrl-C or a kill ends the recording early but still closes both files.
+        let interrupted = DispatchSemaphore(value: 0)
+        let handlers = [SIGINT, SIGTERM].map { sig -> DispatchSourceSignal in
+            signal(sig, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: sig, queue: .global())
+            source.setEventHandler { interrupted.signal() }
+            source.resume()
+            return source
+        }
         try capture.start(dir: dir)
-        print("recording \(seconds)s to \(dir.path)/Me.wav and Others.wav")
-        Thread.sleep(forTimeInterval: seconds)
+        print("recording \(seconds)s to \(dir.path)/Me.wav and Others.wav (ctrl-c stops early)")
+        if interrupted.wait(timeout: .now() + seconds) == .success { print("stopping early") }
+        handlers.forEach { $0.cancel() }
         try capture.stop()
         print("saved \(dir.path)/Me.wav and Others.wav")
     } catch {

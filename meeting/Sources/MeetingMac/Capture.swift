@@ -3,14 +3,15 @@ import AVFoundation
 import CoreAudio
 
 /// Records the mic ("Me") and all system audio ("Others") into two WAV files, using a
-/// Core Audio process tap inside a private aggregate device (macOS 14.2+).
-/// Needs mic + "System Audio Recording" permission; never called from tests.
+/// Core Audio process tap inside a private aggregate device (macOS 14.4+). The files stay readable while
+/// recording (WavWriter), so a crash keeps everything up to the last second.
+/// start() needs mic + "System Audio Recording" permission; tests drive receive() and stop() only.
 public final class MeetingCapture {
     var tapID = AudioObjectID(kAudioObjectUnknown)
     var aggregateID = AudioObjectID(kAudioObjectUnknown)
     var procID: AudioDeviceIOProcID?
-    var me: AVAudioFile?
-    var others: AVAudioFile?
+    var me: WavWriter?
+    var others: WavWriter?
     var failure: Error?
 
     public init() {}
@@ -57,10 +58,24 @@ public final class MeetingCapture {
         if aggregateID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggregateID) }
         if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
         let wrote = me != nil && others != nil
-        me = nil
-        others = nil  // closing the AVAudioFile finalises the WAV header
-        if let failure { throw failure }
+        var closeError: Error?
+        for file in [me, others].compactMap({ $0 }) {
+            do { try file.close() } catch { closeError = closeError ?? error }
+        }
+        let failed = failure ?? closeError
+        reset()
+        if let failed { throw failed }
         if !wrote { throw CaptureError("no audio was captured") }
+    }
+
+    /// Forgets the device, the files and the last error, so the instance can record the next meeting.
+    func reset() {
+        procID = nil
+        aggregateID = AudioObjectID(kAudioObjectUnknown)
+        tapID = AudioObjectID(kAudioObjectUnknown)
+        me = nil
+        others = nil
+        failure = nil
     }
 
     /// One IO cycle of the aggregate device. Keeps the first error for `stop()`.
@@ -78,20 +93,15 @@ public final class MeetingCapture {
         }
     }
 
-    func write(_ buffer: AudioBuffer, rate: Double, to file: inout AVAudioFile?, url: URL) throws {
-        let channels = AVAudioChannelCount(max(buffer.mNumberChannels, 1))
-        guard let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate,
-                                         channels: channels, interleaved: true)
-        else { throw CaptureError("unsupported format: \(channels) channels at \(rate) Hz") }
-        if file == nil {
-            file = try AVAudioFile(forWriting: url, settings: format.settings,
-                                   commonFormat: .pcmFormatFloat32, interleaved: true)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    /// Appends one interleaved float32 buffer, creating the file (0600) on the first one.
+    func write(_ buffer: AudioBuffer, rate: Double, to file: inout WavWriter?, url: URL) throws {
+        let channels = Int(max(buffer.mNumberChannels, 1))
+        if file == nil { file = try WavWriter(url: url, rate: rate, channels: channels) }
+        guard let file, file.channels == channels else {
+            throw CaptureError("channel count changed mid-recording in \(url.lastPathComponent)")
         }
-        var list = AudioBufferList(mNumberBuffers: 1, mBuffers: buffer)
-        guard let file, let pcm = AVAudioPCMBuffer(pcmFormat: format, bufferListNoCopy: &list)
-        else { throw CaptureError("cannot wrap the audio buffer") }
-        try file.write(from: pcm)
+        guard let data = buffer.mData else { return }
+        try file.append(UnsafeRawBufferPointer(start: data, count: Int(buffer.mDataByteSize)))
     }
 
     /// Creates `dir` and missing parents as 0700, and tightens `dir` if it already exists.
