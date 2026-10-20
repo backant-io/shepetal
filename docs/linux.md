@@ -19,7 +19,7 @@ PipeWire bindings are less mature. Python would need a runtime and a virtualenv 
 | Part | v0 | Later |
 | --- | --- | --- |
 | Hotkey | fn (evdev `KEY_FN`). Read only the `/dev/input/event*` keyboards whose sysfs key capabilities include the hotkey (see "fn hotkey" below). Their key events go to one state machine. User must be in the `input` group. | GlobalShortcuts portal first (press and release, GNOME 48+, Plasma, Hyprland), evdev as the opt-in fallback, `evdev` crate for hotplug |
-| Gesture | Recording starts on the fn press. Hold fn at least 300 ms for push-to-talk. Two taps within 400 ms for hands-free, next press stops. A chord (fn+F1) cancels, and the clip is kept as cancelled. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code). | Config file, tunable thresholds |
+| Gesture | Recording starts on the fn press. Hold fn at least 500 ms for push-to-talk. Two taps with at most 500 ms between the release and the second press for hands-free, next press stops. A shorter press with no second tap is too short: nothing is transcribed or typed, the clip is kept as too short, and the daemon prints the hint `Hold fn to talk · double-tap for hands-free` to stderr (the 🤫 overlay will show it). A chord (fn+F1) cancels without a hint, and the clip is kept as cancelled. The 500/500 ms values match the Mac (`Sources/ShepetalCore/FnGesture.swift`) and the 500 ms debounce in `docs/re/dictation-input.md` section 2.3. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code). | Config file, tunable thresholds |
 | Mic | `pw-record` at 16 kHz mono s16, falling back to `parecord` (PulseAudio). Stopped with SIGINT so the WAV header is written. | `pipewire-rs` stream, no temp file |
 | STT | `whisper-cli` from whisper.cpp on a temp WAV | `whisper-rs` in-process, model kept warm, sherpa-onnx for streaming |
 | Model | `large-v3-turbo` on CUDA (`/dev/nvidia0`) or Vulkan (an ICD in `/usr/share/vulkan/icd.d`) when RAM is at least 8 GB. On CPU: `small` (16 GB and 8 cores or more), `base` (8 GB or more), else `tiny`. | Thresholds from measured latency, VRAM check |
@@ -53,7 +53,8 @@ paste keystroke, so the user pastes by hand, and restoring the clipboard would d
   `$XDG_DATA_HOME/shepetal/audio/` (default `~/.local/share/shepetal/audio/`). The directory is
   created 0700, and the daemon refuses to start if it is a symlink or open to other users. Each
   file is a new `<unix-ms>.wav`, created with `O_CREAT|O_EXCL` (which also refuses a symlink) and
-  mode 0600. Nothing is deleted. A cancelled recording is renamed `<unix-ms>.cancelled.wav`.
+  mode 0600. Nothing is deleted. A cancelled recording is renamed `<unix-ms>.cancelled.wav`, and
+  a too-short press `<unix-ms>.tooshort.wav`.
   There is no option to skip storage. Audio never goes to `/tmp`, where another user could swap
   it and so choose what gets typed.
 - Because an fn chord (fn+F1, fn+arrow) also counts as a cancelled recording, the history fills
@@ -143,8 +144,11 @@ Not yet done. These are the steps:
    ydotoold runs.
 6. Open gedit. Hold fn, say "hello world", release: the text appears. Recording starts on the
    press, so the first word is not cut off.
-7. Tap fn once: nothing is typed. Press fn+F1 while talking: nothing is typed, and a
-   `<unix-ms>.cancelled.wav` appears in `~/.local/share/shepetal/audio/`.
+7. Tap fn once (shorter than half a second): nothing is typed, the daemon prints
+   `shepetal: hint: Hold fn to talk · double-tap for hands-free` about half a second after the
+   release, and a `<unix-ms>.tooshort.wav` appears in `~/.local/share/shepetal/audio/`. Press
+   fn+F1 while talking: nothing is typed, no hint is printed, and a `<unix-ms>.cancelled.wav`
+   appears there.
 8. Double-tap fn, talk for 20 seconds while typing elsewhere, then press fn
    once: the whole passage is typed.
 9. Repeat steps 6 to 8 in an X11 session ("Ubuntu on Xorg" at login), where it must use `xdotool`.
@@ -165,3 +169,7 @@ Not yet done. These are the steps:
   verified. If it does not, `probe` lists shepetal's own recording as a mic user.
 - No retention limit or cleanup for the audio history yet.
 - Meeting detection only runs in `probe`. The daemon does not record meetings yet.
+- The short-press hint goes to stderr. The 🤫 overlay that shows it next to the indicator for
+  about 2 s comes in a follow-up PR.
+- Another key while fn is held cancels at any point of the hold. The Mac cancels only in the
+  first second (`chordWindow`).

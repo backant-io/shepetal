@@ -20,7 +20,7 @@ Ubuntu 24.04 ships cargo 1.75, so `Cargo.lock` is kept at lockfile version 3, wh
 This runs the unit tests (gesture timing, model choice, insertion backend priority, text over
 stdin to fake typing tools, meeting detection over `fixtures/pw-dump-meeting.json`, evdev
 decoding, the sysfs key bitmap that finds fn, the daemon's fn default and keyboard choice over a
-fake sysfs, cancelled clips kept), builds the release binary and
+fake sysfs, cancelled and too-short clips kept, the short-press hint), builds the release binary and
 runs `probe` against the fixture. The hotkey, mic, whisper-cli and typing paths need a real
 desktop and are not exercised in Docker.
 

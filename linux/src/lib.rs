@@ -62,11 +62,17 @@ pub fn new_recording(data_home: &Path, stamp: u128) -> std::io::Result<PathBuf> 
     Ok(path)
 }
 
-/// Every recording is kept. A cancelled one is renamed `<stamp>.cancelled.wav`, never deleted.
-pub fn mark_cancelled(wav: &Path) -> std::io::Result<PathBuf> {
-    let to = wav.with_extension("cancelled.wav");
+/// Every recording is kept. A cancelled or too-short one is renamed `<stamp>.<label>.wav`
+/// (`cancelled`, `tooshort`), never deleted.
+pub fn mark(wav: &Path, label: &str) -> std::io::Result<PathBuf> {
+    let to = wav.with_extension(format!("{label}.wav"));
     std::fs::rename(wav, &to)?;
     Ok(to)
+}
+
+/// Shown next to the 🤫 indicator after a too-short press. Our own wording, as on the Mac.
+pub fn short_press_hint(key: &str) -> String {
+    format!("Hold {key} to talk · double-tap for hands-free")
 }
 
 #[cfg(test)]
@@ -83,7 +89,7 @@ mod tests {
         assert_eq!(mode(wav.parent().unwrap()), 0o700);
         assert!(new_recording(&home, 1).is_err(), "must never reuse an existing file");
         std::fs::write(&wav, b"RIFF").unwrap();
-        let cancelled = mark_cancelled(&wav).unwrap();
+        let cancelled = mark(&wav, "cancelled").unwrap();
         assert_eq!(cancelled.file_name().unwrap(), "1.cancelled.wav");
         assert_eq!(std::fs::read(&cancelled).unwrap(), b"RIFF", "cancelled audio must be kept");
         assert_eq!(mode(&cancelled), 0o600);

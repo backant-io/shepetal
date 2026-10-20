@@ -210,29 +210,35 @@ fn daemon() -> Res {
             Err(mpsc::RecvTimeoutError::Disconnected) => return Err("all input devices closed".into()),
         };
         for a in g.feed(ev) {
-            act(a, &mut rec, &data_home, &model, typer)?;
+            // ponytail: stderr until the 🤫 overlay lands, which shows the hint for about 2 s.
+            if let Some(hint) = act(a, &mut rec, &data_home, &model, typer, &key_name)? {
+                eprintln!("shepetal: hint: {hint}");
+            }
         }
     }
 }
 
 /// Carry out one gesture action. `rec` is the running recorder and the WAV it writes.
-fn act(a: Action, rec: &mut Option<(Child, PathBuf)>, data_home: &Path, model: &PathBuf, typer: insert::Backend) -> Res {
+/// Returns the hint to show next to 🤫 after a too-short press.
+fn act(a: Action, rec: &mut Option<(Child, PathBuf)>, data_home: &Path, model: &PathBuf, typer: insert::Backend, key_name: &str) -> Result<Option<String>, String> {
     match a {
         Action::Start => {
             let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
             let wav = shepetal::new_recording(data_home, stamp).map_err(|e| format!("audio file: {e}"))?;
             *rec = Some((record(&wav).map_err(|e| format!("recorder: {e}"))?, wav));
         }
-        Action::Cancel => {
+        Action::Cancel | Action::TooShort => {
+            let label = if a == Action::Cancel { "cancelled" } else { "tooshort" };
             if let Some((c, wav)) = rec.take() {
                 stop(c);
-                if let Err(e) = shepetal::mark_cancelled(&wav) {
-                    eprintln!("shepetal: mark cancelled {}: {e}", wav.display());
+                if let Err(e) = shepetal::mark(&wav, label) {
+                    eprintln!("shepetal: mark {label} {}: {e}", wav.display());
                 }
             }
+            return Ok((a == Action::TooShort).then(|| shepetal::short_press_hint(key_name)));
         }
         Action::Stop => {
-            let Some((c, wav)) = rec.take() else { return Ok(()) };
+            let Some((c, wav)) = rec.take() else { return Ok(None) };
             stop(c);
             // ponytail: transcribes on the input thread, so keys pressed meanwhile queue up.
             // The WAV stays in the audio history: it is exactly what the model heard.
@@ -247,7 +253,7 @@ fn act(a: Action, rec: &mut Option<(Child, PathBuf)>, data_home: &Path, model: &
             }
         }
     }
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]
@@ -297,17 +303,34 @@ mod tests {
         std::fs::remove_dir_all(laptop).unwrap();
     }
 
+    /// Runs `a` on a fake recording `<stamp>.wav` holding "RIFF" and returns the hint.
+    fn act_on_clip(a: Action, home: &Path, stamp: u128) -> Option<String> {
+        let wav = shepetal::new_recording(home, stamp).unwrap();
+        std::fs::write(&wav, b"RIFF").unwrap();
+        let mut rec = Some((Command::new("true").spawn().unwrap(), wav.clone()));
+        let hint = act(a, &mut rec, home, &PathBuf::new(), insert::Backend::Wtype, "fn").unwrap();
+        assert!(rec.is_none());
+        assert!(!wav.exists());
+        hint
+    }
+
     #[test]
     fn cancel_keeps_the_recording() {
         // Pavel's decision: every clip is kept, a cancelled one as <stamp>.cancelled.wav.
         let home = std::env::temp_dir().join(format!("shepetal-cancel-{}", std::process::id()));
-        let wav = shepetal::new_recording(&home, 7).unwrap();
-        std::fs::write(&wav, b"RIFF").unwrap();
-        let mut rec = Some((Command::new("true").spawn().unwrap(), wav.clone()));
-        act(Action::Cancel, &mut rec, &home, &PathBuf::new(), insert::Backend::Wtype).unwrap();
-        assert!(rec.is_none());
-        assert!(!wav.exists());
+        assert_eq!(act_on_clip(Action::Cancel, &home, 7), None, "an fn chord shows no hint");
         assert_eq!(std::fs::read(home.join("shepetal/audio/7.cancelled.wav")).unwrap(), b"RIFF");
+        std::fs::remove_dir_all(&home).unwrap();
+    }
+
+    #[test]
+    fn too_short_press_keeps_the_clip_and_shows_the_hint() {
+        // Goal rule 2: the clip is not transcribed but kept, marked too short, and the hint
+        // names the key.
+        let home = std::env::temp_dir().join(format!("shepetal-short-{}", std::process::id()));
+        let hint = act_on_clip(Action::TooShort, &home, 8);
+        assert_eq!(hint.as_deref(), Some("Hold fn to talk · double-tap for hands-free"));
+        assert_eq!(std::fs::read(home.join("shepetal/audio/8.tooshort.wav")).unwrap(), b"RIFF");
         std::fs::remove_dir_all(&home).unwrap();
     }
 }
