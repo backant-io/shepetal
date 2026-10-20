@@ -17,11 +17,22 @@ COMMIT = re.compile(r"\bI(?:'ll| will)\s+(.+)", re.I)
 DECIDE = re.compile(r"\b(decision|decided|is postponed|we (?:move|keep|use|ship|offer|skip|roll back|don't store)|let's (?:ship|not|skip|use))\b", re.I)
 
 
+# "Maya: ...", "Speaker 1: ...", "张伟: ...": starts with a letter, at most 4 words, no sentence punctuation, and a
+# space after the colon, so "at 10:30" or "https://..." is never a label.
+LABEL = re.compile(r"^\s*([^\W\d_][^:.!?]{0,39}?)\s*:(?:\s|$)")
+
+
 def parse(text):
-    """-> [(speaker, sentence)] in transcript order."""
+    """-> [(speaker, sentence)] in transcript order. Lines without a label keep an unknown speaker ("").
+    Labels count only when at least half the lines have one: in an undiarized transcript (the iPhone mic path)
+    a stray "Note: I will..." is text, not a speaker."""
+    lines = [l for l in text.splitlines() if l.strip()]
+    found = [LABEL.match(l) for l in lines]
+    found = [m if m and len(m.group(1).split()) <= 4 else None for m in found]
+    diarized = 2 * sum(m is not None for m in found) >= len(lines)
     out = []
-    for line in text.splitlines():
-        spk, body = line.split(":", 1) if ":" in line else ("", line)  # undiarized lines keep an unknown speaker
+    for line, m in zip(lines, found):
+        spk, body = (m.group(1), line[m.end():]) if m and diarized else ("", line)
         out += [(spk.strip(), s.strip()) for s in re.split(r"(?<=[.!?])\s+", body.strip()) if s.strip()]
     return out
 
@@ -118,7 +129,7 @@ def action_scores(sents, model):
 
 def tokens(s):
     """words() with the case kept: names are matched as written."""
-    return re.findall(r"[A-Za-z0-9']+", s)
+    return re.findall(r"[\w']+", s)  # Unicode letters too: "Олена" and "张伟" are names
 
 
 def aliases(sents):
@@ -135,6 +146,8 @@ def aliases(sents):
     for lab, name in [(l, n) for l in labels for n in names[l][1:]] + [(l, l) for l in labels]:  # labels win over titles
         others = {w for l in labels if l != lab for n in names[l] for w in words(n)}  # "Designer" names neither designer
         toks = [w[:1].upper() + w[1:] for w in tokens(name)]  # a lowercase calendar name "will" must not match "will"
+        if not toks:  # a label with no letters ("—") would become the empty phrase, which matches every sentence
+            continue
         out[" ".join(toks)] = lab
         out.update({w: lab for w in toks if len(w) >= 3 and w.lower() not in others and not w.isdigit()})  # "Speaker 1" gives nothing
         if len(toks) > 1:
