@@ -165,8 +165,8 @@ final class Channel {
 }
 
 /// Reads a WAV that may still be growing: each call returns the whole frames written since the last one.
-/// While a recorder writes, the header's sizes are still 0, so the data runs to the end of the file; once it is
-/// closed, the data chunk's size marks the end.
+/// While AVAudioFile writes, the header's sizes are still 0, so the data runs to the end of the file; the meeting
+/// recorder's WavWriter keeps the data size current, and 0xFFFFFFFF (past 4 GB) means to the end as well.
 final class WavTail {
     let url: URL
     private var format: AVAudioFormat?
@@ -186,7 +186,7 @@ final class WavTail {
         guard let format else { return nil }
         try h.seek(toOffset: dataStart - 4)
         let declared = UInt64(try h.read(upToCount: 4).map { $0.withUnsafeBytes { $0.loadUnaligned(as: UInt32.self) } } ?? 0)
-        let end = declared > 0 && dataStart + declared <= size ? dataStart + declared : size
+        let end = declared > 0 && declared < 0xFFFF_FFFF && dataStart + declared <= size ? dataStart + declared : size
         let frameBytes = UInt64(format.streamDescription.pointee.mBytesPerFrame)
         let frames = min((end - min(end, dataStart + read)) / frameBytes, UInt64(maxSeconds * format.sampleRate))
         guard frames > 0, let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else { return nil }
