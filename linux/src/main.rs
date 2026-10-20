@@ -664,7 +664,7 @@ mod tests {
             let whisper = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: true });
             assert_eq!(transcribe(&whisper, &wav).as_deref(), Ok("expanded"), "whole dictation is a snippet trigger");
             let args = std::fs::read_to_string(d.join("stt.args")).unwrap();
-            assert!(args.ends_with(" -l auto --prompt hello, WORLD\n"), "{args}");
+            assert!(args.ends_with(" -l auto --prompt WORLD, hello\n"), "{args}");
             vocab::save(&conf, vocab::SNIPPETS, "").unwrap();
             assert_eq!(transcribe(&whisper, &wav).as_deref(), Ok("Hi WORLD."));
             let sherpa = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: false });

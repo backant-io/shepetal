@@ -75,12 +75,15 @@ impl Vocab {
         Vocab::parse(&read(DICTIONARY), &read(SNIPPETS))
     }
 
-    /// The hint for Whisper's initial prompt: the spoken side (what the model has to hear),
-    /// starred first, then file order, at most PROMPT_LIMIT. None when the dictionary is empty.
+    /// The hint for Whisper's initial prompt: the spoken side (what the model has to hear) of the
+    /// first PROMPT_LIMIT entries, starred first, then file order. None when the dictionary is empty.
+    /// The list is written lowest priority first: whisper.cpp keeps only the last ~223 prompt
+    /// tokens, so a long hint loses its least important terms, never the starred ones.
     pub fn prompt(&self) -> Option<String> {
         let d = &self.dictionary;
-        let terms: Vec<&str> = d.iter().filter(|e| e.starred).chain(d.iter().filter(|e| !e.starred))
+        let mut terms: Vec<&str> = d.iter().filter(|e| e.starred).chain(d.iter().filter(|e| !e.starred))
             .map(|e| e.spoken.as_str()).take(PROMPT_LIMIT).collect();
+        terms.reverse();
         (!terms.is_empty()).then(|| terms.join(", "))
     }
 
@@ -329,7 +332,7 @@ pub fn cli(dir: &Path, args: &[String]) -> Result<String, String> {
 
 /// The dictionary file without lines whose entry is `spoken` (case-insensitive); comments stay.
 fn without_entry(file: &str, spoken: &str) -> String {
-    file.lines().filter(|l| Entry::parse(l).is_none_or(|e| !eq_ci(&e.spoken, spoken)))
+    file.lines().filter(|l| !matches!(Entry::parse(l), Some(e) if eq_ci(&e.spoken, spoken)))
         .map(|l| format!("{l}\n")).collect()
 }
 
@@ -406,12 +409,18 @@ mod tests {
     }
 
     #[test]
-    fn prompt_puts_starred_first_and_is_capped() {
+    fn prompt_puts_starred_last_and_is_capped() {
+        // whisper.cpp drops the start of a long prompt, so the most important term goes last.
         let d = v("# c\nalpha\n*Shepetal\nbtw => by the way\n", &[("sig", "x")]);
-        assert_eq!(d.prompt().as_deref(), Some("Shepetal, alpha, btw"));
+        assert_eq!(d.prompt().as_deref(), Some("btw, alpha, Shepetal"));
         assert_eq!(Vocab::default().prompt(), None);
-        let many: String = (0..300).map(|n| format!("w{n}\n")).collect();
-        assert_eq!(v(&many, &[]).prompt().unwrap().split(", ").count(), PROMPT_LIMIT);
+        let many: String = (0..300).map(|n| format!("w{n}\n")).chain(["*Star\n".into()]).collect();
+        let p = v(&many, &[]).prompt().unwrap();
+        let terms: Vec<&str> = p.split(", ").collect();
+        assert_eq!(terms.len(), PROMPT_LIMIT);
+        assert_eq!(terms.last(), Some(&"Star"), "the starred entry survives whisper's front truncation");
+        assert_eq!(terms[terms.len() - 2], "w0", "then the first entries of the file");
+        assert!(!terms.contains(&"w199"), "the cap drops the end of the file");
     }
 
     #[test]

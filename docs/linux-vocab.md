@@ -33,7 +33,7 @@ Adding an entry or trigger that exists (case-insensitive) replaces it.
 
 ## Pipeline
 
-1. **Bias**: with Whisper, the dictionary's spoken side (starred first, at most 200 entries) goes to `whisper-cli --prompt`. sherpa-onnx models get no hint yet (their hotwords need modified beam search).
+1. **Bias**: with Whisper, the dictionary's spoken side (at most 200 entries, starred ones kept first) goes to `whisper-cli --prompt`, written lowest priority first: whisper.cpp keeps only the last ~223 prompt tokens, so a long dictionary loses its least important terms, never the starred ones. sherpa-onnx models get no hint yet (their hotwords need modified beam search).
 2. **Whole-dictation snippet**: if the transcript, with case and punctuation ignored, equals a trigger, the expansion is inserted alone.
 3. **Inline**: snippet triggers and dictionary entries are replaced in one pass: case-insensitive, whole words only (Unicode letters and digits count as word characters, so `btw` inside `btwx` never fires), any whitespace between the words of a phrase, longest first, and inserted text is never scanned again. A replacement at a capital keeps it (`Btw` -> `By the way`); a plain entry is written exactly as stored (`github` -> `GitHub`).
 
