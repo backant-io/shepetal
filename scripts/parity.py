@@ -3,6 +3,7 @@
 
   python3 scripts/parity.py                                 check the ledger, print coverage
   python3 scripts/parity.py --completeness MAP IDENTIFIERS  also fail on unmapped Wispr identifiers
+                                                            and on map entries missing from the lists
   python3 scripts/parity.py --self-test                     assert-based self-check
 
 Exit status 1 when any rule is broken. The ledger syntax is described at the top of docs/parity.md.
@@ -82,7 +83,10 @@ def completeness(map_text, identifiers, ledger_ids):
             continue
         cols = line.split("\t") + ["", ""]
         category, name, target, reason = cols[0], cols[1], cols[2], cols[3].strip()
-        if target == "internal" and not reason:
+        if (category, name) not in identifiers:
+            # The map covers every identifier, so this catches truncated lists as well as stale entries.
+            errors.append(f"map line {n}: {category}: {name} is not in the identifier lists")
+        elif target == "internal" and not reason:
             errors.append(f"map line {n}: internal needs a reason")
         elif target != "internal" and target not in ledger_ids:
             errors.append(f"map line {n}: {target!r} is not an F-ID in the ledger")
@@ -119,6 +123,7 @@ def self_test():
     fails(good.replace("`HotkeyTests.testHold`", "HotkeyTests.testHold"), "F01 Mac: done needs")
     fails(good.replace("https://www.kernel.org/doc/x", "the kernel forbids it"), "F01 Linux: impossible needs")
     fails(good.replace("n/a billing", "n/a cloud-sync"), "F01 iPhone: n/a needs")
+    fails(good.replace("Mac: `HotkeyTests", "Linux: `HotkeyTests"), "F01 Mac: done needs")  # no cross-platform evidence
     fails(good.replace("n/a billing: store only", "n/a billing"), "F01 iPhone: n/a needs")
     fails(good.replace("| todo |", "| wip |"), "unknown value 'wip'")
 
@@ -126,6 +131,7 @@ def self_test():
     full = "flags\tx-flag\tF01\nevents\ty_event\tinternal\tserver-side metric\n"
     assert completeness(full, ids, {"F01"}) == []
     assert completeness(full.splitlines()[0], ids, {"F01"}) == ["unmapped events: y_event"]
+    assert completeness(full, {("flags", "x-flag")}, {"F01"}) == ["map line 2: events: y_event is not in the identifier lists"]
     assert any("internal needs a reason" in e for e in completeness(full.replace("\tserver-side metric", ""), ids, {"F01"}))
     assert any("not an F-ID" in e for e in completeness(full, ids, {"F02"}))
     print("self-test ok")
