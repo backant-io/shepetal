@@ -143,19 +143,20 @@ enum FocusedText {
     /// The focused app's pid and its focused window, to tell at paste time whether focus moved (rule 8).
     /// Without Accessibility only the frontmost app is known, and the window is nil.
     static func window() -> (app: Int32, window: AXUIElement?)? {
+        let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
         var app: CFTypeRef?
         guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString,
                                             &app) == .success, let app else {
-            return NSWorkspace.shared.frontmostApplication.map { ($0.processIdentifier, nil) }
+            return PasteGate.focus(axPid: nil, frontmostPid: frontmost, window: nil as AXUIElement?)
         }
         let element = app as! AXUIElement
         // This runs on the main thread at fn-down: a hung app must not stall fn handling for AX's default 6 s.
         AXUIElementSetMessagingTimeout(element, 0.1)
         var pid: pid_t = 0
-        guard AXUIElementGetPid(element, &pid) == .success else { return nil }
+        let axPid: Int32? = AXUIElementGetPid(element, &pid) == .success ? pid : nil
         var window: CFTypeRef?
         let ok = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success
-        return (pid, ok ? (window as! AXUIElement) : nil)
+        return PasteGate.focus(axPid: axPid, frontmostPid: frontmost, window: ok ? (window as! AXUIElement) : nil)
     }
 
     private static func read() -> (String, NSRange)? {

@@ -46,7 +46,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F24 | Textbox and AX context sent to the formatter (text around the cursor) | todo | todo | todo | |
 | F25 | Screenshot / OCR context | todo | todo | todo | |
 | F26 | Auto-learn words from the user's edits after paste | todo | todo | todo | |
-| F27 | Focus restore before paste (store, then refocus the element) | hand-test | todo | todo | Mac, under rule 8 (paste only into the window that stayed in focus, never refocus, else the clipboard and a ⌘V hint): `PasteGateTests.testSameWindowPastes`, `PasteGateTests.testOtherAppOrWindowGoesToTheClipboard`, `PasteGateTests.testUnreadableFocusPastes`, `PasteGatePipelineTests.testFocusMovedWhileTranscribingLeavesTheTextOnTheClipboard`, `PasteGatePipelineTests.testUnknownFocusPastesAndRestoresTheClipboard` #34, hand step M-FOC-1 |
+| F27 | Focus restore before paste (store, then refocus the element) | hand-test | todo | todo | Mac, under rule 8 (paste only into the window that stayed in focus, never refocus, else the clipboard and a ⌘V hint): `PasteGateTests.testSameWindowPastes`, `PasteGateTests.testOtherAppOrWindowGoesToTheClipboard`, `PasteGateTests.testUnreadableFocusPastes`, `PasteGateTests.testUnreadableWindowStillRecordsTheApp`, `PasteGatePipelineTests.testFocusMovedWhileTranscribingLeavesTheTextOnTheClipboard`, `PasteGatePipelineTests.testUnknownFocusPastesAndRestoresTheClipboard` #34, hand step M-FOC-1 |
 | F28 | Link memory: insert recently copied links by voice | todo | todo | todo | |
 | F29 | IDE integration: file tagging (@file) in Cursor and other IDEs | todo | todo | todo | |
 | F30 | Coding-CLI detection in terminals (claude, codex, aider and others) | todo | todo | todo | |

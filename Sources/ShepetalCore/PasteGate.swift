@@ -17,6 +17,14 @@ public enum PasteGate {
         return a == b
     }
 
+    /// The focus record `focusKept` compares, from what could be read. `axPid` is the AX focused app's pid (nil when
+    /// unreadable), `frontmostPid` the frontmost app's. A window that could not be read stays nil but the app is
+    /// still recorded, so a move to another app is caught even then.
+    public static func focus<W>(axPid: Int32?, frontmostPid: Int32?, window: W?) -> (app: Int32, window: W?)? {
+        guard let pid = axPid ?? frontmostPid else { return nil }
+        return (pid, axPid == nil ? nil : window)
+    }
+
     /// The message when the text goes to the clipboard instead of being pasted, or nil to paste.
     public static func blocked(focusKept: Bool?, secureInputApp: String?) -> String? {
         if focusKept == false { return focusMoved }

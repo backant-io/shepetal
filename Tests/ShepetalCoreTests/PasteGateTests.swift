@@ -21,6 +21,21 @@ final class PasteGateTests: XCTestCase {
                        "The window changed while you spoke. The text is on the clipboard: press ⌘V to paste it.")
     }
 
+    // A window that cannot be read still records the app: focus moving to another app whose window is
+    // unreadable (busy, or no AX window) must go to the clipboard, not count as "unknown".
+    func testUnreadableWindowStillRecordsTheApp() {
+        let start = PasteGate.focus(axPid: 1, frontmostPid: 1, window: "doc")
+        let now = PasteGate.focus(axPid: 2, frontmostPid: 2, window: nil as String?)
+        XCTAssertEqual(now?.app, 2)
+        XCTAssertEqual(PasteGate.focusKept(start: start, now: now), false)
+        // No AX answer at all (no Accessibility, or the pid read failed): the frontmost app, no window.
+        let fallback = PasteGate.focus(axPid: nil, frontmostPid: 3, window: "ignored")
+        XCTAssertEqual(fallback?.app, 3)
+        XCTAssertNil(fallback?.window)
+        XCTAssertEqual(PasteGate.focusKept(start: start, now: fallback), false)
+        XCTAssertNil(PasteGate.focus(axPid: nil, frontmostPid: nil, window: "doc"))
+    }
+
     // Without Accessibility the window cannot be read: paste, and let the paste check catch a miss.
     func testUnreadableFocusPastes() {
         XCTAssertNil(PasteGate.focusKept(start: (1, nil), now: (1, nil) as Focus))

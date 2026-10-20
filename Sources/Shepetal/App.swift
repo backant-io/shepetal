@@ -144,8 +144,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busy = true
         indicator.set(.processing)
         let appAtStart = appAtStart
+        let start = focusAtStart
         Task {
-            let start = focusAtStart
             let app = await appAtStart?.value ?? AppContext()
             let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
                                              selection: FocusedText.selected,
