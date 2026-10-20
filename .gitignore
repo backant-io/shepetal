@@ -6,4 +6,4 @@ agent/ids.json
 /dist/
 bench/.cache/
 bench/.venv/
-bench/__pycache__/
+__pycache__/
