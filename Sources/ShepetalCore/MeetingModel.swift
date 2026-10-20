@@ -95,6 +95,8 @@ public protocol MeetingStoring: AnyObject {
     func save(_ meeting: Meeting) throws
     /// Adds segments to a saved meeting; segments arrive live while it runs.
     func append(_ segments: [Segment], to meetingID: String) throws
+    /// Removes these segments (one stored copy each), e.g. the call's echo on the mic channel.
+    func remove(_ segments: [Segment], from meetingID: String) throws
     func setSummary(_ summary: Summary, for meetingID: String) throws
     /// Newest first.
     func list(limit: Int) throws -> [Meeting]

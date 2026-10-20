@@ -7,6 +7,8 @@
 # live segments stored before the end, the meeting read back from the store and found by search, owner-only
 # audio, and a summary with at least one action item. The app runs with the network denied (sandbox-exec), so
 # transcription and summary make no network call.
+# BLEED=0.05 also mixes the other side into the mic channel at that gain (about -26 dB), as a MacBook's speakers
+# do without headphones: the same checks must pass, so none of that echo may come out as Me.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 if [ -z "${SHEPETAL_BIN:-}" ]; then
@@ -40,8 +42,8 @@ while IFS='|' read -r who text; do
 done < "$FIX/script.txt"
 
 # Lay the lines end to end: each channel holds its speaker's lines and silence while the other speaks.
-python3 - "$FIX" <<'PY'
-import json, os, sys, wave
+BLEED=${BLEED:-0} python3 - "$FIX" <<'PY'
+import array, json, os, sys, wave
 fix = sys.argv[1]
 lines = [l.rstrip("\n").split("|", 1) for l in open(os.path.join(fix, "script.txt")) if l.strip()]
 rate, gap = 16000, int(0.8 * 16000)
@@ -57,12 +59,16 @@ for i, (who, text) in enumerate(lines):
         tr += pcm if k == who else bytes(len(pcm))
     ref.append({"speaker": who, "start": t / rate, "end": (t + n) / rate, "text": text})
     t += n + gap
+bleed = float(os.environ["BLEED"])
+if bleed:
+    me, ot = array.array("h", tracks["Me"]), array.array("h", tracks["Others"])
+    tracks["Me"] = bytearray(array.array("h", (max(-32768, min(32767, m + round(bleed * o))) for m, o in zip(me, ot))).tobytes())
 for k, tr in tracks.items():
     tr += bytes(2 * (t - len(tr) // 2))
     with wave.open(os.path.join(fix, f"{k.lower()}.wav"), "wb") as w:
         w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate); w.writeframes(bytes(tr))
 json.dump(ref, open(os.path.join(fix, "ref.json"), "w"), indent=1)
-print(f"meeting: {len(ref)} lines, {t / rate:.1f} s", file=sys.stderr)
+print(f"meeting: {len(ref)} lines, {t / rate:.1f} s, bleed {bleed}", file=sys.stderr)
 PY
 
 sandbox-exec -p '(version 1)(allow default)(deny network*)' \

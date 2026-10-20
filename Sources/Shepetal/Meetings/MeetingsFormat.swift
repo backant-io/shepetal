@@ -82,6 +82,13 @@ final class InMemoryMeetingStore: MeetingStoring {
         records[meetingID]!.segments += segments
     }
 
+    func remove(_ segments: [Segment], from meetingID: String) throws {
+        guard records[meetingID] != nil else { throw UnknownMeeting(id: meetingID) }
+        for s in segments {
+            if let i = records[meetingID]!.segments.firstIndex(of: s) { records[meetingID]!.segments.remove(at: i) }
+        }
+    }
+
     func setSummary(_ summary: Summary, for meetingID: String) throws {
         guard records[meetingID] != nil else { throw UnknownMeeting(id: meetingID) }
         records[meetingID]!.summary = summary

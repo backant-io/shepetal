@@ -72,6 +72,33 @@ public final class MeetingStore: MeetingStoring {
         }
     }
 
+    public func remove(_ segments: [Segment], from meetingID: String) throws {
+        try transaction {
+            let stmt = try prepare("""
+                DELETE FROM segments WHERE rowid = (SELECT rowid FROM segments
+                  WHERE meeting_id = ? AND speaker = ? AND start = ? AND end = ? AND text = ? LIMIT 1)
+                """)
+            defer { sqlite3_finalize(stmt) }
+            for s in segments {
+                sqlite3_reset(stmt)
+                bind(stmt, 1, meetingID)
+                bind(stmt, 2, s.speaker.rawValue)
+                sqlite3_bind_double(stmt, 3, s.start)
+                sqlite3_bind_double(stmt, 4, s.end)
+                bind(stmt, 5, s.text)
+                guard sqlite3_step(stmt) == SQLITE_DONE else { throw error("remove") }
+            }
+            // The search index has a row per segment: rebuild this meeting's from the segments left.
+            for sql in ["DELETE FROM meeting_text WHERE meeting_id = ?1 AND kind = 'segment'",
+                        "INSERT INTO meeting_text(meeting_id, kind, text) SELECT meeting_id, 'segment', text FROM segments WHERE meeting_id = ?1"] {
+                let s = try prepare(sql)
+                defer { sqlite3_finalize(s) }
+                bind(s, 1, meetingID)
+                guard sqlite3_step(s) == SQLITE_DONE else { throw error("remove") }
+            }
+        }
+    }
+
     public func setSummary(_ summary: Summary, for meetingID: String) throws {
         let json = String(decoding: try JSONEncoder().encode(summary), as: UTF8.self)
         try transaction {

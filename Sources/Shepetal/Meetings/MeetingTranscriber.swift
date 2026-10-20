@@ -1,6 +1,7 @@
 import AVFoundation
 import Foundation
 import ShepetalCore
+import ShepetalSummary
 
 /// Transcribes a meeting's two kept WAVs, the mic as "Me" and the system audio as "Others", with the dictation
 /// speech engine, and summarizes the result with the non-LLM summarizer (rule 6). Each channel is cut into
@@ -70,7 +71,15 @@ final class MeetingTranscriber {
                 out += try await transcribe(ch, final: true)
             }
         }
-        return out
+        let echoes = try removeEchoes()
+        return out.filter { !echoes.contains($0) }
+    }
+
+    /// Takes the call's echo on the mic channel out of the stored transcript (the audio stays as recorded).
+    private func removeEchoes() throws -> [Segment] {
+        let echoes = Echo.find(try store.get(meeting.id)?.segments ?? [])
+        if !echoes.isEmpty { try store.remove(echoes, from: meeting.id) }
+        return echoes
     }
 
     /// Transcribes the utterances in the channel's pending audio and stores them before dropping that audio.
@@ -231,6 +240,26 @@ final class WavTail {
         }
         if d.count >= 65_536 { throw SpeechError("\(url.lastPathComponent): no audio data in the first 64 KB") }
         return false
+    }
+}
+
+/// Without headphones the Mac's speakers play the call into its mic, so the Me channel hears the other side
+/// again, quieter, and the model transcribes it as Me. A Me segment that overlaps Others segments in time is
+/// that echo when it says mostly the same words, or when it is a blip the model guessed a word from.
+/// Pure, so it is tested without a model.
+/// ponytail: text and length, not audio. Me agreeing in the other side's own words while they talk is dropped
+/// too; cross-correlate the two channels if that loses real lines.
+enum Echo {
+    /// Under 0.2 s of speech between the two 0.2 s pads: too short for a word said on purpose over someone.
+    static let blip = 0.6
+
+    static func find(_ segments: [Segment]) -> [Segment] {
+        let others = segments.filter { $0.speaker == .others }
+        return segments.filter { me in
+            guard me.speaker == .me else { return false }
+            let heard = others.filter { $0.start < me.end && me.start < $0.end }.map(\.text)
+            return !heard.isEmpty && (me.end - me.start < blip || similar(me.text, heard.joined(separator: " ")))
+        }
     }
 }
 

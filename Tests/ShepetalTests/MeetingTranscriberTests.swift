@@ -60,10 +60,12 @@ final class MeetingTranscriberTests: XCTestCase {
         let name = "stub"
         var calls: [Int] = []
         var failNext = false
+        /// What the model "hears", one per utterance in call order; " wordN " once it runs out.
+        var texts: [String] = []
         func transcribe(_ samples: [Float], wav: URL) async throws -> String {
             if failNext { failNext = false; throw SpeechError("model failed") }
             calls.append(samples.count)
-            return " word\(calls.count) "
+            return texts.isEmpty ? " word\(calls.count) " : texts.removeFirst()
         }
     }
 
@@ -170,6 +172,38 @@ final class MeetingTranscriberTests: XCTestCase {
         XCTAssertEqual(try store.get(m.id)?.summary?.actionItems, [ActionItem(owner: "Me", task: "t")])
         XCTAssertEqual(try store.get(m.id)?.segments, r.segments)
         XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent(".utterance.wav").path))
+    }
+
+    // On laptop speakers the mic hears the call again, so the model transcribes the other side's line as Me
+    // too. That copy must not reach the transcript, the search or the summary (else Me gets a second copy of the
+    // other side's action items), while Me talking over them in its own words stays and the audio is kept as
+    // recorded (rule 4).
+    func testCallEchoOnTheMicIsDroppedButOwnCrosstalkIsKept() async throws {
+        let m = try meeting()
+        // 5...7 is the echo of the other side; 13 is a quiet bit of it, too short to be a word Me said.
+        let me = audio(17, rate: 16_000, on: [1...3, 5...7, 9...11, 13...13.05])
+        let others = audio(17, rate: 48_000, on: [5...7, 9...11, 12...14])
+        // Per pass the Me channel is transcribed first, then Others. The quieter echo is misheard.
+        engine.texts = ["Thanks for joining, everyone.", "Sure the bita build is ready", "Yes, that works for me.", "Bang.",
+                        "Sure, the beta build is ready.", "I will fix the login crash by Wednesday.", "Thanks, everyone."]
+        let rec = try Recording(m)
+        let t = MeetingTranscriber(meeting: m, engine: engine, store: store, summarizer: summarizer)
+        try rec.write(me: me, others: others)
+        let live = try await t.poll()
+        rec.close(me: me)
+        let wav = try Data(contentsOf: URL(fileURLWithPath: m.meAudioPath))
+        let r = try await t.finish()
+
+        let expected = [Speaker.me: ["Thanks for joining, everyone.", "Yes, that works for me."],
+                        .others: ["Sure, the beta build is ready.", "I will fix the login crash by Wednesday.", "Thanks, everyone."]]
+        for segs in [live, r.segments, try store.get(m.id)?.segments ?? [], summarizer.got ?? []] {
+            XCTAssertEqual(segs.filter { $0.speaker == .me }.map(\.text), expected[.me])
+            XCTAssertEqual(segs.filter { $0.speaker == .others }.map(\.text), expected[.others])
+        }
+        XCTAssertEqual(engine.calls.count, 7)
+        XCTAssertTrue(try store.search("bita", limit: 10).isEmpty, "the echo's text is out of the search index")
+        XCTAssertEqual(try store.search("beta", limit: 10).map(\.id), [m.id])
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: m.meAudioPath)), wav, "the mic audio is kept as recorded")
     }
 
     // A model error must not lose speech: the utterance stays pending and is transcribed by a later pass.

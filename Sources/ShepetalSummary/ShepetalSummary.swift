@@ -148,7 +148,8 @@ func words(_ s: String) -> [String] { WORD.findAll(s.lowercased()) }
 /// words() with the case kept: names are matched as written.
 func tokens(_ s: String) -> [String] { TOKEN.findAll(s) }
 
-func similar(_ a: String, _ b: String, _ t: Double = 0.5) -> Bool {
+/// True when more than `t` of the shorter text's words are in the other one.
+public func similar(_ a: String, _ b: String, _ t: Double = 0.5) -> Bool {
     let a = Set(words(a)), b = Set(words(b))
     return Double(a.intersection(b).count) / Double(max(1, min(a.count, b.count))) > t
 }
