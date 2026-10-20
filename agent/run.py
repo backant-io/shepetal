@@ -1,6 +1,6 @@
 """Run shepetal's builder as a Claude Managed Agent whose tools execute on this Mac.
 
-    agent/.venv/bin/python agent/run.py setup          # once: environment + agent -> agent/ids.json (prompts for the API key)
+    agent/.venv/bin/python agent/run.py setup          # once: environment + agent + first session (prompts for the API key)
     agent/.venv/bin/python agent/run.py worker         # keep running: executes the agent's tools here (prompts for the environment key)
     agent/.venv/bin/python agent/run.py start [cents]  # new budgeted session, kicked off with the outcome (prompts for the API key)
 """
@@ -32,9 +32,10 @@ def ids():
     return json.loads(IDS.read_text())
 
 
-def setup():
+def setup(cents="20000"):
     if IDS.exists():
         sys.exit(f"{IDS} exists, delete it to recreate the agent and environment")
+    check_cents(cents)
     client = api()
     env = client.beta.environments.create(name="shepetal-mac", config={"type": "self_hosted"})
     agent = client.beta.agents.create(
@@ -49,7 +50,10 @@ def setup():
         }],
     )
     IDS.write_text(json.dumps({"environment_id": env.id, "agent_id": agent.id}, indent=2) + "\n")
-    print(f"environment {env.id}\nagent       {agent.id}\nNext: generate an environment key for {env.id} in the Console.")
+    print(f"environment {env.id}\nagent       {agent.id}")
+    # Start the first session now so the API key is only needed once; it waits until a worker polls.
+    start(cents, client)
+    print(f"Next: generate an environment key for {env.id} (shepetal-mac) in the Console, then run the worker.")
 
 
 async def worker():
@@ -70,10 +74,14 @@ async def worker():
             await task
 
 
-def start(cents="20000"):
+def check_cents(cents):
     if not cents.isdigit() or cents.startswith("0"):
         sys.exit("budget is in US cents, e.g. 20000 for $200")
-    client = api()
+
+
+def start(cents="20000", client=None):
+    check_cents(cents)
+    client = client or api()
     i = ids()
     session = client.beta.sessions.create(
         agent=i["agent_id"],
@@ -92,7 +100,7 @@ def start(cents="20000"):
 if __name__ == "__main__":
     cmd, *args = sys.argv[1:] or ["help"]
     if cmd == "setup":
-        setup()
+        setup(*args)
     elif cmd == "worker":
         asyncio.run(worker())
     elif cmd == "start":
