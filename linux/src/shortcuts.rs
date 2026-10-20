@@ -318,9 +318,15 @@ impl Shortcuts {
     /// End the dictation from outside the gesture. The gesture starts over, so the release of a
     /// hotkey still held does nothing.
     fn end(&mut self, a: Action, out: &mut Vec<Cmd>) {
+        self.reset();
+        out.push(Cmd::Dictation(a));
+    }
+
+    /// The dictation ended without a key (its mic was unplugged): forget it, so the next press
+    /// starts a new one, and neither Esc, the toggle nor the 20 min cap acts on it.
+    pub fn reset(&mut self) {
         self.rec = None;
         self.gesture = Gesture::default();
-        out.push(Cmd::Dictation(a));
     }
 }
 
@@ -427,6 +433,18 @@ mod tests {
         assert!(s.hands_free(), "double tap");
         run(&mut s, &[(KEY_ESC, 1, 20_000)]);
         assert!(!s.hands_free(), "cancelled");
+    }
+
+    #[test]
+    fn after_a_reset_the_next_press_starts_a_new_dictation() {
+        let mut s = Shortcuts::new(FN, defaults());
+        let toggle = press(&[LCTRL, LMETA, SPACE], 0);
+        assert_eq!(run(&mut s, &toggle), [d(Start)]);
+        s.reset(); // the mic went away and the daemon typed what was said
+        assert!(!s.hands_free());
+        assert_eq!(run(&mut s, &[(KEY_ESC, 1, 1000), (KEY_ESC, 0, 1050)]), [], "Esc has nothing to cancel");
+        assert_eq!(s.feed(None, MAX_MS + 1000), [], "no cap on a dictation that ended");
+        assert_eq!(run(&mut s, &press(&[LCTRL, LMETA, SPACE], 2_000_000)), [d(Start)], "the toggle starts anew");
     }
 
     #[test]
