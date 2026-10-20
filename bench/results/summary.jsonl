@@ -1,0 +1,4 @@
+{"engine": "parakeet-110m", "wer_dictation": 15.7, "wer_meeting": 3.7, "latency_dictation_ms_mean": 71, "latency_meeting_ms": 729, "rtf": 0.0114, "load_s": 0.54, "peak_rss_mb": 737, "model_mb": 126}
+{"engine": "moonshine-tiny", "wer_dictation": 12.0, "wer_meeting": 89.5, "latency_dictation_ms_mean": 64, "latency_meeting_ms": 1793, "rtf": 0.0202, "load_s": 0.33, "peak_rss_mb": 863, "model_mb": 119}
+{"engine": "wcpp-base.en-q5_1", "wer_dictation": 3.6, "wer_meeting": 0.0, "latency_dictation_ms_mean": 169, "latency_meeting_ms": 844, "rtf": 0.0193, "load_s": null, "peak_rss_mb": 284, "model_mb": 57}
+{"engine": "wcpp-small", "wer_dictation": 3.6, "wer_meeting": 0.6, "latency_dictation_ms_mean": 399, "latency_meeting_ms": 1289, "rtf": 0.0394, "load_s": null, "peak_rss_mb": 875, "model_mb": 465}

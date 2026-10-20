@@ -41,7 +41,8 @@ How to read it:
     whisper.cpp uses the M4 Pro GPU through Metal.
 - Synthetic voices are cleaner than a real microphone, so real-world WER will be higher for every model.
   Use these numbers to compare models, not as absolute values.
-- Per-file transcripts are in `bench/results/<engine>.json`.
+- Per-file transcripts are in `bench/results/<engine>.json`. A second full `run.sh` pass
+  (`bench/results/summary.jsonl`) gave the same WER, and latency within about 15 %.
 
 Skipped in this sprint: Parakeet TDT 0.6B v3 (sherpa-onnx int8, 640 MB) and the FluidAudio and WhisperKit
 CoreML builds. The shared network gave about 0.5 MB/s, so the 0.6B weights could not download in the time
