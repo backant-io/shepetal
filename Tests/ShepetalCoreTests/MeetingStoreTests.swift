@@ -105,11 +105,13 @@ final class MeetingStoreTests: XCTestCase {
         XCTAssertEqual(mode?.intValue, 0o600)
     }
 
-    // Meeting audio follows the dictation retention (Pavel's decision). With delete after 24 h, a meeting whose
-    // recording ended more than 24 h ago goes whole: folder, row, transcript and search entries. A newer one stays,
-    // and the meeting being recorded stays however old its files look. A meeting cut off by a crash (no end time)
-    // and a folder with no row count as ended when their audio was last written.
-    func testRetentionDeletesMeetingsEndedOver24hAgoButNeverTheOneRecording() throws {
+    // Meeting audio follows the dictation retention (Pavel's decision 2). With delete after 24 h, the audio folder
+    // of a meeting whose recording ended more than 24 h ago is deleted. Only the audio: as with dictation history,
+    // the row, transcript, summary and search entries stay, because the setting runs at once when it is picked and
+    // nothing asks first. A newer meeting keeps its audio, and so does the meeting being recorded, however old its
+    // files look. A meeting cut off by a crash (no end time) and a folder with no row count as ended when their
+    // audio was last written.
+    func testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording() throws {
         let store = try MeetingStore(path: dbURL)
         let fm = FileManager.default
         let dir = root.appendingPathComponent("meetings")
@@ -129,6 +131,7 @@ final class MeetingStoreTests: XCTestCase {
                                    endedAt: endedAgo.map { now.addingTimeInterval(-$0) },
                                    meAudioPath: files[0].path, othersAudioPath: files[1].path))
             try store.append([Segment(speaker: .me, start: 0, end: 1, text: "budget \(id)")], to: id)
+            try store.setSummary(Summary(overview: "summary \(id)"), for: id)
         }
         try add("old", endedAgo: day + 1, writtenAgo: day + 1)
         try add("fresh", endedAgo: day - 60, writtenAgo: day - 60)
@@ -147,8 +150,8 @@ final class MeetingStoreTests: XCTestCase {
         XCTAssertEqual(try store.list(limit: 10).count, 6)
 
         XCTAssertEqual(try store.applyRetention(.delete24h, dir: dir, recording: "recording", now: now),
-                       ["../audio", "crashed", "no-row", "old"])
-        XCTAssertEqual(Set(try store.list(limit: 10).map(\.id)), ["fresh", "recording", "crashed-recently"])
+                       ["crashed", "no-row", "old"])
+        XCTAssertEqual(try store.list(limit: 10).count, 6, "every meeting stays listed")
         for gone in ["old", "crashed", "no-row"] {
             XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent(gone).path), gone)
         }
@@ -157,14 +160,19 @@ final class MeetingStoreTests: XCTestCase {
         }
         XCTAssertTrue(fm.fileExists(atPath: audio.path))
         XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(".DS_Store").path))
-        XCTAssertNil(try store.get("old"))
-        XCTAssertEqual(try store.search("budget old", limit: 10), [], "its search entries are gone too")
-        XCTAssertEqual(try store.search("budget", limit: 10).count, 3)
+        for id in ["old", "crashed"] {
+            let kept = try XCTUnwrap(try store.get(id), id)
+            XCTAssertEqual(kept.segments.map(\.text), ["budget \(id)"], "the transcript stays")
+            XCTAssertEqual(kept.summary?.overview, "summary \(id)", "the summary stays")
+            XCTAssertTrue(try store.search("budget \(id)", limit: 10).map(\.id).contains(id), "it is still found")
+        }
+        XCTAssertEqual(try store.search("budget", limit: 10).count, 5)
 
         // A minute later the fresh one is past 24 h as well; the recording one is still kept.
         XCTAssertEqual(try store.applyRetention(.delete24h, dir: dir, recording: "recording", now: now.addingTimeInterval(61)), ["fresh"])
         // Once it is no longer recording (the app crashed during it), its old files let it go.
         XCTAssertEqual(try store.applyRetention(.delete24h, dir: dir, recording: nil, now: now.addingTimeInterval(61)), ["recording"])
+        XCTAssertEqual(try store.list(limit: 10).count, 6, "no sweep deletes a meeting itself")
     }
 
     // No meeting was ever recorded: the sweep has nothing to do and does not fail.

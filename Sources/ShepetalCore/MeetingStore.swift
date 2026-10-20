@@ -234,38 +234,33 @@ public final class MeetingStore: MeetingStoring {
 }
 
 public extension MeetingStoring {
-    /// Meetings follow the dictation retention: with `.delete24h`, a meeting whose recording ended more than 24 h
-    /// ago is deleted whole, its folder under `dir` (both WAVs) and its row with segments, summary and search entries.
-    /// `recording`, the meeting being recorded, is never deleted. A meeting without an end time (the app crashed
-    /// while it recorded) and a folder without a row count as ended when their files were last written.
-    /// Returns the deleted ids.
+    /// Meeting audio follows the dictation retention: with `.delete24h`, the folder under `dir` (both WAVs) of a
+    /// meeting whose recording ended more than 24 h ago is deleted. As with dictation, only the audio goes: the row,
+    /// transcript, summary and search entries stay. `recording`, the meeting being recorded, is never touched.
+    /// A meeting without an end time (the app crashed while it recorded) and a folder without a row count as ended
+    /// when their files were last written. Returns the ids whose folders were deleted.
     @discardableResult
     func applyRetention(_ retention: Retention, dir: URL, recording: String?, now: Date = Date()) throws -> [String] {
         guard retention == .delete24h else { return [] }
         let fm = FileManager.default
-        // Folders come only from the listing, so a stored id never names a path that gets deleted.
-        var folders: [String: URL] = [:]
-        for url in fm.fileExists(atPath: dir.path) ? try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey]) : []
-        where (try url.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true {
-            folders[url.lastPathComponent] = url
-        }
-        var ended: [String: Date] = [:]
-        for m in try list(limit: Int.max) { ended[m.id] = m.endedAt ?? lastWritten(folders[m.id]) ?? m.startedAt }
-        for (id, url) in folders where ended[id] == nil { ended[id] = lastWritten(url) ?? now }
+        var endedAt: [String: Date] = [:]
+        for m in try list(limit: Int.max) { endedAt[m.id] = m.endedAt }
         let cutoff = now.addingTimeInterval(-24 * 3600)
         var deleted: [String] = []
-        for (id, end) in ended.sorted(by: { $0.key < $1.key }) where id != recording && end <= cutoff {
-            if let url = folders[id] { try fm.removeItem(at: url) }
-            try delete(id)
+        // Folders come only from the listing, so a stored id never names a path that gets deleted.
+        for url in fm.fileExists(atPath: dir.path) ? try fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey]) : []
+        where (try url.resourceValues(forKeys: [.isDirectoryKey])).isDirectory == true {
+            let id = url.lastPathComponent
+            guard id != recording, (endedAt[id] ?? lastWritten(url) ?? now) <= cutoff else { continue }
+            try fm.removeItem(at: url)
             deleted.append(id)
         }
-        return deleted
+        return deleted.sorted()
     }
 }
 
 /// The newest modification time of `folder` and the files in it.
-private func lastWritten(_ folder: URL?) -> Date? {
-    guard let folder else { return nil }
+private func lastWritten(_ folder: URL) -> Date? {
     let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
     return ([folder] + files).compactMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }.max()
 }
