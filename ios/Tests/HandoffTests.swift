@@ -194,6 +194,54 @@ final class HandoffTests: XCTestCase {
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Recording stopped early")
     }
 
+    // MARK: Issue #14: the stop notification carries no sender, so the stop request lives in the App Group.
+
+    func testStopRequestIsOnlyAcceptedForTheRecordingSession() {
+        var h = Handoff()
+        h.request(a, document: field, now: t0)
+        XCTAssertFalse(h.requestStop(a, now: t0)) // not recording yet: the keyboard starts over instead
+        XCTAssertTrue(h.startRecording(a, now: t0) {})
+        XCTAssertFalse(h.stopRequested)
+        XCTAssertFalse(h.requestStop(b, now: t0))
+        XCTAssertFalse(h.stopRequested)
+        XCTAssertTrue(h.requestStop(a, now: t0))
+        XCTAssertTrue(h.stopRequested)
+        XCTAssertTrue(h.shouldKeepRecording(a, now: t0)) // the request does not reset the 5-minute cap clock
+        XCTAssertFalse(h.shouldKeepRecording(a, now: t0 + Handoff.maxRecording))
+        var abandoned = recording(a, at: t0) // the app died mid-recording: the keyboard must start over, not wait on it
+        XCTAssertFalse(abandoned.requestStop(a, now: t0 + Handoff.maxRecording + Handoff.timeout + 1))
+        XCTAssertFalse(abandoned.stopRequested)
+        h.request(b, document: field, now: t0) // a new session never inherits the old stop
+        XCTAssertFalse(h.stopRequested)
+    }
+
+    // MARK: Goal rule 3: the keyboard's 🤫 ring follows the keyboard's own session.
+
+    func testKeyboardIndicatorFollowsTheSession() {
+        var h = Handoff()
+        XCTAssertEqual(h.indicatorMode(for: nil, now: t0), .idle)
+        h.request(a, document: field, now: t0)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .processing) // opening the app
+        h.startRecording(a, now: t0) {}
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .recording)
+        h.finishRecording(a, now: t0)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .processing)
+        h.deliver(a, text: "hi", now: t0)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .processing)
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0 + Handoff.timeout + 1), .error) // timed out
+        XCTAssertEqual(h.consume(a, document: field, now: t0), "hi")
+        XCTAssertEqual(h.indicatorMode(for: a, now: t0), .idle)
+        XCTAssertEqual(h.indicatorMode(for: b, now: t0), .error) // the keyboard's session is gone
+
+        var wrongField = ready(a, text: "hi", at: t0)
+        XCTAssertNil(wrongField.consume(a, document: otherField, now: t0))
+        XCTAssertEqual(wrongField.indicatorMode(for: a, now: t0), .error)
+
+        var cancelled = recording(a, at: t0)
+        cancelled.cancel(a, now: t0)
+        XCTAssertEqual(cancelled.indicatorMode(for: a, now: t0), .idle)
+    }
+
     func testOutOfOrderTransitionsAreRejected() {
         var h = Handoff()
         h.request(a, document: field, now: t0)
@@ -291,15 +339,41 @@ final class AudioArchiveTests: XCTestCase {
 final class IndicatorTests: XCTestCase {
     func testIndicatorIsInTheBottomLeftCornerWithTheStateNextToIt() throws {
         let view = UIView(frame: CGRect(x: 0, y: 0, width: 375, height: 180))
-        let status = Indicator.install(in: view)
-        status.text = "Could not transcribe"
+        let indicator = Indicator(in: view)
+        indicator.show(.error, "Could not transcribe")
         view.layoutIfNeeded()
         let psst = try XCTUnwrap(view.subviews.compactMap { $0 as? UILabel }.first { $0.text == "🤫" })
+        let status = indicator.status
+        XCTAssertEqual(status.text, "Could not transcribe")
         XCTAssertEqual(psst.font.pointSize, 18)
         XCTAssertEqual(psst.frame.minX, 8, accuracy: 0.5)
         XCTAssertEqual(psst.frame.maxY, 172, accuracy: 0.5)
         XCTAssertFalse(psst.isUserInteractionEnabled) // never takes a tap meant for a key
         XCTAssertGreaterThanOrEqual(status.frame.minX, psst.frame.maxX)
         XCTAssertLessThanOrEqual(status.frame.maxX, 367)
+    }
+
+    /// Goal rule 3: the states show at the indicator, in the same colors as on the Mac
+    /// (Sources/Shepetal/Indicator.swift: recording red, processing blue, error yellow, idle no ring).
+    func testStateRingUsesTheMacColors() {
+        XCTAssertNil(Indicator.Mode.idle.color)
+        XCTAssertEqual(Indicator.Mode.recording.color, .systemRed)
+        XCTAssertEqual(Indicator.Mode.processing.color, .systemBlue)
+        XCTAssertEqual(Indicator.Mode.error.color, .systemYellow)
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 375, height: 180))
+        let indicator = Indicator(in: view)
+        indicator.show(.recording, nil)
+        XCTAssertEqual(indicator.psst.layer.borderWidth, 2)
+        XCTAssertEqual(indicator.psst.layer.borderColor, UIColor.systemRed.cgColor)
+        indicator.show(.idle, nil)
+        XCTAssertEqual(indicator.psst.layer.borderWidth, 0) // idle: just 🤫, no ring
+    }
+
+    func testLiveActivityGoesStaleOnlyAfterTheStatesTimeout() {
+        // A Live Activity left by an app that died says so instead of "Listening" for hours.
+        XCTAssertEqual(Indicator.Mode.recording.staleAfter, Handoff.maxRecording + Handoff.timeout)
+        XCTAssertEqual(Indicator.Mode.processing.staleAfter, Handoff.timeout)
+        XCTAssertNil(Indicator.Mode.idle.staleAfter)
+        XCTAssertNil(Indicator.Mode.error.staleAfter) // ended by the app a few seconds later anyway
     }
 }
