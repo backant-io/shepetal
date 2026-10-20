@@ -26,12 +26,12 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F04 | Rebindable shortcuts, multi-key combos, mouse buttons | todo | todo | todo | |
 | F05 | Floating Flow Bar / status pill with live waveform | todo | todo | todo | Mac: the 🤫 NSPanel is on main (#10, hand step M-IND-1) but no test covers its frame or panel flags (#15); iPhone: keyboard-corner 🤫 is tested (`IndicatorTests.testIndicatorIsInTheBottomLeftCornerWithTheStateNextToIt` #3), the Live Activity is not built (#13) |
 | F06 | Start and stop sounds, haptics | todo | todo | todo | |
-| F07 | Microphone selection with ranked fallback devices | todo | todo | todo | |
-| F08 | Mic health alerts (no audio, disconnected, unreadable, AirPods or clamshell warnings) | todo | todo | todo | |
+| F07 | Microphone selection with ranked fallback devices | hand-test | todo | todo | Mac: `MicTests.testForcedDeviceWins`, `MicTests.testForcedDeviceMissingFallsBackToRanking`, `MicTests.testRankingOrderPicksFirstPresent`, `MicTests.testNothingRankedUsesSystemDefault`, `MicTests.testClamshellSkipsBuiltIn`, `MicTests.testPreferMovesToTop`, `MicTests.testNewDeviceNoticedOnce` #39, hand steps M-MIC-1 and M-MIC-2 |
+| F08 | Mic health alerts (no audio, disconnected, unreadable, AirPods or clamshell warnings) | hand-test | todo | todo | Mac: `MicTests.testFiveSecondsOfZerosWarnsOnce`, `MicTests.testRealAudioResetsTheSilenceCount`, `MicTests.testFifteenSecondsEscalates`, `MicTests.testNoBuffersInFiveSecondsStops`, `MicTests.testSilentStartReopensOnce`, `MicTests.testBluetoothHintOnce`, `MicTests.testQuietRecordingSuggestsCloserMic`, `MicTests.testClamshellWithOnlyBuiltInIsAnError` #39, hand steps M-MIC-2 to M-MIC-5 |
 | F09 | Mute or pause media while dictating | todo | todo | todo | |
 | F10 | Max dictation length and duration warnings | todo | todo | todo | Mac: no max-length cap yet (left for M2 in #10); iPhone: 5-minute cap on main (`DictationSessionTests.testRecordingStopsAtTheFiveMinuteCapAndIsKeptAndDelivered` #3), no duration warning |
 | F11 | Whisper mode (quiet speech) | todo | todo | todo | |
-| F12 | Multi-language with auto-detect | todo | todo | todo | |
+| F12 | Multi-language with auto-detect | todo | todo | todo | Mac: routing between Parakeet and whisper large-v3-turbo is built (`LanguageTests.testEmptySelectionUsesTierPrimary`, `LanguageTests.testJapaneseRoutesToWhisperWithJa`, `LanguageTests.testMixedSetUsesWhisperAuto`, `LanguageTests.testWhisperArguments` #39, hand step M-LANG-1); todo until several languages are restricted to the selected set and large-v3-turbo has run (#31) |
 | F13 | Streaming text while speaking | todo | todo | todo | |
 | F14 | Mouse Flow (dictate via a mouse button) | todo | todo | todo | |
 | F15 | BLE mic ring (hands-free over Bluetooth) | todo | todo | todo | |
@@ -58,7 +58,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F36 | Email formatting and an auto email signature | todo | todo | todo | |
 | F37 | Styles / tone per app category (work, email, personal, other) | todo | todo | todo | |
 | F38 | "My voice" preferences and writing samples (tone match) | todo | todo | todo | |
-| F39 | Personal dictionary (vocabulary and replacements) | todo | todo | todo | |
+| F39 | Personal dictionary (vocabulary and replacements) | todo | todo | todo | Mac: dictionary.txt replacements, casing and the whisper `--prompt` are built (`VocabularyTests.testReplacementIsWholeWordAndCaseInsensitive`, `VocabularyTests.testLongestPhraseFirst`, `VocabularyTests.testPromptPutsStarredFirstAndCapsAt200`, `VocabularyTests.testFileIsOwnerOnly`, `scripts/e2e-mac.sh` #39, hand step M-DICT-1); todo until Parakeet, the default model, gets the dictionary bias (#30) |
 | F40 | Snippets (voice shortcut expands to text, rich text) | todo | todo | todo | |
 | F41 | Translate while dictating | todo | todo | todo | |
 | F42 | Voice commands: "press enter" | todo | todo | todo | |
