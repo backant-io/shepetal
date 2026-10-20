@@ -31,6 +31,12 @@ pub fn choose(env: &Env, has: impl Fn(&str) -> bool) -> Option<Backend> {
     order.iter().copied().find(|b| !(gnome && *b == Backend::Wtype) && has(b.bin()))
 }
 
+/// The clipboard tool for this session, for text that is not typed (goal rule 8).
+pub fn clipboard(env: &Env, has: impl Fn(&str) -> bool) -> Option<Backend> {
+    let order: &[Backend] = if env.session == "wayland" { &[Backend::WlCopy, Backend::Xclip] } else { &[Backend::Xclip] };
+    order.iter().copied().find(|b| has(b.bin()))
+}
+
 impl Backend {
     pub fn bin(self) -> &'static str {
         match self {

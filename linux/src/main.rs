@@ -278,6 +278,8 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
     let t0 = Instant::now();
     let mut s = Shortcuts::new(key, keys.clone());
     let mut rec: Option<(Child, PathBuf)> = None;
+    // The newest dictated text, for the paste-last and copy-last keys.
+    let mut last = String::new();
     loop {
         let (k, now) = match next_key(rx, t0) {
             Ok(ev) => ev,
@@ -285,7 +287,7 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
                 // Every keyboard is gone, e.g. a Bluetooth one slept mid-recording. Rust does not
                 // kill children on exit, so the recorder would keep the mic open after shepetal.
                 // Stop it, and keep the clip as cancelled.
-                act(Action::Cancel, &mut rec, data_home, stt, typer, key_name)?;
+                act(Action::Cancel, &mut rec, data_home, stt, typer, key_name, &mut last)?;
                 return Err(e);
             }
         };
@@ -295,9 +297,9 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
         for cmd in s.feed(k, now) {
             // ponytail: stderr until the 🤫 overlay lands, which shows the hint for about 2 s.
             let hint = match cmd {
-                Cmd::Dictation(a) => act(a, &mut rec, data_home, stt, typer, key_name)?,
+                Cmd::Dictation(a) => act(a, &mut rec, data_home, stt, typer, key_name, &mut last)?,
                 Cmd::MaxLengthWarning => Some(shortcuts::WARNING.into()),
-                Cmd::PasteLast | Cmd::CopyLast => run_cli(cmd.cli().unwrap_or_default()),
+                Cmd::PasteLast | Cmd::CopyLast => again(cmd, &last, typer).err(),
             };
             if let Some(hint) = hint {
                 eprintln!("shepetal: hint: {hint}");
@@ -306,19 +308,27 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
     }
 }
 
-/// paste-last and copy-last keys run the CLI subcommand of the same name. Returns its error.
-fn run_cli(sub: &str) -> Option<String> {
-    let exe = std::env::current_exe().map_err(|e| e.to_string());
-    match exe.and_then(|exe| Command::new(exe).arg(sub).status().map_err(|e| e.to_string())) {
-        Ok(st) if st.success() => None,
-        Ok(st) => Some(format!("shepetal {sub} failed ({st})")),
-        Err(e) => Some(format!("shepetal {sub}: {e}")),
+/// The paste-last key types `last` at the cursor again; copy-last puts it on the clipboard.
+// ponytail: the text of this daemon run only; read the history store instead once it lands, so
+// it survives a restart.
+fn again(cmd: Cmd, last: &str, typer: insert::Backend) -> Result<(), String> {
+    if last.is_empty() {
+        return Err("Nothing dictated yet".into());
     }
+    let to = match cmd {
+        Cmd::CopyLast => {
+            let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
+            insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("copy-last: no wl-copy or xclip")?
+        }
+        _ => typer,
+    };
+    to.insert(last).map_err(|e| format!("{}: {e}", if cmd == Cmd::CopyLast { "copy-last" } else { "paste-last" }))
 }
 
-/// Carry out one gesture action. `rec` is the running recorder and the WAV it writes.
+/// Carry out one gesture action. `rec` is the running recorder and the WAV it writes; `last`
+/// gets the text of a transcribed dictation.
 /// Returns the hint to show next to 🤫 after a too-short press.
-fn act(a: Action, rec: &mut Option<(Child, PathBuf)>, data_home: &Path, stt: &model::Choice, typer: insert::Backend, key_name: &str) -> Result<Option<String>, String> {
+fn act(a: Action, rec: &mut Option<(Child, PathBuf)>, data_home: &Path, stt: &model::Choice, typer: insert::Backend, key_name: &str, last: &mut String) -> Result<Option<String>, String> {
     match a {
         Action::Start => {
             let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
@@ -345,6 +355,7 @@ fn act(a: Action, rec: &mut Option<(Child, PathBuf)>, data_home: &Path, stt: &mo
                     if let Err(e) = typer.insert(&t) {
                         eprintln!("shepetal: insert: {e}");
                     }
+                    *last = t;
                 }
                 Ok(_) => {}
                 Err(e) => eprintln!("shepetal: {e}"),
@@ -412,7 +423,7 @@ mod tests {
         let wav = shepetal::new_recording(home, stamp).unwrap();
         std::fs::write(&wav, b"RIFF").unwrap();
         let mut rec = Some((Command::new("true").spawn().unwrap(), wav.clone()));
-        let hint = act(a, &mut rec, home, &cpu(), insert::Backend::Wtype, "fn").unwrap();
+        let hint = act(a, &mut rec, home, &cpu(), insert::Backend::Wtype, "fn", &mut String::new()).unwrap();
         assert!(rec.is_none());
         assert!(!wav.exists());
         hint
@@ -509,11 +520,55 @@ mod tests {
         });
     }
 
+    #[test]
+    fn paste_last_and_copy_last_keys_repeat_the_last_dictation() {
+        // F21 on main without the history store: Shift+Alt+Z types the newest dictated text
+        // again, Shift+Alt+X puts it on the clipboard. Before any dictation they do nothing.
+        with_fake_tools("last", |d| {
+            let home = d.join("home");
+            let audio = home.join("shepetal/audio");
+            let session = std::env::var("XDG_SESSION_TYPE");
+            std::env::set_var("XDG_SESSION_TYPE", "wayland");
+            let (tx, rx) = mpsc::channel();
+            let dir = d.to_path_buf();
+            let keyboard = std::thread::spawn(move || {
+                let combo = |keys: [u16; 3]| {
+                    keys.iter().for_each(|&k| tx.send((k, 1)).unwrap());
+                    keys.iter().rev().for_each(|&k| tx.send((k, 0)).unwrap());
+                };
+                let (paste, copy) = ([42, 56, 44], [42, 56, 45]); // Shift+Alt+Z, Shift+Alt+X
+                combo(paste);
+                combo(copy);
+                tx.send((shepetal::KEY_FN, 1)).unwrap();
+                wait_until("the recorder", || clips(&audio).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
+                assert!(!dir.join("typed").exists() && !dir.join("copied").exists(), "nothing dictated yet: nothing typed or copied");
+                std::thread::sleep(Duration::from_millis(600)); // a hold, not a tap
+                tx.send((shepetal::KEY_FN, 0)).unwrap();
+                wait_until("the dictation", || std::fs::read(dir.join("typed")).is_ok_and(|b| b == b"Hello world."));
+                std::fs::remove_file(dir.join("typed")).unwrap();
+                combo(paste);
+                wait_until("paste-last", || dir.join("typed").exists());
+                combo(copy);
+                wait_until("copy-last", || dir.join("copied").exists());
+            });
+            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &shortcuts::parse("", shepetal::KEY_FN).unwrap()).unwrap_err();
+            let thread = keyboard.join();
+            match session {
+                Ok(s) => std::env::set_var("XDG_SESSION_TYPE", s),
+                Err(_) => std::env::remove_var("XDG_SESSION_TYPE"),
+            }
+            thread.unwrap();
+            assert_eq!(err, "all input devices closed");
+            assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.", "typed again at the cursor");
+            assert_eq!(std::fs::read_to_string(d.join("copied")).unwrap(), "Hello world.", "on the clipboard");
+        });
+    }
+
     static PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
-    /// Runs `f(d)` with fake pw-record, sherpa-onnx-offline, whisper-cli and wtype first on PATH.
-    /// They write into the fresh dir `d`: rec.args and stt.args (their argv), heard.wav (a copy of
-    /// the file the model read) and typed (wtype's stdin). The recorder writes "RIFF partial"
+    /// Runs `f(d)` with fake pw-record, sherpa-onnx-offline, whisper-cli, wtype and wl-copy first
+    /// on PATH. They write into the fresh dir `d`: rec.args and stt.args (their argv), heard.wav (a
+    /// copy of the file the model read), typed (wtype's stdin) and copied (wl-copy's stdin). The recorder writes "RIFF partial"
     /// once its SIGINT trap is set and "RIFF final" on SIGINT, the way pw-record finishes the
     /// WAV header. SIGKILL leaves "RIFF partial".
     fn with_fake_tools(tag: &str, f: impl FnOnce(&Path)) {
@@ -530,6 +585,7 @@ mod tests {
             ("sherpa-onnx-offline", format!("echo \"$*\" > \"{d_}/stt.args\"\nfor f; do :; done\ncp \"$f\" \"{d_}/heard.wav\"\necho 'Started' >&2\nprintf '%s\\n' '{sherpa_out}'\n")),
             ("whisper-cli", format!("echo \"$*\" > \"{d_}/stt.args\"\ncp \"$4\" \"{d_}/heard.wav\"\nprintf ' [BLANK_AUDIO]\\n Hello\\n  world. [Music]\\n'\n")),
             ("wtype", format!("cat > \"{d_}/typed\"\n")),
+            ("wl-copy", format!("cat > \"{d_}/copied\"\n")),
         ];
         for (bin, body) in tools {
             std::fs::write(d.join(bin), format!("#!/bin/sh\n{body}")).unwrap();
@@ -566,13 +622,13 @@ mod tests {
         with_fake_tools("stop", |d| {
             let home = d.join("home");
             let mut rec = None;
-            act(Action::Start, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn").unwrap();
+            act(Action::Start, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn", &mut String::new()).unwrap();
             let wav = rec.as_ref().unwrap().1.clone();
             wait_until("the recorder", || std::fs::read(&wav).is_ok_and(|b| b == b"RIFF partial"));
             assert_eq!(std::fs::read_to_string(d.join("rec.args")).unwrap(),
                 format!("--rate 16000 --channels 1 --format s16 -P {{ application.name = shepetal }} {}\n", wav.display()));
 
-            assert_eq!(act(Action::Stop, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn").unwrap(), None);
+            assert_eq!(act(Action::Stop, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn", &mut String::new()).unwrap(), None);
             assert!(rec.is_none());
             assert_eq!(clips(&home.join("shepetal/audio")), std::slice::from_ref(&wav), "kept under its own name, not marked");
             assert_eq!(std::fs::read(&wav).unwrap(), b"RIFF final", "finished by SIGINT, not killed");

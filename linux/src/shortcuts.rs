@@ -13,13 +13,10 @@
 //! - A warning at 19 min and a stop (transcribed as usual) at 20 min, as Wispr
 //!   (docs/re/dictation-input.md, section 2.3).
 //!
-//! The combos live in `~/.config/shepetal/config.toml`:
+//! The combos live in `~/.config/shepetal/config.json`, the one settings file of the daemon:
 //!
-//! ```toml
-//! [shortcuts]
-//! paste_last = "shift+alt+z"
-//! copy_last = "shift+alt+x"
-//! hands_free = "ctrl+meta+space"
+//! ```json
+//! {"shortcuts": {"paste_last": "shift+alt+z", "copy_last": "shift+alt+x", "hands_free": "ctrl+meta+space"}}
 //! ```
 
 use crate::gesture::{Action, Event, Gesture, DOUBLE_TAP_MS};
@@ -38,17 +35,6 @@ pub enum Cmd {
     MaxLengthWarning,
     PasteLast,
     CopyLast,
-}
-
-impl Cmd {
-    /// The CLI subcommand that does the same.
-    pub fn cli(self) -> Option<&'static str> {
-        match self {
-            Cmd::PasteLast => Some("paste-last"),
-            Cmd::CopyLast => Some("copy-last"),
-            _ => None,
-        }
-    }
 }
 
 /// A key combo: per key, the evdev codes that count as it ("alt" is Left Alt or Right Alt).
@@ -181,40 +167,28 @@ pub fn combo(s: &str, hotkey: u16) -> Result<Combo, String> {
     Ok(Combo(keys))
 }
 
-/// `$XDG_CONFIG_HOME/shepetal/config.toml`, else `~/.config/shepetal/config.toml`. A relative
+/// `$XDG_CONFIG_HOME/shepetal/config.json`, else `~/.config/shepetal/config.json`. A relative
 /// XDG_CONFIG_HOME is ignored, as the XDG Base Directory spec says.
 pub fn config_file(xdg_config_home: Option<&str>, home: &str) -> PathBuf {
     let base = match xdg_config_home {
         Some(d) if d.starts_with('/') => PathBuf::from(d),
         _ => Path::new(home).join(".config"),
     };
-    base.join("shepetal").join("config.toml")
+    base.join("shepetal").join("config.json")
 }
 
-/// Read the `[shortcuts]` table of config.toml (a missing file means the defaults). Other
-/// tables belong to other features and are skipped; an unknown key in `[shortcuts]` is an error,
-/// so a typo is not silently ignored.
-pub fn parse(toml: &str, hotkey: u16) -> Result<Config, String> {
+/// Read the `shortcuts` object of config.json (an empty or missing file means the defaults).
+/// Other keys belong to other features and are skipped; an unknown name in `shortcuts` is an
+/// error, so a typo is not silently ignored.
+pub fn parse(json: &str, hotkey: u16) -> Result<Config, String> {
     let mut vals = DEFAULTS.map(|(k, v)| (k, v.to_string()));
-    let mut table = "";
-    for (i, line) in toml.lines().enumerate() {
-        let line = line.split('#').next().unwrap_or("").trim();
-        if line.is_empty() {
-            continue;
+    let v: serde_json::Value = if json.trim().is_empty() { Default::default() } else { serde_json::from_str(json).map_err(|e| e.to_string())? };
+    if let Some(set) = v.get("shortcuts") {
+        for (k, val) in set.as_object().ok_or("\"shortcuts\" must be an object")? {
+            let slot = vals.iter_mut().find(|(name, _)| name == k)
+                .ok_or(format!("unknown shortcut {k:?} (paste_last, copy_last, hands_free)"))?;
+            slot.1 = val.as_str().ok_or(format!("{k}: expected keys as a string, such as \"shift+alt+z\""))?.to_string();
         }
-        if let Some(t) = line.strip_prefix('[').and_then(|l| l.strip_suffix(']')) {
-            table = t.trim();
-            continue;
-        }
-        if table != "shortcuts" {
-            continue;
-        }
-        let bad = || format!("line {}: expected name = \"keys\"", i + 1);
-        let (k, v) = line.split_once('=').ok_or_else(bad)?;
-        let v = v.trim().strip_prefix('"').and_then(|v| v.strip_suffix('"')).ok_or_else(bad)?;
-        let slot = vals.iter_mut().find(|(name, _)| *name == k.trim())
-            .ok_or(format!("line {}: unknown shortcut {:?} (paste_last, copy_last, hands_free)", i + 1, k.trim()))?;
-        slot.1 = v.to_string();
     }
     let mut combos: Vec<(&str, Combo)> = vec![];
     for (name, v) in &vals {
@@ -411,8 +385,6 @@ mod tests {
         assert_eq!(run(&mut s, &evs), []);
         assert_eq!(s.feed(Some((LALT, 0)), 620), [Cmd::PasteLast]);
         assert_eq!(run(&mut s, &press(&[LSHIFT, RALT, X], 1000)), [Cmd::CopyLast], "either Alt");
-        assert_eq!(Cmd::PasteLast.cli(), Some("paste-last"));
-        assert_eq!(Cmd::CopyLast.cli(), Some("copy-last"));
     }
 
     #[test]
@@ -496,9 +468,11 @@ mod tests {
     }
 
     #[test]
-    fn config_overrides_and_other_tables_are_skipped() {
-        let toml = "# mine\n[history]\npaste_last = 3\n\n[shortcuts]\npaste_last = \"Ctrl+Shift+V\"  # comment\n hands_free=\"leftmeta+f9\"\n";
-        let c = parse(toml, FN).unwrap();
+    fn config_overrides_and_other_settings_are_skipped() {
+        // One config.json for the daemon: the retention setting sits next to the shortcuts.
+        let json = r#"{"retention": "delete_after_24h", "history": {"paste_last": 3},
+                       "shortcuts": {"paste_last": "Ctrl+Shift+V", "hands_free": "leftmeta+f9"}}"#;
+        let c = parse(json, FN).unwrap();
         assert_eq!(c.paste_last, Combo(vec![vec![29, 97], vec![42, 54], vec![47]]));
         assert_eq!(c.copy_last, defaults().copy_last, "not set: default");
         assert_eq!(c.hands_free, Combo(vec![vec![125], vec![67]]));
@@ -547,26 +521,31 @@ mod tests {
     }
 
     #[test]
-    fn config_errors_name_the_shortcut_and_line() {
+    fn config_errors_name_the_shortcut_and_place() {
         let e = |t: &str| parse(t, FN).unwrap_err();
-        assert_eq!(e("[shortcuts]\ncopy_last = \"shift+alt+z\""), "copy_last: \"shift+alt+z\" is already paste_last");
-        assert_eq!(e("[shortcuts]\nhands_free = \"Alt + Shift + Z\""), "hands_free: \"Alt + Shift + Z\" is already paste_last", "order and case do not matter");
-        assert_eq!(e("[shortcuts]\npaste_lats = \"ctrl+v\""), "line 2: unknown shortcut \"paste_lats\" (paste_last, copy_last, hands_free)");
-        assert_eq!(e("[shortcuts]\npaste_last = ctrl+v"), "line 2: expected name = \"keys\"");
-        assert!(e("[shortcuts]\npaste_last = \"z\"").starts_with("paste_last: "));
+        assert_eq!(e(r#"{"shortcuts": {"copy_last": "shift+alt+z"}}"#), "copy_last: \"shift+alt+z\" is already paste_last");
+        assert_eq!(e(r#"{"shortcuts": {"hands_free": "Alt + Shift + Z"}}"#), "hands_free: \"Alt + Shift + Z\" is already paste_last", "order and case do not matter");
+        assert_eq!(e(r#"{"shortcuts": {"paste_lats": "ctrl+v"}}"#), "unknown shortcut \"paste_lats\" (paste_last, copy_last, hands_free)");
+        assert_eq!(e(r#"{"shortcuts": {"paste_last": ["ctrl", "v"]}}"#), "paste_last: expected keys as a string, such as \"shift+alt+z\"");
+        assert_eq!(e(r#"{"shortcuts": "ctrl+v"}"#), "\"shortcuts\" must be an object");
+        let broken = e("{\"shortcuts\":\n {\"paste_last\" \"ctrl+v\"}}");
+        assert_eq!(broken, "expected `:` at line 2 column 16", "broken JSON names the place");
+        assert!(e(r#"{"shortcuts": {"paste_last": "z"}}"#).starts_with("paste_last: "));
+        assert_eq!(parse(r#"{"retention": "keep"}"#, FN), Ok(defaults()), "no shortcuts: defaults");
     }
 
     #[test]
     fn config_file_location_and_missing_file() {
-        assert_eq!(config_file(None, "/home/me"), PathBuf::from("/home/me/.config/shepetal/config.toml"));
-        assert_eq!(config_file(Some("/cfg"), "/home/me"), PathBuf::from("/cfg/shepetal/config.toml"));
-        assert_eq!(config_file(Some("rel"), "/home/me"), PathBuf::from("/home/me/.config/shepetal/config.toml"));
+        // The same file the retention setting is read from, so the daemon has one settings file.
+        assert_eq!(config_file(None, "/home/me"), PathBuf::from("/home/me/.config/shepetal/config.json"));
+        assert_eq!(config_file(Some("/cfg"), "/home/me"), PathBuf::from("/cfg/shepetal/config.json"));
+        assert_eq!(config_file(Some("rel"), "/home/me"), PathBuf::from("/home/me/.config/shepetal/config.json"));
         let dir = std::env::temp_dir().join(format!("shepetal-shortcuts-{}", std::process::id()));
-        assert_eq!(load(&dir.join("none.toml"), FN), Ok(defaults()));
+        assert_eq!(load(&dir.join("none.json"), FN), Ok(defaults()));
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join("bad.toml"), "[shortcuts]\npaste_last = \"v\"\n").unwrap();
-        let err = load(&dir.join("bad.toml"), FN).unwrap_err();
+        std::fs::write(dir.join("bad.json"), r#"{"shortcuts": {"paste_last": "v"}}"#).unwrap();
+        let err = load(&dir.join("bad.json"), FN).unwrap_err();
         std::fs::remove_dir_all(&dir).unwrap();
-        assert!(err.contains("bad.toml: paste_last: \"v\" needs a modifier"), "{err}");
+        assert!(err.contains("bad.json: paste_last: \"v\" needs a modifier"), "{err}");
     }
 }
