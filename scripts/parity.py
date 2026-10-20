@@ -43,6 +43,9 @@ def check(inventory, ledger):
     """Return (errors, cell values) for a ledger against the inventory."""
     errors, ledger_ids, cells = [], set(), []
     wispr = {fid: set(cols[1].split()) for fid, cols in rows(inventory)}
+    # A malformed Wispr column ("M,W", "") holds no desktop letter, so outside would pass silently.
+    errors += [f"{fid}: inventory Wispr column must be M, W and/or i separated by spaces, got {' '.join(sorted(w))!r}"
+               for fid, w in wispr.items() if not w or w - DESKTOP - {"i"}]
     for fid, cols in rows(ledger):
         if fid in ledger_ids:
             errors.append(f"{fid}: duplicate row")
@@ -143,6 +146,9 @@ def self_test():
         errors = check(ios_inv.replace("| k | i |", f"| k | {wispr} |"), ios)[0]
         assert any("F09 Mac: outside needs" in e for e in errors), (wispr, errors)
         assert any("F09 Linux: outside needs" in e for e in errors), (wispr, errors)
+    for wispr in ("M,W", "MW", "", "mac win"):  # a malformed column must not let outside through
+        errors = check(ios_inv.replace("| k | i |", f"| k | {wispr} |"), ios)[0]
+        assert any("F09: inventory Wispr column must be" in e for e in errors), (wispr, errors)
     errors = check(ios_inv, ios.replace("| todo | |", "| outside | |"))[0]
     assert any("F09 iPhone: outside needs" in e for e in errors), errors
 
