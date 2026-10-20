@@ -6,7 +6,7 @@ Data: AMI manual annotations 1.6.2 (CC BY 4.0), text only, into .cache (gitignor
 Labels: a dialogue act is an action item when a summlink ties it to a sentence in the <actions> list of the
 meeting's abstractive summary. The owner is the role named in that sentence's subject.
 Split: corpusResources/meetings.xml seen_type (training 98 / development 20 / unseen = test 20 scenario meetings).
-Usage: .venv/bin/python -I ami_actions.py train | eval [dev|test]
+Usage: .venv/bin/python -I ami_actions.py train | eval [test|cv]   (the shipped model is fit on train + dev, so dev is not held out)
 """
 import html, json, math, os, re, resource, sys, time
 
@@ -88,29 +88,47 @@ def sents_of(das):
     return [(spk, text) for _, spk, text in das]
 
 
-def train(C=0.03, prune=0.02):
-    """Logistic regression on the train split; writes actions_model.json (weights below `prune` are dropped)."""
+def fit(meetings, C=0.03, prune=0.02):
+    """Logistic regression on {meeting id: (das, gold)} -> model dict (weights below `prune` are dropped)."""
     from sklearn.feature_extraction import DictVectorizer  # training only: the summarizer reads the JSON with plain Python
     from sklearn.linear_model import LogisticRegression
     X, y = [], []
-    for das, gold in corpus("train").values():
+    for das, gold in meetings.values():
         pos = set().union(*(links for _, _, links in gold))
         X += [dict.fromkeys(f, 1) for f in S.action_features(sents_of(das))]
         y += [d in pos for d, _, _ in das]
     dv = DictVectorizer()
     lr = LogisticRegression(C=C, class_weight="balanced", max_iter=5000).fit(dv.fit_transform(X), y)
     w = {k: round(float(v), 4) for k, v in zip(dv.feature_names_, lr.coef_[0]) if abs(v) >= prune}
-    print(f"train: {len(y)} dialogue acts, {sum(y)} action items, {len(dv.feature_names_)} features, {len(w)} kept")
-    return {"bias": round(float(lr.intercept_[0]), 4), "threshold": 0.5, "weights": dict(sorted(w.items())),
-            "trained_on": "AMI manual annotations 1.6.2 (CC BY 4.0), scenario train split", "C": C}
+    print(f"fit: {len(y)} dialogue acts, {sum(y)} action items, {len(dv.feature_names_)} features, {len(w)} kept", flush=True)
+    return {"bias": round(float(lr.intercept_[0]), 4), "threshold": 0.5, "weights": dict(sorted(w.items())), "C": C}
+
+
+def folds(k=5):
+    """-> {meeting id: fold} over train + dev. A whole series (same four people) stays in one fold."""
+    ser = sorted({m[:-1] for m, s in splits().items() if s != "test"})
+    return {m: ser.index(m[:-1]) % k for m, s in splits().items() if s != "test"}
+
+
+def cross_validate(meetings, th_grid, labels=None, k=5):
+    """-> {threshold: score} out of fold: each series is scored by a model fit on the other folds."""
+    fold = folds(k)
+    parts = [{m: v for m, v in meetings.items() if fold[m] == j} for j in range(k)]
+    models = [fit({m: v for m, v in meetings.items() if fold[m] != j}) for j in range(k)]
+    return {th: merge([score(parts[j], {**models[j], "threshold": th}, labels=labels) for j in range(k)]) for th in th_grid}
+
+
+def merge(rs):
+    return {key: max(r[key] for r in rs) if key == "ms_max" else sum(r[key] for r in rs) for key in rs[0]}
 
 
 def score(split, model, rule=None, labels=None):
     """Gold action items with a named owner that some predicted item recovers (a linked dialogue act, same owner).
+    split: a split name or {meeting id: (das, gold)}.
     labels: rename the speakers, in order of first appearance, before the summarizer sees them, and map the owners back.
     None keeps AMI's role labels. Speakers say those roles aloud ("the ID", "the Marketing Expert"): the best case."""
     r = dict.fromkeys(["meetings", "owned", "hit", "found", "team", "team_found", "pred", "tp", "near", "ms", "ms_max"], 0)
-    for das, gold in corpus(split).values():
+    for das, gold in (corpus(split) if isinstance(split, str) else split).values():
         sents, back = sents_of(das), {}
         if labels:
             new = dict(zip(dict.fromkeys(spk for spk, _ in sents), labels))
@@ -145,20 +163,29 @@ def report(name, r):
 
 def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "eval"
+    split = sys.argv[2] if len(sys.argv) > 2 else "test"
+    if cmd == "train" or split == "cv":
+        tv = {**corpus("train"), **corpus("dev")}  # the test split is never read here
     if cmd == "train":
-        model = train()
-        # The threshold is picked on dev only: among those giving at most 8 items per meeting, the highest one with the
-        # best dev recall with the right owner.
-        curve = {th: score("dev", {**model, "threshold": th}) for th in [x / 20 for x in range(2, 19)]}
+        # The threshold comes from 5-fold CV over the train + dev series (187 owned items; dev alone has 34, and its curve
+        # jumps by 3 items between neighbouring thresholds): among those giving at most 8 items per meeting, the highest
+        # one with the best recall with the right owner. The shipped model is then fit on all of train + dev.
+        curve = cross_validate(tv, [x / 40 for x in range(8, 37)])
         for th, r in curve.items():
-            report(f"dev th={th:.2f}", r)
-        best = max(r["hit"] for r in curve.values() if r["pred"] <= 8 * r["meetings"])
-        model["threshold"] = max(th for th, r in curve.items() if r["hit"] == best and r["pred"] <= 8 * r["meetings"])
+            report(f"cv th={th:.3f}", r)
+        ok = {th: r for th, r in curve.items() if r["pred"] <= 8 * r["meetings"]}
+        best = max(r["hit"] for r in ok.values())
+        model = {**fit(tv), "threshold": max(th for th, r in ok.items() if r["hit"] == best),
+                 "trained_on": "AMI manual annotations 1.6.2 (CC BY 4.0), scenario train + dev splits"}
         with open(S.MODEL, "w") as f:
             json.dump(model, f, separators=(",", ":"))
         print(f"wrote {S.MODEL}: threshold {model['threshold']}, {os.path.getsize(S.MODEL) // 1024} KB")
         return
-    split = sys.argv[2] if len(sys.argv) > 2 else "test"
+    if split == "cv":  # out-of-fold over train + dev at the shipped threshold: the larger held-out check (187 owned items)
+        th = S.load_model()["threshold"]
+        for name, labels in [("role labels", None), ("Speaker 1..4 labels", SPEAKERS)]:
+            report(f"5-fold CV, {name}", cross_validate(tv, [th], labels)[th])
+        return
     import tracemalloc
     tracemalloc.start()
     model = S.load_model()

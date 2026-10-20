@@ -1,0 +1,25 @@
+[package]
+name = "audio"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "shepetal for Windows: mic capture at 16 kHz mono, the kept-audio store and local speech-to-text."
+
+[features]
+# whisper.cpp on an NVIDIA GPU. Needs the CUDA toolkit at build time.
+cuda = ["whisper-rs/cuda"]
+
+[dependencies]
+cpal = "0.18"
+sha2 = "0.10"
+whisper-rs = "0.16"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Authorization",
+    "Win32_Storage_FileSystem",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+] }

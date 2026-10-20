@@ -84,11 +84,12 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>$SHORT_VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD</string>
   <key>ShepetalCommit</key><string>$COMMIT</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.4</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Shepetal listens while you hold fn and turns your speech into text on this Mac. Audio never leaves it.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Shepetal records the other people in a meeting so it can transcribe it on this Mac. Audio never leaves it.</string>
   <key>NSHumanReadableCopyright</key><string>MIT License</string>
 </dict>
 </plist>

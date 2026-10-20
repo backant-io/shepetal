@@ -6,6 +6,29 @@ public protocol Microphone: AnyObject {
     func stop()
     /// False once the system stopped the mic under us: a call, Siri, an audio interruption or a route change.
     var isRunning: Bool { get }
+    /// True only while a dictation records. An open, idle mic drops its buffers before converting them.
+    var capturing: Bool { get set }
+}
+
+/// How long the mic stays open after a dictation, so the next one starts from the keyboard without
+/// opening the app (iOS lets an app start recording only in the foreground; once open, the `audio`
+/// background mode keeps it running). Frames are kept only between a start and a stop. The longest
+/// option stays well under the 8 hours after which iOS ends a Live Activity, so 🤫 is shown the whole time.
+public enum KeepOpen: Int, CaseIterable, Identifiable {
+    case afterEach = 0, fiveMinutes = 300, fifteenMinutes = 900, oneHour = 3600
+
+    public static let standard = KeepOpen.fiveMinutes
+    public var id: Int { rawValue }
+    /// Seconds an idle mic stays open.
+    public var seconds: TimeInterval { TimeInterval(rawValue) }
+    public var label: String {
+        switch self {
+        case .afterEach: "Close after each dictation"
+        case .fiveMinutes: "5 minutes"
+        case .fifteenMinutes: "15 minutes"
+        case .oneHour: "1 hour"
+        }
+    }
 }
 
 /// The app's side of a dictation, with no audio hardware or speech model in it, so tests can drive it.
@@ -17,6 +40,11 @@ public final class DictationSession: ObservableObject {
     /// FluidAudio rejects audio under 0.3 s.
     public static let minimumSamples = AudioArchive.sampleRate * 3 / 10
     static let ready = "Ready. Tap the mic on the Shepetal keyboard."
+    /// How long an error stays in the Live Activity before it goes back to "Ready" while the mic stays open.
+    public static let errorShown: TimeInterval = 4
+    /// While the mic is open and idle, the Live Activity is sent again this often, so its stale date
+    /// (`Indicator.Mode.staleAfter`) only passes when the app stopped running.
+    public nonisolated static let activityRefresh: TimeInterval = 60
 
     @Published public private(set) var status = "Loading speech model..."
     /// Set while recordings are held in memory because they could not be written (the iPhone is locked).
@@ -24,16 +52,25 @@ public final class DictationSession: ObservableObject {
     @Published public private(set) var saveError: String?
     @Published public private(set) var history: [Recording]
     @Published public private(set) var isRecording = false
+    /// The mic is open: recording, or waiting for the keyboard's next dictation (`keepOpen`).
+    @Published public private(set) var isOpen = false
+    @Published public var keepOpen: KeepOpen {
+        didSet { settings.set(keepOpen.rawValue, forKey: "keepOpen"); if isOpen, !isRecording { closeAt = closingTime() } }
+    }
     /// Keep (the default) or delete recordings after 24 h.
     @Published public var deleteAfter24h: Bool {
         didSet { settings.set(deleteAfter24h, forKey: "deleteAfter24h"); sweep() }
     }
-    /// What the Live Activity shows: recording, then processing, nil once the text is delivered or the
-    /// recording is cancelled, error when it ended without text. Nil before the first dictation.
+    /// What the Live Activity shows: recording, then processing, idle ("Ready") while the mic stays open,
+    /// error when a dictation ended without text, nil once the mic is closed. Nil before the first dictation.
     public private(set) var activity: Indicator.Mode? {
-        didSet { if activity != oldValue { onActivity(activity) } }
+        didSet { if activity != oldValue { activitySentAt = Date(); onActivity(activity) } }
     }
+    private var activitySentAt = Date.distantPast
     public var onActivity: @MainActor (Indicator.Mode?) -> Void = { _ in }
+    /// Called when a transcription starts; the returned closure is called when it ends. The app asks iOS for
+    /// background time here, so it is not suspended mid-transcription once the mic and audio session are off.
+    public var beginBackgroundWork: @MainActor () -> () -> Void = { {} }
     /// Transcribes 16 kHz mono samples. Nil until the speech model is loaded.
     public private(set) var transcribe: (([Float]) async throws -> String)?
 
@@ -53,6 +90,9 @@ public final class DictationSession: ObservableObject {
     private var samples: [Float] = []
     private var unsaved: [UUID: Unsaved] = [:]
     private var watchdog: Timer?
+    /// When an open, idle mic closes. Nil while recording, or when kept open until turned off.
+    private var closeAt: Date?
+    private var errorAt: Date?
 
     public init(mic: Microphone, directory: URL = AudioArchive.directory, handoff: UserDefaults? = SharedHandoff.shared,
                 settings: UserDefaults = .standard, requestPermission: @escaping () async -> Bool) {
@@ -62,6 +102,7 @@ public final class DictationSession: ObservableObject {
         self.settings = settings
         self.requestPermission = requestPermission
         deleteAfter24h = settings.bool(forKey: "deleteAfter24h")
+        keepOpen = (settings.object(forKey: "keepOpen") as? Int).flatMap(KeepOpen.init(rawValue:)) ?? .standard
         history = AudioArchive.history(in: directory)
     }
 
@@ -87,6 +128,21 @@ public final class DictationSession: ObservableObject {
             status = "Ignored a dictation request that did not come from the Shepetal keyboard."
             return
         }
+        await begin(id)
+    }
+
+    /// The keyboard's start notification, sent instead of opening the app while the mic is open. Like the
+    /// stop notification it only wakes the app: a dictation starts only for a pending request in the App Group.
+    public func startFromKeyboard() async {
+        let state = SharedHandoff.read(in: handoff)
+        guard isOpen, let id = state.sessionID, state.canStart(id) else { return }
+        // The system stopped the engine since the last tick: starting it now, in the background, would fail.
+        // Close instead; the request stays pending and the keyboard opens the app.
+        guard mic.isRunning else { return close() }
+        await begin(id)
+    }
+
+    private func begin(_ id: UUID) async {
         guard await requestPermission() else {
             tell { $0.fail(id, "Microphone access is off. Turn it on in Settings > Shepetal.") }
             status = "Microphone access denied. Enable it in Settings > Shepetal."
@@ -97,8 +153,9 @@ public final class DictationSession: ObservableObject {
         guard SharedHandoff.read(in: handoff).canStart(id) else { return }
         let superseded = endRecording(reason: nil) // a recording still running was superseded by this request
         samples = []
-        guard SharedHandoff.update(in: handoff, { $0.startRecording(id) { try mic.start() } }) else {
-            mic.stop()
+        // An open mic is already running; only frames from now on are kept.
+        guard SharedHandoff.update(in: handoff, { $0.startRecording(id) { if !mic.isRunning { try mic.start() } } }) else {
+            close(endActivity: false)
             SharedHandoff.post(SharedHandoff.readyNotification)
             latestID = id // the older recording still goes to history, but no longer sets the status
             if let superseded { await finish(superseded) }
@@ -107,22 +164,39 @@ public final class DictationSession: ObservableObject {
         }
         sessionID = id
         latestID = id
+        mic.capturing = true
         startedAt = Date()
         isRecording = true
+        isOpen = true
+        closeAt = nil
+        errorAt = nil
         status = "Listening. Go back to your app and tap the mic to finish."
         // Sent again when a superseded recording was already showing it, so the Live Activity's stale date restarts.
         if activity == .recording { onActivity(.recording) } else { activity = .recording }
-        watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.tick() }
+        SharedHandoff.markListening(Date(), in: handoff)
+        SharedHandoff.post(SharedHandoff.readyNotification) // a keyboard that sent the start shows "Listening"
+        if watchdog == nil {
+            watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor in await self?.tick() }
+            }
         }
         if let superseded { await finish(superseded) }
     }
 
-    /// Starts listening for the keyboard's stop notification.
+    /// Starts listening for the keyboard's start and stop notifications.
     public func observeKeyboard() {
         SharedHandoff.observe(SharedHandoff.stopNotification) { [weak self] in
             Task { @MainActor in await self?.followKeyboard() }
         }
+        SharedHandoff.observe(SharedHandoff.startNotification) { [weak self] in
+            Task { @MainActor in await self?.startFromKeyboard() }
+        }
+    }
+
+    /// Closes the mic now, also while it waits for the next dictation. A running recording is stopped and transcribed.
+    public func turnOff() async {
+        await stop()
+        close()
     }
 
     /// Any app can post a Darwin notification, so the stop notification only wakes the app. The recording
@@ -142,19 +216,38 @@ public final class DictationSession: ObservableObject {
         return true
     }
 
+    /// Samples held for the current recording (tests check that an open, idle mic holds none).
+    var heldSampleCount: Int { samples.count }
+
     /// 16 kHz mono samples from the mic. Ignored when not recording.
     public func append(_ chunk: [Float]) {
         if sessionID != nil { samples += chunk }
     }
 
-    /// Runs once a second while recording. Stops when the mic died, at the 5-minute cap, and as soon as
-    /// the session was superseded or cancelled. Also catches a stop request whose notification got lost.
+    /// Runs once a second while the mic is open. While recording: stops when the mic died, at the 5-minute
+    /// cap, and as soon as the session was superseded or cancelled; also catches a stop request whose
+    /// notification got lost. While waiting: tells the keyboard the app is listening, and closes the mic
+    /// when it died or `keepOpen` ran out. A pending keyboard request whose start notification got lost starts here too.
     public func tick(now: Date = Date()) async {
-        guard let id = sessionID else { return }
+        guard let id = sessionID else {
+            guard isOpen else { return }
+            guard mic.isRunning, closeAt.map({ now < $0 }) ?? true else { return close() }
+            SharedHandoff.markListening(now, in: handoff)
+            if let at = errorAt, activity == .error, now.timeIntervalSince(at) >= Self.errorShown {
+                errorAt = nil
+                activity = .idle
+            } else if let activity, now.timeIntervalSince(activitySentAt) >= Self.activityRefresh {
+                activitySentAt = now
+                onActivity(activity)
+            }
+            await startFromKeyboard()
+            return
+        }
         guard mic.isRunning else {
             await stop(reason: "Recording stopped early: the microphone was interrupted.")
             return
         }
+        SharedHandoff.markListening(now, in: handoff)
         guard await !followKeyboard() else { return }
         let state = SharedHandoff.read(in: handoff)
         guard !state.shouldKeepRecording(id, now: now) else { return }
@@ -174,7 +267,7 @@ public final class DictationSession: ObservableObject {
         entry.outcome = .cancelled
         keep(entry)
         tell { $0.cancel(entry.id) }
-        setStatus("Cancelled. The recording is kept.", activity: nil, for: entry.id)
+        setStatus("Cancelled. The recording is kept.", activity: isOpen ? .idle : nil, for: entry.id)
     }
 
     /// Transcribes an ended recording into history and tells the keyboard how it went.
@@ -195,13 +288,15 @@ public final class DictationSession: ObservableObject {
             return fail(.failed, "Not transcribed: the speech model is still loading. The audio is kept.")
         }
         setStatus("Transcribing...", activity: .processing, for: id)
+        let endBackgroundWork = beginBackgroundWork()
+        defer { endBackgroundWork() }
         do {
             let text = try await transcribe(samples)
             entry.outcome = .transcribed
             entry.text = text
             keep(entry)
             if ended.forKeyboard { tell { $0.deliver(id, text: text, note: reason) } }
-            setStatus(reason ?? Self.ready, activity: nil, for: id)
+            setStatus(reason ?? Self.ready, activity: isOpen ? .idle : nil, for: id)
         } catch {
             fail(.failed, "Could not transcribe: \(error.localizedDescription). The audio is kept.")
         }
@@ -261,7 +356,26 @@ public final class DictationSession: ObservableObject {
     private func setStatus(_ text: String, activity: Indicator.Mode?, for id: UUID) {
         guard sessionID == nil, id == latestID else { return }
         status = text
+        errorAt = activity == .error ? Date() : nil
         self.activity = activity
+    }
+
+    /// When an idle open mic closes, counted from now.
+    private func closingTime() -> Date {
+        Date().addingTimeInterval(keepOpen.seconds)
+    }
+
+    /// Turns the mic off, so the keyboard opens the app for the next dictation. Ends the Live Activity
+    /// unless the caller sets its final state right after (`endActivity` false).
+    private func close(endActivity: Bool = true) {
+        mic.stop()
+        watchdog?.invalidate()
+        watchdog = nil
+        SharedHandoff.markListening(nil, in: handoff)
+        closeAt = nil
+        errorAt = nil
+        isOpen = false
+        if endActivity, !isRecording { activity = nil }
     }
 
     /// Stops the mic, keeps the audio and moves the keyboard's session on. Synchronous, so nothing
@@ -269,14 +383,19 @@ public final class DictationSession: ObservableObject {
     private func endRecording(reason: String?) -> Ended? {
         guard let id = sessionID else { return nil }
         sessionID = nil
+        mic.capturing = false
         isRecording = false
-        watchdog?.invalidate()
-        watchdog = nil
-        mic.stop()
+        if keepOpen == .afterEach || !mic.isRunning {
+            close(endActivity: false) // `finish` or `cancel` sets the last state
+        } else {
+            closeAt = closingTime() // keep listening for the keyboard's next dictation
+        }
         let entry = Recording(id: id, date: startedAt, outcome: .recorded, note: reason)
         keep(entry, samples: samples) // every recording is kept, also when it is never transcribed
         let forKeyboard = SharedHandoff.update(in: handoff) { $0.finishRecording(id) }
-        return Ended(entry: entry, samples: samples, forKeyboard: forKeyboard)
+        let ended = Ended(entry: entry, samples: samples, forKeyboard: forKeyboard)
+        samples = [] // the open mic keeps running; nothing it hears until the next start is held
+        return ended
     }
 }
 

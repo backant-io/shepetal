@@ -58,7 +58,10 @@ final class Pipeline {
                                      _ focusKept: () -> Bool?, _ secureInput: () -> String?,
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
         guard let engine else { return "Speech model is not loaded" }
-        guard SpeechGuard.isSpeech(samples) else { return noSpeech(&run) }  // silence never reaches the model
+        guard SpeechGuard.isSpeech(samples) else {  // silence never reaches the model
+            let message = noSpeech(&run)
+            return samples.isEmpty ? MicAudio.noAudio : message  // the mic never delivered a buffer
+        }
         run.entry.model = engine.name
         do {
             run.entry.rawText = try await engine.transcribe(samples, wav: URL(fileURLWithPath: run.entry.audioPath))
