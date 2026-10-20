@@ -28,7 +28,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
-    private lazy var meetings = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts)) { [weak self] in self?.indicator.show($0, seconds: 4) }
+    private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
+                                                                 card: { [weak self] in self?.meetingCard.show($0) }) { [weak self] in self?.indicator.show($0, seconds: 4) }
+    /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
+    private lazy var meetingCard: MeetingCard = MeetingCard(onRecord: { [weak self] in self?.meetings.record() },
+                                                            onNotNow: { [weak self] in self?.meetings.notNow() })
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -75,7 +79,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
             meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
             meetingFlow?.attach(meetings)
-            meetingFlow?.onRecording = { [weak self] in self?.statusItem.button?.title = $0 ? "🤫●" : "🤫" }
+            meetingFlow?.onRecording = { [weak self] in
+                self?.statusItem.button?.title = $0 ? "🤫●" : "🤫"
+                self?.indicator.meeting = $0  // the red ring, for the whole recording
+            }
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
 
