@@ -15,10 +15,8 @@ Their dictation accuracy dropped badly after last week's update, and they are th
 - We roll back Northwind today, fix the limit with a warning and a test by Thursday, review Thursday, ship Friday.
 
 ## Action items
-- Kenji: confirm with their sample files, but the timing matches exactly
 - Aisha: talk to finance and we decide (due next week)
 - Kenji: query all tenants for entries over thirty-two characters and send the list to Daniel (due tomorrow)
-- Daniel: reach out to any affected customers proactively once I have the list
 - Kenji: switch the Northwind tenant to the old loader, right after this call (due today)
 - Kenji: have the fix with the new limit and the warning ready for review (due Thursday)
 - Aisha: review it so it can ship Friday morning (due Thursday afternoon)

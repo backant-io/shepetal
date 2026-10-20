@@ -33,11 +33,11 @@ final class Pipeline {
         history = try History(path: Paths.history)
     }
 
-    func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
-                 sendPaste: (CGEvent) -> Void) async -> Run {
+    func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
+                 context: () -> (before: String, after: String), sendPaste: (CGEvent) -> Void) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
-                                          durationMs: Self.ms(samples)))
+                                          durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
         save(samples, &run)  // first, so the audio survives anything below
         let saveError = run.error
         let error = await transcribeAndInsert(samples, engine, t0, context, sendPaste, &run)
@@ -57,7 +57,7 @@ final class Pipeline {
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Cleanup.apply(run.entry.rawText)
+        run.entry.text = Self.finishText(run.entry.rawText)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return "No speech heard" }
         let (before, after) = context()
@@ -66,6 +66,11 @@ final class Pipeline {
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
         return paste.landed ? nil : "Paste did not land. The text is on the clipboard: press ⌘V to paste it."
+    }
+
+    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
+    static func finishText(_ raw: String) -> String {
+        Cleanup.apply(raw)
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {
