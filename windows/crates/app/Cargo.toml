@@ -1,0 +1,20 @@
+[package]
+name = "app"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "shepetal for Windows: hold Ctrl+Win, talk, and the text lands at the cursor. Fully local."
+
+[[bin]]
+name = "shepetal"
+path = "src/main.rs"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
