@@ -134,11 +134,13 @@ describe('code and PKCE', () => {
     expect(await redeemCode(code, VERIFIER, MAC, T)).toBeNull();
   });
 
-  it(`expires after ${CODE_TTL} s`, async () => {
+  // API.md: 60 s, written out so a longer CODE_TTL fails here.
+  it('expires after 60 s', async () => {
+    expect(CODE_TTL).toBe(60);
     const a = await login();
-    expect(await redeemCode(a.code, VERIFIER, MAC, T + CODE_TTL * 1000 - 1)).not.toBeNull();
+    expect(await redeemCode(a.code, VERIFIER, MAC, T + 60_000 - 1)).not.toBeNull();
     const b = await login();
-    expect(await redeemCode(b.code, VERIFIER, MAC, T + CODE_TTL * 1000)).toBeNull();
+    expect(await redeemCode(b.code, VERIFIER, MAC, T + 60_000)).toBeNull();
   });
 
   it('refuses an unknown code', async () => {

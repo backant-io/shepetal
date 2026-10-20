@@ -4,9 +4,9 @@ Do these in order. Steps marked **Pavel** need an account only Pavel has. Run ev
 
 ## 1. Merge (Pavel)
 
-1. Into `feat/web`, in this order: #85 (account API), the feat/web-e2e PR (app sign-in with PKCE, `web/e2e`, this file), then the pages PR and #84 (help). The pages PR must not add `/device` or `ApproveDevice`: the device login is gone (see API.md). Each must keep `web e2e` green.
+1. Into `feat/web`: the feat/web-e2e PR (app sign-in with PKCE, `web/e2e`, this file; #85 and #105 are already in), then #84 (help). The `web e2e` check must stay green.
 2. Then #69 (`feat/web` into `main`).
-3. Do not merge #70 (Mac sign-in) yet: the app still uses the device flow there, and it must move to `/app/login` with PKCE first. Merge it only after step 7 passes, because the app blocks dictation until it is signed in.
+3. #70 (Mac sign-in with PKCE) can merge any time: its sign-in gate is off unless the app bundle has `ShepetalRequiresSignIn` = true. Turn that key on in the release build only after step 6 passes.
 4. backant-io/backant-mcp #84 only adds a test, and shepetal does not depend on it. Merging it to `main` starts the `Deploy to Production` workflow for backant.io, which has failed on its last 3 runs (since 2026-09-11). Merge it whenever backant's deploy is healthy. backant.io needs no change, config or redeploy for shepetal.
 
 ## 2. Google OAuth (Pavel)
@@ -27,25 +27,31 @@ Both sites share this Stripe account, so each webhook sees the other's checkouts
 
 ## 4. Database, Worker and secrets
 
+The preview Worker `shepetal-web` (https://shepetal-web.business-c0d.workers.dev) already exists, with `0001_init.sql` applied to the remote D1 and the secrets `AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `STRIPE_SECRET_KEY` set (web/README.md, Preview). What is left:
+
 ```sh
 cd web
 git switch main && git pull
 npm ci
 npx wrangler whoami                      # Hegler Technologies
-npm run db:migrate:remote                # 0001_init, 0002_app_login
-npm run deploy                           # creates shepetal-web on workers.dev
+npx wrangler secret list                 # names only: AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY
+npm run db:migrate:remote                # applies 0002_app_login (drops device_codes, creates app_codes)
+npx wrangler secret put STRIPE_WEBHOOK_SECRET   # paste the whsec_ value from step 3
+npm run deploy
+```
 
+If any of the four secrets is missing from the list, set it without printing it:
+
+```sh
 export AWS_PROFILE=backant AWS_REGION=eu-central-1
 ssm() { aws ssm get-parameter --with-decryption --name "$1" --query Parameter.Value --output text; }
 openssl rand -hex 32 | npx wrangler secret put AUTH_SECRET     # new; never backant's AUTH_SECRET or NEXTAUTH_SECRET
 ssm /backant/WEB_GOOGLE_CLIENT_ID | npx wrangler secret put GOOGLE_CLIENT_ID
 ssm /backant/WEB_GOOGLE_CLIENT_SECRET | npx wrangler secret put GOOGLE_CLIENT_SECRET
 ssm /backant/WEB_STRIPE_SECRET_KEY | npx wrangler secret put STRIPE_SECRET_KEY
-npx wrangler secret put STRIPE_WEBHOOK_SECRET                  # paste the whsec_ value from step 3
-npx wrangler secret list                                        # names only: the five above
 ```
 
-- Set `AUTH_SECRET` once. A new value signs everyone out of the site (app tokens keep working).
+- Never set `AUTH_SECRET` again once it exists. A new value signs everyone out of the site (app tokens keep working).
 - Never set `STRIPE_API_BASE` in production. It is for `web/e2e` only, and the code ignores it unless the key starts with `sk_test_`.
 - The Google client secret now lives in two places. If it is rotated, update `/backant/WEB_GOOGLE_CLIENT_SECRET` and shepetal's `GOOGLE_CLIENT_SECRET` together.
 
@@ -54,14 +60,10 @@ npx wrangler secret list                                        # names only: th
 `AUTH_URL` is `https://shepetal.backant.io`, so Google sign-in and `/app/login` only work there, not on workers.dev.
 
 1. Check that the backant.io zone has no DNS record for `shepetal` yet (Cloudflare dashboard → backant.io → DNS). A custom domain cannot replace one.
-2. Add to `web/wrangler.toml`, merge to `main`, and deploy:
-
-```toml
-routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]
-```
+2. Uncomment the `routes` line in `web/wrangler.toml` (`routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]`), merge that to `main`, and deploy:
 
 ```sh
-npm run deploy
+sed -i '' 's/^# routes = /routes = /' wrangler.toml && npm run deploy
 ```
 
 ## 6. Smoke tests (anyone, right after step 5)
@@ -112,7 +114,7 @@ PY
 
 - In Stripe → Developers → Webhooks → the shepetal endpoint: the delivery for that checkout answered 200. Refund the payment if it was a test; the license stays active.
 - Sign in on https://backant.io and open its dashboard: backant's own login still works.
-- Once #70 uses `/app/login`: install the Mac app, sign in from the menu, and check that Home shows "Free trial: 30 days left".
+- Mac (#70): install a build with `ShepetalRequiresSignIn` = true, choose Sign in with Google in the menu, and check that Home shows "Free trial: 30 days left" and that fn dictates.
 
 If something is wrong: `npx wrangler rollback` (previous version) or remove the `routes` line and deploy, which takes shepetal.backant.io down without touching backant.io.
 
