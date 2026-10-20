@@ -180,3 +180,26 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Open History. Expected: the rows show "TextEdit", "Safari · github.com" and "Google Chrome · github.com". The URL is stored only in `history.sqlite` (`sqlite3 … 'select app, bundle_id, url from history order by created_at desc limit 3'`).
 3. If a Chrome row has no host, note it on the PR: Chrome had no accessibility tree for the page (see the `ponytail:` note in `Sources/Shepetal/AppContext.swift`).
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
+
+### M-MTG-1: Zoom call, detected and transcribed (rule 7)
+Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic).
+1. Start or join a Zoom meeting in the zoom.us app, with your mic unmuted.
+2. Expected about 5 s after Zoom opens the mic: "Meeting detected · recording" next to the 🤫 in the bottom-left corner, the menu bar shows "🤫●", and the 🤫 menu shows "Stop meeting recording". The first time, macOS asks whether Shepetal may record system audio: allow it. If the hint says "… mic only (turn on System Audio Recording)", add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, then leave and rejoin the call.
+3. Open 🤫 > Open Shepetal… > Meetings. Expected: a "Zoom" meeting at the top, still running. Within about a minute its transcript fills in, with your lines labelled Me and the other side's labelled Others.
+4. Say "I will send the slides by Friday." Have the other side say "I will review the budget tomorrow."
+5. Leave the meeting. Expected within about 5 s: "Meeting recording saved", then "Meeting notes ready · open Shepetal → Meetings", and the menu bar goes back to "🤫". The meeting's Summary lists the action items "Me: send the slides (Friday)" and "Others: review the budget (tomorrow)" (the wording may differ slightly).
+6. Type `budget` in the Meetings search. Expected: the meeting is found. Click Copy summary and paste in TextEdit: the summary is pasted, without the transcript. Export Markdown writes a `.md` file where you choose.
+7. Run `ls -la ~/Library/Application\ Support/Shepetal/meetings/*/`. Expected: the meeting's folder is `drwx------` and holds `Me.wav` and `Others.wav`, both `-rw-------`. Open them in QuickTime: Me is your mic, Others is the call audio.
+
+### M-MTG-2: Google Meet in a browser
+1. Meet in Chrome or Safari is found by the tab's window title, which macOS only shows to apps with screen recording access. Add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording (the upper list), then quit and reopen Shepetal.
+2. Join a Google Meet call in Chrome with the mic on. Expected: "Meeting detected · recording", and the meeting is listed as "Google Meet (Google Chrome)" (or Safari). Repeat steps 3 to 7 of M-MTG-1.
+3. Without screen recording access, Meet is not detected. Use 🤫 > Start meeting recording before the call and Stop meeting recording after it. Expected: the same transcript and summary, listed as "Manual".
+
+### M-MTG-3: dictation during a meeting
+1. During a recorded Zoom call, click into TextEdit, hold fn, say a sentence, and release. Expected: the sentence is inserted as usual, and no second meeting starts.
+2. Expected afterwards: the meeting's transcript has the sentence under Me, since the meeting records the mic too.
+
+### M-MTG-4: quit during a meeting
+1. Start a meeting recording, talk for a minute, then quit Shepetal from the 🤫 menu.
+2. Expected: both WAVs are kept and play to the end. The meeting is listed as ended, with the transcript up to the last 30 s live pass. It gets no summary: a meeting cut off by quitting is not transcribed again at the next launch.
