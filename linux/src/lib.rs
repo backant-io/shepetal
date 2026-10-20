@@ -5,6 +5,7 @@ pub mod gesture;
 pub mod indicator;
 pub mod insert;
 pub mod meeting;
+pub mod mic;
 pub mod model;
 pub mod text_rules;
 pub mod vocab;
