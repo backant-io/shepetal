@@ -1,7 +1,9 @@
 #if canImport(CoreAudio)
 import AppKit
 import CoreAudio
+import EventKit
 import MeetingCore
+import os
 
 func address(_ selector: AudioObjectPropertySelector) -> AudioObjectPropertyAddress {
     AudioObjectPropertyAddress(mSelector: selector, mScope: kAudioObjectPropertyScopeGlobal,
@@ -63,8 +65,48 @@ public enum Probes {
         return out
     }
 
+    /// Default input and output device IDs (no permission needed).
+    public static func devices() -> [UInt32] {
+        [kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyDefaultOutputDevice].map {
+            read(AudioObjectID(kAudioObjectSystemObject), $0, AudioObjectID(0)) ?? 0
+        }
+    }
+
+    static let audioRestarts = OSAllocatedUnfairLock(initialState: 0)
+    static let restartListener: OSStatus = {
+        var addr = address(kAudioHardwarePropertyServiceRestarted)
+        return AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &addr, .global()) { _, _ in
+            audioRestarts.withLock { $0 += 1 }
+        }
+    }()
+
+    /// Last wake time (`kern.waketime`) plus the number of coreaudiod restarts seen.
+    public static func wakeMarker() -> String {
+        _ = restartListener
+        var wake = timeval()
+        var size = MemoryLayout<timeval>.size
+        let ok = sysctlbyname("kern.waketime", &wake, &size, nil, 0) == 0
+        return "\(ok ? wake.tv_sec : -1).\(wake.tv_usec)/\(audioRestarts.withLock { $0 })"
+    }
+
+    nonisolated(unsafe) static let eventStore = EKEventStore()
+
+    /// The calendar event around now. Reads EventKit only when Calendar full access is already
+    /// granted, so this never prompts.
+    public static func calendarEvent(now: Date = Date()) -> String? {
+        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
+        let window = eventStore.predicateForEvents(withStart: now.addingTimeInterval(-300),
+                                                   end: now.addingTimeInterval(300), calendars: nil)
+        let events = eventStore.events(matching: window).map {
+            CalendarEvent(title: $0.title ?? "", start: $0.startDate.timeIntervalSince1970,
+                          end: $0.endDate.timeIntervalSince1970, isAllDay: $0.isAllDay)
+        }
+        return CalendarEvent.current(in: events, now: now.timeIntervalSince1970)
+    }
+
     public static func snapshot() -> Snapshot {
-        Snapshot(micClients: micClients(), windowTitles: windowTitles())
+        Snapshot(micClients: micClients(), windowTitles: windowTitles(), calendarEvent: calendarEvent(),
+                 devices: devices(), wakeMarker: wakeMarker())
     }
 }
 #endif

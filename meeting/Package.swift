@@ -9,5 +9,6 @@ let package = Package(
         .target(name: "MeetingMac", dependencies: ["MeetingCore"]),
         .executableTarget(name: "shepetal-meeting", dependencies: ["MeetingCore", "MeetingMac"]),
         .testTarget(name: "MeetingCoreTests", dependencies: ["MeetingCore"]),
+        .testTarget(name: "MeetingMacTests", dependencies: ["MeetingMac"]),
     ]
 )

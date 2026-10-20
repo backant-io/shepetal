@@ -10,13 +10,16 @@ case "probe":
     if clients.isEmpty { print("no process is using the mic") }
     for c in clients { print("\(c.bundleID.isEmpty ? "-" : c.bundleID)\t\(c.name)") }
     let detector = MeetingDetector()
-    print("meeting apps now: \(detector.meetingApps(in: Probes.snapshot()).sorted())")
+    let snapshot = Probes.snapshot()
+    print("calendar event now: \(snapshot.calendarEvent ?? "none (or no Calendar access)")")
+    print("meeting apps now: \(detector.meetingApps(in: snapshot).sorted())")
 case "watch":
     var detector = MeetingDetector()
     let env = ProcessInfo.processInfo.environment
     detector.startAfter = Double(env["START_AFTER"] ?? "") ?? detector.startAfter
     detector.endWithoutEvidence = Double(env["END_AFTER"] ?? "") ?? detector.endWithoutEvidence
-    print("watching (start after \(detector.startAfter)s, end after \(detector.endWithoutEvidence)s), ctrl-c to stop")
+    let bound = max(detector.endWithEvidence, detector.reacquire)
+    print("watching (start after \(detector.startAfter)s, end after \(bound)s or \(detector.endWithoutEvidence)s), ctrl-c to stop")
     let t0 = Date()
     while true {
         for e in detector.update(Probes.snapshot(), now: Date().timeIntervalSince(t0)) {
@@ -28,12 +31,16 @@ case "watch":
 case "record":
     let seconds = Double(args.dropFirst().first ?? "") ?? 10
     let capture = MeetingCapture()
-    let dir = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    let stamp = DateFormatter()
+    stamp.dateFormat = "yyyyMMdd-HHmmss"
+    let dir = FileManager.default.homeDirectoryForCurrentUser
+        .appending(path: "Library/Application Support/shepetal/meetings/\(stamp.string(from: Date()))")
     do {
         try capture.start(dir: dir)
         print("recording \(seconds)s to \(dir.path)/Me.wav and Others.wav")
         Thread.sleep(forTimeInterval: seconds)
-        capture.stop()
+        try capture.stop()
+        print("saved \(dir.path)/Me.wav and Others.wav")
     } catch {
         print("record failed: \(error)")
         exit(1)
