@@ -30,6 +30,7 @@ Requirements: Xcode or the Swift 6 toolchain.
 
 ```bash
 swift build && swift test             # core: fn gestures, model tiers, audio store, history, text rules
+scripts/ci/run-checks.sh              # every suite in the repo, as CI runs them (--fast skips Docker and iOS; see docs/ci.md)
 scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only), signed (see below)
 scripts/make-app.sh --install         # same, then installed to /Applications/Shepetal.app
 scripts/make-app.sh --zip             # same, plus dist/Shepetal-<version>-mac.zip for a release

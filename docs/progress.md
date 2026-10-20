@@ -4,6 +4,42 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### Parity audit (main at 45e8bf4)
+
+`docs/parity.md` was checked cell by cell against main at 45e8bf4. Work in open PRs counts for nothing until it merges. This redoes the 800cacc audit (#74) on the current ledger, and applies the cell moves that #90 (Linux steps) and #27 (iPhone steps) left to it.
+
+| | Before (main at 45e8bf4) | After |
+|---|---|---|
+| Automated coverage | 10.2% (38 of 372: 18 n/a, 4 outside, 16 Mac hand-test) | 12.9% (48 of 372) |
+| Confirmed coverage | 5.9% (22 of 372: 18 n/a, 4 outside) | 5.9%, the same |
+
+Ten cells moved from `todo` to `hand-test`. Each has its tests on main and a step in `docs/manual-test.md`:
+- **Linux** (#2 code, #90 steps): F01 (L-KEY-1 to L-KEY-3, L-FN-1, L-FN-3), F02 (L-FN-2), F19 (L-INS-1 to L-INS-5; Linux types the text and falls back to the clipboard without restore), F112 (L-FN-4).
+- **iPhone** (#3, #27 and #54 code, #27 and #54 steps): F01 (I-DICT-1), F05 (I-IND-1, I-LA-1: the Live Activity landed in #27), F19 (I-DICT-1, I-FIELD-2), F27 (I-FIELD-1, I-FIELD-2: rule 8, #54), F53 (I-RET-1, I-BACKUP-1; the sweep still runs only while the app runs, #13), F108 (I-SETUP-1, I-KB-1, I-KB-2, I-MIC-1, I-DICT-1).
+
+Checks:
+- Every backticked test name in the ledger exists on main inside the class it names (Swift `func`, Rust `fn`), and every cited M-, I-, L- and MEET- step has a heading in `docs/manual-test.md`. A one-off script did the check; breaking one test name or one step id made it report that row. `scripts/parity.py` does not check hand steps yet (#102, open PR #116).
+- Notes fixed: F01 Mac names the #112 🌐 key tests (M-SETUP-4, M-SETUP-5); F20 names `scripts/e2e-mac.sh --drop-paste` (#35); F72 gives the #40 numbers; F03, F04, F10, F21, F32, F53 and F66 name the open PR that builds the missing part.
+- Linux F05 (🤫, #56) and F27 (rule 8, #58) are on main, but their hand steps are in `docs/linux.md`, not `docs/manual-test.md`, so they stay `todo` (#126).
+- M-INS-4 still expects the failed-paste wording from before rule 8 (#57).
+- The meetings PRs #73, #76, #77 and #89 merged into `feat/meetings` (#113), not main, so F65 to F73 are unchanged.
+- No `impossible` cell was added: each needs an Apple doc URL and a substitute that is built.
+
+### Next highest-value features (P0 still `todo`, per platform)
+
+Pick from this list. It replaces the iteration 1 list under "Left".
+
+- **Mac** (13 of 29 P0 cells are `todo`):
+  - In open PRs, so review and merge them: F03 Esc cancel, F04 shortcuts, F10 max length, F21 paste and copy last (#47); F07 mic selection, F08 mic health, F12 languages, F39 dictionary (#39); F32 local cleanup model (#44).
+  - No PR yet: F89 first-run onboarding (mic test, language, shortcut, try it); F99 crash recovery and relaunch; F88 screen and system-audio permissions (with meetings, #113); F91 the remaining hub tabs (after F39, F40, F37 and F55).
+- **Linux** (25 of 29 P0 cells are `todo`):
+  - Code on main, steps missing from `docs/manual-test.md`: F05 🤫 indicator (#56) and F27 rule 8 (#58) (#126).
+  - In open PRs: F52 history and F53 24 h retention (#67); F03 Esc, F04 shortcuts, F10 cap, F21 paste last (#96, #67); F07 and F08 mic (#92); F32 cleanup and F109 insertion fit (#83); F39 dictionary (#86); F92 start at login (#114).
+  - No PR yet: F06, F12, F17, F20, F23, F51, F88, F89, F90, F91, F99.
+- **iPhone** (24 of 29 P0 cells are `todo`):
+  - Mark the desktop-only P0 rows `impossible` where iOS forbids them, each with an Apple doc URL and a built substitute: F04, F17, F92 and F99 are candidates.
+  - Then build F03 keyboard cancel and F10 duration warning (#13), F02 hands-free and F112 from the keyboard, F51 nonsense guard, F12 languages, F32 cleanup and F39 dictionary.
+
 ### account (Mac sign-in, free trial, lifetime license, no model names in the UI)
 
 | PR | State | What landed | Verified before merge |
