@@ -99,8 +99,6 @@ public struct MicHealth {
     public var warnAfter: TimeInterval = 5
     public var escalateAfter: TimeInterval = 15
     public var noAudioAfter: TimeInterval = 5
-    /// Opening the mic (starting the engine) gives up after this long.
-    public static let openTimeout: TimeInterval = 3
 
     private let start: TimeInterval
     private var buffers = 0

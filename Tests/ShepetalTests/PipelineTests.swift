@@ -178,6 +178,17 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(try pipeline.history.recent().first { $0.id == row.id }?.text, Cleanup.apply("send it"))
     }
 
+    /// The hub's re-transcribe reads the pipeline's own dictionary.txt, so it gets the replacements dictation
+    /// gets, and a test or a second data dir never reads the real one.
+    @MainActor
+    func testRetranscribeUsesThePipelinesDictionary() async throws {
+        let (_, row) = try await process(speech, FakeEngine("Send it."))
+        try "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let e = try await pipeline.retranscribe(row, with: FakeEngine("call the dentist"))
+        XCTAssertEqual(e.text, Cleanup.apply("call the orthodontist"))
+    }
+
     @MainActor
     func testNoEngineAndEngineErrorKeepAudio() async throws {
         let (none, noneRow) = try await process(speech, nil)

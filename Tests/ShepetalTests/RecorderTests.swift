@@ -12,6 +12,11 @@ final class FlakyRecorder: Recorder {
     override func healthEvents() -> [MicHealth.Event] { [.reopen] }
 }
 
+/// A mic that never opens.
+final class DeadRecorder: Recorder {
+    override func open(_ device: MicDevice?) throws { throw SpeechError("gone") }
+}
+
 /// A reopen closes the engine before it opens it again. When that open fails, the dictation must still end
 /// with a message (the audio so far is transcribed and kept). Otherwise the ring keeps showing recording,
 /// hands-free included, while nothing is captured.
@@ -23,7 +28,7 @@ final class RecorderTests: XCTestCase {
         var ends: [(Bool, String)] = []
         // Like App: ending the dictation stops the mic.
         mic.end = { ends.append(($0, $1)); _ = mic.stop() }
-        try recorder.start()
+        recorder.start()
 
         mic.checkHealth()
         XCTAssertEqual(recorder.opens, 2, "the silent start reopens the mic")
@@ -34,5 +39,22 @@ final class RecorderTests: XCTestCase {
 
         mic.checkHealth()
         XCTAssertEqual(ends.count, 1, "an ended dictation is not ended again")
+    }
+
+    /// The mic opens off the main thread, after the recording has started. When that open fails, the dictation
+    /// ends right away with nothing to transcribe, instead of showing recording on a closed mic until fn is up.
+    func testFailedOpenEndsTheDictation() {
+        let recorder = DeadRecorder()
+        let mic = Mic(recorder: recorder)
+        let ended = expectation(description: "the dictation ends")
+        mic.end = { transcribe, message in
+            XCTAssertFalse(transcribe, "nothing was recorded")
+            XCTAssertEqual(message, "Microphone: gone")
+            _ = mic.stop()
+            ended.fulfill()
+        }
+        recorder.start()
+        wait(for: [ended], timeout: 5)
+        XCTAssertFalse(recorder.isRecording)
     }
 }

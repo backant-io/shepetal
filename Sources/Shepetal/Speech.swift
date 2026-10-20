@@ -11,6 +11,14 @@ protocol SpeechEngine: AnyObject {
 struct SpeechError: LocalizedError {
     let errorDescription: String?
     init(_ message: String) { errorDescription = message }
+
+    /// For the UI: our own messages pass as they are. Anything else (FluidAudio, CoreML, a failed process) can
+    /// carry model names and paths, so it goes to the log and the user sees `fallback`.
+    init(plain error: Error, _ fallback: String) {
+        if let own = error as? SpeechError { self = own; return }
+        NSLog("shepetal: speech: %@", String(describing: error))
+        errorDescription = fallback
+    }
 }
 
 enum Speech {
@@ -19,23 +27,31 @@ enum Speech {
     static func load(prefer: SpeechModel? = nil, languages: [String] = []) async throws -> SpeechEngine {
         let tier = currentModelTier()
         let route = speechRoute(languages: languages, tier: tier)
+        var tried: [String] = []
         var models = [prefer ?? route.model]
         // A language only whisper knows gets no fallback: Parakeet would write it in the wrong language.
         if route.model == tier.primary, let f = tier.fallback, f != models[0] { models.append(f) }
-        var tried: [String] = []
         for model in models {
             do { return try await engine(for: model, language: route.language ?? "auto") } catch {
-                tried.append("\(model.rawValue): \(error.localizedDescription)")
+                tried.append("\(model.rawValue): \(error.localizedDescription)")  // not shown: logged below
             }
         }
-        let why = route.model == tier.primary ? "" : "\(languages.joined(separator: ", ")) needs Whisper large-v3-turbo. "
-        throw SpeechError("No speech model available. " + why + tried.joined(separator: "; "))
+        NSLog("shepetal: no speech model: %@", tried.joined(separator: "; "))  // names in the log, not the UI
+        guard route.model == tier.primary else {
+            let names = languages.map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
+            throw SpeechError("On-device speech recognition for \(names.joined(separator: ", ")) is not installed")
+        }
+        throw SpeechError("On-device speech recognition is not available")
     }
 
     static func engine(for model: SpeechModel, language: String = "auto") async throws -> SpeechEngine {
-        switch model {
-        case .parakeetV3: return try await ParakeetEngine.load()
-        case .whisperBaseEn, .whisperLargeV3Turbo: return try WhisperCppEngine(model, language: language)
+        do {
+            switch model {
+            case .parakeetV3: return try await ParakeetEngine.load()
+            case .whisperBaseEn, .whisperLargeV3Turbo: return try WhisperCppEngine(model, language: language)
+            }
+        } catch {
+            throw SpeechError(plain: error, "On-device speech recognition could not start")
         }
     }
 }
@@ -118,7 +134,7 @@ final class ParakeetEngine: SpeechEngine {
 
     static func load() async throws -> ParakeetEngine {
         // Checked first so FluidAudio never fetches missing files on its own.
-        guard isInstalled else { throw SpeechError("Parakeet v3 is not downloaded (\(directory.path))") }
+        guard isInstalled else { throw SpeechError("On-device speech recognition is not downloaded yet") }
         let models = try await AsrModels.load(from: directory, version: .v3)
         let asr = AsrManager()
         try await asr.loadModels(models)
@@ -135,7 +151,11 @@ final class ParakeetEngine: SpeechEngine {
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         var state = TdtDecoderState.make(decoderLayers: decoderLayers)
-        return try await asr.transcribe(samples, decoderState: &state).text
+        // A hold can end with under 300 ms of audio while the mic was still opening; Parakeet refuses that.
+        let minimum = ASRConstants.minimumRequiredSamples(forSampleRate: AudioStore.sampleRate)
+        do { return try await asr.transcribe(MicAudio.padded(samples, to: minimum), decoderState: &state).text } catch {
+            throw SpeechError(plain: error, "On-device speech recognition could not read this recording")
+        }
     }
 }
 
@@ -156,20 +176,26 @@ final class WhisperCppEngine: SpeechEngine {
         cli = env["SHEPETAL_WHISPER_CLI"].map { URL(fileURLWithPath: $0) }
             ?? Paths.models.appendingPathComponent("whisper.cpp/whisper-cli")
         model = env["SHEPETAL_WHISPER_MODEL"].map { URL(fileURLWithPath: $0) }
-            ?? Paths.models.appendingPathComponent("\(m.rawValue).bin")
+            ?? Paths.models.appendingPathComponent("\(m.rawValue).bin")  // not shown: a path
         self.language = language
         name = model.deletingPathExtension().lastPathComponent
         for url in [cli, model] where !FileManager.default.fileExists(atPath: url.path) {
-            throw SpeechError("needs \(url.lastPathComponent) in \(url.deletingLastPathComponent().path) (docs/models.md)")
+            NSLog("shepetal: %@ not found", url.path)
+            throw SpeechError("The alternative engine is not installed")
         }
     }
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
-        let cli = cli
         // The dictionary hint (F39), read fresh for every dictation like the replacements.
         let args = whisperArguments(model: model.path, wav: wav.path, language: language,
                                     vocabulary: Vocabulary.load(Paths.dictionary))
-        return try await Task.detached {
+        do { return try await run(cli, args) } catch {
+            throw SpeechError(plain: error, "The alternative engine could not read this recording")
+        }
+    }
+
+    private func run(_ cli: URL, _ args: [String]) async throws -> String {
+        try await Task.detached {
             let p = Process()
             p.executableURL = cli
             p.arguments = args
@@ -179,7 +205,7 @@ final class WhisperCppEngine: SpeechEngine {
             try p.run()
             let data = out.fileHandleForReading.readDataToEndOfFile()
             p.waitUntilExit()
-            guard p.terminationStatus == 0 else { throw SpeechError("whisper-cli exited with \(p.terminationStatus)") }
+            guard p.terminationStatus == 0 else { throw SpeechError("The alternative engine stopped with code \(p.terminationStatus)") }
             return String(decoding: data, as: UTF8.self)
                 .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
                 .joined(separator: " ")

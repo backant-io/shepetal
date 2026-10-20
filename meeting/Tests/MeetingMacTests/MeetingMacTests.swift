@@ -77,4 +77,55 @@ func mode(_ url: URL) throws -> Int {
     let write = #expect(throws: (any Error).self) { try missingDir.stop() }
     #expect(write != nil && !(write is CaptureError))  // the file system error itself
 }
+
+@Test func aKilledRecordingLeavesPlayableFilesWithEveryFrame() throws {
+    // #100: a crash, a force quit or a kill mid-meeting must not leave WAVs that read as empty. stop() is never
+    // called and the capture stays open, as when the process dies: the writes are unbuffered, so this is what a
+    // killed process leaves on disk. Both files must already parse, with every frame written so far.
+    let dir = scratchDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try MeetingCapture.makeOwnerOnlyDir(dir)
+    let capture = MeetingCapture()
+    for _ in 0..<150 { feed(capture, buffers: 2, frames: 480, dir: dir) }  // 1.5 s at 48 kHz
+    for name in ["Me.wav", "Others.wav"] {
+        let file = try AVAudioFile(forReading: dir.appending(path: name))
+        #expect(file.length == 72_000)
+        #expect(file.fileFormat.sampleRate == 48_000)
+        file.framePosition = 71_999  // the last frame written holds the fed sample
+        let last = try #require(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 1))
+        try file.read(into: last)
+        #expect(last.frameLength == 1 && last.floatChannelData?[0][0] == 0.25)
+    }
+    withExtendedLifetime(capture) {}
+}
+
+@Test func micBuffersAreInterleavedFrameByFrame() throws {
+    // AVAudioEngine hands the mic over one buffer per channel; the WAV must hold L R L R, or a stereo mic's
+    // channels come back swapped or scrambled.
+    let url = scratchDir().appendingPathExtension("wav")
+    defer { try? FileManager.default.removeItem(at: url) }
+    let format = try #require(AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 2, interleaved: false))
+    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 3))
+    buffer.frameLength = 3
+    for f in 0..<3 { buffer.floatChannelData![0][f] = Float(f); buffer.floatChannelData![1][f] = Float(-f - 1) }
+    let writer = try WavWriter(url, rate: 16_000, channels: 2)
+    try writer.append(buffer)
+    #expect(try mode(url) == 0o600)
+    let samples = try Data(contentsOf: url).dropFirst(44).withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+    #expect(samples == [0, -1, 1, -2, 2, -3])
+    #expect(try AVAudioFile(forReading: url).length == 3)
+}
+
+@Test func aCaptureRecordsAgainAfterAFailedMeeting() throws {
+    // #100: one failed meeting must not make the next start() on the same capture record nothing.
+    let capture = MeetingCapture()
+    feed(capture, buffers: 1, frames: 480, dir: scratchDir())
+    #expect(throws: CaptureError.self) { try capture.stop() }
+    let dir = scratchDir()
+    defer { try? FileManager.default.removeItem(at: dir) }
+    try MeetingCapture.makeOwnerOnlyDir(dir)
+    feed(capture, buffers: 2, frames: 480, dir: dir)
+    try capture.stop()
+    #expect(try AVAudioFile(forReading: dir.appending(path: "Me.wav")).length == 480)
+}
 #endif
