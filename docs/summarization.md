@@ -64,7 +64,10 @@ without stemming. Latency is per meeting after the model has loaded. Peak RAM is
 | Approach | ROUGE-1 | ROUGE-2 | ROUGE-L | Latency / meeting | Model load | Peak RSS |
 |---|---|---|---|---|---|---|
 | textrank-tfidf + rules | 0.647 | 0.426 | 0.448 | 26-45 ms | 0 s | 30 MB |
-MINILM_ROW
+| textrank-minilm + rules | 0.628 | 0.421 | 0.471 | 236 ms | 5.0 s (mostly torch import) | 388 MB (PyTorch runtime; the model is 90 MB) |
+
+Decisions and action items come from the same rules in both rows. Only the Overview and Key points differ, and on
+these fixtures the two rankers are a tie: TF-IDF is slightly ahead on ROUGE-1, MiniLM slightly ahead on ROUGE-L.
 
 **Manual check (textrank-tfidf, see `summarize/out/`):**
 - Action items are the strongest part: all 16 reference action items were found with the right owner and due
@@ -81,12 +84,13 @@ MINILM_ROW
 
 | Platform | Default | Fallback |
 |---|---|---|
-| Mac | TextRank on MiniLM-L6 embeddings + rules (CoreML encoder, about 90 MB) | TF-IDF TextRank + rules (no model) |
-| iPhone | Same MiniLM CoreML encoder (runs on ANE, a few ms per sentence batch) | TF-IDF TextRank + rules |
-| Linux CPU | MiniLM via ONNX Runtime + rules | TF-IDF TextRank + rules |
+| Mac | TF-IDF TextRank + rules (no model, about 30 MB RSS, under 50 ms) | MiniLM-L6 TextRank via CoreML (90 MB) |
+| iPhone | TF-IDF TextRank + rules | MiniLM-L6 CoreML encoder on the ANE |
+| Linux CPU | TF-IDF TextRank + rules | MiniLM-L6 via ONNX Runtime |
 
-The encoder-only extractive path is deterministic, hallucination-free, under 100 MB and well under a second per
-hour of meeting. Add a seq2seq model only for the Overview line, once it has been measured: distilBART-CNN-12-6 or
+MiniLM did not beat TF-IDF on these fixtures, so it does not earn its 90 MB as the default. Switch to it only if
+real transcripts, which have more paraphrase than these, show a gain. Both paths are deterministic and
+hallucination-free, and both stay well under a second per meeting. Add a seq2seq model only for the Overview line, once it has been measured: distilBART-CNN-12-6 or
 a SAMSum fine-tune on Mac and Linux. Re-evaluate NCM when a meeting or dialogue checkpoint and a non-CUDA path
 exist.
 
