@@ -20,6 +20,8 @@ AUTOMATED = {"done", "hand-test", "confirmed", "impossible", "n/a", "outside"}
 CONFIRMED = AUTOMATED - {"hand-test"}
 DESKTOP = {"M", "W"}  # inventory Wispr-column letters that map to the Mac and Linux columns (goal "Platform mapping")
 NA_CATEGORIES = {"billing", "subscriptions", "referrals", "telemetry", "remote-flags", "ab-tests", "account-admin"}
+# A docs/manual-test.md step id (M-FN-1, I-DICT-1, L-KEY-2, MEET-3). A cell that waits on one is hand-test, not done (#41).
+HAND_STEP = re.compile(r"\b(?:[MIL]-[A-Z]+-\d+|MEET-\d+)\b")
 ROW = re.compile(r"^\|\s*(F\d+)\s*\|(.*)\|\s*$", re.M)
 
 
@@ -62,6 +64,9 @@ def check(inventory, ledger):
                 errors.append(f"{fid} {p}: unknown value {value!r}")
             elif value == "done" and not (re.search(r"`[^`]+`", e) and re.search(r"#\d+", e)):
                 errors.append(f"{fid} {p}: done needs a `test name` and a PR number (#N)")
+            elif value == "done" and HAND_STEP.search(e):
+                errors.append(f"{fid} {p}: done cites hand step {HAND_STEP.search(e).group()}; a cell that waits on "
+                              "docs/manual-test.md is hand-test")
             elif value == "impossible" and not re.search(r"https?://\S+", e):
                 errors.append(f"{fid} {p}: impossible needs a doc citation (URL)")
             elif value == "n/a":
@@ -134,6 +139,10 @@ def self_test():
     fails(good.replace("Mac: `HotkeyTests", "Linux: `HotkeyTests"), "F01 Mac: done needs")  # no cross-platform evidence
     fails(good.replace("n/a billing: store only", "n/a billing"), "F01 iPhone: n/a needs")
     fails(good.replace("| todo |", "| wip |"), "unknown value 'wip'")
+    for step in ("M-NS-1", "I-DICT-1", "L-KEY-2", "MEET-3"):  # done may not wait on a hand step (#41)
+        fails(good.replace("#3;", f"#3, see {step};"), f"F01 Mac: done cites hand step {step}")
+    for text in ("UTF-8", "SHA-256", "F01-2"):  # look-alikes that are not step ids
+        assert check(inv, good.replace("#3;", f"#3 {text};"))[0] == [], text
 
     # outside: only for a column the feature's Wispr platforms don't map to.
     ios_inv = inv + "| F09 | k | i | y | x | P2 | y |\n"
