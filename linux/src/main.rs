@@ -268,13 +268,22 @@ fn start_indicator() -> Result<Indicator, String> {
         eprintln!("shepetal: no private XDG_RUNTIME_DIR, so no 🤫 indicator; hints go to stderr only");
         return Ok(Indicator::default());
     };
-    let ind = Indicator::bind(&sock).map_err(|e| format!("{}: {e}", sock.display()))?;
+    let ind = match Indicator::bind(&sock) {
+        Ok(ind) => ind,
+        // Two daemons would both record on every fn press.
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => return Err(format!("{}: {e}", sock.display())),
+        Err(e) => {
+            eprintln!("shepetal: {}: {e}; no 🤫 indicator, hints go to stderr only", sock.display());
+            return Ok(Indicator::default());
+        }
+    };
     if env("XDG_SESSION_TYPE") == "wayland" && env("XDG_CURRENT_DESKTOP").to_ascii_uppercase().contains("GNOME") {
         // GNOME lets no app place an overlay; the shell extension reads the socket instead.
         eprintln!("shepetal: on GNOME Wayland 🤫 comes from the shepetal GNOME Shell extension (linux/gnome-extension/)");
-    } else if let Err(e) = Command::new("shepetal-indicator").spawn() {
-        // It exits by itself when this process closes the socket, also on SIGKILL.
-        eprintln!("shepetal: 🤫 indicator not started: shepetal-indicator: {e} (see docs/linux.md)");
+    } else {
+        // It exits by itself when this process closes the socket, also on SIGKILL, and is
+        // started again whenever it exits while this process runs.
+        indicator::supervise("shepetal-indicator".into(), Duration::from_secs(2));
     }
     Ok(ind)
 }
@@ -738,6 +747,22 @@ mod tests {
             });
             assert!(!d.join("typed").exists());
             assert_eq!(read_lines(r, 5), ["idle", "recording", "idle", "hint Hold fn to talk · double-tap for hands-free", "idle"]);
+        });
+    }
+
+    #[test]
+    fn a_silent_recording_puts_the_indicator_back_to_idle() {
+        // No words: nothing typed, and 🤫 must not keep pulsing blue.
+        with_fake_tools("silent", |d| {
+            let sherpa = std::fs::read_to_string(d.join("sherpa-onnx-offline")).unwrap();
+            std::fs::write(d.join("sherpa-onnx-offline"), sherpa.replace("Hello\\n  world.", "")).unwrap();
+            let home = d.join("home");
+            let (ind, r) = indicator_in(d);
+            let mut rec = None;
+            act(Action::Start, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn", &ind).unwrap();
+            act(Action::Stop, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn", &ind).unwrap();
+            assert_eq!(read_lines(r, 4), ["idle", "recording", "processing", "idle"]);
+            assert!(!d.join("typed").exists());
         });
     }
 
