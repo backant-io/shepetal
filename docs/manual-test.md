@@ -130,10 +130,13 @@ Setup (I-SETUP-1 below). The simulator has no usable mic path for this flow, so 
 2. Expected: the app says "Cancelled. The recording is kept." Back in Notes, nothing is inserted and the keyboard says "Cancelled. Shepetal kept the audio."
 3. Download the container. Expected: `audio/<id>.wav` holds the sentence and `audio/<id>.json` has `"outcome":"cancelled"`. History lists it as `cancelled`.
 
-### I-FIELD-1: wrong field discard
-1. In note A, start a dictation, go back and say a sentence.
-2. Without stopping, open note B (or a text field in another app), bring up the Shepetal keyboard there and tap the mic. This stops the recording.
-3. Expected: nothing is inserted into note B. A yellow ring and "Not inserted, because you are in a different field now. The text is in Shepetal's history." show next to 🤫. Shepetal's history lists the recording with its text.
+### I-FIELD-1: a result for a different field goes to the clipboard
+1. Copy a word from anywhere, so the clipboard holds something you recognize.
+2. In note A, start a dictation, go back and say a sentence.
+3. Without stopping, open note B (or a text field in another app), bring up the Shepetal keyboard there and tap the mic. This stops the recording.
+4. Expected: nothing is inserted into note B. "You are in a different field now, so the text is on the clipboard. Tap the field and choose Paste." shows next to 🤫, with no ring. Shepetal's history lists the recording with its text.
+5. Tap note B and choose Paste. Expected: the sentence is pasted as plain text, and the word from step 1 is gone from the clipboard. Go back to note A: nothing is inserted there either.
+6. With a Mac signed in to the same Apple Account and Handoff on, press ⌘V in a Mac text field. Expected: the sentence does not arrive (the copy is local to the iPhone).
 
 ### I-SHORT-1: too short
 1. Tap the mic, go back, and tap the mic again right away (under 0.3 s of audio).
@@ -172,7 +175,7 @@ Setup (I-SETUP-1 below). The simulator has no usable mic path for this flow, so 
 
 ### I-DOCID-1: field identity survives a keyboard relaunch
 1. Start a dictation in a note and go back. Before stopping, switch to the system keyboard with the globe key and back to Shepetal, in the same note.
-2. Tap the mic. Expected: the text is inserted. If you see "Not inserted, because you are in a different field now" instead, the keyboard is given a new `documentIdentifier` after a relaunch, and the field check discards every such result. Report it.
+2. Tap the mic. Expected: the text is inserted. If you see "You are in a different field now, so the text is on the clipboard" instead, the keyboard is given a new `documentIdentifier` after a relaunch, and every such result goes to the clipboard instead of the field. Report it.
 
 ## Meetings
 
