@@ -4,6 +4,10 @@ import PackageDescription
 let package = Package(
     name: "shepetal-meeting",
     platforms: [.macOS("14.4")],
+    products: [
+        .library(name: "MeetingCore", targets: ["MeetingCore"]),
+        .library(name: "MeetingMac", targets: ["MeetingMac"]),
+    ],
     targets: [
         .target(name: "MeetingCore"),
         .target(name: "MeetingMac", dependencies: ["MeetingCore"]),
