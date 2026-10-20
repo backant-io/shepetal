@@ -31,7 +31,18 @@ pub fn choose(env: &Env, has: impl Fn(&str) -> bool) -> Option<Backend> {
     order.iter().copied().find(|b| !(gnome && *b == Backend::Wtype) && has(b.bin()))
 }
 
+/// The clipboard tool for this session, for text that is not typed (goal rule 8).
+pub fn clipboard(env: &Env, has: impl Fn(&str) -> bool) -> Option<Backend> {
+    let order: &[Backend] = if env.session == "wayland" { &[Backend::WlCopy, Backend::Xclip] } else { &[Backend::Xclip] };
+    order.iter().copied().find(|b| has(b.bin()))
+}
+
 impl Backend {
+    /// Copies instead of typing: the user pastes.
+    pub fn is_clipboard(self) -> bool {
+        matches!(self, Backend::WlCopy | Backend::Xclip)
+    }
+
     pub fn bin(self) -> &'static str {
         match self {
             Backend::Wtype => "wtype",
@@ -116,6 +127,18 @@ mod tests {
         std::env::set_var("PATH", path);
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(got, tools.map(|(b, _)| (b, true)));
+    }
+
+    #[test]
+    fn clipboard_tool_follows_the_session() {
+        let clip = |session, bins: &[&str]| clipboard(&Env { session, desktop: "" }, |b| bins.contains(&b));
+        assert_eq!(clip("wayland", ALL), Some(WlCopy));
+        // XWayland apps read the X clipboard, which Wayland compositors sync.
+        assert_eq!(clip("wayland", &["xclip"]), Some(Xclip));
+        assert_eq!(clip("x11", ALL), Some(Xclip));
+        assert_eq!(clip("x11", &["wl-copy"]), None);
+        assert!(WlCopy.is_clipboard() && Xclip.is_clipboard());
+        assert!(!Wtype.is_clipboard() && !Xdotool.is_clipboard() && !Ydotool.is_clipboard());
     }
 
     #[test]

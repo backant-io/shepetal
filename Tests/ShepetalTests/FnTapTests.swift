@@ -13,8 +13,8 @@ final class FnTapTests: XCTestCase {
 
     override func setUp() {
         tap = FnTap(fnHeld: { [unowned self] in self.held })
-        tap.onChange = { [unowned self] in self.changes.append($0) }
-        tap.onOtherKey = { [unowned self] in self.otherKeys += 1 }
+        tap.onChange = { [unowned self] down, _ in self.changes.append(down) }
+        tap.onOtherKey = { [unowned self] _ in self.otherKeys += 1 }
     }
 
     func key(_ code: Int64, fn: Bool = false) -> CGEvent {
