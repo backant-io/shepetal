@@ -266,7 +266,9 @@ fn record(wav: &PathBuf) -> std::io::Result<Child> {
 
 /// SIGINT so the recorder finalizes the WAV header; SIGKILL would leave it broken.
 fn stop(mut child: Child) {
-    let _ = Command::new("kill").args(["-INT", &child.id().to_string()]).status();
+    // The shell's builtin kill: minimal images (Debian slim) have no /usr/bin/kill, and a failed
+    // SIGINT would leave the mic open.
+    let _ = Command::new("sh").args(["-c", "kill -INT \"$0\"", &child.id().to_string()]).status();
     let _ = child.wait();
 }
 
@@ -344,6 +346,9 @@ fn daemon() -> Res {
     watch_keys(tx, &devs)?;
     let names: Vec<_> = devs.iter().map(|(p, n)| format!("{} ({n})", p.display())).collect();
     eprintln!("shepetal: hold {key_name} to talk, double-tap for hands-free. keyboards {}, model {}, insert {typer:?}", names.join(", "), choice.model);
+    if let Some(note) = focus::Session::from_env().unreadable_note() {
+        eprintln!("shepetal: {note}");
+    }
 
     listen(&rx, key, &key_name, &data_home, &choice, typer, &ind)
 }
@@ -355,13 +360,22 @@ fn start_indicator() -> Result<Indicator, String> {
         eprintln!("shepetal: no private XDG_RUNTIME_DIR, so no 🤫 indicator; hints go to stderr only");
         return Ok(Indicator::default());
     };
-    let ind = Indicator::bind(&sock).map_err(|e| format!("{}: {e}", sock.display()))?;
+    let ind = match Indicator::bind(&sock) {
+        Ok(ind) => ind,
+        // Two daemons would both record on every fn press.
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => return Err(format!("{}: {e}", sock.display())),
+        Err(e) => {
+            eprintln!("shepetal: {}: {e}; no 🤫 indicator, hints go to stderr only", sock.display());
+            return Ok(Indicator::default());
+        }
+    };
     if env("XDG_SESSION_TYPE") == "wayland" && env("XDG_CURRENT_DESKTOP").to_ascii_uppercase().contains("GNOME") {
         // GNOME lets no app place an overlay; the shell extension reads the socket instead.
         eprintln!("shepetal: on GNOME Wayland 🤫 comes from the shepetal GNOME Shell extension (linux/gnome-extension/)");
-    } else if let Err(e) = Command::new("shepetal-indicator").spawn() {
-        // It exits by itself when this process closes the socket, also on SIGKILL.
-        eprintln!("shepetal: 🤫 indicator not started: shepetal-indicator: {e} (see docs/linux.md)");
+    } else {
+        // It exits by itself when this process closes the socket, also on SIGKILL, and is
+        // started again whenever it exits while this process runs.
+        indicator::supervise("shepetal-indicator".into(), Duration::from_secs(2));
     }
     Ok(ind)
 }
@@ -687,6 +701,8 @@ mod tests {
             ("wtype", format!("cat > \"{d_}/typed\"\n")),
             ("xdotool", format!("if [ \"$1\" = getactivewindow ]; then cat \"{d_}/active\"; else cat > \"{d_}/typed\"; fi\n")),
             ("xclip", format!("cat > \"{d_}/clipboard\"\n")),
+            ("swaymsg", format!("echo \"$*\" > \"{d_}/focus.args\"\ncat \"{d_}/sway-tree\"\n")),
+            ("hyprctl", format!("echo \"$*\" > \"{d_}/focus.args\"\ncat \"{d_}/hypr-active\"\n")),
             ("wl-copy", format!("cat > \"{d_}/clipboard\"\n")),
             ("pw-play", format!("echo \"$*\" > \"{d_}/played\"\n")),
         ];
@@ -696,7 +712,7 @@ mod tests {
         }
         // Put PATH back and remove the tools also when `f` panics, or the next test would run
         // this test's tools.
-        const SESSION: [&str; 6] = ["XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE", "XDG_DATA_HOME", "XDG_CONFIG_HOME"];
+        const SESSION: [&str; 7] = ["XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY", "XDG_DATA_HOME", "XDG_CONFIG_HOME"];
         struct Restore(Vec<(&'static str, Option<std::ffi::OsString>)>, PathBuf);
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -711,7 +727,7 @@ mod tests {
         }
         let saved = SESSION.iter().chain(&["PATH"]).map(|k| (*k, std::env::var_os(k))).collect();
         let _restore = Restore(saved, d.clone());
-        SESSION.iter().for_each(std::env::remove_var);
+        SESSION.iter().for_each(|k| std::env::remove_var(k));
         let path = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", format!("{d_}:{path}"));
         f(&d);
@@ -855,6 +871,22 @@ mod tests {
     }
 
     #[test]
+    fn a_silent_recording_puts_the_indicator_back_to_idle() {
+        // No words: nothing typed, and 🤫 must not keep pulsing blue.
+        with_fake_tools("silent", |d| {
+            let sherpa = std::fs::read_to_string(d.join("sherpa-onnx-offline")).unwrap();
+            std::fs::write(d.join("sherpa-onnx-offline"), sherpa.replace("Hello\\n  world.", "")).unwrap();
+            let home = d.join("home");
+            let (ind, r) = indicator_in(d);
+            let mut rec = None;
+            act(Action::Start, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn", &ind).unwrap();
+            act(Action::Stop, &mut rec, &home, &cpu(), insert::Backend::Wtype, "fn", &ind).unwrap();
+            assert_eq!(read_lines(r, 4), ["idle", "recording", "processing", "idle"]);
+            assert!(!d.join("typed").exists());
+        });
+    }
+
+    #[test]
     fn a_failed_dictation_turns_the_indicator_yellow() {
         with_fake_tools("error", |d| {
             let home = d.join("home");
@@ -919,6 +951,52 @@ mod tests {
             assert_eq!(lines, ["recording", "processing", "idle"]);
             assert!(!d.join("typed").exists(), "nothing typed into the other window");
             assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "Hello world.");
+        });
+    }
+
+    #[test]
+    fn focus_is_read_again_when_the_text_is_ready() {
+        // Goal rule 8: a switch during transcription counts. The fake model moves focus to
+        // another window while it runs, so the text must go to the clipboard.
+        with_fake_tools("latefocus", |d| {
+            let sherpa = std::fs::read_to_string(d.join("sherpa-onnx-offline")).unwrap();
+            let moving = sherpa.replacen("#!/bin/sh\n", &format!("#!/bin/sh\necho 54525959 > \"{}/active\"\n", d.display()), 1);
+            std::fs::write(d.join("sherpa-onnx-offline"), moving).unwrap();
+            let (hint, _) = dictate_on_x11(d, insert::Backend::Xdotool, Some("41943047"), Some("41943047"));
+            assert_eq!(hint.as_deref(), Some(FOCUS_MOVED));
+            assert!(!d.join("typed").exists());
+            assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "Hello world.");
+        });
+    }
+
+    #[test]
+    fn focus_is_read_from_sway_and_hyprland() {
+        with_fake_tools("wlfocus", |d| {
+            std::env::set_var("XDG_SESSION_TYPE", "wayland");
+            std::env::set_var("SWAYSOCK", "/run/user/1000/sway-ipc.sock");
+            std::fs::write(d.join("sway-tree"), r#"{"id": 1, "focused": false, "nodes": [{"id": 12, "focused": true, "nodes": []}]}"#).unwrap();
+            let s = focus::Session::from_env();
+            assert_eq!(s, focus::Session::Sway);
+            assert_eq!(s.focused().as_deref(), Some("12"));
+            assert_eq!(std::fs::read_to_string(d.join("focus.args")).unwrap(), "-t get_tree\n");
+
+            std::env::remove_var("SWAYSOCK");
+            std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "abc");
+            std::fs::write(d.join("hypr-active"), r#"{"address": "0x55aa", "class": "kitty"}"#).unwrap();
+            let s = focus::Session::from_env();
+            assert_eq!(s, focus::Session::Hyprland);
+            assert_eq!(s.focused().as_deref(), Some("0x55aa"));
+            assert_eq!(std::fs::read_to_string(d.join("focus.args")).unwrap(), "activewindow -j\n");
+        });
+    }
+
+    #[test]
+    fn a_hung_focus_tool_is_cut_off() {
+        with_fake_tools("hung", |d| {
+            std::fs::write(d.join("xdotool"), "#!/bin/sh\nexec sleep 5\n").unwrap();
+            let t = Instant::now();
+            assert_eq!(focus::Session::X11.focused(), None);
+            assert!(t.elapsed() < Duration::from_millis(1500), "waited {:?}", t.elapsed());
         });
     }
 

@@ -42,16 +42,25 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
         }
         let landed = PasteCheck.verdict(postedAt: posted, requestedAt: requestedAt, now: now) == .landed
         if !landed {
-            // Nothing took the paste (focus moved, or the app ignores Cmd+V): leave the text on the
-            // clipboard as plain text so the user can paste it themselves.
-            pasteboard.clearContents()
-            pasteboard.setString(text, forType: .string)
+            // Nothing took the paste (focus moved, or the app ignores Cmd+V).
+            leaveOnClipboard(text)
             return Result(landed: false, restored: false)
         }
         let wait = PasteCheck.restoreAt(postedAt: posted, requestedAt: requestedAt) - now
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         restore(saved)
         return Result(landed: landed, restored: snapshot() == saved)
+    }
+
+    /// Rule 8: text that is not pasted stays on the clipboard as plain text, so the user can press ⌘V.
+    /// The user's old clipboard is not restored then.
+    /// The Concealed and Transient markers stay on it: clipboard managers skip it, and ⌘V still pastes it.
+    func leaveOnClipboard(_ text: String) {
+        pasteboard.clearContents()
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        for m in Self.markers { item.setData(Data(), forType: m) }
+        pasteboard.writeObjects([item])
     }
 
     nonisolated func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
@@ -116,23 +125,55 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     }
 }
 
-/// Text around the cursor of the focused field, through Accessibility. Empty when unreadable.
+/// Text around the cursor of the focused field, and the selection the paste replaces, through
+/// Accessibility (`AXValue` and `AXSelectedTextRange`). Empty when unreadable.
 enum FocusedText {
     static func context() -> (before: String, after: String) {
+        read().map { split($0, $1) } ?? ("", "")
+    }
+
+    static func selected() -> String {
+        read().map { s, r in
+            let ns = s as NSString
+            let start = min(max(r.location, 0), ns.length)
+            return ns.substring(with: NSRange(location: start, length: min(max(r.length, 0), ns.length - start)))
+        } ?? ""
+    }
+
+    /// The focused app's pid and its focused window, to tell at paste time whether focus moved (rule 8).
+    /// Without Accessibility only the frontmost app is known, and the window is nil.
+    static func window() -> (app: Int32, window: AXUIElement?)? {
+        let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        var app: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString,
+                                            &app) == .success, let app else {
+            return PasteGate.focus(axPid: nil, frontmostPid: frontmost, window: nil as AXUIElement?)
+        }
+        let element = app as! AXUIElement
+        // This runs on the main thread at fn-down: a hung app must not stall fn handling for AX's default 6 s.
+        AXUIElementSetMessagingTimeout(element, 0.1)
+        var pid: pid_t = 0
+        let axPid: Int32? = AXUIElementGetPid(element, &pid) == .success ? pid : nil
+        var window: CFTypeRef?
+        let ok = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success
+        return PasteGate.focus(axPid: axPid, frontmostPid: frontmost, window: ok ? (window as! AXUIElement) : nil)
+    }
+
+    private static func read() -> (String, NSRange)? {
         let system = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused else { return ("", "") }
+              let element = focused else { return nil }
         let el = element as! AXUIElement
         var value: CFTypeRef?
         var rangeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
               let string = value as? String,
               AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-              let rangeValue = rangeRef else { return ("", "") }
+              let rangeValue = rangeRef else { return nil }
         var range = CFRange()
-        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return ("", "") }
-        return split(string, NSRange(location: range.location, length: range.length))
+        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
+        return (string, NSRange(location: range.location, length: range.length))
     }
 
     static func split(_ s: String, _ selection: NSRange) -> (before: String, after: String) {

@@ -13,11 +13,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var dictation: Dictation?
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
-    private var engineStatus = "Loading speech model…"
+    private var engineStatus = "Loading on-device speech recognition…"
     private var busy = false
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
+    private var focusAtStart: (app: Int32, window: AXUIElement?)?
+    private let sounds = Sounds()
+    private lazy var secureInput = SecureInput(indicator: indicator)
+    private var permissions: PermissionMonitor!
+    private let fnWatch = FnWatch()
+    private var tapFailed = false
+    private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
 
@@ -49,7 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
         applyRetention()
-        tap.onChange = { [weak self] down in self?.fn(down) }
+        tap.onChange = { [weak self] down in self?.fnWatch.tapEvent(); self?.fn(down) }
+        fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
+        fnWatch.start()
         tap.onOtherKey = { [weak self] in self?.run { $0.otherKeyDown(at: ProcessInfo.processInfo.systemUptime) } }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
@@ -57,14 +66,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.applyRetention() }
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.startTapIfAllowed() }
+            MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
 
+        // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
+        Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
+                             hint: { [weak self] in self?.indicator.show($0, seconds: 6) })
+        permissions = PermissionMonitor(revoked: { [weak self] message in
+            self?.fail(message)
+            if self?.allowPrompts == true { self?.showOnboarding() }
+        }, restored: { [weak self] in
+            if self?.indicator.mode == .error { self?.indicator.set(.idle) }
+        })
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
         }
         if hintAtLaunch { indicator.show(Hint.shortPress, seconds: Hint.seconds) }
+        applyFnKeySetting()
+    }
+
+    /// "Press 🌐 key to" must be Do Nothing, or fn switches the input source instead of dictating.
+    /// Checked at every launch; says something only when it changed the setting or could not.
+    private func applyFnKeySetting() {
+        guard FnKeySystem.enabled else { return }
+        let outcome = FnKeySetting.apply(FnKeySystem.io)
+        switch outcome {
+        case .alreadySet: break
+        case .changed: indicator.show(FnKeySetting.changedHint, seconds: 6)
+        case .failed: fnProblem(FnKeySetting.failedHint)
+        }
+    }
+
+    private func fnProblem(_ message: String) {
+        FnDiagnostics.problem = message
+        indicator.set(.error)
+        indicator.show(message, seconds: 8)
     }
 
     // MARK: fn → gestures
@@ -75,6 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             indicator.show("Still transcribing the last one", seconds: Hint.seconds)
             return
         }
+        if down, dictation?.gesture.state == .idle, !Account.shared.allowFnDown() { return }  // signed out or trial over
         run { down ? $0.fnDown(at: t) : $0.fnUp(at: t) }
     }
 
@@ -100,10 +138,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func show(_ action: GestureAction) {
+        sounds.play(action)
         switch action {
         case .start:
+            focusAtStart = FocusedText.window()
             indicator.set(.recording)
             appAtStart = AppContext.capture()
+            if let g = dictation?.gesture {  // the start sound waits until the press is a hold
+                DispatchQueue.main.asyncAfter(deadline: .now() + g.holdThreshold + 0.01) { [weak self] in
+                    MainActor.assumeIsolated { if let g = self?.dictation?.gesture { self?.sounds.holdCheck(g) } }
+                }
+            }
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
@@ -126,10 +171,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busy = true
         indicator.set(.processing)
         let appAtStart = appAtStart
+        let start = focusAtStart
         Task {
             let app = await appAtStart?.value ?? AppContext()
             let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
-                                             sendPaste: Inserter.postCmdV)
+                                             selection: FocusedText.selected,
+                                             focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
+                                             secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false
             if let error = run.error { fail(error) } else { indicator.set(.idle) }
         }
@@ -146,16 +194,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             let e = try await Speech.load()
             engine = e
-            engineStatus = "Model: \(e.name)"
+            engineStatus = EngineLabel.status(e.name)
         } catch {
-            engineStatus = error.localizedDescription
-            fail("No speech model. Open the 🤫 menu.")
+            NSLog("shepetal: speech: %@", error.localizedDescription)  // model names stay in the log
+            engineStatus = ParakeetEngine.isInstalled ? "On-device speech recognition could not start"
+                                                      : "On-device speech recognition is not downloaded yet"
+            fail("No speech recognition. Open the 🤫 menu.")
         }
     }
 
     private func startTapIfAllowed() {
         guard !tap.isRunning, Permission.inputMonitoring.granted else { return }
-        if tap.start(), indicator.mode == .error, Permission.missing.isEmpty { indicator.set(.idle) }
+        if tap.start() {
+            tapFailed = false
+            if FnDiagnostics.problem == FnHealth.hint { FnDiagnostics.problem = nil }
+            if indicator.mode == .error, Permission.missing.isEmpty { indicator.set(.idle) }
+        } else if !tapFailed {
+            tapFailed = true  // granted, yet macOS refuses the tap: the grant belongs to another build
+            fnProblem(FnHealth.hint)
+        }
     }
 
     private func applyRetention() {
@@ -176,8 +233,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: tap.isRunning ? "Hold fn to talk, double-tap for hands-free" : "fn is not being watched yet", action: nil, keyEquivalent: "")
         menu.addItem(withTitle: engineStatus, action: nil, keyEquivalent: "")
         menu.addItem(item("Open Shepetal…", #selector(openHub)))
+        Account.shared.menuItems().forEach(menu.addItem)
         if engine == nil, !ParakeetEngine.isInstalled {
-            menu.addItem(item("Download speech model (Parakeet v3, about 470 MB)", #selector(downloadModel)))
+            menu.addItem(item("Download on-device speech recognition (about 470 MB)", #selector(downloadModel)))
         }
         menu.addItem(.separator())
 
@@ -205,6 +263,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keepItem.submenu = keep
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
+        menu.addItem(sounds.menuItem)
+        menu.addItem(loginItem.menuItem)
+        if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
+            menu.addItem(item("Restore 🌐 key setting (\(FnKeySetting.describe(previous)))", #selector(restoreFnKey)))
+        }
         menu.addItem(item(Permission.missing.isEmpty ? "Permissions…" : "Permissions… (\(Permission.missing.count) missing)", #selector(openPermissions)))
         menu.addItem(.separator())
         for (title, url) in Self.donate {
@@ -247,6 +310,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hub?.show()
     }
 
+    @objc private func restoreFnKey() {
+        let previous = FnKeySetting.restorable(FnKeySystem.io)
+        guard FnKeySetting.restore(FnKeySystem.io) else { return }
+        indicator.show("🌐 key back to \(FnKeySetting.describe(previous)) until Shepetal starts again", seconds: 6)
+    }
+
     @objc private func openRecordings() { NSWorkspace.shared.open(Paths.audio) }
     @objc private func openPermissions() { showOnboarding() }
 
@@ -255,9 +324,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func downloadModel() {
-        engineStatus = "Downloading Parakeet v3…"
+        engineStatus = "Downloading on-device speech recognition…"
         Task {
-            do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: \(error.localizedDescription)"; return }
+            do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""); return }
             await loadEngine()
         }
     }

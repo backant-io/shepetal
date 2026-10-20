@@ -14,7 +14,8 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::process::Command;
+use std::time::{Duration, Instant};
 
 struct Shared {
     /// The last state line, sent to an indicator when it connects. Text is not replayed.
@@ -39,7 +40,7 @@ impl Indicator {
     /// belongs to a running daemon, and two daemons would both record on every fn press.
     pub fn bind(path: &Path) -> std::io::Result<Indicator> {
         if UnixStream::connect(path).is_ok() {
-            return Err(std::io::Error::other("another shepetal daemon is running"));
+            return Err(std::io::Error::new(std::io::ErrorKind::AddrInUse, "another shepetal daemon is running"));
         }
         let _ = std::fs::remove_file(path);
         let listener = UnixListener::bind(path)?;
@@ -47,7 +48,12 @@ impl Indicator {
         let shared = Arc::new(Mutex::new(Shared { state: "idle".into(), clients: vec![] }));
         let s = shared.clone();
         std::thread::spawn(move || {
-            for c in listener.incoming().flatten() {
+            for c in listener.incoming() {
+                let Ok(c) = c else {
+                    // E.g. out of file descriptors: wait instead of spinning a core.
+                    std::thread::sleep(Duration::from_millis(100));
+                    continue;
+                };
                 // A reader that stops reading must not stall the dictation loop.
                 let _ = c.set_write_timeout(Some(Duration::from_millis(100)));
                 let mut g = s.lock().unwrap();
@@ -71,6 +77,34 @@ impl Indicator {
         }
         g.clients.retain(|c| writeln!(&*c, "{line}").is_ok());
     }
+}
+
+/// Keep the indicator program running for as long as the daemon runs (goal rule 3: 🤫 is always
+/// there): start it, and when it exits (a crash, an X server or compositor restart, a display that
+/// was not ready yet) start it again after `delay`. The delay doubles, up to 32 times, while it
+/// keeps exiting within 30 s. Waiting on it also reaps it, so no zombie is left. A program that
+/// cannot be started at all (not installed) is reported once and not retried.
+pub fn supervise(program: String, delay: Duration) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || {
+        let mut wait = delay;
+        loop {
+            let started = Instant::now();
+            let status = match Command::new(&program).spawn() {
+                Ok(mut child) => child.wait(),
+                Err(e) => {
+                    eprintln!("shepetal: 🤫 indicator not started: {program}: {e} (see docs/linux.md)");
+                    return;
+                }
+            };
+            if started.elapsed() >= Duration::from_secs(30) {
+                wait = delay;
+            }
+            let how = status.map_or_else(|e| e.to_string(), |s| s.to_string());
+            eprintln!("shepetal: 🤫 indicator exited ({how}); starting it again in {wait:?}");
+            std::thread::sleep(wait);
+            wait = (wait * 2).min(delay * 32);
+        }
+    })
 }
 
 #[cfg(test)]
@@ -141,11 +175,65 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_that_never_reads_cannot_stall_the_daemon() {
+        let (dir, ind, stuck) = bound("stuck");
+        let mut live = BufReader::new(UnixStream::connect(dir.join("shepetal.sock")).unwrap());
+        assert_eq!(line(&mut live), "idle\n");
+        // Enough to fill any socket buffer many times over; `stuck` never reads.
+        let (tx, rx) = std::sync::mpsc::channel();
+        let sender = ind.clone();
+        std::thread::spawn(move || {
+            let text = "x".repeat(1000);
+            for _ in 0..3000 {
+                sender.send(&format!("hint {text}"));
+            }
+            sender.send("recording");
+            tx.send(()).unwrap();
+        });
+        rx.recv_timeout(Duration::from_secs(10)).expect("send blocked on a reader that does not read");
+        drop(stuck);
+        // `live` read nothing meanwhile either, so it was dropped too; a new reader still works.
+        let mut fresh = BufReader::new(UnixStream::connect(dir.join("shepetal.sock")).unwrap());
+        assert_eq!(line(&mut fresh), "recording\n");
+        ind.send("idle");
+        assert_eq!(line(&mut fresh), "idle\n");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn the_indicator_is_started_again_when_it_exits() {
+        // Goal rule 3: a crashed indicator comes back while the daemon runs.
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("shepetal-sup-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let prog = dir.join("fake-indicator");
+        std::fs::write(&prog, format!("#!/bin/sh\necho started >> '{}/runs'\nexit 1\n", dir.display())).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = supervise(prog.display().to_string(), Duration::from_millis(10));
+        let runs = || std::fs::read_to_string(dir.join("runs")).map_or(0, |s| s.lines().count());
+        let t = Instant::now();
+        while runs() < 3 && t.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(runs() >= 3, "started {} times", runs());
+
+        // Not installed: reported once, and the supervisor ends instead of retrying forever.
+        let h = supervise(dir.join("missing").display().to_string(), Duration::from_millis(10));
+        let t = Instant::now();
+        while !h.is_finished() && t.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(h.is_finished());
+    }
+
+    #[test]
     fn a_running_daemon_keeps_its_socket_and_a_dead_ones_is_replaced() {
         let (dir, _ind, _r) = bound("twice");
         let sock = dir.join("shepetal.sock");
         let err = Indicator::bind(&sock).err().expect("a second daemon must not start");
         assert_eq!(err.to_string(), "another shepetal daemon is running");
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
 
         let stale = dir.join("stale.sock");
         // A socket file nobody accepts on. Not a dropped UnixListener: a test in another thread

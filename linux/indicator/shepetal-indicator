@@ -62,7 +62,10 @@ def pulse_alpha(seconds):
 
 def main():
     signal.signal(signal.SIGINT, signal.SIG_DFL)
-    path = os.path.join(os.environ.get("XDG_RUNTIME_DIR", ""), "shepetal.sock")
+    runtime = os.environ.get("XDG_RUNTIME_DIR", "")
+    if not runtime.startswith("/"):
+        sys.exit("shepetal-indicator: XDG_RUNTIME_DIR is not set; the daemon's socket lives there.")
+    path = os.path.join(runtime, "shepetal.sock")
     conn = socket.socket(socket.AF_UNIX)
     try:
         conn.connect(path)
