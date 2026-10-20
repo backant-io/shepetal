@@ -88,7 +88,9 @@ public enum Hint {
     public static let seconds: TimeInterval = 3
 }
 
-/// Which events are fn. fn is keycode 63 on flagsChanged; newer Apple keyboards send the Globe key as 179.
+/// Which events are fn: keycode 63 on flagsChanged. macOS also sends the Globe key as keycode 179 key events, which
+/// are not presses: read as fn, the pair after a release made one tap a double-tap. Wispr drops them too
+/// ("doubleFn", docs/re/dictation-input.md 2.2). The tap ignores `globe` entirely.
 public enum FnKey {
     public static let keycode: Int64 = 63
     public static let globe: Int64 = 179
@@ -96,7 +98,7 @@ public enum FnKey {
     /// `isKeyDown` is nil for flagsChanged, true/false for keyDown/keyUp.
     /// Returns true when fn went down, false when it went up, nil when the event is not fn.
     public static func transition(keycode: Int64, secondaryFn: Bool, isKeyDown: Bool?) -> Bool? {
-        guard keycode == Self.keycode || keycode == globe else { return nil }
+        guard keycode == Self.keycode else { return nil }
         return isKeyDown ?? secondaryFn
     }
 }

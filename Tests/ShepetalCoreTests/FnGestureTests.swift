@@ -150,8 +150,9 @@ final class FnGestureTests: XCTestCase {
     func testFnKeyClassification() {
         XCTAssertEqual(FnKey.transition(keycode: 63, secondaryFn: true, isKeyDown: nil), true)
         XCTAssertEqual(FnKey.transition(keycode: 63, secondaryFn: false, isKeyDown: nil), false)
-        XCTAssertEqual(FnKey.transition(keycode: 179, secondaryFn: false, isKeyDown: true), true)
-        XCTAssertEqual(FnKey.transition(keycode: 179, secondaryFn: true, isKeyDown: false), false)
+        // The Globe key's extra keycode 179 events are not fn presses (FnTapTests.testGlobeKeyEventsAreIgnored).
+        XCTAssertNil(FnKey.transition(keycode: 179, secondaryFn: true, isKeyDown: true))
+        XCTAssertNil(FnKey.transition(keycode: 179, secondaryFn: false, isKeyDown: false))
         // Arrow keys carry the secondary-fn flag too; they are not fn.
         XCTAssertNil(FnKey.transition(keycode: 123, secondaryFn: true, isKeyDown: true))
         XCTAssertNil(FnKey.transition(keycode: 56, secondaryFn: false, isKeyDown: nil))

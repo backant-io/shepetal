@@ -1,8 +1,8 @@
 import AppKit
 import ShepetalCore
 
-/// Listens for fn (keycode 63, Globe 179) with a listen-only CGEventTap. Re-enables the tap when
-/// macOS turns it off, and releases fn if its key-up was lost while the tap was off.
+/// Listens for fn (keycode 63; the Globe key's extra 179 events are ignored, see `FnKey`) with a listen-only
+/// CGEventTap. Re-enables the tap when macOS turns it off, and releases fn if its key-up was lost while the tap was off.
 /// `onOtherKey` reports any other key pressed while fn is held (fn+Delete, fn+arrows).
 /// Both pass the uptime when the key moved (`FnClock`), which can be well before the main thread reads it.
 final class FnTap {
@@ -39,9 +39,11 @@ final class FnTap {
     func handle(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { return reenable() }
         let keyDown: Bool? = type == .keyDown ? true : type == .keyUp ? false : nil
+        let keycode = event.getIntegerValueField(.keyboardEventKeycode)
+        if keycode == FnKey.globe { return }  // neither fn nor another key (FnKey)
         let t = FnClock.seconds(timestamp: event.timestamp, now: ProcessInfo.processInfo.systemUptime)
-        guard let down = FnKey.transition(keycode: event.getIntegerValueField(.keyboardEventKeycode),
-                                          secondaryFn: event.flags.contains(.maskSecondaryFn), isKeyDown: keyDown) else {
+        guard let down = FnKey.transition(keycode: keycode, secondaryFn: event.flags.contains(.maskSecondaryFn),
+                                          isKeyDown: keyDown) else {
             if keyDown == true, isDown { onOtherKey?(t) }
             return
         }

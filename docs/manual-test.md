@@ -75,7 +75,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 
 ### M-FN-3: short press
 1. Tap fn once, briefly (under half a second), and don't tap again.
-2. Expected: nothing is inserted. "Hold fn to talk · double-tap for hands-free" shows next to 🤫 about half a second after the release, for about 3 s, without another fn press.
+2. Expected: nothing is inserted and the ring never turns orange (a short press is never hands-free). "Hold fn to talk · double-tap for hands-free" shows next to 🤫 about half a second after the release, for about 3 s, without another fn press.
 3. Expected: Recent in the 🤫 menu has a "(too short)" entry, and a new WAV is in Open recordings folder.
 
 ### M-FN-4: fn as a modifier
