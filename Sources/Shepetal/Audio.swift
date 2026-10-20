@@ -52,7 +52,9 @@ final class Resampler {
 
 /// Opens the mic for each dictation (so the macOS mic indicator is on only while dictating)
 /// and collects 16 kHz mono samples. Each open builds a fresh engine on the chosen device, so a device
-/// or format change never reuses a stale format. Not final so tests can replace `open` (the hardware).
+/// or format change never reuses a stale format. Opening the mic can take half a second or more, and fn is
+/// read on the main thread, so every engine call runs on `queue`: `start` returns at once and `stop` waits
+/// for it. Not final so tests can replace `open` (the hardware).
 class Recorder {
     private var engine: AVAudioEngine?
     private let queue = DispatchQueue(label: "io.backant.shepetal.mic")
@@ -65,6 +67,8 @@ class Recorder {
     private(set) var device: MicDevice?
     /// Main thread: the engine stopped itself because the device or its format changed.
     var onConfigurationChange: (() -> Void)?
+    /// Main thread: the mic did not open.
+    var onError: ((String) -> Void)?
 
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
     /// From a successful start until stop, also while a reopen has the engine down or failed, so a failed
@@ -72,22 +76,29 @@ class Recorder {
     private(set) var isRecording = false
 
     /// Starts recording from `device` (nil: the system default input).
-    func start(_ device: MicDevice? = nil) throws {
+    func start(_ device: MicDevice? = nil) {
         lock.withLock { samples = []; events = []; health = MicHealth(start: ProcessInfo.processInfo.systemUptime) }
-        try open(device)
+        self.device = device
         isRecording = true
+        queue.async { [self] in
+            do { try open(device) } catch {
+                let message = "Microphone: \(error.localizedDescription)"
+                DispatchQueue.main.async { self.onError?(message) }
+            }
+        }
     }
 
     /// Opens the same device again, keeping what was recorded so far.
     func reopen() throws {
-        let device = device
-        close()
-        try open(device)
+        try queue.sync { [self] in
+            close()
+            try open(device)
+        }
     }
 
     func stop() -> [Float] {
         isRecording = false
-        close()
+        queue.sync { close() }
         return lock.withLock { samples }
     }
 
@@ -99,6 +110,7 @@ class Recorder {
         }
     }
 
+    /// On `queue`.
     func open(_ device: MicDevice?) throws {
         let engine = AVAudioEngine()
         let input = engine.inputNode
@@ -113,28 +125,16 @@ class Recorder {
         guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechError("No microphone") }
         input.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buf, _ in self?.take(buf) }
         engine.prepare()
-        // Off the main thread, with a timeout, so a hung audio driver cannot freeze the app.
-        var failure: Error?
-        let started = DispatchSemaphore(value: 0)
-        queue.async {
-            do { try engine.start() } catch { failure = error }
-            started.signal()
-        }
-        guard started.wait(timeout: .now() + MicHealth.openTimeout) == .success else {
-            queue.async { input.removeTap(onBus: 0); engine.stop() }  // runs once the hung start returns
-            throw SpeechError("\(device?.name ?? "The mic") did not open within \(Int(MicHealth.openTimeout)) s")
-        }
-        if let failure {
+        do { try engine.start() } catch {
             input.removeTap(onBus: 0)
-            throw failure
+            throw error
         }
         self.engine = engine
-        self.device = device
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
                                                           queue: .main) { [weak self] _ in self?.onConfigurationChange?() }
     }
 
-    /// Stops the engine and moves what the resampler still holds into `samples`.
+    /// On `queue`: stops the engine and moves what the resampler still holds into `samples`.
     private func close() {
         if let observer { NotificationCenter.default.removeObserver(observer) }
         observer = nil
@@ -195,6 +195,7 @@ final class Mic: NSObject {
                              bluetoothHintShown: defaults.bool(forKey: "micBluetoothHintShown"))
         super.init()
         recorder.onConfigurationChange = { [weak self] in MainActor.assumeIsolated { self?.configurationChanged() } }
+        recorder.onError = { [weak self] message in MainActor.assumeIsolated { self?.stopDictation(transcribe: false, message) } }
     }
 
     /// Starts watching hot-plug, and notices mics plugged in since the last run.
@@ -208,7 +209,7 @@ final class Mic: NSObject {
         let lidClosed = AudioDevices.lidClosed
         let pick = try MicChoice.pick(devices, forced: forced, ranking: ranking,
                                       systemDefault: AudioDevices.defaultInputUID, lidClosed: lidClosed)
-        try recorder.start(pick)
+        recorder.start(pick)
         rebuilds = 0
         var lines = notices.update(devices, pick: pick)
         if let hint = notices.opening(pick, builtInUsable: !lidClosed && devices.contains { $0.transport == .builtIn }) {
@@ -295,7 +296,7 @@ final class Mic: NSObject {
         let pick = try? MicChoice.pick(devices, forced: forced, ranking: ranking,
                                        systemDefault: AudioDevices.defaultInputUID, lidClosed: lidClosed)
         let menu = NSMenu()
-        let auto = menu.addItem(withTitle: "Automatic" + (pick.map { " (\($0.name))" } ?? ""), action: #selector(automatic), keyEquivalent: "")
+        let auto = menu.addItem(withTitle: "Automatic" + (pick.map { d in " (\(d.name))" } ?? ""), action: #selector(automatic), keyEquivalent: "")
         auto.target = self
         auto.state = forced == nil ? .on : .off
         for d in devices {

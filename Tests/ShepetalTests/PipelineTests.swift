@@ -118,7 +118,8 @@ final class PipelineTests: XCTestCase {
         // Goal rule 8: the text stays on the clipboard as plain text and the old clipboard is not restored.
         XCTAssertEqual(pasteboard.string(forType: .string), "Send the report today.", "the text is left on the clipboard")
         let markers: Set<NSPasteboard.PasteboardType> = [.init("org.nspasteboard.ConcealedType"), .init("org.nspasteboard.TransientType")]
-        XCTAssertTrue(markers.isDisjoint(with: pasteboard.types ?? []), "plain text that clipboard managers keep, not the promised item")
+        // #42: the Concealed and Transient markers stay on it (clipboard managers skip it; ⌘V still pastes it).
+        XCTAssertTrue(markers.isSubset(of: Set(pasteboard.types ?? [])), "the text left on the clipboard keeps its markers")
         XCTAssertEqual(run.paste?.restored, false)
     }
 
@@ -184,6 +185,27 @@ final class PipelineTests: XCTestCase {
         try? "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
         XCTAssertEqual(Pipeline.finishText("call the dentist", dictionary: root.appendingPathComponent("dictionary.txt")),
                        Cleanup.apply("call the orthodontist"), "re-transcribe applies the personal dictionary too")
+    }
+
+    /// The hub's re-transcribe writes the same text step's result to the same row.
+    @MainActor
+    func testRetranscribeStripsTagsAndUpdatesTheRow() async throws {
+        let (_, row) = try await process(speech, FakeEngine("Send it."))
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let e = try await pipeline.retranscribe(row, with: FakeEngine("[BLANK_AUDIO] um, send it"))
+        XCTAssertEqual(e.text, Cleanup.apply("send it"))
+        XCTAssertEqual(try pipeline.history.recent().first { $0.id == row.id }?.text, Cleanup.apply("send it"))
+    }
+
+    /// The hub's re-transcribe reads the pipeline's own dictionary.txt, so it gets the replacements dictation
+    /// gets, and a test or a second data dir never reads the real one.
+    @MainActor
+    func testRetranscribeUsesThePipelinesDictionary() async throws {
+        let (_, row) = try await process(speech, FakeEngine("Send it."))
+        try "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let e = try await pipeline.retranscribe(row, with: FakeEngine("call the dentist"))
+        XCTAssertEqual(e.text, Cleanup.apply("call the orthodontist"))
     }
 
     @MainActor

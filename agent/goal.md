@@ -17,6 +17,7 @@ This is a continuous effort. You work in iterations, and the goal is reached ONL
   - `confirmed`: only Pavel sets this, after he runs the hand test. You never write it.
   - `impossible`: the platform forbids it. Cite the Apple, Linux or kernel doc, and build the closest substitute (example: iPhone cannot capture other apps' call audio, so it records in-person meetings from the mic).
   - `n/a`: only for features that exist solely to serve Wispr's servers or business: billing, subscriptions, referrals, telemetry/analytics, remote feature flags, A/B tests, and account and team administration. Each row gives its reason.
+  - `outside`: the cell's platform is outside the platform mapping for this feature (for example, the Mac and Linux cells of an iOS-only feature). scripts/parity.py allows it only when the inventory shows the feature on no platform that maps to that column.
   - `todo`: not built yet.
 - **Cloud-backed user features still count.** Wispr features that give the user value through its cloud (cross-device sync, share links, MCP export, team dictionaries, server-side formatting, cloud ASR) are NOT `n/a`. Each needs a local-first equivalent: sync through a folder the user picks (iCloud Drive, Syncthing), sharing by exported file, a local MCP server, local models.
 - **`scripts/parity.py` computes the result.** Use plain Python stdlib, with an assert-based self-check. It fails if any inventory ID is missing from the ledger, if a `done` cell has no evidence, or if an `n/a` falls outside the allowed categories. It prints two numbers: **automated coverage** (done + hand-test + confirmed + impossible + n/a, over all cells) and **confirmed coverage** (the same, with hand-test cells counting only once Pavel has confirmed them). The goal is reached when both are 100%.
@@ -66,9 +67,11 @@ On Pavel's Mac: Apple M4 Pro, 24 GB, macOS 15.7, Xcode 26.3 with the iOS 26.3 si
    - Hold fn to talk; double-tap it for hands-free.
    - On Linux, fn is evdev KEY_FN (464). Many laptops handle fn in firmware and never report it. If no keyboard reports it, say so plainly and ask the user to pick a key. Never fall back to another key silently.
    - iPhone uses the keyboard's mic button.
-2. **Too-short presses are ignored, with a text.** If fn is released before the hold threshold and no second tap follows, nothing is transcribed and nothing is inserted. A short hint shows next to the 🤫 indicator for about 2 s, in our own wording (for example "Hold fn to talk · double-tap for hands-free"). The audio is still kept (rule 4) and marked "too short" in history.
+   - **Mac: the install sets "Press 🌐 key to" to Do Nothing**, because otherwise fn switches the input source and dictation never starts. The installer's postinstall (run as the logged-in user) and every app launch read `com.apple.HIToolbox AppleFnUsageType`; if it is not 0 they store the old value once, write 0, restart TextInputMenuAgent and TextInputSwitcher (`killall`, `killall -9`) so it applies without a logout, read it back, and say so once next to 🤫. The menu can restore the old value, and uninstalling restores it. No other system setting is touched.
+2. **Too-short presses are ignored, with a text.** If fn is released before the hold threshold and no second tap follows, nothing is transcribed and nothing is inserted. A short hint shows next to the 🤫 indicator for about 3 s, in our own wording (for example "Hold fn to talk · double-tap for hands-free"). The audio is still kept (rule 4) and marked "too short" in history.
 3. **The 🤫 indicator is tiny, sits in the bottom-left corner, and is always there while shepetal runs.** It is the shushing "psst" emoji, about 18 pt, inset about 8 pt from the bottom-left corner of the main display. It shows at all times while shepetal runs, idle included. It stays on top across all Spaces and over full-screen apps, and it is click-through, so it never takes focus or clicks. It is shepetal's Flow Bar: recording, hands-free, processing, error and hint states all show at or next to it, and it stays tiny.
    - **Mac:** a non-activating, borderless NSPanel.
+   - **The app icon is 🤫 too:** AppIcon.icns is rendered from the shushing-face emoji at every size (16 to 1024 px), so Finder, Launchpad, Spotlight and the Privacy & Security lists show 🤫.
    - **Linux:** an override-redirect, always-on-top, sticky window on X11; wlr-layer-shell on KDE, Sway and Hyprland; a small bundled GNOME Shell extension on GNOME Wayland, because GNOME lets no app place overlays.
    - **iPhone:** no system-wide overlay is possible, so show 🤫 in the keyboard's corner and in the Live Activity / Dynamic Island while a session is active.
 4. **The raw audio of every recording is kept.**
@@ -98,7 +101,8 @@ On Pavel's Mac: Apple M4 Pro, 24 GB, macOS 15.7, Xcode 26.3 with the iOS 26.3 si
   - recording with raw audio kept;
   - local STT (FluidAudio Parakeet v3, with the docs/models.md fallback);
   - insertion by clipboard plus Cmd+V with a paste-success check and clipboard restore (per docs/re/insertion-context.md), or Accessibility where that proves better;
-  - history and the permission onboarding.
+  - history and the permission onboarding;
+  - an installer: `Shepetal-<version>.pkg` (pkgbuild + productbuild, script in the repo) installs Shepetal.app to /Applications, and its postinstall, as the logged-in user, sets the 🌐 key to Do Nothing, turns on launch at login and opens the app, so the user only grants the three permissions. The app is signed with the maintainer's Apple Development identity when there is one; an uninstall script removes the app and the login item, restores the 🌐 key setting, and keeps the user's recordings and history.
 - **M2:** Mac P0 parity.
 - **M3:** Mac meetings plus the summarizer.
 - **M4:** Linux P0 parity plus meetings.

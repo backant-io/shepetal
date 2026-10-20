@@ -68,19 +68,40 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertEqual(s.action(held: [Key.rightCtrl, opt]), .handsFree)
     }
 
-    func testFnAndGlobeAreOneKey() {
-        var s = Shortcuts()
-        XCTAssertEqual(s.action(held: [Key.globe]), .ptt)
-        XCTAssertEqual(s.action(held: [Key.globe, space]), .handsFree)
-        XCTAssertEqual(s.problem([Key.globe], for: .copyLast), .inUse, "Globe is fn, which hold-to-talk has")
-        XCTAssertNil(s.set([Key.globe, Key.s], for: .copyLast))
-        XCTAssertEqual(s.chord(.copyLast), [fn, Key.s], "stored as fn")
+    // The Globe key's keycode 179 events are dropped by the tap (FnTapTests.testGlobeKeyEventsAreIgnored); were one
+    // to get here, it is no key of any chord, so it never stands in for fn.
+    func testGlobeIsNotFn() {
+        XCTAssertEqual(Key.normal(Key.globe), Key.globe)
+        XCTAssertNil(Shortcuts().action(held: [Key.globe]))
+        XCTAssertNil(Key.modifierDown(Key.globe, flags: 0x80_0000))
+    }
 
-        var r = KeyRouter()
-        XCTAssertEqual(r.key(fn, down: true, active: false, canSwallow: true).inputs, [.pttDown])
-        XCTAssertEqual(r.key(Key.globe, down: true, active: true, canSwallow: true).inputs, [], "the twin of a held key is not a new press")
-        XCTAssertEqual(r.key(Key.globe, down: false, active: true, canSwallow: true).inputs, [], "fn is still down")
-        XCTAssertEqual(r.key(fn, down: false, active: true, canSwallow: true).inputs, [.pttUp])
+    // ⇧ or ⌥ with a key types a character, a lone modifier is pressed all day, and ⌘ with one key is some app's
+    // shortcut: bound to an action, each would fire while the user types or works.
+    func testRejectsTypingChords() {
+        let s = Shortcuts()
+        for m in [shift, opt, cmd, ctrl, Key.rightOpt] {
+            XCTAssertEqual(s.problem([m], for: .ptt), .typing, Key.label([m]))
+        }
+        XCTAssertEqual(s.problem([shift, Key.a], for: .pasteLast), .typing, "every capital A")
+        XCTAssertEqual(s.problem([opt, 37], for: .pasteLast), .typing, "⌥L types @ on a German layout")
+        XCTAssertEqual(s.problem([shift, opt, Key.a], for: .pasteLast), .typing)
+        XCTAssertEqual(s.problem([cmd, 17], for: .pasteLast), .blocked, "⌘T")
+        XCTAssertEqual(s.problem([cmd, Key.n], for: .copyLast), .blocked, "⌘N")
+        XCTAssertNil(s.problem([fn], for: .ptt), "fn alone is the default")
+        XCTAssertNil(s.problem([cmd, shift, 17], for: .pasteLast), "⌘ with another modifier is fine")
+        XCTAssertNil(s.problem([opt, Key.mouse(4)], for: .pasteLast), "a mouse button is no typing")
+    }
+
+    // fn+V for paste last would start a recording on the fn first; a hold chord inside another chord the same.
+    func testRejectsChordsHoldingTheHoldChord() {
+        var s = Shortcuts()
+        XCTAssertEqual(s.problem([fn, v], for: .pasteLast), .inUse)
+        XCTAssertNil(s.problem([fn, Key.s, ctrl], for: .handsFree), "hands-free may extend the hold (the promotion)")
+        XCTAssertEqual(s.problem([ctrl, cmd], for: .ptt), .inUse, "inside paste last's ⌃⌘V")
+        XCTAssertNil(s.set([ctrl, opt], for: .ptt))
+        XCTAssertEqual(s.problem([ctrl, opt, Key.s], for: .copyLast), .inUse)
+        XCTAssertNil(s.problem([fn, v], for: .pasteLast), "fn is free once the hold moved")
     }
 
     // The action fires only when the held set is exactly its chord.
@@ -170,7 +191,6 @@ final class ShortcutsTests: XCTestCase {
     func testModifierFlags() {
         XCTAssertEqual(Key.modifierDown(fn, flags: 0x80_0100), true)
         XCTAssertEqual(Key.modifierDown(fn, flags: 0x100), false)
-        XCTAssertEqual(Key.modifierDown(Key.globe, flags: 0x80_0000), true)
         XCTAssertEqual(Key.modifierDown(cmd, flags: 0x10_0010), false, "only right Command is down")
         XCTAssertEqual(Key.modifierDown(Key.rightCmd, flags: 0x10_0010), true)
         XCTAssertNil(Key.modifierDown(57, flags: 0x1_0000), "Caps Lock is not tracked")
@@ -179,18 +199,7 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertFalse(Key.flagUp(cmd, flags: 0x10_0000))
         XCTAssertFalse(Key.flagUp(v, flags: 0), "not a modifier")
         XCTAssertTrue(Key.flagUp(fn, flags: 0))
-        XCTAssertFalse(Key.flagUp(Key.globe, flags: 0), "Globe as a key event is released by its key-up")
-    }
-
-    // A modifier released where the tap could not see it (a password field) must not block every chord.
-    func testStaleModifierIsDroppedByTheNextEventsFlags() {
-        var r = KeyRouter()
-        _ = r.key(cmd, down: true, active: false, canSwallow: true)
-        XCTAssertEqual(r.key(fn, down: true, active: false, canSwallow: true).inputs, [], "Cmd+fn is no chord")
-        _ = r.key(fn, down: false, active: false, canSwallow: true)
-        let flags: UInt64 = 0x80_0000  // the next fn press: fn down, no Command
-        XCTAssertEqual(r.releaseStale { $0 != fn && Key.flagUp($0, flags: flags) }, [])
-        XCTAssertEqual(r.key(fn, down: true, active: false, canSwallow: true).inputs, [.pttDown])
+        XCTAssertFalse(Key.flagUp(Key.globe, flags: 0), "Globe is not a modifier")
     }
 
     func testStoredBindingsRoundTripAndReset() {
@@ -198,9 +207,24 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertNil(s.set([ctrl, opt], for: .ptt))
         let back = Shortcuts(stored: s.stored)
         XCTAssertEqual(back, s)
-        XCTAssertEqual(Shortcuts(stored: ["ptt": [], "nonsense": [1]]), Shortcuts(), "empty and unknown entries fall back")
+        XCTAssertEqual(Shortcuts(stored: ["ptt": [Int](), "nonsense": [1]]).bindings, Shortcuts.defaults, "empty and unknown entries fall back")
         s.reset()
         XCTAssertEqual(s, Shortcuts())
+    }
+
+    // Stored chords pass the same rules as recorded ones (a hand-edited or older plist), entry by entry: one bad
+    // entry keeps only that action's default, and the window can say which.
+    func testStoredChordsPassTheSameRules() {
+        let bare = Shortcuts(stored: ["ptt": [Key.a], "copyLast": [ctrl, opt, Key.s]])
+        XCTAssertEqual(bare.chord(.ptt), [fn], "a bare A would be swallowed in every app")
+        XCTAssertEqual(bare.chord(.copyLast), [ctrl, opt, Key.s], "the good entry is kept")
+        XCTAssertEqual(bare.refused, [.ptt])
+        let twice = Shortcuts(stored: ["pasteLast": [ctrl, cmd, c]])
+        XCTAssertEqual(twice.chord(.pasteLast), [ctrl, cmd, v], "two actions never share a chord")
+        XCTAssertEqual(twice.refused, [.pasteLast])
+        let junk = Shortcuts(stored: ["ptt": "fn", "copyLast": [ctrl, opt, Key.s]])
+        XCTAssertEqual(junk.chord(.copyLast), [ctrl, opt, Key.s], "one value of the wrong type resets only itself")
+        XCTAssertEqual(junk.refused, [.ptt])
     }
 
     func testLabels() {
@@ -212,7 +236,7 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertEqual(Key.label([opt, 18, 29]), "⌥ 1 0")
     }
 
-    // Paste last and copy last use the newest text, whatever happened to it; rows without text are skipped.
+    // Paste last and copy last use the newest text; rows without text, and a dictation cancelled with Esc, are skipped.
     func testLastTextPicksNewestNonEmptyIncludingPasteFailed() {
         func row(_ s: TimeInterval, _ outcome: Outcome, _ text: String) -> HistoryEntry {
             HistoryEntry(id: "\(s)", createdAt: Date(timeIntervalSince1970: s), outcome: outcome, audioPath: "", durationMs: 0, text: text)
@@ -221,7 +245,8 @@ final class ShortcutsTests: XCTestCase {
                     row(2, .inserted, "older"), row(1, .inserted, "oldest")]
         XCTAssertEqual(lastText(in: rows), "the one that did not land")
         XCTAssertEqual(lastText(in: rows.reversed()), "the one that did not land", "by time, not by list order")
-        XCTAssertEqual(lastText(in: [row(9, .cancelled, "kept from an Esc")] + rows), "kept from an Esc")
+        XCTAssertEqual(lastText(in: [row(9, .cancelled, "thrown away with Esc")] + rows), "the one that did not land",
+                       "the user threw that one away")
         XCTAssertNil(lastText(in: [row(1, .tooShort, "")]))
     }
 

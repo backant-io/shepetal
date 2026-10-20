@@ -18,12 +18,13 @@ public enum ShortcutAction: String, CaseIterable {
 
 /// Why a chord was refused. The messages are ours.
 public enum ChordProblem: String, Equatable {
-    case tooManyKeys, noModifier, leftRightSame, inUse, blocked
+    case tooManyKeys, noModifier, typing, leftRightSame, inUse, blocked
 
     public var message: String {
         switch self {
         case .tooManyKeys: "Use 3 keys or fewer."
         case .noModifier: "Add fn, ⌃, ⌥, ⇧, ⌘ or a mouse button."
+        case .typing: "These keys type text. Add fn, ⌃ or ⌘."
         case .leftRightSame: "Use one side of a modifier, not both."
         case .inUse: "Another action already uses these keys."
         case .blocked: "macOS or most apps already use these keys."
@@ -45,9 +46,9 @@ public enum Key {
     public static func mouse(_ n: Int) -> Int { 1000 + n }
     public static func mouseButton(_ code: Int) -> Int? { (1003...1010).contains(code) ? code - 1000 : nil }
 
-    /// Right-hand modifiers count as the left one, and Globe counts as fn.
+    /// Right-hand modifiers count as the left one. (Globe's 179 never gets here: the tap ignores it.)
     public static func normal(_ code: Int) -> Int {
-        [rightCmd: cmd, rightShift: shift, rightOpt: opt, rightCtrl: ctrl, globe: fn][code] ?? code
+        [rightCmd: cmd, rightShift: shift, rightOpt: opt, rightCtrl: ctrl][code] ?? code
     }
 
     public static func isModifier(_ code: Int) -> Bool { [fn, cmd, shift, opt, ctrl].contains(normal(code)) }
@@ -56,15 +57,13 @@ public enum Key {
     /// tell left from right). nil for keys we do not track, such as Caps Lock.
     public static func modifierDown(_ code: Int, flags: UInt64) -> Bool? {
         let bit: UInt64? = [ctrl: 0x1, shift: 0x2, rightShift: 0x4, cmd: 0x8, rightCmd: 0x10, opt: 0x20, rightOpt: 0x40,
-                            rightCtrl: 0x2000, fn: 0x80_0000, globe: 0x80_0000][code]
+                            rightCtrl: 0x2000, fn: 0x80_0000][code]
         return bit.map { flags & $0 != 0 }
     }
 
     /// Any event: true when `code` is a modifier and the event's flags say no key of it is down. Catches
     /// a key-up the tap never saw (secure input hides events), which would otherwise block every chord.
-    /// Globe can arrive as a key event, so only its own key-up releases it.
     public static func flagUp(_ code: Int, flags: UInt64) -> Bool {
-        guard code != globe else { return false }
         let bit: UInt64? = [shift: 0x2_0000, ctrl: 0x4_0000, opt: 0x8_0000, cmd: 0x10_0000, fn: 0x80_0000][normal(code)]
         return bit.map { flags & $0 == 0 } ?? false
     }
@@ -115,11 +114,20 @@ public struct Shortcuts: Equatable {
 
     public private(set) var bindings: [ShortcutAction: Set<Int>]
 
-    /// `stored` is what `stored` returned earlier (UserDefaults). Missing or empty entries take the default.
-    public init(stored: [String: [Int]]? = nil) {
+    /// Stored actions whose chord failed `problem` (a bare letter, two actions on one chord, a chord a newer
+    /// build blocks); they keep the default, and the Shortcuts window says so.
+    public private(set) var refused: [ShortcutAction] = []
+
+    /// `stored` is what `stored` returned earlier (UserDefaults), read entry by entry: one bad value keeps only
+    /// that action's default. Every stored chord passes `problem`, like a recorded one.
+    public init(stored: [String: Any]? = nil) {
         bindings = Self.defaults
-        for (name, keys) in stored ?? [:] {
-            if let action = ShortcutAction(rawValue: name), !keys.isEmpty { bindings[action] = Set(keys.map(Key.normal)) }
+        for action in ShortcutAction.allCases {
+            guard let value = stored?[action.rawValue] else { continue }
+            guard let keys = value as? [Int], !keys.isEmpty, set(Set(keys), for: action) == nil else {
+                refused.append(action)
+                continue
+            }
         }
     }
 
@@ -137,8 +145,23 @@ public struct Shortcuts: Equatable {
         // Esc alone is the one bare key allowed, and only for cancel.
         if !hasModifier, !(action == .dismiss && chord == [Key.esc]) { return .noModifier }
         if chord.count < raw.count { return .leftRightSame }
+        let modifiers = chord.filter(Key.isModifier), keys = chord.subtracting(modifiers)
+        if !keys.contains(where: { Key.mouseButton($0) != nil }) {
+            // A lone ⇧, ⌥, ⌘ or ⌃ is pressed all day (and either side would match until chords are side-specific).
+            if keys.isEmpty, modifiers.count == 1, modifiers != [Key.fn] { return .typing }
+            // ⇧ or ⌥ with a key types a character (⌥L is @ on a German layout).
+            if !keys.isEmpty, !modifiers.isEmpty, modifiers.isSubset(of: [Key.shift, Key.opt]) { return .typing }
+            // ⌘ with one key is some app's shortcut (⌘T, ⌘N, ⌘F, ...).
+            if !keys.isEmpty, modifiers == [Key.cmd] { return .blocked }
+        }
         if Self.blocked.contains(chord) { return .blocked }
         if bindings.contains(where: { $0.key != action && $0.value == chord }) { return .inUse }
+        // A chord holding the hold chord would start a recording before it completes, and the reverse; only
+        // hands-free may extend it (fn+Space promotes the hold).
+        if action != .handsFree, bindings.contains(where: { other in
+            other.key != action && other.key != .handsFree
+                && (action == .ptt ? chord.isStrictSubset(of: other.value) : other.key == .ptt && other.value.isStrictSubset(of: chord))
+        }) { return .inUse }
         return nil
     }
 
@@ -230,8 +253,9 @@ public struct KeyRouter {
     }
 }
 
-/// The text paste-last and copy-last use: the newest history row with text, whatever its outcome
-/// (a paste that did not land is the main case). Rows without text (too short, no speech) are skipped.
+/// The text paste-last and copy-last use: the newest history row with text (a paste that did not land is the
+/// main case). Rows without text (too short, no speech) are skipped, and so is a dictation cancelled with Esc:
+/// the user threw it away, so paste last gives the one before it, as Wispr does.
 public func lastText(in rows: [HistoryEntry]) -> String? {
-    rows.filter { !$0.text.isEmpty }.max { $0.createdAt < $1.createdAt }?.text
+    rows.filter { !$0.text.isEmpty && $0.outcome != .cancelled }.max { $0.createdAt < $1.createdAt }?.text
 }

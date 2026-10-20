@@ -23,6 +23,7 @@ public struct FnGesture: Equatable {
     }
 
     public var holdThreshold: TimeInterval = 0.5
+    /// From the first tap's release to the second press ("0.5 s between fns"). There is no minimum tap length.
     public var doubleTapWindow: TimeInterval = 0.5
     public var chordWindow: TimeInterval = 1.0
     /// Max dictation length (docs/re/dictation-input.md 2.3); the shell reads `maxDictationMinutes`.
@@ -30,7 +31,7 @@ public struct FnGesture: Equatable {
     public var warningLead: TimeInterval = 60
     public private(set) var state: State = .idle
     private var warned = false
-    private var tapPending = false  // fn went down in hands-free; its release ends the session
+    private var endingPress = false  // the fn press that ended hands-free is still down
 
     public init() {}
 
@@ -56,23 +57,23 @@ public struct FnGesture: Equatable {
             begin(.holding(since: t))
             return [.tooShort, .start]
         case .handsFree:
-            // Ends on release, so fn+Space (the toggle) can stop hands-free without fn stopping it first.
-            tapPending = true
-            return []
+            // The ending tap transcribes on its press (Pavel, M-FN-2). That fn may start fn+Space (the toggle):
+            // its Space must not start a new session, so a toggle waits until this fn is up.
+            end()
+            endingPress = true
+            return [.stop]
         case .holding:
             return []  // key repeat or a duplicate event
         }
     }
 
     public mutating func fnUp(at t: TimeInterval) -> [GestureAction] {
+        endingPress = false
         switch state {
         case .holding(let since) where t - since < holdThreshold:
             state = .awaitingSecondTap(since: since, deadline: t + doubleTapWindow)
             return []
         case .holding:
-            end()
-            return [.stop]
-        case .handsFree where tapPending:
             end()
             return [.stop]
         default:
@@ -83,7 +84,6 @@ public struct FnGesture: Equatable {
     /// A key other than fn went down. In the first `chordWindow` of a hold that is a shortcut with fn,
     /// not dictation (docs/re/dictation-input.md 1, "Chord collision cancels").
     public mutating func otherKeyDown(at t: TimeInterval) -> [GestureAction] {
-        if case .handsFree = state { tapPending = false }  // fn+key while hands-free is a shortcut, not the stop tap
         guard case .holding(let since) = state, t - since < chordWindow else { return [] }
         end()
         return [.cancel]
@@ -93,12 +93,13 @@ public struct FnGesture: Equatable {
     /// (chord promotion); while locked it stops, or cancels when pressed within `doubleTapWindow` of the start.
     public mutating func toggle(at t: TimeInterval) -> [GestureAction] {
         switch state {
+        case .idle where endingPress:
+            return []  // the Space of the fn+Space whose fn already ended hands-free
         case .idle:
             begin(.handsFree(since: t))
             return [.start, .lockHandsFree]
         case .holding(let since), .awaitingSecondTap(let since, _):
             state = .handsFree(since: since)
-            tapPending = false
             return [.lockHandsFree]
         case .handsFree(let since):
             end()
@@ -149,7 +150,7 @@ public struct FnGesture: Equatable {
     private mutating func begin(_ s: State) {
         state = s
         warned = false
-        tapPending = false
+        endingPress = false
     }
 
     private mutating func end() { begin(.idle) }
@@ -157,8 +158,10 @@ public struct FnGesture: Equatable {
 
 /// The short-press hint shown next to the indicator. Our own wording.
 public enum Hint {
-    public static let shortPress = "Hold fn to talk · double-tap for hands-free"
-    public static let seconds: TimeInterval = 2
+    public static let shortPress = holdToTalk("fn")
+    /// `key`: the hold-to-talk chord's label (`Key.label`), so a rebound chord gets its own name.
+    public static func holdToTalk(_ key: String) -> String { "Hold \(key) to talk · double-tap for hands-free" }
+    public static let seconds: TimeInterval = 3
     public static let cancelled = "Cancelled"
     public static let oneMinuteLeft = "1 minute left"
     public static let nothingToPaste = "Nothing to paste yet"

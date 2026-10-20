@@ -8,6 +8,7 @@ final class FnGestureTests: XCTestCase {
         XCTAssertEqual(g.fnDown(at: 10), [.start])
         XCTAssertEqual(g.fnUp(at: 10.6), [.stop])
         XCTAssertEqual(g.state, .idle)
+        XCTAssertNil(g.deadline, "the transcript starts on the release; nothing waits for a timer or another fn press")
     }
 
     // The 500 ms threshold is a product decision: 0.49 s is a tap, 0.5 s is a hold.
@@ -36,12 +37,51 @@ final class FnGestureTests: XCTestCase {
     func testHintWordingAndDuration() {
         XCTAssertTrue(Hint.shortPress.contains("Hold fn"), Hint.shortPress)
         XCTAssertTrue(Hint.shortPress.contains("double-tap"), Hint.shortPress)
-        XCTAssertEqual(Hint.seconds, 2, accuracy: 0.5)
+        XCTAssertEqual(Hint.seconds, 3, accuracy: 0.5, "Pavel: a lone short tap gets a 3 second notice")
+    }
+
+    // "0.5 seconds between fns": the window runs from the first release to the second press (as in docs/linux.md
+    // and the Windows gesture). 0.5 s after the release is still a double-tap; any later and the first tap was
+    // too short, and the timer settles it when the window closes, without another fn press.
+    func testDoubleTapWindowBoundary() {
+        var g = FnGesture()
+        _ = g.fnDown(at: 0)
+        _ = g.fnUp(at: 0.25)
+        XCTAssertEqual(g.fnDown(at: 0.75), [.lockHandsFree], "second press 0.5 s after the release")
+
+        var late = FnGesture()
+        _ = late.fnDown(at: 0)
+        _ = late.fnUp(at: 0.25)
+        XCTAssertEqual(late.fnDown(at: 0.751), [.tooShort, .start], "0.501 s after the release is not a double-tap")
+
+        var lone = FnGesture()
+        _ = lone.fnDown(at: 0)
+        _ = lone.fnUp(at: 0.25)
+        XCTAssertEqual(lone.deadline, 0.75)
+        XCTAssertEqual(lone.tick(at: 0.7499), [])
+        XCTAssertEqual(lone.tick(at: 0.75), [.tooShort])
+    }
+
+    // Pavel (2026-10-21): a double-tap can be very quick, 30-60 ms taps with 40-80 ms between them. There is no
+    // minimum tap length: each locks hands-free on the second press with nothing left pending, and one tap ends it
+    // with the transcript on that tap's press, not on a timer or a later fn event.
+    func testQuickDoubleTapsLockAndOneTapTranscribes() {
+        for (tap, gap) in [(0.03, 0.04), (0.045, 0.06), (0.06, 0.08), (0.005, 0.005)] {
+            var g = FnGesture()
+            XCTAssertEqual(g.fnDown(at: 0), [.start])
+            XCTAssertEqual(g.fnUp(at: tap), [], "\(tap) s tap")
+            XCTAssertEqual(g.fnDown(at: tap + gap), [.lockHandsFree], "\(tap) s tap, \(gap) s gap")
+            XCTAssertEqual(g.fnUp(at: 2 * tap + gap), [])
+            XCTAssertEqual(g.deadline, 19 * 60, "hands-free waits only for the length warning")
+            XCTAssertEqual(g.fnDown(at: 9), [.stop], "the ending tap transcribes on its press")
+            XCTAssertEqual(g.state, .idle)
+            XCTAssertNil(g.deadline)
+            XCTAssertEqual(g.fnUp(at: 9 + tap), [])
+        }
     }
 
     // Double-tap: the second press inside the window locks hands-free; release does not stop it;
-    // the next tap ends it and transcribes. The tap ends it on release, so that fn+Space (the toggle)
-    // stops hands-free instead of fn stopping it and Space starting a new one.
+    // the next tap ends it and transcribes on its press (testFnSpacePromotesHoldToHandsFree has fn+Space).
     func testDoubleTapLocksHandsFreeAndTapEndsIt() {
         var g = FnGesture()
         _ = g.fnDown(at: 0)
@@ -50,8 +90,8 @@ final class FnGestureTests: XCTestCase {
         XCTAssertEqual(g.state, .handsFree(since: 0), "the session started at the first press")
         XCTAssertEqual(g.fnUp(at: 0.55), [], "release while locked keeps recording")
         XCTAssertEqual(g.tick(at: 10), [], "no short-press timer while locked")
-        XCTAssertEqual(g.fnDown(at: 30), [])
-        XCTAssertEqual(g.fnUp(at: 30.1), [.stop])
+        XCTAssertEqual(g.fnDown(at: 30), [.stop])
+        XCTAssertEqual(g.fnUp(at: 30.1), [])
         XCTAssertEqual(g.state, .idle)
     }
 
@@ -106,10 +146,6 @@ final class FnGestureTests: XCTestCase {
         XCTAssertEqual(h.otherKeyDown(at: 0.4), [])
         XCTAssertEqual(h.state, .handsFree(since: 0))
         XCTAssertEqual(h.otherKeyDown(at: 9), [])
-        // fn+Delete while hands-free is a shortcut, so its fn release is not the stop tap.
-        XCTAssertEqual(h.fnDown(at: 12), [])
-        XCTAssertEqual(h.otherKeyDown(at: 12.1), [])
-        XCTAssertEqual(h.fnUp(at: 12.3), [])
         XCTAssertEqual(h.state, .handsFree(since: 0))
     }
 
@@ -155,9 +191,9 @@ final class FnGestureTests: XCTestCase {
         XCTAssertEqual(k.release(Key.fn, at: 0.5), [], "releasing fn no longer ends it")
         XCTAssertEqual(k.gesture.state, .handsFree(since: 0))
 
-        // fn+Space again stops it once: fn going down must not stop it before Space toggles a new one.
-        XCTAssertEqual(k.press(Key.fn, at: 20), [])
-        XCTAssertEqual(k.press(Key.space, at: 20.1), [.stop])
+        // fn+Space again stops it once: fn stops it on its press, and the Space must not start a new one.
+        XCTAssertEqual(k.press(Key.fn, at: 20), [.stop])
+        XCTAssertEqual(k.press(Key.space, at: 20.1), [])
         XCTAssertEqual(k.release(Key.space, at: 20.2), [])
         XCTAssertEqual(k.release(Key.fn, at: 20.3), [])
         XCTAssertEqual(k.gesture.state, .idle)

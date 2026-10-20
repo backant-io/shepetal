@@ -104,4 +104,22 @@ final class IndicatorTests: XCTestCase {
         XCTAssertEqual(indicator.emoji.layer?.borderWidth, 0)
         XCTAssertNil(indicator.emoji.layer?.animation(forKey: "pulse"))
     }
+
+    /// Pavel's decision (1): the red ring shows the whole time a meeting records, through dictation and errors too.
+    func testMeetingKeepsTheRingRedUntilItStops() throws {
+        let indicator = make()
+        indicator.meeting = true
+        let red = NSColor.systemRed.cgColor
+        for mode: Indicator.Mode in [.idle, .recording, .handsFree, .processing, .error, .idle] {
+            indicator.set(mode)
+            let layer = try XCTUnwrap(indicator.emoji.layer)
+            XCTAssertEqual(layer.borderWidth, 2, "\(mode)")
+            XCTAssertEqual(layer.borderColor, red, "red while the meeting records: \(mode)")
+        }
+        indicator.set(.error)
+        indicator.meeting = false
+        XCTAssertNotEqual(indicator.emoji.layer?.borderColor, red, "the dictation state shows again once it stops")
+        indicator.set(.idle)
+        XCTAssertEqual(indicator.emoji.layer?.borderWidth, 0)
+    }
 }

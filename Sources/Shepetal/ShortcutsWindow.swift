@@ -5,7 +5,7 @@ import ShepetalCore
 /// A refused chord shows why. Reset puts the defaults back. Bindings live in UserDefaults ("shortcuts").
 final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
     private static let defaultsKey = "shortcuts"
-    static var saved: Shortcuts { Shortcuts(stored: UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: [Int]]) }
+    static var saved: Shortcuts { Shortcuts(stored: UserDefaults.standard.dictionary(forKey: defaultsKey)) }
 
     private let tap: FnTap
     private var chords: [ShortcutAction: NSTextField] = [:]
@@ -48,6 +48,10 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
         for v in [status, note, reset] { stack.addArrangedSubview(v) }
         for v in [status, note] { v.preferredMaxLayoutWidth = 408 }
         window.contentView = stack
+        let refused = tap.router.shortcuts.refused
+        if !refused.isEmpty {
+            status.stringValue = "Saved keys for \(refused.map(\.title).joined(separator: ", ")) were not allowed, so the default is back."
+        }
         refresh()
     }
 
@@ -57,7 +61,7 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
     func recorded(_ raw: Set<Int>) {
         guard let action = recording else { return }
         recording = nil
-        if let problem = tap.router.shortcuts.set(raw, for: action) {
+        if let problem = tap.updateRouter({ $0.shortcuts.set(raw, for: action) }) {
             status.stringValue = "\(Key.label(raw)): \(problem.message)"
         } else {
             status.stringValue = ""
@@ -66,22 +70,28 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
         refresh()
     }
 
-    func windowWillClose(_ notification: Notification) {
+    func windowWillClose(_ notification: Notification) { stopRecording() }
+
+    /// Leaving the window (⌘Tab included) ends the recording, so its keys reach the next app again.
+    func windowDidResignKey(_ notification: Notification) { stopRecording() }
+
+    private func stopRecording() {
+        guard recording != nil else { return }
         recording = nil
-        tap.router.stopRecording()
+        tap.updateRouter { $0.stopRecording() }
+        refresh()
     }
 
     @objc private func change(_ sender: NSButton) {
         recording = ShortcutAction.allCases[sender.tag]
         status.stringValue = ""
-        tap.router.record()
+        tap.updateRouter { $0.record() }
         refresh()
     }
 
     @objc private func resetDefaults() {
         recording = nil
-        tap.router.stopRecording()
-        tap.router.shortcuts.reset()
+        tap.updateRouter { $0.stopRecording(); $0.shortcuts.reset() }
         status.stringValue = ""
         save()
         refresh()
