@@ -75,8 +75,10 @@ final class KeyboardViewController: UIInputViewController {
     private func refresh() {
         guard let id = sessionID else { return }
         let document = textDocumentProxy.documentIdentifier
-        if let text = SharedHandoff.update({ $0.consume(id, document: document) }) {
-            textDocumentProxy.insertText(text)
+        switch SharedHandoff.update({ $0.consume(id, document: document, canCopy: hasFullAccess) }) {
+        case .insert(let text): textDocumentProxy.insertText(text)
+        case .copy(let text): Clipboard.copy(text) // goal rule 8: a different field gets nothing inserted
+        case nil: break
         }
         let state = SharedHandoff.read()
         indicator.show(state.indicatorMode(for: id), state.keyboardStatus(for: id))

@@ -1,4 +1,6 @@
 import Foundation
+import UIKit
+import UniformTypeIdentifiers
 
 /// The keyboard <-> app dictation handoff. Both processes load it from the App Group,
 /// apply one transition and save it back. Every transition names the session it is for,
@@ -84,20 +86,32 @@ public struct Handoff: Codable, Equatable {
         return true
     }
 
+    /// What the keyboard does with a ready result.
+    public enum Delivery: Equatable {
+        /// Insert into the field the dictation started in.
+        case insert(String)
+        /// Goal rule 8: the user is in a different field now, so the text goes to the clipboard as plain text
+        /// (the old clipboard is not restored) and the hint says to paste.
+        case copy(String)
+    }
+
     /// Keyboard: take the text for the session it requested, in the field it is showing now.
-    /// Returns nil for a stale, expired or already inserted result, so the same text is never
-    /// inserted twice. A ready result shown in a different field is never inserted: the session
-    /// fails and the keyboard says the text is in the app's history (the app keeps every result there).
-    public mutating func consume(_ id: UUID, document: UUID, now: Date = Date()) -> String? {
+    /// Returns nil for a stale, expired or already delivered result, so the same text is never
+    /// delivered twice. A ready result shown in a different field is never inserted there: it is copied
+    /// instead (goal rule 8), or, when the keyboard cannot write the clipboard (`canCopy` false: no Full
+    /// Access), the session fails and the keyboard says the text is in the app's history.
+    public mutating func consume(_ id: UUID, document: UUID, canCopy: Bool, now: Date = Date()) -> Delivery? {
         let result = text
-        guard advance(id, from: .ready, to: .inserted, now: now) else { return nil }
+        guard advance(id, from: .ready, to: .inserted, now: now), let result else { return nil }
         text = nil
-        guard document == documentID else {
+        if document == documentID { return .insert(result) }
+        guard canCopy else {
             phase = .failed
             message = "Not inserted, because you are in a different field now. The text is in Shepetal's history."
             return nil
         }
-        return result
+        message = "You are in a different field now, so the text is on the clipboard. Tap the field and choose Paste."
+        return .copy(result)
     }
 
     /// Either side: give up on the session. Only the session id is needed; the app keeps the audio.
@@ -268,6 +282,15 @@ public enum AudioArchive {
         data.append(contentsOf: Array("data".utf8)); put(dataSize)
         samples.forEach { put($0.bitPattern) }
         return data
+    }
+}
+
+/// Goal rule 8 on iPhone: a result for a different field is left on the clipboard.
+public enum Clipboard {
+    /// Replaces the clipboard with `text` as plain text. Local only: it is not sent to the user's other
+    /// devices by Universal Clipboard. Tests pass a private named pasteboard, never `.general`.
+    public static func copy(_ text: String, to pasteboard: UIPasteboard = .general) {
+        pasteboard.setItems([[UTType.utf8PlainText.identifier: text]], options: [.localOnly: true])
     }
 }
 
