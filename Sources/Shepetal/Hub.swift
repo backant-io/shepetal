@@ -5,7 +5,7 @@ import SwiftUI
 
 /// The one Shepetal window: Home, History and Settings. It opens from the 🤫 menu and when the app is
 /// opened again while it runs, never at launch. Settings added by other parts (shortcuts, mic,
-/// languages, dictionary, sounds, login) stay in the 🤫 menu for now.
+/// languages, dictionary, login) stay in the 🤫 menu for now.
 @MainActor
 final class Hub {
     private let window: NSWindow
