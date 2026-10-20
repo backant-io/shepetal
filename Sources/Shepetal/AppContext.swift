@@ -44,8 +44,8 @@ struct AppContext: Equatable {
     }
 
     /// A messaging timeout applies only to the element it is set on, so every element gets its own.
-    private static func value(_ el: AXUIElement, _ attribute: String) -> CFTypeRef? {
-        AXUIElementSetMessagingTimeout(el, 0.1)
+    static func value(_ el: AXUIElement, _ attribute: String, timeout: Float = 0.1) -> CFTypeRef? {
+        AXUIElementSetMessagingTimeout(el, timeout)
         var v: CFTypeRef?
         return AXUIElementCopyAttributeValue(el, attribute as CFString, &v) == .success ? v : nil
     }

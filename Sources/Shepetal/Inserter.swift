@@ -159,18 +159,19 @@ enum FocusedText {
         return PasteGate.focus(axPid: axPid, frontmostPid: frontmost, window: ok ? (window as! AXUIElement) : nil)
     }
 
+    private static let textTimeout: Float = 0.25  // a whole document's AXValue is the slowest read
+
+    /// Runs on the main thread just before a paste. Each element gets a short timeout: a busy app must not
+    /// freeze Shepetal for AX's default (1.5 s per call measured on macOS 15). A slow field reads as unknown.
     private static func read() -> (String, NSRange)? {
-        let system = AXUIElementCreateSystemWide()
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused else { return nil }
-        let el = element as! AXUIElement
-        var value: CFTypeRef?
-        var rangeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
-              let string = value as? String,
-              AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-              let rangeValue = rangeRef else { return nil }
+        var app: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString,
+                                            &app) == .success, let app,
+              let focused = AppContext.value(app as! AXUIElement, kAXFocusedUIElementAttribute, timeout: textTimeout)
+        else { return nil }
+        let el = focused as! AXUIElement
+        guard let string = AppContext.value(el, kAXValueAttribute, timeout: textTimeout) as? String,
+              let rangeValue = AppContext.value(el, kAXSelectedTextRangeAttribute, timeout: textTimeout) else { return nil }
         var range = CFRange()
         guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
         return (string, NSRange(location: range.location, length: range.length))

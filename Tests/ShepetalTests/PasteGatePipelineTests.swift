@@ -67,6 +67,30 @@ final class PasteGatePipelineTests: XCTestCase {
         assertOnClipboard(run, row, message: PasteGate.focusMoved)
     }
 
+    // M-NS-1: the text field is read through Accessibility on the main thread, and a busy or hung app answers
+    // only when AX gives up (1.5 s per call measured on macOS 15). When the window changed, that field is not
+    // where the text goes, so rule 8 must decide without reading it, well inside 300 ms of the text being ready.
+    func testFocusMovedDecidesWithoutReadingTheNewField() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        var reads = 0
+        let slowField = { reads += 1; Thread.sleep(forTimeInterval: 1.5) }  // what one timed-out AX call costs
+        var decidedAfter: TimeInterval?
+        let engine = StubEngine("hello there")
+        let run = await pipeline.process(samples, engine: engine,
+                                         context: { slowField(); return ("", "") },
+                                         selection: { slowField(); return "" },
+                                         focusKept: {
+                                             decidedAfter = ProcessInfo.processInfo.systemUptime - (engine.doneAt ?? 0)
+                                             return false
+                                         },
+                                         secureInput: { nil }, sendPaste: { [unowned self] _ in pastes += 1 })
+        XCTAssertEqual(reads, 0, "the field that took focus must not be read")
+        XCTAssertLessThan(try XCTUnwrap(decidedAfter), 0.3)
+        XCTAssertEqual(pastes, 0)
+        XCTAssertEqual(run.error, PasteGate.focusMoved)
+        XCTAssertEqual(pasteboard.string(forType: .string), "hello there", "the text waits on the clipboard as dictated")
+    }
+
     // Focus that cannot be read (no Accessibility) does not block the paste; the paste check is the backstop.
     func testUnknownFocusPastesAndRestoresTheClipboard() async throws {
         let (run, row) = try await process(StubEngine("hello there"), focusKept: { nil }, secureInput: { nil })
@@ -82,11 +106,13 @@ private final class StubEngine: SpeechEngine {
     let name = "stub"
     let text: String
     private(set) var called = false
+    private(set) var doneAt: TimeInterval?  // when the transcript was ready
 
     init(_ text: String) { self.text = text }
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         called = true
+        doneAt = ProcessInfo.processInfo.systemUptime
         return text
     }
 }
