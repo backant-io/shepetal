@@ -4,7 +4,24 @@ Steps a person has to run: they need physical keys, a voice, or a permission gra
 
 ## Mac
 
-Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc signed, so every rebuild counts as a new app for macOS and the permissions have to be granted again. If the 🌐/fn key opens the emoji picker or starts macOS Dictation, set System Settings > Keyboard > "Press 🌐 key to" to "Do Nothing".
+Setup: install the app once, either from the release zip (README > Mac > Install) or with `scripts/make-app.sh --install`, which builds and copies it to `~/Applications/Shepetal.app`. Open it from Finder or with `open ~/Applications/Shepetal.app`. If the 🌐/fn key opens the emoji picker or starts macOS Dictation, set System Settings > Keyboard > "Press 🌐 key to" to "Do Nothing". If Wispr Flow is running with fn as its shortcut, both apps hear fn and both insert text: quit Wispr Flow (or move its shortcut off fn) before testing Shepetal.
+
+The app is signed with a certificate when the build machine has one (`scripts/make-app.sh` prints "Signed with: …"). Then macOS keeps the permissions across rebuilds and updates. If it prints "Signed ad-hoc", every rebuild counts as a new app for macOS and the permissions have to be granted again. To run the M-PERM tests from scratch, quit Shepetal and reset its grants with `tccutil reset All io.backant.shepetal`.
+
+### M-SETUP-1: first run from the release zip
+1. Download the zip from the release, double-click it, and drag `Shepetal.app` into Applications.
+2. Double-click `Shepetal.app`. If macOS blocks it, use System Settings > Privacy & Security > Open Anyway (README > Mac > Install, step 3).
+3. Expected: no Dock icon appears. 🤫 appears in the menu bar and, tiny, in the bottom-left corner of the screen. The Permissions window opens.
+4. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅ and the 🤫 menu's first line reads "Hold fn to talk, double-tap for hands-free".
+5. Click into any text field, hold fn, say a sentence, release. Expected: the sentence is typed there.
+
+### M-SETUP-2: permissions survive a rebuild
+1. With all three permissions granted, quit Shepetal, run `scripts/make-app.sh --install` (it must print "Signed with: Apple Development…" or "Developer ID…"), and open the app again.
+2. Expected: no Permissions window opens, nothing is asked again, and fn dictation works straight away.
+
+### M-SETUP-3: stays running in the background
+1. Open Shepetal and use other apps for an hour, including full-screen apps and Space switches.
+2. Expected: 🤫 is still in the bottom-left corner and in the menu bar, there was never a Dock icon, and fn still dictates. Quit Shepetal from the 🤫 menu: both 🤫 disappear.
 
 ### M-PERM-1: Microphone
 1. Quit Shepetal. Run `tccutil reset Microphone io.backant.shepetal`.

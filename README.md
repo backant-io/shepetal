@@ -6,15 +6,34 @@ An open-source replacement for Wispr Flow. Status: in design.
 
 ## Mac
 
-Requirements: macOS 14 or later, Apple Silicon for the default model, Xcode or the Swift 6 toolchain.
+### Install
+
+1. Download `Shepetal-<version>-mac.zip` from the [Mac releases](https://github.com/backant-io/shepetal/releases) and double-click it. You get `Shepetal.app`.
+2. Drag `Shepetal.app` into Applications (`/Applications`, or `~/Applications` in your home folder).
+3. Double-click it. The app is not notarized by Apple yet, so macOS 15 says it cannot verify it. Click Done, open System Settings > Privacy & Security, scroll down to the line saying Shepetal was blocked, click Open Anyway and confirm. You do this once per download.
+4. Shepetal runs in the menu bar (🤫) with no Dock icon, and a tiny 🤫 sits in the bottom-left corner of the screen. The Permissions window asks for Microphone, Input Monitoring and Accessibility; grant all three.
+5. Hold `fn` and talk in any app. To start it with your Mac, turn on Open at login in the 🤫 menu (once that menu item has landed; see the release notes).
+
+Requirements: macOS 14 or later on Apple Silicon. The speech model (Parakeet v3, about 470 MB) downloads from the 🤫 menu on first run if it is not on the Mac yet. After that nothing goes over the network.
+
+### Build from source
+
+Requirements: Xcode or the Swift 6 toolchain.
 
 ```bash
 swift build && swift test             # core: fn gestures, model tiers, audio store, history, text rules
-scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only, ad-hoc signed)
+scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only), signed (see below)
+scripts/make-app.sh --install         # same, then copied to ~/Applications/Shepetal.app
+scripts/make-app.sh --zip             # same, plus dist/Shepetal-<version>-mac.zip for a release
 open dist/Shepetal.app                # add --args --no-permission-prompts to never ask macOS for anything
+scripts/check-app.sh                  # launches the bundle: menu-bar only, 🤫 bottom-left, alive for 5 min, Quit from the menu
 scripts/e2e-mac.sh                    # real pipeline on `say` speech: WER, latency, audio file checks
 sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh   # same, with the network blocked
 ```
+
+`scripts/make-app.sh` signs with the first Developer ID Application or Apple Development certificate in your keychain, or with `SIGN_IDENTITY`. With a certificate, macOS keeps the permissions you granted across rebuilds. Without one it signs ad-hoc, and macOS asks for the permissions again after every rebuild.
+
+### Use
 
 - Hold `fn` to talk and release to insert. Double-tap `fn` for hands-free, then tap `fn` once to stop. A press shorter than 0.5 s inserts nothing and shows a hint. Another key pressed in the first second of an fn hold (fn+Delete, fn+arrows) is a shortcut, so that recording is cancelled.
 - 🤫 sits 8 pt in from the bottom-left corner of the main display while Shepetal runs. A red ring means recording, orange hands-free, a pulsing blue ring processing, and yellow an error, with a short message next to it.
