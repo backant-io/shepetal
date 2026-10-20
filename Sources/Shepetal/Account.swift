@@ -193,6 +193,9 @@ final class Account: NSObject, ObservableObject {
                 openURL(try await client.checkout(token: token))
                 message = ""
                 recheckUntil = now().addingTimeInterval(3600)
+            } catch let e as AccountError where e == .alreadyBought {
+                message = ""
+                check()  // bought already (another device, or before the re-check ran): show "Yours forever"
             } catch let e as AccountError where e == .signedOut {
                 signOut()  // the token was revoked: offer Sign in again
                 message = "Signed out on shepetal.backant.io. Sign in again, then buy."

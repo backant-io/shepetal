@@ -93,6 +93,8 @@ public struct AccountError: LocalizedError, Equatable {
 
     /// 401 from checkout: the token is gone, so the app signs out.
     public static let signedOut = AccountError("Signed out: sign in again to buy", status: 401)
+    /// 409 already_active from checkout: the license is bought, so the app checks it instead of paying twice.
+    public static let alreadyBought = AccountError("You already own Shepetal", status: 409)
 }
 
 public struct AccountClient: Sendable {
@@ -137,6 +139,7 @@ public struct AccountClient: Sendable {
     public func checkout(token: String) async throws -> URL {
         let (status, data) = try await send("POST", "/api/checkout", token: token, json: [:])
         if status == 401 { throw AccountError.signedOut }
+        if status == 409 { throw AccountError.alreadyBought }
         guard status == 200, let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let s = body["url"] as? String, let url = URL(string: s), AccountClient.isWebPage(url)
         else { throw Self.unexpected(status) }
