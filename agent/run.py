@@ -22,7 +22,10 @@ WORKDIR = Path.home() / "shepetal-agent"
 
 
 def api():
-    return anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY") or getpass.getpass("Anthropic API key: "))
+    key = os.environ.get("ANTHROPIC_API_KEY") or getpass.getpass("Anthropic API key: ")
+    # Keys not scoped to a workspace must name one on every request.
+    ws = os.environ.get("ANTHROPIC_WORKSPACE_ID") or input("Workspace ID (wrkspc_..., blank if the key is workspace-scoped): ").strip()
+    return anthropic.Anthropic(api_key=key, default_headers={"anthropic-workspace-id": ws} if ws else None)
 
 
 def ids():
