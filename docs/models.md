@@ -79,6 +79,30 @@ How to read it:
 Not measured yet: WhisperKit (no Swift CLI in the harness), Whisper large-v3-turbo, the streaming models and
 the diarizers. All rows ran on one M4 Pro; no other Mac, iPhone or Linux machine was measured.
 
+### End to end in the Mac app (Parakeet v3, FluidAudio)
+
+`scripts/e2e-mac.sh` runs the app's own pipeline on 6 `say` clips (4.5 to 10.7 s, 127 words): capture resampler,
+Parakeet TDT 0.6B v3, cleanup, kept audio and history, then clipboard plus Cmd+V into a text view the app owns.
+Run on 2026-10-20 at `36f3e0d` (branch `feat/mac-mac-shell-tests`) from a clean clone, release build, with the
+network denied by `sandbox-exec`:
+
+| Clip | Audio | Word errors | Text ready after release |
+|---|---|---|---|
+| e01 | 6.2 s | 0 / 20 | 72 ms |
+| e02 | 5.4 s | 0 / 15 | 57 ms |
+| e03 | 4.5 s | 0 / 17 | 63 ms |
+| e04 | 6.6 s | 0 / 21 | 63 ms |
+| e05 | 10.7 s | 0 / 36 | 89 ms |
+| e06 | 5.8 s | 0 / 18 | 69 ms |
+
+- WER 0.0 % over 127 words, text ready 57 to 89 ms (mean 69 ms). The goal bar is WER ≤ 8 % and ≤ 700 ms for a 10 s
+  utterance; the 10.7 s clip took 89 ms. The earlier run on `982e547` gave 0.0 % and 58 to 78 ms.
+- These clips are easier than the bench fixtures above (no numbers, no product names), so the 0.0 % here and the
+  7.2 % above do not disagree.
+- Model load was 380 ms with CoreML's compiled cache warm. A second process right after it (the silent-WAV run)
+  took 38 s to load while the machine had a load average of about 45 from parallel builds. Cold and contended
+  load times are not measured yet (#17).
+
 ## Candidates (research)
 
 | Model | Params / disk | Languages | Streaming | Word timestamps | Custom vocab / hotwords | Runtimes | Published WER |
@@ -111,6 +135,25 @@ the diarizers. All rows ran on one M4 Pro; no other Mac, iPhone or Linux machine
 | Linux CPU only, x86 / ARM | Parakeet TDT 0.6B v3 int8, sherpa-onnx | Parakeet TDT-CTC 110M int8 (sherpa-onnx, 71 ms, 0.011 RTF on CPU) for low-end ARM such as a Raspberry Pi. Moonshine tiny only behind VAD | Same model family as the Mac, one ONNX runtime, no GPU needed | default and fallbacks: measured on the M4 Pro CPU, not on x86 or ARM Linux (default: 3.6 %, 177 ms, 1.8 GB peak RSS) |
 | Linux NVIDIA CUDA | Parakeet TDT 0.6B v3 (sherpa-onnx CUDA provider or NeMo) | Whisper large-v3-turbo, whisper.cpp CUDA (99 languages) | Parakeet runs at thousands of times real time on a GPU, which is enough headroom for diarization next to it | research |
 | Linux AMD / Intel Vulkan | Whisper large-v3-turbo q5_0, whisper.cpp Vulkan | Parakeet TDT 0.6B v3 int8 on CPU (sherpa-onnx) | whisper.cpp is the only runtime here with mature Vulkan support (and HIP for AMD) | default: research; fallback: measured on the M4 Pro CPU |
+
+### Languages on the Mac
+
+The 🤫 menu's Languages setting picks the model (`speechRoute` in `Sources/ShepetalCore/ModelTier.swift`, tested in
+`LanguageTests`):
+
+| Selected languages | Apple Silicon | Without Apple Silicon |
+|---|---|---|
+| none (automatic) | Parakeet TDT 0.6B v3, which detects the language itself | Whisper base.en |
+| only Parakeet v3's 25 (bg hr cs da nl en et fi fr de el hu it lv lt mt pl pt ro sk sl es sv ru uk, from the model card) | Parakeet TDT 0.6B v3 | base.en for English only, else large-v3-turbo |
+| one other language | Whisper large-v3-turbo q5_0, `-l <code>` | the same |
+| several, at least one outside Parakeet's | Whisper large-v3-turbo q5_0, `-l auto` | the same |
+
+- When the selection needs Whisper and its files are missing, the app does not fall back to Parakeet (it would write the
+  wrong language). The 🤫 menu names the missing file and where it goes. The large-v3-turbo route has not been run on
+  this Mac, and `-l auto` is not limited to the selected languages yet (#31).
+- The personal dictionary reaches whisper.cpp as `--prompt` ("Glossary: …", starred entries last because whisper.cpp
+  keeps the end of a long prompt). With a bare lowercase word list as the prompt, base.en dropped casing and
+  punctuation on one e2e clip; the sentence form fixed it. Parakeet gets no hint yet (#30).
 
 ### Streaming model for live meeting transcripts
 

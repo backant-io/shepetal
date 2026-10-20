@@ -9,7 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private var indicator: Indicator!
     private let tap = FnTap()
-    private let recorder = Recorder()
+    private let mic = Mic()
+    private let speech = SpeechMenu()
     private var dictation: Dictation?
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
@@ -46,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let pipeline {
             dictation = Dictation(store: pipeline.store, history: pipeline.history,
                                   startMic: { [weak self] in try self?.openMic() },
-                                  stopMic: { [recorder] in recorder.stop() },
+                                  stopMic: { [mic] in mic.stop() },
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
         applyRetention()
@@ -56,6 +57,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tap.isActive = { [weak self] in MainActor.assumeIsolated { self.map { $0.busy || $0.dictation?.gesture.state != .idle } ?? false } }
         // Off the tap callback: opening the mic is slow, and a slow callback gets the tap turned off.
         tap.onInput = { [weak self] input in DispatchQueue.main.async { MainActor.assumeIsolated { self?.key(input) } } }
+        wireMicAndSpeech()
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -134,7 +136,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if allowPrompts { Permission.microphone.request() }
             throw SpeechError("Microphone access is off")
         }
-        do { try recorder.start() } catch { throw SpeechError("Microphone: \(error.localizedDescription)") }
+        do { try mic.open() } catch { throw SpeechError("Microphone: \(error.localizedDescription)") }
+    }
+
+    /// Mic problems end the dictation through the gesture, so the audio is kept like any other recording.
+    private func wireMicAndSpeech() {
+        mic.notice = { [weak self] in self?.indicator.show($0, seconds: 4) }
+        mic.end = { [weak self] transcribe, message in
+            self?.run { $0.reset(); return [transcribe ? .stop : .cancel] }
+            self?.fail(message)
+        }
+        speech.reload = { [weak self] in
+            self?.engineStatus = "Loading speech model…"
+            Task { await self?.loadEngine() }
+        }
+        speech.fail = { [weak self] in self?.fail($0) }
+        mic.watch()
     }
 
     private func transcribe(_ samples: [Float]) {
@@ -152,6 +169,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             inserting = false
             transcription = nil
             if let error = run.error, !Task.isCancelled { fail(error) } else { indicator.set(.idle) }
+            if !Task.isCancelled, Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
         }
     }
 
@@ -188,10 +206,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func loadEngine() async {
         do {
-            let e = try await Speech.load()
+            let e = try await Speech.load(languages: speech.languages)
             engine = e
             engineStatus = "Model: \(e.name)"
         } catch {
+            engine = nil
             engineStatus = error.localizedDescription
             fail("No speech model. Open the 🤫 menu.")
         }
@@ -223,6 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if engine == nil, !ParakeetEngine.isInstalled {
             menu.addItem(item("Download speech model (Parakeet v3, about 470 MB)", #selector(downloadModel)))
         }
+        for i in [mic.menuItem()] + speech.items() { menu.addItem(i) }
         menu.addItem(.separator())
 
         let recent = NSMenu()

@@ -31,6 +31,8 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 2. Expected: a small 🤫 (about 18 pt) about 8 pt from the bottom and left edges, above the Dock.
 3. Switch to another Space, then put Safari in full screen. Expected: 🤫 stays in the same corner in both.
 4. Click on 🤫. Expected: the click goes to whatever is under it. Shepetal does not take focus.
+5. Tap fn once briefly. Expected: the hint shows to the right of 🤫, and 🤫 itself does not move. When the hint goes, 🤫 stays (idle has no ring).
+(The frame, the panel flags, the hint timing and the ring colours are covered by `IndicatorTests`. This step checks them on a real display, Space and full-screen app.)
 
 ### M-FN-1: hold to talk
 1. Click into a TextEdit document. Hold fn, say "Testing one two three, this is a hold to talk check.", then release.
@@ -69,6 +71,13 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 ### M-INS-4: paste that does not land
 1. Open Activity Monitor and click its process list, so no text field has focus. Hold fn, say a sentence, then release.
 2. Expected: a yellow ring and "Paste did not land. The text is in Recent." Clicking the entry in Recent copies the text.
+
+### M-NS-1: no speech
+1. Copy a word in TextEdit (Cmd+C), then click into the document. In a quiet room, hold fn for about 2 s without speaking, then release.
+2. Expected: nothing is inserted. A yellow ring and "No speech heard" show for about 4 s. Cmd+V still pastes the word you copied.
+3. Expected: Recent in the 🤫 menu has a "(no speech)" entry, and a new WAV is in Open recordings folder.
+4. Hold fn, say only "um, uh", then release. Expected: the same as steps 2 and 3.
+5. Hold fn and say a quiet "yes" from about an arm's length away. Expected: "yes" is inserted. If it shows "No speech heard" instead, or room noise in step 1 got transcribed, the -60 dBFS floor does not fit this mic: note the mic and the room in #15. You can try another floor with `defaults write io.backant.shepetal speechFloorDb -float -65` and relaunch.
 
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
@@ -116,3 +125,36 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 3. Copy some other text with ⌘C, then press ⌃⌘C and paste with ⌘V. Expected: the sentence again.
 4. Tap fn once briefly (too short) and wait for the hint to go away, then press ⌃⌘V. Expected: still the same sentence, because entries without text are skipped.
 5. The 🤫 menu's "Paste last text" and "Copy last text" do the same.
+
+### M-MIC-1: choosing the mic
+1. Plug in a USB or Bluetooth mic you have never used with Shepetal. Expected: "New mic: <its name>" shows next to 🤫. Unplug and plug it in again: nothing shows.
+2. Open 🤫 > Microphone. Expected: "Automatic (<mic in use>)" is checked, every input device is listed, and a "Prefer <name>" item is listed for each.
+3. Choose the USB mic's name (this forces it). Dictate a sentence while tapping the USB mic, then play the newest WAV from Open recordings folder. Expected: the tap is loud, so the USB mic recorded.
+4. Choose Automatic, then "Prefer <USB mic>". Dictate again. Expected: the USB mic records. Unplug it. Expected: "Using <next mic>" shows next to 🤫, and the next dictation works.
+
+### M-MIC-2: closed lid
+1. On a MacBook with an external display, keyboard and a USB mic, close the lid. Dictate. Expected: the USB mic records, even when MacBook Pro Microphone is forced or ranked first (the menu shows it as "(lid closed)" and greyed out).
+2. Unplug the USB mic and dictate. Expected: no recording starts, and a yellow ring with "The lid is closed and no other mic is connected. Open the lid or plug in a mic."
+
+### M-MIC-3: mic disconnected mid-dictation
+1. Force a USB or Bluetooth mic. Double-tap fn for hands-free, say a sentence, then unplug the mic (or switch off the headset) while still recording.
+2. Expected: recording stops, "Mic disconnected" shows next to 🤫, what you said before the unplug is inserted, and its WAV is in Open recordings folder.
+
+### M-MIC-4: dead mic
+1. Force an input that sends only silence: a loopback driver with nothing playing (for example Microsoft Teams Audio when Teams is closed, or BlackHole). Double-tap fn for hands-free and wait.
+2. Expected: after about 5 s "No sound from <name>. Is it muted?", and after about 15 s "Still no sound from <name>. Pick another mic in the 🤫 menu." Tap fn: the WAV is kept and holds silence.
+
+### M-MIC-5: Bluetooth and quiet recordings
+1. With AirPods connected and preferred, dictate once. Expected: "Tip: the built-in mic records clearer than Bluetooth" shows once. Dictate again: it does not show again, not even after a relaunch.
+2. On the built-in mic, hold fn and say a sentence very quietly from about an arm's length away. Expected: after the text lands, "Speak closer or use a wired mic". A normal sentence at normal distance does not show it. If it shows too often or never, tune it with `defaults write io.backant.shepetal micQuietFloor -float 0.002` (RMS, default 0.003) and relaunch.
+
+### M-LANG-1: languages
+1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
+2. Check Deutsch and Français. Expected: the menu's model line stays "Model: parakeet-tdt-0.6b-v3" (no reload). Say a German sentence. Expected: German text.
+3. Check 日本語 (Japanese). Expected: the model line reads "Model: ggml-large-v3-turbo-q5_0" when that model and `whisper-cli` are in `~/Library/Application Support/Shepetal/models/`. Otherwise it says which file is missing and where it goes, and dictation shows "Speech model is not loaded" until you install it or choose Automatic.
+4. Choose Automatic. Expected: the model line goes back to Parakeet.
+
+### M-DICT-1: personal dictionary
+1. Choose 🤫 > Dictionary…. Expected: `dictionary.txt` opens in your default text editor, holding only comment lines that explain the format. `ls -l ~/Library/Application\ Support/Shepetal/dictionary.txt` shows `-rw-------`.
+2. Add the lines `GitHub` and `asap => as soon as possible`, save, and without restarting Shepetal dictate "push it to github asap".
+3. Expected: "Push it to GitHub as soon as possible." A word that only contains "asap" (for example "asaps") is left alone.
