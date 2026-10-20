@@ -56,8 +56,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
         applyRetention()
-        tap.onChange = { [weak self] down in self?.fnWatch.tapEvent(); self?.fn(down) }
+        tap.onChange = { [weak self] down in self?.fnReceived(); self?.fn(down) }
         fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
+        fnWatch.active = { [weak self] in self?.tap.isRunning == true }
         fnWatch.start()
         tap.onOtherKey = { [weak self] in self?.run { $0.otherKeyDown(at: ProcessInfo.processInfo.systemUptime) } }
         startTapIfAllowed()
@@ -86,13 +87,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// "Press 🌐 key to" must be Do Nothing, or fn switches the input source instead of dictating.
     /// Checked at every launch; says something only when it changed the setting or could not.
     private func applyFnKeySetting() {
-        guard FnKeySystem.enabled else { return }
+        guard FnKeySystem.enabled, allowPrompts else { return }  // never from --no-permission-prompts test launches
         let outcome = FnKeySetting.apply(FnKeySystem.io)
         switch outcome {
         case .alreadySet: break
-        case .changed: indicator.show(FnKeySetting.changedHint, seconds: 6)
+        case .changed, .changedByInstaller: indicator.show(FnKeySetting.changedHint, seconds: 6)
         case .failed: fnProblem(FnKeySetting.failedHint)
         }
+    }
+
+    /// The tap delivered fn: an earlier "fn not received" no longer holds.
+    private func fnReceived() {
+        fnWatch.tapEvent()
+        guard FnDiagnostics.problem == FnHealth.hint else { return }
+        FnDiagnostics.problem = nil
+        if indicator.mode == .error { indicator.set(.idle) }
     }
 
     private func fnProblem(_ message: String) {
