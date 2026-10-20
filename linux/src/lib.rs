@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
+pub mod focus;
 pub mod gesture;
+pub mod indicator;
 pub mod insert;
 pub mod meeting;
 pub mod model;
