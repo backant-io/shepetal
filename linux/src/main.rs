@@ -48,7 +48,16 @@ fn backend() -> Option<insert::Backend> {
 }
 
 fn data_home() -> String {
-    std::env::var("XDG_DATA_HOME").unwrap_or_else(|_| format!("{}/.local/share", env("HOME")))
+    data_home_from(std::env::var("XDG_DATA_HOME").ok().as_deref(), &env("HOME"))
+}
+
+/// The XDG Base Directory spec: an empty or relative XDG_DATA_HOME is ignored, so the kept
+/// audio never lands under the daemon's working directory (which can be /tmp).
+fn data_home_from(xdg: Option<&str>, home: &str) -> String {
+    match xdg {
+        Some(d) if d.starts_with('/') => d.to_string(),
+        _ => format!("{home}/.local/share"),
+    }
 }
 
 fn model_path(m: &model::Choice) -> PathBuf {
@@ -112,7 +121,12 @@ fn keyboards_with(sys: &Path, key: u16) -> Vec<(PathBuf, String)> {
 /// it. None is an error: the daemon must not start and wait for a key that never arrives.
 fn hotkey_keyboards(sys: &Path) -> Result<(u16, String, Vec<(PathBuf, String)>), String> {
     let key_env = std::env::var("SHEPETAL_KEY").ok();
-    let key_name = key_env.clone().unwrap_or_else(|| "fn".into());
+    // A raw evdev code reads "Hold key 58 to talk" in the hint, not "Hold 58 to talk".
+    let key_name = match key_env.as_deref() {
+        None => "fn".into(),
+        Some(k) if k.parse::<u16>().is_ok() => format!("key {k}"),
+        Some(k) => k.to_string(),
+    };
     let key = shepetal::hotkey(key_env.as_deref()).ok_or(format!("unknown SHEPETAL_KEY {key_name:?}"))?;
     let devs = keyboards_with(sys, key);
     if devs.is_empty() {
@@ -196,13 +210,29 @@ fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
     }
     let stdout = String::from_utf8_lossy(&out.stdout);
     let text = if m.engine == Whisper {
-        stdout.into_owned()
+        without_markers(&stdout)
     } else {
         // sherpa-onnx-offline logs to stderr and prints one JSON result line per file on stdout.
         let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("{bin} output: {e}"))?;
         v["text"].as_str().ok_or(format!("{bin} output has no text"))?.to_string()
     };
     Ok(text.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// whisper.cpp writes non-speech as bracketed markers (`[BLANK_AUDIO]`, `[Music]`); they must
+/// not be typed at the cursor.
+fn without_markers(s: &str) -> String {
+    let mut out = String::new();
+    let mut depth = 0;
+    for c in s.chars() {
+        match c {
+            '[' => depth += 1,
+            ']' if depth > 0 => depth -= 1,
+            _ if depth == 0 => out.push(c),
+            _ => {}
+        }
+    }
+    out
 }
 
 fn daemon() -> Res {
@@ -247,8 +277,7 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
     let mut rec: Option<(Child, PathBuf)> = None;
     loop {
         let ev = match next_event(rx, key, t0) {
-            Ok(Some(ev)) => ev,
-            Ok(None) => continue,
+            Ok(ev) => ev,
             Err(e) => {
                 // Every keyboard is gone, e.g. a Bluetooth one slept mid-recording. Rust does not
                 // kill children on exit, so the recorder would keep the mic open after shepetal.
@@ -257,10 +286,16 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
                 return Err(e);
             }
         };
-        for a in g.feed(ev) {
-            // ponytail: stderr until the 🤫 overlay lands, which shows the hint for about 2 s.
-            if let Some(hint) = act(a, &mut rec, data_home, stt, typer, key_name)? {
-                eprintln!("shepetal: hint: {hint}");
+        // A tick after every event too, not only after 50 ms without one: while the user types
+        // or holds a key after a tap, the tap must still end as too short when its window runs
+        // out, and the recorder must stop then.
+        let tick = Event::Tick(t0.elapsed().as_millis() as u64);
+        for ev in ev.into_iter().chain([tick]) {
+            for a in g.feed(ev) {
+                // ponytail: stderr until the 🤫 overlay lands, which shows the hint for about 2 s.
+                if let Some(hint) = act(a, &mut rec, data_home, stt, typer, key_name)? {
+                    eprintln!("shepetal: hint: {hint}");
+                }
             }
         }
     }
@@ -443,11 +478,12 @@ mod tests {
         std::fs::create_dir_all(&d).unwrap();
         let d_ = d.display();
         // The JSON line has the shape sherpa-onnx-offline v1.13.8 prints on stdout.
-        let sherpa_out = r#"{"lang": "", "emotion": "", "event": "", "text": " Hello  world.", "timestamps": [0.00, 0.08]}"#;
+        // The text holds a newline: typed as is, it would press Enter in the user's window.
+        let sherpa_out = r#"{"lang": "", "emotion": "", "event": "", "text": " Hello\n  world.", "timestamps": [0.00, 0.08]}"#;
         let tools = [
             ("pw-record", format!("for f; do :; done\necho \"$*\" > \"{d_}/rec.args\"\ntrap 'printf \"RIFF final\" > \"$f\"; exit 0' INT\nprintf 'RIFF partial' > \"$f\"\ni=0; while [ $i -lt 1000 ]; do sleep 0.01; i=$((i+1)); done\n")),
-            ("sherpa-onnx-offline", format!("echo \"$*\" > \"{d_}/stt.args\"\nfor f; do :; done\ncp \"$f\" \"{d_}/heard.wav\"\necho 'Started' >&2\necho '{sherpa_out}'\n")),
-            ("whisper-cli", format!("echo \"$*\" > \"{d_}/stt.args\"\ncp \"$4\" \"{d_}/heard.wav\"\necho ' Hello  world.'\n")),
+            ("sherpa-onnx-offline", format!("echo \"$*\" > \"{d_}/stt.args\"\nfor f; do :; done\ncp \"$f\" \"{d_}/heard.wav\"\necho 'Started' >&2\nprintf '%s\\n' '{sherpa_out}'\n")),
+            ("whisper-cli", format!("echo \"$*\" > \"{d_}/stt.args\"\ncp \"$4\" \"{d_}/heard.wav\"\nprintf ' [BLANK_AUDIO]\\n Hello\\n  world. [Music]\\n'\n")),
             ("wtype", format!("cat > \"{d_}/typed\"\n")),
         ];
         for (bin, body) in tools {
@@ -523,6 +559,42 @@ mod tests {
             assert_eq!(kept.len(), 1, "{kept:?}");
             assert!(kept[0].to_string_lossy().ends_with(".cancelled.wav"), "{kept:?}");
             assert_eq!(std::fs::read(&kept[0]).unwrap(), b"RIFF final", "the recorder got SIGINT before shepetal returned");
+        });
+    }
+
+    #[test]
+    fn audio_never_goes_under_a_relative_or_empty_xdg_data_home() {
+        assert_eq!(data_home_from(Some("/data/me"), "/home/me"), "/data/me");
+        assert_eq!(data_home_from(None, "/home/me"), "/home/me/.local/share");
+        assert_eq!(data_home_from(Some(""), "/home/me"), "/home/me/.local/share");
+        assert_eq!(data_home_from(Some("tmp/x"), "/home/me"), "/home/me/.local/share");
+    }
+
+    #[test]
+    fn a_tap_ends_as_too_short_on_time_while_a_key_repeats() {
+        // Goal rule 2: tap fn, then hold Backspace. The tap must end as too short when the
+        // 500 ms window runs out, not when the typing pauses, so the mic is not left open.
+        with_fake_tools("repeat", |d| {
+            let home = d.join("home");
+            let audio = home.join("shepetal/audio");
+            let (tx, rx) = mpsc::channel();
+            let keyboard = std::thread::spawn(move || {
+                tx.send((shepetal::KEY_FN, 1)).unwrap();
+                wait_until("the recorder", || clips(&audio).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
+                tx.send((shepetal::KEY_FN, 0)).unwrap();
+                let up = Instant::now();
+                tx.send((14, 1)).unwrap(); // KEY_BACKSPACE down, then autorepeat every 20 ms
+                let too_short = || clips(&audio).iter().any(|p| p.to_string_lossy().ends_with(".tooshort.wav"));
+                while !too_short() && up.elapsed() < Duration::from_millis(2000) {
+                    tx.send((14, 2)).unwrap();
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                up.elapsed()
+            });
+            assert_eq!(listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype).unwrap_err(), "all input devices closed");
+            let took = keyboard.join().unwrap();
+            assert!(took < Duration::from_millis(900), "too short only {took:?} after the release, while the key repeated");
+            assert!(!d.join("typed").exists());
         });
     }
 

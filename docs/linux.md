@@ -50,8 +50,10 @@ paste keystroke, so the user pastes by hand, and restoring the clipboard would d
 - Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`
   and `xclip` over stdin. It never goes in argv, which every local user can read with `ps`.
 - Every dictation's raw audio is kept, the exact 16 kHz mono WAV the model received, in
-  `$XDG_DATA_HOME/shepetal/audio/` (default `~/.local/share/shepetal/audio/`). The directory is
-  created 0700, and the daemon refuses to start if it is a symlink or open to other users. Each
+  `$XDG_DATA_HOME/shepetal/audio/` (default `~/.local/share/shepetal/audio/`; an empty or relative
+  `XDG_DATA_HOME` is ignored, as the XDG spec says). The directory is created 0700. If it is a
+  symlink or open to other users, the recording is refused at the fn press and the daemon exits
+  with the reason. Each
   file is a new `<unix-ms>.wav`, created with `O_CREAT|O_EXCL` (which also refuses a symlink) and
   mode 0600. Nothing is deleted. A cancelled recording is renamed `<unix-ms>.cancelled.wav`, and
   a too-short press `<unix-ms>.tooshort.wav`.
@@ -166,7 +168,8 @@ Not yet done. These are the steps:
 ## Known gaps
 
 - Transcription runs on the input thread, so keys pressed during it queue up. Each event is
-  stamped when the loop takes it, so a hold that starts during a transcription is measured short.
+  stamped when the loop takes it, so a hold made during a transcription comes out as too short,
+  and its speech is not recorded at all (#59).
 - If every keyboard closes (a Bluetooth keyboard sleeps), the daemon stops a running recorder
   with SIGINT, keeps the clip as `*.cancelled.wav` and exits. A daemon killed by a signal
   (`kill`, SIGKILL) still leaves a running `pw-record` behind (#45).
