@@ -5,6 +5,8 @@ main = ".open-next/worker.js"
 
 # workers.dev only for now. The shepetal.backant.io custom domain is added at launch.
 workers_dev = true
+# Go-live: uncomment the next line, then npm run deploy.
+# routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]
 
 [assets]
 directory = ".open-next/assets"

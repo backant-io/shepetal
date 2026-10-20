@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { beforeEach, expect, it, vi } from 'vitest';
 import { upsertUser, type User } from './account';
 import { db } from './db';
-import { handleWebhook } from './stripe';
+import { checkoutUrl, getStripe, handleWebhook } from './stripe';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -11,6 +11,7 @@ useTestDb();
 const SECRET = 'whsec_test_secret';
 process.env.STRIPE_SECRET_KEY = 'sk_test_unused';
 process.env.STRIPE_WEBHOOK_SECRET = SECRET;
+process.env.STRIPE_PRICE_ID = 'price_test';
 
 const stripe = new Stripe('sk_test_unused');
 let user: User;
@@ -53,5 +54,24 @@ it('waits for a delayed payment to succeed before activating', async () => {
   expect(await status()).toBe('trial');
   const later = event({ ...s, payment_status: 'paid' }, 'checkout.session.async_payment_succeeded');
   await handleWebhook(later, sign(later));
+  expect(await status()).toBe('active');
+});
+
+// The webhook only activates sessions tagged app=shepetal and carrying the user id, so
+// checkoutUrl() must create exactly that: otherwise buyers pay $4.99 and stay on the trial.
+it('creates a checkout session that the webhook turns into an active license', async () => {
+  const create = vi
+    .spyOn(getStripe().checkout.sessions, 'create')
+    .mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/cs_1' } as never);
+  expect(await checkoutUrl(user, 'https://shepetal.backant.io')).toBe('https://checkout.stripe.com/c/pay/cs_1');
+  const params = create.mock.calls[0][0] as Stripe.Checkout.SessionCreateParams;
+  expect(params).toMatchObject({
+    mode: 'payment',
+    line_items: [{ price: 'price_test', quantity: 1 }],
+    client_reference_id: String(user.id),
+    metadata: { app: 'shepetal' },
+  });
+  const completed = event({ client_reference_id: params.client_reference_id, metadata: params.metadata, payment_status: 'paid' });
+  await handleWebhook(completed, sign(completed));
   expect(await status()).toBe('active');
 });
