@@ -258,6 +258,15 @@ impl Alert {
         }
     }
 
+    /// The few words next to 🤫, which stays tiny; the notification has the whole text.
+    pub fn short(&self) -> &'static str {
+        match self {
+            Alert::NoAudio(_) => "No sound from the mic",
+            Alert::Disconnected(_) => "Mic disconnected",
+            Alert::NoAudioServer => "No PipeWire or PulseAudio",
+        }
+    }
+
     fn kind(&self) -> u8 {
         match self {
             Alert::NoAudio(_) => 0,
@@ -292,8 +301,8 @@ impl RateLimit {
 
 type Sink = Box<dyn Fn(&str) + Send>;
 
-/// Where `hint <text>` and `error <text>` lines for the 🤫 overlay go. Until the overlay socket
-/// is wired in, stderr, as for the short-press hint.
+/// Where `hint <text>` and `error <text>` lines for the 🤫 overlay go (the daemon's indicator
+/// socket). They always go to stderr too, as the daemon's other hints do.
 static HINTS: Mutex<Option<Sink>> = Mutex::new(None);
 static LIMIT: Mutex<Option<RateLimit>> = Mutex::new(None);
 static PICKER: Mutex<Picker> = Mutex::new(Picker { last: None });
@@ -304,9 +313,9 @@ pub fn set_hint_sink(f: impl Fn(&str) + Send + 'static) {
 }
 
 fn hint_line(line: &str) {
-    match HINTS.lock().unwrap().as_ref() {
-        Some(f) => f(line),
-        None => eprintln!("shepetal: {}", line.replacen(' ', ": ", 1)),
+    eprintln!("shepetal: {}", line.replacen(' ', ": ", 1));
+    if let Some(f) = HINTS.lock().unwrap().as_ref() {
+        f(line);
     }
 }
 
@@ -316,7 +325,10 @@ pub fn alert(a: Alert) -> bool {
     let shown = LIMIT.lock().unwrap().get_or_insert_with(|| RateLimit::new(ALERT_EVERY)).allow(&a, Instant::now());
     if shown {
         let text = a.text();
-        hint_line(&format!("error {text}"));
+        eprintln!("shepetal: {text}");
+        if let Some(f) = HINTS.lock().unwrap().as_ref() {
+            f(&format!("error {}", a.short()));
+        }
         // Our own fixed wording plus a device description, not dictated text.
         let _ = Command::new("notify-send").args(["-a", "shepetal", "-i", "audio-input-microphone", "shepetal", &text]).status();
     }
@@ -438,8 +450,12 @@ pub fn watch(pid: u32, comm: &'static str, wav: PathBuf, mic: Option<Source>) {
     std::thread::spawn(move || {
         let mut h = Health::new(mic);
         let mut n = 0u32;
-        while alive(pid, comm) {
+        loop {
             std::thread::sleep(WATCH_EVERY);
+            // Checked after the sleep: once the recorder is reaped its pid may be another process.
+            if !alive(pid, comm) {
+                return;
+            }
             n += 1;
             let sources = (n % POLL_EVERY == 0).then(list).and_then(Result::ok);
             let bytes = std::fs::read(&wav).unwrap_or_default();
@@ -450,7 +466,8 @@ pub fn watch(pid: u32, comm: &'static str, wav: PathBuf, mic: Option<Source>) {
                 }
                 Verdict::Stop(a) => {
                     alert(a);
-                    let _ = Command::new("kill").args(["-INT", &pid.to_string()]).status();
+                    // The shell's builtin kill, as the daemon's stop(): Debian slim has no /usr/bin/kill.
+                    let _ = Command::new("sh").args(["-c", "kill -INT \"$0\"", &pid.to_string()]).status();
                     return;
                 }
             }
@@ -694,6 +711,16 @@ mod tests {
         assert!(r.allow(&Alert::NoAudioServer, t));
         assert!(r.allow(&Alert::NoAudio("a".into()), t + ALERT_EVERY), "allowed again after the window");
         assert!(!r.allow(&Alert::NoAudio("a".into()), t + ALERT_EVERY + Duration::from_secs(1)));
+    }
+
+    #[test]
+    fn the_indicator_gets_a_few_words_and_no_device_name() {
+        // Goal rule 3: 🤫 stays tiny. A long device name or advice belongs in the notification.
+        let long = "Yeti Stereo Microphone Analog Stereo".to_string();
+        for a in [Alert::NoAudio(long.clone()), Alert::Disconnected(long.clone()), Alert::NoAudioServer] {
+            assert!(a.short().len() <= 30 && !a.short().contains("Yeti"), "{:?}", a.short());
+            assert!(a.text().len() > a.short().len());
+        }
     }
 
     #[test]
