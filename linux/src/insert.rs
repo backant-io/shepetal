@@ -93,12 +93,29 @@ mod tests {
 
     #[test]
     fn text_goes_over_stdin_not_argv() {
-        // Each tool must be told to read stdin; argv is visible to every user via ps.
-        assert_eq!(Wtype.argv(), ["-"]);
-        assert_eq!(Xdotool.argv(), ["type", "--clearmodifiers", "--file", "-"]);
-        assert_eq!(Ydotool.argv(), ["type", "--file", "-"]);
-        assert!(WlCopy.argv().is_empty());
-        assert_eq!(Xclip.argv(), ["-selection", "clipboard"]);
+        // argv is visible to every user via ps, so insert() must pass only the fixed flags there
+        // and the text on stdin. Each fake tool exits 1 unless both hold, which fails insert().
+        use std::os::unix::fs::PermissionsExt;
+        let tools = [
+            (Wtype, "-"),
+            (Xdotool, "type --clearmodifiers --file -"),
+            (Ydotool, "type --file -"),
+            (WlCopy, ""),
+            (Xclip, "-selection clipboard"),
+        ];
+        let dir = std::env::temp_dir().join(format!("shepetal-bin-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (b, args) in tools {
+            let f = dir.join(b.bin());
+            std::fs::write(&f, format!("#!/bin/sh\n[ \"$*\" = \"{args}\" ] && [ \"$(cat; echo .)\" = \"secret words.\" ]\n")).unwrap();
+            std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let path = std::env::var("PATH").unwrap_or_default();
+        std::env::set_var("PATH", format!("{}:{path}", dir.display()));
+        let got: Vec<_> = tools.iter().map(|(b, _)| (*b, b.insert("secret words").is_ok())).collect();
+        std::env::set_var("PATH", path);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(got, tools.map(|(b, _)| (b, true)));
     }
 
     #[test]

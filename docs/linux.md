@@ -92,6 +92,15 @@ unset, it exits non-zero with a message saying fn is not visible to Linux and ho
 `SHEPETAL_KEY`. It never falls back to another key on its own. `shepetal probe` prints whether fn
 is visible and on which devices (sysfs is world-readable, so this needs no `input` group).
 
+The daemon and `probe` both skip the device named `ydotoold virtual device`. ydotoold (needed on GNOME Wayland) creates
+a uinput keyboard that declares every key, `KEY_FN` included
+([ydotool v1.0.4 ydotoold.c](https://github.com/ReimuNotMoe/ydotool/blob/v1.0.4/Daemon/ydotoold.c),
+and libuInputPlus's default key list for 0.1.8), but it only replays what `ydotool type` sends.
+Counted as a keyboard, it would let the daemon start on a laptop whose fn is invisible and then
+wait for a key that never comes. The name is the only stable marker: ydotool 1.x registers the
+device as `BUS_VIRTUAL`, but 0.1.8, the Ubuntu 24.04 package, registers it as `BUS_USB` (the
+libuInputPlus default).
+
 ## Packaging
 
 - **`.deb` / AppImage**: recommended. A plain process can read `/dev/input`, run `pw-record` and
@@ -127,9 +136,11 @@ Not yet done. These are the steps:
    `SHEPETAL_KEY=rightalt ./target/release/shepetal daemon` and Right Alt in place of fn.
 4. Start a Zoom call or a Google Meet in Firefox and run `probe` again. It must list the app as
    a mic user with `meeting=Some(..)`. Close the call, and it must disappear.
-5. `ydotoold &` (GNOME Wayland only), then `./target/release/shepetal daemon`.
+5. `ydotoold &` (GNOME Wayland only), then run `probe` again: its `fn key:` line must not
+   change, and it must never name `ydotoold virtual device`. Then `./target/release/shepetal daemon`.
    It must print the keyboards it listens on. If fn is not visible, it must exit non-zero with
-   the message that fn is not visible to Linux and how to set `SHEPETAL_KEY`.
+   the message that fn is not visible to Linux and how to set `SHEPETAL_KEY`, also while
+   ydotoold runs.
 6. Open gedit. Hold fn, say "hello world", release: the text appears. Recording starts on the
    press, so the first word is not cut off.
 7. Tap fn once: nothing is typed. Press fn+F1 while talking: nothing is typed, and a
@@ -144,6 +155,10 @@ Not yet done. These are the steps:
 
 - Transcription runs on the input thread, so keys pressed during it queue up.
 - No hotplug: keyboards plugged in after start are not seen.
+- Only ydotoold's virtual device is skipped. Any other uinput device that declares fn still
+  counts as an fn keyboard, so with one running and fn invisible the daemon starts and fn does
+  nothing. Skipping every virtual device would also drop a remapper's (keyd) virtual keyboard,
+  which is then the only device that sends real keys.
 - Only keyboards that report the hotkey are read, so a key pressed on another keyboard while fn
   is held does not cancel.
 - Whether `pw-record -P '{ application.name = shepetal }'` really renames the stream is not

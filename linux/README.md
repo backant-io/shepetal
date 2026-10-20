@@ -17,9 +17,10 @@ docker run --rm -v "$PWD/linux":/src -w /src -e CARGO_TARGET_DIR=/tmp/target ubu
 Ubuntu 24.04 ships cargo 1.75, so `Cargo.lock` is kept at lockfile version 3, which that cargo can read.
 ```
 
-This runs the unit tests (gesture timing, model choice, insertion backend priority, meeting
-detection over `fixtures/pw-dump-meeting.json`, evdev decoding, the sysfs key bitmap that
-finds fn), builds the release binary and
+This runs the unit tests (gesture timing, model choice, insertion backend priority, text over
+stdin to fake typing tools, meeting detection over `fixtures/pw-dump-meeting.json`, evdev
+decoding, the sysfs key bitmap that finds fn, the daemon's fn default and keyboard choice over a
+fake sysfs, cancelled clips kept), builds the release binary and
 runs `probe` against the fixture. The hotkey, mic, whisper-cli and typing paths need a real
 desktop and are not exercised in Docker.
 
