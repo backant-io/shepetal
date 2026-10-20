@@ -46,6 +46,12 @@ func run(_ d: inout MeetingDetector, _ s: Snapshot, from: Int, to: Int) -> [Meet
     let meet = Snapshot(micClients: [chromeHelper], windowTitles: ["com.google.Chrome": ["Meet - abc-defg-hij"]])
     #expect(run(&d, meet, from: 0, to: 2) == [.started(app: "Google Meet (Chrome)")])
 
+    // Safari's mic is held by the WebKit GPU process, its windows belong to Safari.
+    var ds = MeetingDetector(startAfter: 2, endAfter: 2)
+    let safari = Snapshot(micClients: [MicClient(bundleID: "com.apple.WebKit.GPU", name: "com.apple.WebKit.GPU")],
+                          windowTitles: ["com.apple.Safari": ["Weekly sync | Microsoft Teams"]])
+    #expect(run(&ds, safari, from: 0, to: 2) == [.started(app: "Microsoft Teams (Safari)")])
+
     // Browser mic without a meeting tab (e.g. a voice memo site) is not a meeting.
     var d2 = MeetingDetector(startAfter: 2, endAfter: 2)
     let other = Snapshot(micClients: [chromeHelper], windowTitles: ["com.google.Chrome": ["Inbox - Gmail"]])

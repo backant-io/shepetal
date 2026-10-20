@@ -15,6 +15,14 @@ Known apps: Zoom, Microsoft Teams, Slack (huddles), FaceTime, Webex, Discord by 
 Google Meet, Teams web and Zoom web in Chrome, Safari, Arc, Firefox and Edge by window title.
 During a calendar event, any other app holding the mic also counts.
 
+Thresholds follow what `docs/re/meetings.md` found in Wispr Flow: a 5 s grace period before a
+meeting counts (our `startAfter`), case-insensitive bundle-ID matching (FaceTime reports
+`com.apple.facetime`, Safari's mic is held by `com.apple.WebKit.GPU`), and browsers only count with
+a Meet/Teams/Zoom tab. Wispr ends a meeting with mic release plus a speech-silence policy
+(mic re-grab within 4 s is the same meeting, device switches within 10 s are not an end). We have
+no speech signal here, so `endAfter` defaults to 10 s of mic release. The caller decides what
+"current calendar event" means (Wispr uses a 5 min window around the start).
+
 ## Build and test
 
 ```sh

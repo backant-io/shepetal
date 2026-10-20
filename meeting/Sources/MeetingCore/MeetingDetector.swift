@@ -30,8 +30,8 @@ public enum MeetingEvent: Equatable, Sendable {
 }
 
 public enum KnownApps {
-    /// Native apps that only hold the mic during a call. Matched by bundle ID prefix,
-    /// so helper processes (e.g. `us.zoom.xos.helper`) count too.
+    /// Native apps that only hold the mic during a call. Matched by case-insensitive bundle ID
+    /// prefix, so helpers (`us.zoom.xos.helper`, `com.microsoft.teams2.modulehost`) count too.
     public static let native: [(prefix: String, name: String)] = [
         ("us.zoom.xos", "Zoom"),
         ("com.microsoft.teams", "Microsoft Teams"),  // also matches com.microsoft.teams2
@@ -52,6 +52,10 @@ public enum KnownApps {
         ("company.thebrowser.Browser", "Arc"),
         ("org.mozilla.firefox", "Firefox"),
         ("com.microsoft.edgemac", "Edge"),
+        ("com.brave.Browser", "Brave"),
+        ("com.vivaldi.Vivaldi", "Vivaldi"),
+        ("com.operasoftware.Opera", "Opera"),
+        ("org.chromium.Chromium", "Chromium"),
     ]
 
     /// Web meetings recognised by the browser window (tab) title.
@@ -89,18 +93,21 @@ public struct MeetingDetector: Sendable {
 
     func isSelf(_ c: MicClient) -> Bool {
         c.name.lowercased().contains("shepetal")
-            || selfBundleIDs.contains { c.bundleID.hasPrefix($0) }
+            || selfBundleIDs.contains { has(c.bundleID, prefix: $0) }
     }
+
+    func has(_ id: String, prefix: String) -> Bool { id.lowercased().hasPrefix(prefix.lowercased()) }
 
     /// The meeting apps visible in one snapshot, ignoring debounce.
     public func meetingApps(in s: Snapshot) -> Set<String> {
         var apps: Set<String> = []
         for c in s.micClients where !isSelf(c) {
-            if let n = KnownApps.native.first(where: { c.bundleID.hasPrefix($0.prefix) }) {
+            if let n = KnownApps.native.first(where: { has(c.bundleID, prefix: $0.prefix) }) {
                 apps.insert(n.name)
-            } else if let b = KnownApps.browsers.first(where: { c.bundleID.hasPrefix($0.prefix) }) {
-                // The helper holding the mic and the window owner share the browser prefix.
-                let titles = s.windowTitles.filter { $0.key.hasPrefix(b.prefix) }.values.joined()
+            } else if let b = KnownApps.browsers.first(where: { has(c.bundleID, prefix: $0.prefix) }) {
+                // The mic helper and the window owner can differ (WebKit.GPU vs Safari): match by browser.
+                let prefixes = KnownApps.browsers.filter { $0.name == b.name }.map(\.prefix)
+                let titles = s.windowTitles.filter { k, _ in prefixes.contains { has(k, prefix: $0) } }.values.joined()
                 if let w = KnownApps.webTitles.first(where: { t in titles.contains { $0.contains(t.needle) } }) {
                     apps.insert("\(w.name) (\(b.name))")
                 }
