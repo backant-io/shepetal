@@ -239,6 +239,9 @@ final class HandoffTests: XCTestCase {
         XCTAssertTrue(h.stopRequested)
         XCTAssertTrue(h.shouldKeepRecording(a, now: t0)) // the request does not reset the 5-minute cap clock
         XCTAssertFalse(h.shouldKeepRecording(a, now: t0 + Handoff.maxRecording))
+        var abandoned = recording(a, at: t0) // the app died mid-recording: the keyboard must start over, not wait on it
+        XCTAssertFalse(abandoned.requestStop(a, now: t0 + Handoff.maxRecording + Handoff.timeout + 1))
+        XCTAssertFalse(abandoned.stopRequested)
         h.request(b, document: field, now: t0) // a new session never inherits the old stop
         XCTAssertFalse(h.stopRequested)
     }
@@ -395,5 +398,13 @@ final class IndicatorTests: XCTestCase {
         XCTAssertEqual(indicator.psst.layer.borderColor, UIColor.systemRed.cgColor)
         indicator.show(.idle, nil)
         XCTAssertEqual(indicator.psst.layer.borderWidth, 0) // idle: just 🤫, no ring
+    }
+
+    func testLiveActivityGoesStaleOnlyAfterTheStatesTimeout() {
+        // A Live Activity left by an app that died says so instead of "Listening" for hours.
+        XCTAssertEqual(Indicator.Mode.recording.staleAfter, Handoff.maxRecording + Handoff.timeout)
+        XCTAssertEqual(Indicator.Mode.processing.staleAfter, Handoff.timeout)
+        XCTAssertNil(Indicator.Mode.idle.staleAfter)
+        XCTAssertNil(Indicator.Mode.error.staleAfter) // ended by the app a few seconds later anyway
     }
 }

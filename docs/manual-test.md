@@ -113,6 +113,7 @@ Setup (I-SETUP-1 below). The simulator has no usable mic path for this flow, so 
 2. Expected: 🤫 is always in the bottom-left corner of the keyboard, about 18 pt, and tapping it does nothing. Its ring uses the Mac colors: red while recording, blue while Shepetal opens or transcribes, yellow for an error, none when idle. The state text sits right of it and never covers the mic or delete key.
 
 ### I-LA-1: Live Activity and Dynamic Island
+The Dynamic Island steps need an iPhone 14 Pro or later (any iPhone 15, 16 or 17). On other iPhones, run only the lock screen steps (3, 7, 8).
 1. Start a dictation (I-DICT-1 steps 1 and 2).
 2. Expected: once you are back in Notes, the Dynamic Island shows 🤫 with a red ring on the left and "Listening" on the right. Touch and hold the island: the expanded view shows the same.
 3. Lock the iPhone. Expected: the lock screen shows the Live Activity with 🤫, a red ring and "Listening". Unlock and go back to Notes.
@@ -120,6 +121,7 @@ Setup (I-SETUP-1 below). The simulator has no usable mic path for this flow, so 
 5. Start a Timer in the Clock app, then start a dictation. With two Live Activities, iOS shows one of them as a small circle at the edge of the island. Expected: when that circle is Shepetal's, it shows 🤫 with its ring.
 6. Tap the mic and stop it at once (I-SHORT-1). Expected: the island shows a yellow ring and "Not inserted" for about 4 s, then the Live Activity ends.
 7. Turn off Settings > Shepetal > Live Activities and run I-DICT-1 again. Expected: no Live Activity, and dictation works the same.
+8. Start a dictation, go back, then force-quit Shepetal from the app switcher. Lock the iPhone. Expected: the Live Activity stays at most about 6 minutes on "Listening" with a red ring, then shows "Stopped" without a ring. Opening Shepetal removes it.
 
 ### I-CAP-1: 5-minute cap
 1. Start a dictation, go back to Notes and leave it running. Talk now and then.
