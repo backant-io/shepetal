@@ -1,7 +1,7 @@
 """Run shepetal's builder as a Claude Managed Agent whose tools execute on this Mac.
 
     agent/.venv/bin/python agent/run.py setup [cents]  # once: environment + agent + first session
-    agent/.venv/bin/python agent/run.py install [n]    # run n workers permanently (login item via launchd); one per parallel session
+    agent/.venv/bin/python agent/run.py install [n]    # run n workers permanently (login item via launchd); reinstalling restarts them
     agent/.venv/bin/python agent/run.py worker [n]     # or run them in the foreground; executes the agent's tools here
     agent/.venv/bin/python agent/run.py start [cents]  # another budgeted session, kicked off with the outcome
     agent/.venv/bin/python agent/run.py configure      # push system.md, tools and parallel workflows to the agent
@@ -115,32 +115,29 @@ async def worker(n="1"):
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(signum, task.cancel)
-        print(f"{n} worker(s) polling, tools run in {WORKDIR}. Ctrl-C to stop.")
+        print(f"{n} worker(s) polling, tools run in {WORKDIR}. Ctrl-C to stop.", flush=True)
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
 
 def install(n="1"):
     secret("environment-key", ENV_KEY_PROMPT)  # launchd has no terminal to ask in
-    # a separate job per count, so adding workers never restarts the ones serving a session
-    label = LABEL if n == "1" else f"{LABEL}-{n}"
-    plist, log = PLIST.with_name(f"{label}.plist"), LOG.with_name(f"shepetal-worker{'' if n == '1' else '-' + n}.log")
-    plist.parent.mkdir(parents=True, exist_ok=True)
-    with plist.open("wb") as f:
+    PLIST.parent.mkdir(parents=True, exist_ok=True)
+    with PLIST.open("wb") as f:
         plistlib.dump({
             "Label": LABEL,
             # caffeinate -i keeps the Mac from idle-sleeping while the worker runs
             "ProgramArguments": ["/usr/bin/caffeinate", "-i", sys.executable, str(Path(__file__).resolve()), "worker", n],
             "RunAtLoad": True,
             "KeepAlive": True,
-            "StandardOutPath": str(log),
-            "StandardErrorPath": str(log),
+            "StandardOutPath": str(LOG),
+            "StandardErrorPath": str(LOG),
         }, f)
     domain = f"gui/{os.getuid()}"
-    subprocess.run(["launchctl", "bootout", domain, str(plist)], capture_output=True)  # reload if already installed
-    subprocess.run(["launchctl", "bootstrap", domain, str(plist)], check=True)
-    print(f"{n} worker(s) installed and running, start at every login. Log: {log}\n"
-          f"Stop for good: launchctl bootout {domain} {plist} && rm {plist}")
+    subprocess.run(["launchctl", "bootout", f"{domain}/{LABEL}"], capture_output=True)  # reload if already installed
+    subprocess.run(["launchctl", "bootstrap", domain, str(PLIST)], check=True)
+    print(f"{n} worker(s) installed and running, start at every login. Log: {LOG}\n"
+          f"Stop for good: launchctl bootout {domain}/{LABEL} && rm {PLIST}")
 
 
 def check_cents(cents):
