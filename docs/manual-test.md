@@ -8,12 +8,23 @@ Setup: install the app once, either from the release zip (README > Mac > Install
 
 The app is signed with a certificate when the build machine has one (`scripts/make-app.sh` prints "Signed with: …"). Then macOS keeps the permissions across rebuilds and updates. If it prints "Signed ad-hoc", every rebuild counts as a new app for macOS and the permissions have to be granted again. To run the M-PERM tests from scratch, quit Shepetal and reset its grants with `tccutil reset All io.backant.shepetal`.
 
-### M-SETUP-1: first run from the release zip
-1. Download the zip from the release, double-click it, and drag `Shepetal.app` into Applications.
-2. Double-click `Shepetal.app`. If macOS blocks it, use System Settings > Privacy & Security > Open Anyway (README > Mac > Install, step 3).
-3. Expected: no Dock icon appears. 🤫 appears in the menu bar and, tiny, in the bottom-left corner of the screen. The Permissions window opens.
-4. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅ and the 🤫 menu's first line reads "Hold fn to talk, double-tap for hands-free".
-5. Click into any text field, hold fn, say a sentence, release. Expected: the sentence is typed there.
+### M-SETUP-1: first run from the installer
+1. In System Settings > Keyboard, set "Press 🌐 key to" to Change Input Source (to see the installer fix it).
+2. Download `Shepetal-<version>.pkg` from the release and open it (right-click › Open, or Privacy & Security › Open Anyway if macOS blocks it). Click Continue, Install, enter your password.
+3. Expected: when the installer finishes, Shepetal opens by itself: no Dock icon, 🤫 in the menu bar and, tiny, in the bottom-left corner. The permissions window opens.
+4. Expected: System Settings > Keyboard shows "Press 🌐 key to: Do Nothing" (reopen the pane), and pressing fn no longer switches the input source. System Settings > General > Login Items & Extensions lists Shepetal under Open at Login, and the 🤫 menu shows Start at login checked.
+5. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅ and the 🤫 menu's first line reads "Hold fn to talk, double-tap for hands-free".
+6. Click into any text field, hold fn, say a sentence, release. Expected: the sentence is typed there.
+
+### M-SETUP-4: the 🌐 key at launch, restore and uninstall
+1. Quit Shepetal. Set "Press 🌐 key to" to Show Emoji & Symbols. Open Shepetal.
+2. Expected: "🌐 key set to Do Nothing so fn can dictate" next to 🤫 for a few seconds, and the setting reads Do Nothing. Quit and open Shepetal again: no message this time.
+3. In the 🤫 menu choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the setting is back to that value.
+4. Run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
+
+### M-SETUP-5: fn not received
+1. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s.
+2. Expected: a yellow ring and "fn not received: re-grant Input Monitoring" next to 🤫; Open Shepetal… > Home shows the same under fn problem. Turn Shepetal back on: within 2 s fn dictates again.
 
 ### M-SETUP-2: permissions survive a rebuild
 1. With all three permissions granted, quit Shepetal, run `scripts/make-app.sh --install` (it must print "Signed with: Apple Development…" or "Developer ID…"), and open the app again.
@@ -124,11 +135,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 4. Repeat steps 1 to 3 with Microphone and with Input Monitoring. After turning Input Monitoring back on, hold fn in TextEdit and speak. Expected: it records and inserts. If fn does nothing until Shepetal restarts, note it on #32.
 5. Quit Shepetal, run `open dist/Shepetal.app --args --no-permission-prompts`, and turn Accessibility off. Expected: the message and the yellow ring show, but no window opens.
 
-### M-LOGIN-1: Open at login (F92)
-1. Open the 🤫 menu and choose Open at login.
+### M-LOGIN-1: Start at login (F92)
+1. Open the 🤫 menu and choose Start at login.
 2. Expected: the item is checked. If macOS wants approval instead, "Allow Shepetal in System Settings > General > Login Items" shows next to 🤫 and System Settings opens at Login Items. Allow Shepetal there. The item is then checked the next time you open the menu.
 3. Log out and log back in. Expected: 🤫 is in the bottom-left corner and in the menu bar without you opening Shepetal, and there is no Dock icon.
-4. Choose Open at login again. Expected: unchecked, and Shepetal is gone from Login Items. Every `scripts/make-app.sh` build has a new ad-hoc signature, so turn it off and on again after a rebuild.
+4. Choose Start at login again. Expected: unchecked, and Shepetal is gone from Login Items. The installer turns it on; builds signed with the same certificate keep it.
 
 ### M-SND-1: sounds (F06)
 1. Turn the volume up. Hold fn, speak, and release. Expected: a short rising blip about half a second after the ring turns red, and a short falling blip on release. Neither is loud.
