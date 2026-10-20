@@ -10,6 +10,7 @@ final class FnKeySettingTests: XCTestCase {
         var restarts = 0
         var stores: [Int?] = []
         var ignoreWrites = false
+        var noticePending = false
 
         init(value: Int?, previous: Int? = nil) { self.value = value; self.previous = previous }
 
@@ -18,7 +19,8 @@ final class FnKeySettingTests: XCTestCase {
                             write: { self.writes.append($0); if !self.ignoreWrites { self.value = $0 } },
                             restartInputAgents: { self.restarts += 1 },
                             loadPrevious: { self.previous },
-                            storePrevious: { self.stores.append($0); self.previous = $0 })
+                            storePrevious: { self.stores.append($0); self.previous = $0 },
+                            takeNoticePending: { defer { self.noticePending = false }; return self.noticePending })
         }
     }
 
@@ -100,6 +102,18 @@ final class FnKeySettingTests: XCTestCase {
         XCTAssertFalse(FnKeySetting.restore(f.io))
         XCTAssertEqual(f.writes, [])
         XCTAssertEqual(f.restarts, 0)
+    }
+
+    func testInstallerChangeIsAnnouncedOnceAtTheNextLaunch() {
+        let f = Fake(value: 0, previous: 1)  // the postinstall already wrote 0 and kept 1
+        f.noticePending = true
+        let first = FnKeySetting.apply(f.io)
+        XCTAssertEqual(first, .changedByInstaller)
+        XCTAssertEqual(first.hint, "🌐 key set to Do Nothing so fn can dictate")
+        XCTAssertEqual(f.writes, [], "nothing to write: it is already 0")
+        XCTAssertEqual(f.restarts, 0)
+        XCTAssertFalse(f.noticePending, "the flag is cleared")
+        XCTAssertNil(FnKeySetting.apply(f.io).hint, "said once")
     }
 
     func testDescriptions() {
