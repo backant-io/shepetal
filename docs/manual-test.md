@@ -157,6 +157,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Select "today." including its period. Hold fn and say "Tomorrow". Expected: "Send the final version tomorrow." with the period kept.
 4. Select " version " with the spaces on both sides. Say "copy". Expected: "Send the final copy tomorrow." with no double or missing spaces.
 
+### M-DATE-1: spoken dates become numbers (F32, docs/text-rules.md)
+1. In an empty TextEdit document, hold fn and say "Twenty sixth of July twenty twenty-six." Expected: "26.07.26."
+2. On a new line, say "Sechsundzwanzigster Juni sechsundzwanzig." Expected: "26.06.26."
+3. On a new line type "and then we rest", put the cursor at the start of the line, and say "We leave on the first of March." Expected: "We leave on 01.03. and then we rest". The date keeps its last dot.
+4. Say "May I ask a question?" Expected: it stays in words.
+
 ### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
 1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
 2. Click into a Notes note, then tap fn once to stop.
