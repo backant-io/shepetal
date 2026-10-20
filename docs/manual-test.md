@@ -250,11 +250,21 @@ The Dynamic Island steps need an iPhone 14 Pro or later (any iPhone 15, 16 or 17
 2. Expected: the app says "Cancelled. The recording is kept." Back in Notes, nothing is inserted and the keyboard says "Cancelled. Shepetal kept the audio."
 3. Download the container. Expected: `audio/<id>.wav` holds the sentence and `audio/<id>.json` has `"outcome":"cancelled"`. History lists it as `cancelled`.
 
-### I-FIELD-1: wrong field discard
-This step describes this build. Goal rule 8 says the text goes to the clipboard instead; that change is PR #54 (#42), which rewrites this step. Do not confirm iPhone F19 on this step.
-1. In note A, start a dictation, go back and say a sentence.
-2. Without stopping, open note B (or a text field in another app), bring up the Shepetal keyboard there and tap the mic. This stops the recording.
-3. Expected: nothing is inserted into note B. A yellow ring and "Not inserted, because you are in a different field now. The text is in Shepetal's history." show next to 🤫. Shepetal's history lists the recording with its text.
+### I-FIELD-1: a result for a different field goes to the clipboard
+1. Copy a word from anywhere, so the clipboard holds something you recognize.
+2. In note A, start a dictation, go back and say a sentence.
+3. Without stopping, open note B (or a text field in another app), bring up the Shepetal keyboard there and tap the mic. This stops the recording.
+4. Expected: nothing is inserted into note B. "You are in a different field now, so the text is on the clipboard. Tap the field and choose Paste." shows next to 🤫, with no ring. Shepetal's history lists the recording with its text.
+5. Tap note B and choose Paste. Expected: the sentence is pasted as plain text, and the word from step 1 is gone from the clipboard. Go back to note A: nothing is inserted there either.
+6. With a Mac signed in to the same Apple Account and Handoff on, press ⌘V in a Mac text field. Expected: the sentence does not arrive (the copy is local to the iPhone).
+
+### I-FIELD-2: two fields the keyboard might report as one
+The only field signal a keyboard gets is `documentIdentifier`. This step checks that two different fields never share one; if they did, text would go into the wrong field.
+1. In Safari, open a page with two text inputs on it (for example a sign-up form with name and email). Tap the first input, start a dictation, go back and say a sentence.
+2. Tap the second input on the same page, bring up the Shepetal keyboard and tap the mic.
+3. Expected: nothing is inserted in the second input, and the clipboard hint from I-FIELD-1 shows. Paste in the second input to clear the clipboard check.
+4. Repeat with Messages: start in one conversation, then open a different conversation and stop there. Expected: the same.
+5. If either case inserts the text into the second field, write it down and do not confirm iPhone F19: the identifier alone is not enough and a second field signal is needed.
 
 ### I-SHORT-1: too short
 1. Tap the mic, go back, and tap the mic again right away (under 0.3 s of audio).
@@ -293,7 +303,7 @@ This step describes this build. Goal rule 8 says the text goes to the clipboard 
 
 ### I-DOCID-1: field identity survives a keyboard relaunch
 1. Start a dictation in a note and go back. Before stopping, switch to the system keyboard with the globe key and back to Shepetal, in the same note.
-2. Tap the mic. Expected: the text is inserted. If you see "Not inserted, because you are in a different field now" instead, the keyboard is given a new `documentIdentifier` after a relaunch, and the field check discards every such result. Report it.
+2. Tap the mic. Expected: the text is inserted. If you see "You are in a different field now, so the text is on the clipboard" instead, the keyboard is given a new `documentIdentifier` after a relaunch, and every such result goes to the clipboard instead of the field. Report it.
 
 ## Meetings
 
