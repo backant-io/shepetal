@@ -182,6 +182,22 @@ final class HandoffTests: XCTestCase {
         XCTAssertTrue(board.contains(pasteboardTypes: [UTType.utf8PlainText.identifier]))
     }
 
+    // MARK: The keyboard skips opening the app only while the app's heartbeat is fresh.
+
+    func testKeyboardSeesTheAppListeningOnlyWhileItsHeartbeatIsFresh() throws {
+        let suite = "shepetal-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0, in: defaults)) // never written
+        SharedHandoff.markListening(t0, in: defaults)
+        XCTAssertTrue(SharedHandoff.isAppListening(now: t0, in: defaults))
+        XCTAssertTrue(SharedHandoff.isAppListening(now: t0 + SharedHandoff.listeningWindow - 0.1, in: defaults))
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0 + SharedHandoff.listeningWindow, in: defaults)) // the app died or was suspended
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0 - 10, in: defaults)) // a heartbeat from the future
+        SharedHandoff.markListening(nil, in: defaults) // the app closed the mic
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0, in: defaults))
+    }
+
     // MARK: Timeouts
 
     func testReadyResultExpiresAfterTimeout() {

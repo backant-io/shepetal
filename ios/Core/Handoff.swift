@@ -298,6 +298,10 @@ public enum Clipboard {
 public enum SharedHandoff {
     public static let appGroup = "group.io.backant.shepetal"
     public static let stopNotification = "io.backant.shepetal.stop"
+    /// Posted by the keyboard after writing a request, instead of opening the app, while the app is listening.
+    public static let startNotification = "io.backant.shepetal.start"
+    /// The app's heartbeat is this recent while its mic is open (it writes one every second).
+    public static let listeningWindow: TimeInterval = 3
     /// Posted by the app whenever the keyboard's session moves on: ready, failed or cancelled.
     public static let readyNotification = "io.backant.shepetal.ready"
     public static let shared = UserDefaults(suiteName: appGroup)
@@ -315,6 +319,22 @@ public enum SharedHandoff {
         defaults?.set(try? JSONEncoder().encode(handoff), forKey: key)
         return result
     }
+
+    /// App: its mic is open and it starts dictations from the keyboard's start notification. Nil when it closes the mic.
+    /// Kept apart from the handoff, so the heartbeat never races the keyboard's writes.
+    public static func markListening(_ now: Date?, in defaults: UserDefaults? = shared) {
+        defaults?.set(now, forKey: listeningKey)
+    }
+
+    /// Keyboard: true when the app wrote a heartbeat within `listeningWindow`, so a dictation can start
+    /// without opening the app. A heartbeat from the future (clock change) does not count.
+    public static func isAppListening(now: Date = Date(), in defaults: UserDefaults? = shared) -> Bool {
+        guard let beat = defaults?.object(forKey: listeningKey) as? Date else { return false }
+        let age = now.timeIntervalSince(beat)
+        return age >= -1 && age < listeningWindow
+    }
+
+    private static let listeningKey = "appListeningAt"
 
     public static func post(_ name: String) {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(name as CFString), nil, nil, true)

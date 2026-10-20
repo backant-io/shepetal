@@ -18,7 +18,7 @@ struct ShepetalApp: App {
         }
         session.observeKeyboard()
         let live = LiveIndicator()
-        session.onActivity = { live.show($0) }
+        session.onActivity = { [weak session] in live.show($0, micOpen: session?.isOpen ?? false) }
         // Audio saved while the iPhone was locked could not be written; write it now.
         NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main) { [weak session] _ in
             Task { @MainActor in session?.flush() }
@@ -33,6 +33,14 @@ struct ShepetalApp: App {
                 Text(session.status).multilineTextAlignment(.center)
                 if let error = session.saveError { Text(error).foregroundStyle(.red).multilineTextAlignment(.center) }
                 if session.isRecording { Button("Cancel", role: .destructive) { session.cancel() } }
+                if session.isOpen, !session.isRecording {
+                    Text("The microphone stays open, so the next dictation starts from the keyboard without opening Shepetal.")
+                        .font(.footnote).multilineTextAlignment(.center)
+                    Button("Turn off the microphone") { Task { await session.turnOff() } }
+                }
+                Picker("Keep the microphone open", selection: $session.keepOpen) {
+                    ForEach(KeepOpen.allCases) { Text($0.label).tag($0) }
+                }
                 Toggle("Delete recordings after 24 h", isOn: $session.deleteAfter24h)
                 List(session.history) { recording in
                     VStack(alignment: .leading) {
@@ -88,11 +96,12 @@ final class LiveIndicator {
         Task { for old in leftovers { await old.end(nil, dismissalPolicy: .immediate) } }
     }
 
-    /// Nil ends the Live Activity. An error stays for a few seconds, then it ends.
-    func show(_ mode: Indicator.Mode?) {
+    /// Nil ends the Live Activity. While the mic stays open it shows "Ready" between dictations, and an
+    /// error goes back to "Ready" (the session does that). Once the mic is closed, an error stays a few seconds, then it ends.
+    func show(_ mode: Indicator.Mode?, micOpen: Bool) {
         guard let mode else { return end(nil, .immediate) }
         let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: nil)
-        if mode == .error { return end(content, .after(.now + 4)) }
+        if mode == .error, !micOpen { return end(content, .after(.now + DictationSession.errorShown)) }
         if let activity {
             Task { await activity.update(content) }
         } else {
