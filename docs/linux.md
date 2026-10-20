@@ -41,7 +41,7 @@ and lets every click through to the window below. The ring shows the state:
 | `recording` | red ring |
 | `handsfree` | orange ring (after a double tap) |
 | `processing` | blue ring, 🤫 and ring pulsing between full and 35% opacity, 0.6 s each way |
-| `error <text>` | yellow ring, and the text next to 🤫 for about 4 s (`Transcription failed`, `Could not type the text`; details go to stderr) |
+| `error <text>` | yellow ring, and the text next to 🤫 for about 4 s (`Transcription failed`, `Could not type or copy the text`; details go to stderr) |
 | `hint <text>` | the text next to 🤫 for about 2 s, in white on a dark box; the ring stays. The short-press hint is `Hold fn to talk · double-tap for hands-free` (with the key's name when `SHEPETAL_KEY` is set) |
 
 The colors are Apple's system red, orange, blue and yellow, which the Mac indicator uses.
@@ -150,6 +150,32 @@ result depends on the keyboard layout.
 
 The clipboard fallback does not restore the old clipboard. In that case nothing can send the
 paste keystroke, so the user pastes by hand, and restoring the clipboard would delete the text first.
+
+## Text goes only into the window that kept focus (goal rule 8)
+
+When a dictation starts, the daemon reads which window has focus, and reads it again when the
+text is ready (`linux/src/focus.rs`):
+
+| Session | How focus is read |
+| --- | --- |
+| X11 (any desktop) | `xdotool getactivewindow` (EWMH `_NET_ACTIVE_WINDOW`) |
+| Sway (`SWAYSOCK` set or `XDG_CURRENT_DESKTOP` has `sway`) | `swaymsg -t get_tree`, the node with `"focused": true` |
+| Hyprland (`HYPRLAND_INSTANCE_SIGNATURE` set) | `hyprctl activewindow -j`, its `address` |
+| GNOME and KDE on Wayland | not readable by an app: the text is typed |
+
+- Same window at both ends: the text is typed. The clipboard is not touched.
+- Another window has focus: nothing is typed. The text goes to the clipboard (`wl-copy` on
+  Wayland, else `xclip`), and the hint next to 🤫 says
+  `Focus moved. The text is on the clipboard: press Ctrl+V (Ctrl+Shift+V in a terminal).`
+- Focus unreadable at either end: there is nothing to compare, so the text is typed.
+- Typing fails (the tool exits non-zero): the text goes to the clipboard with the hint
+  `Typing failed. ...`. With only a clipboard tool installed the hint is `No typing tool. ...`.
+- If the clipboard copy fails too, 🤫 turns yellow with `Could not type or copy the text`.
+- shepetal never moves focus back to the first window, and the old clipboard is not restored
+  when the text is left there (the user has not pasted it yet).
+
+Typing tools give no "landed" signal on Linux (unlike the Mac's paste check), so a typed text
+that the window ignores is not caught. The audio is kept either way.
 
 ## Security
 
@@ -268,6 +294,14 @@ Not yet done. These are the steps:
 9. Repeat steps 6 to 8 in an X11 session ("Ubuntu on Xorg" at login), where it must use `xdotool`.
 10. With fn visible: `SHEPETAL_KEY=rightalt ./target/release/shepetal daemon`. Right Alt now
     works and fn does nothing.
+11. **Rule 8, X11 and Sway or Hyprland**: open gedit and a terminal. In gedit, double-tap fn,
+    say a sentence, click into the terminal, then press fn once. Nothing is typed in either
+    window, focus stays on the terminal, and next to 🤫 shows `Focus moved. The text is on the
+    clipboard: press Ctrl+V (Ctrl+Shift+V in a terminal).` Ctrl+Shift+V pastes the sentence.
+    Repeat without switching windows: the sentence is typed into gedit and the clipboard keeps
+    what it held before.
+12. **Rule 8, GNOME or KDE Wayland**: the same steps type the sentence into whatever window has
+    focus at the end, since these desktops do not tell an app which window has focus.
 
 ### Manual test steps: 🤫 indicator
 
