@@ -45,6 +45,10 @@ final class PasteGatePipelineTests: XCTestCase {
         XCTAssertEqual(pastes, 0, "no Cmd+V may be posted", file: file, line: line)
         XCTAssertFalse(run.inserted.isEmpty, file: file, line: line)
         XCTAssertEqual(pasteboard.string(forType: .string), run.inserted, "the text waits on the clipboard", file: file, line: line)
+        let types = pasteboard.types ?? []
+        for marker in ["org.nspasteboard.ConcealedType", "org.nspasteboard.TransientType"] {
+            XCTAssertTrue(types.contains(.init(marker)), "clipboard managers must skip it: \(marker)", file: file, line: line)
+        }
         XCTAssertEqual(run.error, message, file: file, line: line)
         XCTAssertEqual(row.outcome, .pasteFailed, file: file, line: line)
         XCTAssertEqual(row.text, run.entry.text, "Recent keeps the text too", file: file, line: line)

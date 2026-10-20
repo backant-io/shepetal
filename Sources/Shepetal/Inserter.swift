@@ -54,9 +54,13 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
 
     /// Rule 8: text that is not pasted stays on the clipboard as plain text, so the user can press ⌘V.
     /// The user's old clipboard is not restored then.
+    /// The Concealed and Transient markers stay on it: clipboard managers skip it, and ⌘V still pastes it.
     func leaveOnClipboard(_ text: String) {
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let item = NSPasteboardItem()
+        item.setString(text, forType: .string)
+        for m in Self.markers { item.setData(Data(), forType: m) }
+        pasteboard.writeObjects([item])
     }
 
     nonisolated func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
@@ -145,6 +149,8 @@ enum FocusedText {
             return NSWorkspace.shared.frontmostApplication.map { ($0.processIdentifier, nil) }
         }
         let element = app as! AXUIElement
+        // This runs on the main thread at fn-down: a hung app must not stall fn handling for AX's default 6 s.
+        AXUIElementSetMessagingTimeout(element, 0.1)
         var pid: pid_t = 0
         guard AXUIElementGetPid(element, &pid) == .success else { return nil }
         var window: CFTypeRef?
