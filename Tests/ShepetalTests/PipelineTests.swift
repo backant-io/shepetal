@@ -141,6 +141,13 @@ final class PipelineTests: XCTestCase {
         XCTAssertLessThan(elapsed, PasteCheck.failAfter, "a paste that landed does not wait out the failure timeout")
     }
 
+    /// Re-transcribe in the hub runs the same text step as dictation, so it strips non-speech tags too.
+    @MainActor
+    func testFinishTextStripsTagsForReTranscribeToo() {
+        XCTAssertEqual(Pipeline.finishText("[BLANK_AUDIO] um, send it"), Cleanup.apply("send it"))
+        XCTAssertEqual(Pipeline.finishText("[Music]"), "")
+    }
+
     @MainActor
     func testNoEngineAndEngineErrorKeepAudio() async throws {
         let (none, noneRow) = try await process(speech, nil)

@@ -34,11 +34,11 @@ final class Pipeline {
         history = try History(path: root.appendingPathComponent("history.sqlite"))
     }
 
-    func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
-                 sendPaste: (CGEvent) -> Void) async -> Run {
+    func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
+                 context: () -> (before: String, after: String), sendPaste: (CGEvent) -> Void) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
-                                          durationMs: Self.ms(samples)))
+                                          durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
         save(samples, &run)  // first, so the audio survives anything below
         let saveError = run.error
         let error = await transcribeAndInsert(samples, engine, t0, context, sendPaste, &run)
@@ -59,7 +59,7 @@ final class Pipeline {
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Cleanup.apply(SpeechGuard.stripTags(run.entry.rawText))
+        run.entry.text = Self.finishText(run.entry.rawText)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
         let (before, after) = context()
@@ -74,6 +74,11 @@ final class Pipeline {
     private func noSpeech(_ run: inout Run) -> String {
         run.entry.outcome = .noSpeech
         return "No speech heard"
+    }
+
+    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
+    static func finishText(_ raw: String) -> String {
+        Cleanup.apply(SpeechGuard.stripTags(raw))
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {
