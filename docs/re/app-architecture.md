@@ -131,10 +131,10 @@ Permissions (`index.js`, `$.$` enum and `Ae` deep-link switch; `prefs.permission
 
 ## 7. Stats and gamification
 - Per-app word stats (`idx_history_per_app_stats`), WPM and time-saved comparisons (onboarding pages time-savings-speed-comparison; the hub has many `wpm` references), daily streak (flag `daily-streak`), insights heatmap (`cache.lastInsightsHeatmapReconcileAt`), "voice profile" persona card (`config.json` `voiceProfile`: peak time, top app, most-used word, catch phrase, word-count milestone, generated server-side), team leaderboard (flag `pro-team-leaderboard`), milestones and confetti.
-- shepetal: compute WPM = numWords / duration, streaks and per-app counts locally with SQL over `History`. Skip leaderboards.
+- shepetal: compute WPM = numWords / duration, streaks and per-app counts locally with SQL over `History`. A team leaderboard reads stats files from a folder the team shares (inventory F63).
 
 ## 8. Feature flags
-- Provider: PostHog feature flags (`posthog-node`, hosts `us.i.posthog.com`, `ph.wisprflow.ai`), cached to `feature-flags-cache.json`, and pushed to the helper via `UpdateFeatureFlags`. The enum holds about 230 flags (for example `stream-text`, `use-opus`, `use-msgpack`, `grpc-http-race`, `use-candidate-asr`, `auto-cleanup-v0`, `style-detection`, `scratchpad`, `meeting-recorder`, `cloud-sync`, `instruct-mode-experiment`, `ble-mic-ring`, `flow-fetch`, `extension-system`, `coding-cli-detection`, `dark-mode`, `localization-framework`), plus A/B variants (control/test, arm_a/b/c and so on). Pricing and trial experiments make up a large share.
+- Provider: PostHog feature flags (`posthog-node`, host `us.i.posthog.com` and a PostHog proxy on Wispr's own domain), cached to `feature-flags-cache.json`, and pushed to the helper via `UpdateFeatureFlags`. The enum holds about 230 flags (for example `stream-text`, `use-opus`, `use-msgpack`, `grpc-http-race`, `use-candidate-asr`, `auto-cleanup-v0`, `style-detection`, `scratchpad`, `meeting-recorder`, `cloud-sync`, `instruct-mode-experiment`, `ble-mic-ring`, `flow-fetch`, `extension-system`, `coding-cli-detection`, `dark-mode`, `localization-framework`), plus A/B variants (control/test, arm_a/b/c and so on). Pricing and trial experiments make up a large share.
 - shepetal: no remote flags. Use compile-time features and a local `settings.toml`.
 
 ## 9. Auto-updater
@@ -142,10 +142,10 @@ Permissions (`index.js`, `$.$` enum and `Ae` deep-link switch; `prefs.permission
 - shepetal: GitHub Releases plus Sparkle (mac) or the Tauri updater, opt-in, and never mid-dictation.
 
 ## 10. Telemetry and network (what shepetal must NOT do)
-- Analytics: PostHog (`us.i.posthog.com`, `eu.i.posthog.com`, `ph.wisprflow.ai`), Segment (`api.segment.io`, `cdn.segment.com`), and Datadog browser logs (`logs.browser-intake-datadoghq.com`). The analytics event enum in `index.js` has 1065 event names. The biggest groups are onboarding_* (160), notetaker_* (131), meeting_* (37), insights_* (30) and flow_* (30); others include paste_text_outcome, paywall_* and mcp_tool_called. The helper forwards its own events (`TrackAnalyticsEvent`, `PasteAnalytics`).
+- Analytics: PostHog (`us.i.posthog.com`, `eu.i.posthog.com` and a proxy on Wispr's own domain), Segment (`api.segment.io`, `cdn.segment.com`), and Datadog browser logs (`logs.browser-intake-datadoghq.com`). The analytics event enum in `index.js` has 1065 event names. The biggest groups are onboarding_* (160), notetaker_* (131), meeting_* (37), insights_* (30) and flow_* (30); others include paste_text_outcome, paywall_* and mcp_tool_called. The helper forwards its own events (`TrackAnalyticsEvent`, `PasteAnalytics`).
 - Errors and tracing: Sentry (`@sentry/electron`, traces propagated into the helper through `sentryTrace`/`sentryBaggage`), event-loop-blocked logs (`blocked-at`), CPU profiling worker (flag `cpu-profiling`).
 - Data upload: `needsUploading` columns on History, Polish, InstructHistory, FlowLensHistory and UserVoicePreferences. Dictation audio, screenshots and AX context are stored and uploaded unless the data-sharing settings and `localDataPolicy` say otherwise.
-- Backends: `api.wisprflow.ai`, `api-east.wisprflow.ai`, `cloud.wisprflow.ai`, gRPC streaming to a Baseten chain (`chain-*.api.baseten.co`), `aria-web.wispr.ai`, Supabase (auth/sync), WorkOS (enterprise SSO), sync websocket (flag `enable-sync-ws`).
+- Backends: Wispr's API hosts (a main one and a US-east one), a cloud host, an older API host used by `AriaWebClient`, gRPC streaming and a Baseten chain on Baseten, models on Modal, Supabase (auth/sync), WorkOS (enterprise SSO), sync websocket (flag `enable-sync-ws`).
 - shepetal stance: zero network by default. No analytics SDK, no crash upload. Logs are local only. Any model download is explicit.
 
 ## 11. Dependency signals (package.json) mapped to shepetal choices
