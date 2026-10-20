@@ -12,10 +12,11 @@ case "probe":
     let detector = MeetingDetector()
     print("meeting apps now: \(detector.meetingApps(in: Probes.snapshot()).sorted())")
 case "watch":
-    var detector = MeetingDetector(
-        startAfter: Double(ProcessInfo.processInfo.environment["START_AFTER"] ?? "") ?? 5,
-        endAfter: Double(ProcessInfo.processInfo.environment["END_AFTER"] ?? "") ?? 10)
-    print("watching (start after \(detector.startAfter)s, end after \(detector.endAfter)s), ctrl-c to stop")
+    var detector = MeetingDetector()
+    let env = ProcessInfo.processInfo.environment
+    detector.startAfter = Double(env["START_AFTER"] ?? "") ?? detector.startAfter
+    detector.endWithoutEvidence = Double(env["END_AFTER"] ?? "") ?? detector.endWithoutEvidence
+    print("watching (start after \(detector.startAfter)s, end after \(detector.endWithoutEvidence)s), ctrl-c to stop")
     let t0 = Date()
     while true {
         for e in detector.update(Probes.snapshot(), now: Date().timeIntervalSince(t0)) {

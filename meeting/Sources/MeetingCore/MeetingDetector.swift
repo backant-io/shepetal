@@ -15,6 +15,8 @@ public struct Snapshot: Sendable {
     public var windowTitles: [String: [String]]
     /// Title of the calendar event happening now, if any.
     public var calendarEvent: String?
+    /// End evidence, e.g. the meeting window or tab is gone. Shortens the end wait.
+    public var meetingWindowGone: Bool = false
 
     public init(micClients: [MicClient] = [],
                 windowTitles: [String: [String]] = [:], calendarEvent: String? = nil) {
@@ -35,7 +37,6 @@ public enum KnownApps {
     public static let native: [(prefix: String, name: String)] = [
         ("us.zoom.xos", "Zoom"),
         ("com.microsoft.teams", "Microsoft Teams"),  // also matches com.microsoft.teams2
-        ("com.tinyspeck.slackmacgap", "Slack"),
         ("com.apple.FaceTime", "FaceTime"),
         ("com.apple.avconferenced", "FaceTime"),
         ("com.cisco.webexmeetingsapp", "Webex"),
@@ -73,23 +74,37 @@ public enum KnownApps {
 /// Turns snapshots into debounced meetingStarted / meetingEnded events.
 /// Pure state machine: the caller supplies the clock, so it is fully testable.
 public struct MeetingDetector: Sendable {
-    /// Seconds a meeting app must hold the mic before a meeting starts.
-    public var startAfter: Double
-    /// Seconds the mic must be released before the meeting ends.
-    public var endAfter: Double
+    /// Seconds a meeting app must hold the mic before a meeting starts (grace).
+    public var startAfter: Double = 5
+    /// No starts this long after wake or a Core Audio restart.
+    public var holdoff: Double = 10
+    /// No end in the first seconds of a meeting.
+    public var minSession: Double = 15
+    /// Seconds after mic release before ending, with / without end evidence.
+    public var endWithEvidence: Double = 3
+    public var endWithoutEvidence: Double = 30
+    /// The mic coming back within this window is the same meeting.
+    public var reacquire: Double = 4
+    /// An audio device change suppresses ends for this long.
+    public var deviceChangeGrace: Double = 10
     /// Bundle ID prefixes that never count (shepetal's own dictation).
     public var selfBundleIDs: [String]
 
     private var pendingSince: [String: Double] = [:]
     private var lostSince: [String: Double] = [:]
+    private var startedAt: [String: Double] = [:]
+    private var holdoffUntil = -Double.infinity
+    private var deviceGraceUntil = -Double.infinity
     public private(set) var active: Set<String> = []
 
-    public init(startAfter: Double = 5, endAfter: Double = 10,
-                selfBundleIDs: [String] = ["io.backant.shepetal", "shepetal"]) {
-        self.startAfter = startAfter
-        self.endAfter = endAfter
+    public init(selfBundleIDs: [String] = ["io.backant.shepetal", "shepetal"]) {
         self.selfBundleIDs = selfBundleIDs
     }
+
+    /// Call after system wake or a coreaudiod restart.
+    public mutating func wokeOrAudioRestarted(now: Double) { holdoffUntil = now + holdoff }
+    /// Call when the default input/output device changes.
+    public mutating func deviceChanged(now: Double) { deviceGraceUntil = now + deviceChangeGrace }
 
     func isSelf(_ c: MicClient) -> Bool {
         c.name.lowercased().contains("shepetal")
@@ -104,6 +119,10 @@ public struct MeetingDetector: Sendable {
         for c in s.micClients where !isSelf(c) {
             if let n = KnownApps.native.first(where: { has(c.bundleID, prefix: $0.prefix) }) {
                 apps.insert(n.name)
+            } else if has(c.bundleID, prefix: "com.tinyspeck.slackmacgap") {
+                // Slack holds the mic for clips too: only a visible huddle counts.
+                let titles = s.windowTitles.filter { has($0.key, prefix: "com.tinyspeck.slackmacgap") }.values.joined()
+                if titles.contains(where: { $0.lowercased().contains("huddle") }) { apps.insert("Slack") }
             } else if let b = KnownApps.browsers.first(where: { has(c.bundleID, prefix: $0.prefix) }) {
                 // The mic helper and the window owner can differ (WebKit.GPU vs Safari): match by browser.
                 let prefixes = KnownApps.browsers.filter { $0.name == b.name }.map(\.prefix)
@@ -127,8 +146,9 @@ public struct MeetingDetector: Sendable {
             if active.contains(app) { continue }
             let since = pendingSince[app] ?? now
             pendingSince[app] = since
-            if now - since >= startAfter {
+            if now - since >= startAfter && now >= holdoffUntil {
                 pendingSince[app] = nil
+                startedAt[app] = now
                 active.insert(app)
                 events.append(.started(app: app))
             }
@@ -138,8 +158,10 @@ public struct MeetingDetector: Sendable {
         for app in active.sorted() where !seen.contains(app) {
             let since = lostSince[app] ?? now
             lostSince[app] = since
-            if now - since >= endAfter {
+            let wait = max(s.meetingWindowGone ? endWithEvidence : endWithoutEvidence, reacquire)
+            if now - since >= wait && now - (startedAt[app] ?? now) >= minSession && now >= deviceGraceUntil {
                 lostSince[app] = nil
+                startedAt[app] = nil
                 active.remove(app)
                 events.append(.ended(app: app))
             }
