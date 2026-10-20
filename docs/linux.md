@@ -1,7 +1,7 @@
 # shepetal on Linux
 
 Status: v0 scaffold. The pure logic is unit-tested in Docker. The device paths (hotkey, mic,
-whisper, typing) are written but have not been run on a real desktop yet.
+speech-to-text, typing) are written but have not been run on a real desktop yet.
 
 ## Language: Rust
 
@@ -21,8 +21,8 @@ PipeWire bindings are less mature. Python would need a runtime and a virtualenv 
 | Hotkey | fn (evdev `KEY_FN`). Read only the `/dev/input/event*` keyboards whose sysfs key capabilities include the hotkey (see "fn hotkey" below). Their key events go to one state machine. User must be in the `input` group. | GlobalShortcuts portal first (press and release, GNOME 48+, Plasma, Hyprland), evdev as the opt-in fallback, `evdev` crate for hotplug |
 | Gesture | Recording starts on the fn press. Hold fn at least 500 ms for push-to-talk. Two taps with at most 500 ms between the release and the second press for hands-free, next press stops. A shorter press with no second tap is too short: nothing is transcribed or typed, the clip is kept as too short, and the daemon prints the hint `Hold fn to talk · double-tap for hands-free` to stderr (the 🤫 overlay will show it). A chord (fn+F1) cancels without a hint, and the clip is kept as cancelled. The 500/500 ms values match the Mac (`Sources/ShepetalCore/FnGesture.swift`) and the 500 ms debounce in `docs/re/dictation-input.md` section 2.3. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code). | Config file, tunable thresholds |
 | Mic | `pw-record` at 16 kHz mono s16, falling back to `parecord` (PulseAudio). Stopped with SIGINT so the WAV header is written. | `pipewire-rs` stream, no temp file |
-| STT | `whisper-cli` from whisper.cpp on a temp WAV | `whisper-rs` in-process, model kept warm, sherpa-onnx for streaming |
-| Model | `large-v3-turbo` on CUDA (`/dev/nvidia0`) or Vulkan (an ICD in `/usr/share/vulkan/icd.d`) when RAM is at least 8 GB. On CPU: `small` (16 GB and 8 cores or more), `base` (8 GB or more), else `tiny`. | Thresholds from measured latency, VRAM check |
+| STT | `sherpa-onnx-offline` (Parakeet) or `whisper-cli` from whisper.cpp (Whisper), run on the kept WAV. sherpa-onnx prints one JSON line per file on stdout, and shepetal reads its `text`. | `sherpa-rs` / `whisper-rs` in-process, model kept warm, sherpa-onnx streaming for meetings |
+| Model | The Linux rows of the tier table in `docs/models.md` (goal rule 5). CPU: Parakeet TDT 0.6B v3 int8 on sherpa-onnx, or Parakeet TDT-CTC 110M int8 below 4 GB RAM. CUDA (`/dev/nvidia0`, 8 GB RAM or more): Parakeet TDT 0.6B v3 with `--provider=cuda`. Vulkan (an ICD in `/usr/share/vulkan/icd.d`, 8 GB RAM or more): Whisper large-v3-turbo q5_0 on whisper.cpp. | Thresholds from measured latency, VRAM check, the Whisper fallback for languages Parakeet lacks |
 | Insert | See the matrix below | RemoteDesktop portal (`persist_mode=2`) on GNOME and KDE, clipboard plus paste key with restore for long text |
 | Meeting | Parse `pw-dump`: running `Stream/Input/Audio` nodes that do not capture a sink monitor, matched to Zoom, Teams, Slack, Discord, Chrome/Chromium, Firefox. System audio is `<default.audio.sink>.monitor` from the `default` metadata. | Live `pw-dump --monitor`, record the monitor next to the mic |
 
@@ -126,9 +126,17 @@ Not yet done. These are the steps:
 
 1. `sudo apt install pipewire-bin wl-clipboard xclip xdotool ydotool cmake build-essential`,
    then `sudo usermod -aG input $USER` and log out and back in.
-2. Build whisper.cpp (`cmake -B build && cmake --build build -j`), put `build/bin/whisper-cli`
-   on PATH, then download the model `shepetal probe` names
-   (`./models/download-ggml-model.sh base`) into `~/.local/share/shepetal/ggml-base.bin`.
+2. Install the speech-to-text runner and the model `shepetal probe` names, into
+   `~/.local/share/shepetal/`:
+   - Parakeet (CPU and CUDA): put `sherpa-onnx-offline` on PATH from the
+     [sherpa-onnx v1.13.8 release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/v1.13.8)
+     (`sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2`; for CUDA the `...-linux-x64-gpu.tar.bz2`
+     that matches the CUDA version), then unpack
+     `https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2`
+     there. A CPU-only build given `--provider=cuda` logs `Fallback to cpu!` and still works.
+   - Whisper (Vulkan): build whisper.cpp with `-DGGML_VULKAN=ON`, put `build/bin/whisper-cli` on
+     PATH and download `ggml-large-v3-turbo-q5_0.bin` there
+     (`./models/download-ggml-model.sh large-v3-turbo-q5_0`).
 3. `cargo build --release && ./target/release/shepetal probe`. Check that RAM, cores, the GPU
    and the insertion backend match the machine. On GNOME Wayland it must say `Ydotool`.
    Check the `fn key:` line. With an Apple keyboard it must say `visible on /dev/input/eventN`
@@ -157,7 +165,15 @@ Not yet done. These are the steps:
 
 ## Known gaps
 
-- Transcription runs on the input thread, so keys pressed during it queue up.
+- Transcription runs on the input thread, so keys pressed during it queue up. Each event is
+  stamped when the loop takes it, so a hold that starts during a transcription is measured short.
+- If every keyboard closes (a Bluetooth keyboard sleeps), the daemon stops a running recorder
+  with SIGINT, keeps the clip as `*.cancelled.wav` and exits. A daemon killed by a signal
+  (`kill`, SIGKILL) still leaves a running `pw-record` behind.
+- Vulkan counts as present when `/usr/share/vulkan/icd.d` has any file, which includes Mesa's
+  software renderer (lavapipe). Such a machine gets Whisper turbo on Vulkan, not Parakeet on CPU.
+- Parakeet TDT-CTC 110M is English only. The 4 GB RAM line that picks it stands in for the
+  table's "low-end ARM" and is not measured.
 - No hotplug: keyboards plugged in after start are not seen.
 - Only ydotoold's virtual device is skipped. Any other uinput device that declares fn still
   counts as an fn keyboard, so with one running and fn invisible the daemon starts and fn does
