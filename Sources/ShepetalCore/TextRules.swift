@@ -18,17 +18,23 @@ public enum InsertionRules {
         let lead = String(selected.prefix(while: \.isWhitespace))
         let trail = sel.isEmpty ? "" : String(selected.reversed().prefix(while: \.isWhitespace).reversed())
 
+        let prev = before.last(where: { !$0.isWhitespace })
+        let midSentence = prev.map { !sentenceEnd.contains($0) } ?? false
+
         // Case: the selection's first letter when it has one that says something (not "I" or an acronym),
         // else lowercase mid-sentence. Our own "I" and acronyms are never lowercased.
         if let f = sel.first(where: \.isLetter), keepsLowercase(firstWord(sel)) {
             if f.isUppercase { text = text.prefix(1).uppercased() + text.dropFirst() }
             else if keepsLowercase(firstWord(text)) { text = text.prefix(1).lowercased() + text.dropFirst() }
-        } else if let c = before.last(where: { !$0.isWhitespace }), !sentenceEnd.contains(c), keepsLowercase(firstWord(text)) {
+        } else if midSentence, keepsLowercase(firstWord(text)) {
             text = text.prefix(1).lowercased() + text.dropFirst()
         }
 
-        // Sentence end: match the selection's, else drop ours when the text after continues the sentence.
-        let continues = after.first(where: { !$0.isWhitespace }).map { $0.isLowercase || ",;:".contains($0) } ?? false
+        // Sentence end: match the selection's, else drop ours when the sentence goes on after the cursor: the next
+        // character is lowercase, a comma-like mark or the sentence's own end, or any word follows mid-sentence.
+        let continues = after.first(where: { !$0.isWhitespace }).map {
+            $0.isLowercase || ",;:".contains($0) || sentenceEnd.contains($0) || (midSentence && ($0.isLetter || $0.isNumber))
+        } ?? false
         if let end = sel.last, sentenceEnd.contains(end) {
             if let last = text.last, !sentenceEnd.contains(last) { text.append(end) }
         } else if !sel.isEmpty || continues {
@@ -47,6 +53,8 @@ public enum InsertionRules {
     }
 
     /// False for "I", "I'm" and acronyms like "API".
+    /// ponytail: a name that opens a mid-sentence dictation ("John will…") is lowercased. NLTagger's name tags
+    /// were wrong on 10 of 44 short fragments ("Quick brown", "Mark it done"); a user dictionary would cover names.
     static func keepsLowercase(_ word: Substring) -> Bool {
         if word == "I" || word.hasPrefix("I'") || word.hasPrefix("I’") { return false }
         let letters = word.filter(\.isLetter)

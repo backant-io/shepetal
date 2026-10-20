@@ -133,11 +133,7 @@ enum FocusedText {
     }
 
     static func selected() -> String {
-        read().map { s, r in
-            let ns = s as NSString
-            let start = min(max(r.location, 0), ns.length)
-            return ns.substring(with: NSRange(location: start, length: min(max(r.length, 0), ns.length - start)))
-        } ?? ""
+        read().map { selection($0, $1) } ?? ""
     }
 
     /// The focused app's pid and its focused window, to tell at paste time whether focus moved (rule 8).
@@ -159,27 +155,44 @@ enum FocusedText {
         return PasteGate.focus(axPid: axPid, frontmostPid: frontmost, window: ok ? (window as! AXUIElement) : nil)
     }
 
+    /// An unreadable field logs which attribute failed and the AX error code, never the text.
     private static func read() -> (String, NSRange)? {
-        let system = AXUIElementCreateSystemWide()
         var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let element = focused else { return nil }
-        let el = element as! AXUIElement
+        var err = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused)
+        guard err == .success, let focused else { return unreadable(kAXFocusedUIElementAttribute, err) }
+        let el = focused as! AXUIElement
         var value: CFTypeRef?
+        err = AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value)
+        guard err == .success, let string = value as? String else { return unreadable(kAXValueAttribute, err) }
         var rangeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value) == .success,
-              let string = value as? String,
-              AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-              let rangeValue = rangeRef else { return nil }
         var range = CFRange()
-        guard AXValueGetValue(rangeValue as! AXValue, .cfRange, &range) else { return nil }
+        err = AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef)
+        guard err == .success, let rangeRef, AXValueGetValue(rangeRef as! AXValue, .cfRange, &range) else {
+            return unreadable(kAXSelectedTextRangeAttribute, err)
+        }
         return (string, NSRange(location: range.location, length: range.length))
     }
 
+    private static func unreadable(_ attribute: String, _ err: AXError) -> (String, NSRange)? {
+        NSLog("shepetal: context: %@ unreadable (AX %d), text goes in as dictated", attribute, err.rawValue)
+        return nil
+    }
+
+    /// The selected text, or "" when the range is not inside the text.
+    static func selection(_ s: String, _ r: NSRange) -> String {
+        valid(r, in: s) ? (s as NSString).substring(with: r) : ""
+    }
+
+    /// The text before and after the selection. A range outside the text (stale, or counted in other units)
+    /// gives no context: guessing the cursor from it would change the dictation's case and punctuation on a guess.
     static func split(_ s: String, _ selection: NSRange) -> (before: String, after: String) {
+        guard valid(selection, in: s) else { return ("", "") }
         let ns = s as NSString
-        let start = min(max(selection.location, 0), ns.length)
-        let end = min(start + max(selection.length, 0), ns.length)
-        return (ns.substring(to: start), ns.substring(from: end))
+        return (ns.substring(to: selection.location), ns.substring(from: NSMaxRange(selection)))
+    }
+
+    private static func valid(_ r: NSRange, in s: String) -> Bool {
+        let length = (s as NSString).length
+        return r.location >= 0 && r.length >= 0 && r.location <= length && r.length <= length - r.location
     }
 }

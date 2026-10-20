@@ -67,14 +67,15 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Expected: a red ring while you hold, a pulsing blue ring after release, then the text appears at the cursor. Your earlier clipboard is back (Cmd+V elsewhere pastes what you had copied before).
 
 ### M-FN-2: double-tap for hands-free
-1. In TextEdit, tap fn twice quickly (the second press within half a second of releasing the first).
-2. Expected: the ring turns orange and stays orange after you release.
+1. In TextEdit, tap fn twice as fast as you can (the second press within half a second of releasing the first).
+2. Expected: the ring turns orange on the second press and stays orange after you release.
 3. Speak two sentences without holding anything. Tap fn once.
-4. Expected: the text appears. Recent in the 🤫 menu shows it.
+4. Expected: the ring turns blue on that tap and the text appears, with no further fn press. Recent in the 🤫 menu shows it.
+5. Tap fn once, wait about 1 s, then tap again. Expected: not hands-free. Each tap shows the short-press hint (M-FN-3).
 
 ### M-FN-3: short press
 1. Tap fn once, briefly (under half a second), and don't tap again.
-2. Expected: nothing is inserted. "Hold fn to talk · double-tap for hands-free" shows next to 🤫 for about 2 s.
+2. Expected: nothing is inserted and the ring never turns orange (a short press is never hands-free). "Hold fn to talk · double-tap for hands-free" shows next to 🤫 about half a second after the release, for about 3 s, without another fn press.
 3. Expected: Recent in the 🤫 menu has a "(too short)" entry, and a new WAV is in Open recordings folder.
 
 ### M-FN-4: fn as a modifier
@@ -110,6 +111,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
+3. Meetings follow the same choice. Record a short meeting (M-MTG-1, or start and stop one by hand) and leave Shepetal running. Expected about 25 h later: its folder (Me.wav, Others.wav) is gone from `~/Library/Application Support/Shepetal/meetings/`, but the meeting is still in Meetings with its transcript and summary, and search still finds it. Only the audio is deleted, as with dictation. A meeting recorded in the last 24 h keeps its folder, and so does one that is still recording. (The timing is covered by `MeetingStoreTests.testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording`.)
 
 ### M-INS-5: space before the following word (F109)
 1. In TextEdit type "Hello world", then put the cursor right before "world". Hold fn, say "big", then release.
@@ -150,19 +152,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Log out and log back in. Expected: 🤫 is in the bottom-left corner and in the menu bar without you opening Shepetal, and there is no Dock icon.
 4. Choose Start at login again. Expected: unchecked, and Shepetal is gone from Login Items. The installer turns it on; builds signed with the same certificate keep it.
 
-### M-SND-1: sounds (F06)
-1. Turn the volume up. Hold fn, speak, and release. Expected: a short rising blip about half a second after the ring turns red, and a short falling blip on release. Neither is loud.
-2. Double-tap fn. Expected: a quick double blip when the ring turns orange. Tap fn to stop: the falling blip.
-3. Press fn+Delete quickly. Expected: no sound. Tap fn briefly once. Expected: no sound, only the hint. Hold fn until the rising blip, then press Delete within the first second. Expected: the rising blip, then a low tone.
-4. Play the newest WAV in Open recordings folder. The start blip may be faint about half a second in. Expected: the transcript in Recent has no extra word from it.
-5. Uncheck Sounds in the 🤫 menu. Expected: steps 1 to 3 make no sound. Quit and reopen Shepetal: Sounds is still unchecked.
-
 ### M-HUB-1: open the Shepetal window
 1. Before you install this build, run `sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite 'select count(*) from history'` and note the number. Install and open the new build. Run the command again. Expected: the same number. (`HistoryTests.testOldDatabaseUpgradesWithoutLosingRows` checks this on a copy of the old schema.)
 2. With all three permissions granted, quit Shepetal and open it again from Finder or Spotlight. Expected: only 🤫 appears. No Shepetal window opens.
 3. Open the 🤫 menu and choose Open Shepetal…. Expected: a window titled "Shepetal" with Home, History and Settings tabs comes to the front.
 4. Close it. Open `dist/Shepetal.app` again (Finder, Spotlight or `open dist/Shepetal.app`). Expected: the same window opens. No second 🤫 appears.
-5. Home: expected rows for the speech model, the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
+5. Home: expected rows for speech recognition ("On-device speech recognition (standard engine)", no model name), the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
 
 ### M-HUB-2: search and copy
 1. Dictate "Send the quarterly report today" and then "Call the dentist at 100% volume" into TextEdit (M-FN-1). Open History.
@@ -175,8 +170,8 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Expected: that row now says "recording deleted", its Play and Re-transcribe are greyed out, and its text and Copy still work. Set Recordings back to Keep recordings if you want.
 
 ### M-HUB-4: re-transcribe
-1. Click Re-transcribe on a dictation and choose the entry marked "(current)". Expected: "Re-transcribed with parakeet-tdt-0.6b-v3" under the list. The row keeps its time, outcome and app.
-2. Install the whisper.cpp fallback (README, Mac). Choose the other model in the same menu. Expected: after a few seconds, "Re-transcribed with ggml-…", and the row's text is the whisper result. Without the fallback installed, expected: "Re-transcribe failed: … not found", and the row is unchanged.
+1. Click Re-transcribe on a dictation and choose the entry marked "(current)". Expected: "Re-transcribed with the standard engine" under the list. The row keeps its time, outcome and app.
+2. Install the whisper.cpp fallback (README, Mac). Choose the other model in the same menu. It is listed as "With the alternative engine". Expected: after a few seconds, "Re-transcribed with the alternative engine", and the row's text is the whisper result. Without the fallback installed, expected: "Re-transcribe failed: The alternative engine is not installed", and the row is unchanged.
 
 ### M-HUB-5: archive
 1. Click Archive on a dictation. Expected: it leaves the list.
@@ -191,6 +186,54 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Open History. Expected: the rows show "TextEdit", "Safari · github.com" and "Google Chrome · github.com". The URL is stored only in `history.sqlite` (`sqlite3 … 'select app, bundle_id, url from history order by created_at desc limit 3'`).
 3. If a Chrome row has no host, note it on the PR: Chrome had no accessibility tree for the page (see the `ponytail:` note in `Sources/Shepetal/AppContext.swift`).
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
+
+### M-MTG-1: Zoom call, detected, recorded after one click, and transcribed (rule 7)
+Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic). Open Shepetal… > Settings: "Always record meetings automatically" is off (the default).
+1. Start or join a Zoom meeting in the zoom.us app, with your mic unmuted. Click into Zoom's chat box.
+2. Expected about 5 s after Zoom opens the mic: a small card just above the 🤫 in the bottom-left corner says "Meeting detected · Zoom", with Record and Not now. Nothing records yet: 🤫 has no red ring, the menu bar shows "🤫", and the 🤫 menu shows "Start meeting recording".
+3. Click Record. Expected: the card goes away, and typing still goes into Zoom's chat box (the click did not take focus or bring Shepetal forward). "Meeting detected · recording" shows next to 🤫, 🤫 gets a red ring that stays for the whole meeting, the menu bar shows "🤫●", and the 🤫 menu shows "Stop meeting recording". The first time, macOS asks whether Shepetal may record system audio: allow it. If the hint says "… mic only (turn on System Audio Recording)", add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, then leave and rejoin the call.
+4. Open 🤫 > Open Shepetal… > Meetings. Expected: a "Zoom" meeting at the top, still running. Within about a minute its transcript fills in, with your lines labelled Me and the other side's labelled Others.
+5. Say "I will send the slides by Friday." Have the other side say "I will review the budget tomorrow."
+6. Leave the meeting. Expected within about 5 s: "Meeting recording saved", then "Meeting notes ready · open Shepetal → Meetings", the red ring goes away, and the menu bar goes back to "🤫". The meeting's Summary lists the action items "Me: send the slides (Friday)" and "Others: review the budget (tomorrow)" (the wording may differ slightly).
+7. Type `budget` in the Meetings search. Expected: the meeting is found. Click Copy summary and paste in TextEdit: the summary is pasted, without the transcript. Export Markdown writes a `.md` file where you choose.
+8. Run `ls -la ~/Library/Application\ Support/Shepetal/meetings/*/`. Expected: the meeting's folder is `drwx------` and holds `Me.wav` and `Others.wav`, both `-rw-------`. Open them in QuickTime: Me is your mic, Others is the call audio.
+9. Do steps 1 to 6 again without headphones, with the call on the MacBook's own speakers at normal volume. The mic hears the other side here too, and Me.wav keeps that echo (the audio is kept as recorded). Expected: the transcript has no Others line a second time under Me, and the summary has "Others: review the budget (tomorrow)" once, with no second copy under Me. Short replies of yours said over the other side ("yes, that works") stay under Me.
+10. Not now: join a Zoom meeting and click Not now on the card. Expected: the card goes, nothing records (no red ring, "🤫" in the menu bar, "Start meeting recording" in the menu), no new meeting appears under Meetings, and the card does not come back while you stay in that meeting. Leave it.
+11. Timeout: join again and leave the card alone. Expected: it goes away by itself after about 20 s and nothing records. 🤫 > Start meeting recording still records the rest of this meeting by hand (listed as "Manual"); stop it from the menu.
+12. Always record: in Open Shepetal… > Settings, turn on "Always record meetings automatically". Join a Zoom meeting. Expected: no card; about 5 s after Zoom opens the mic, "Meeting detected · recording" next to 🤫, the red ring, "🤫●", and "Stop meeting recording" in the menu. Stop meeting recording ends it. Turn the setting off again.
+
+### M-MTG-2: Google Meet in a browser
+1. Meet in Chrome or Safari is found by the tab's window title, which macOS only shows to apps with screen recording access. Add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording (the upper list), then quit and reopen Shepetal.
+2. Join a Google Meet call in Chrome with the mic on. Expected: the card says "Meeting detected · Google Meet (Chrome)" (or "Google Meet (Safari)"). Click Record: the meeting is listed under that name. Repeat steps 4 to 8 of M-MTG-1.
+3. Without screen recording access, Meet is not detected. Use 🤫 > Start meeting recording before the call and Stop meeting recording after it. Expected: the same transcript and summary, listed as "Manual".
+
+### M-MTG-3: dictation during a meeting
+1. During a recorded Zoom call, click into TextEdit, hold fn, say a sentence, and release. Expected: the sentence is inserted as usual, no second meeting starts or is offered, and the ring around 🤫 stays red throughout.
+2. Expected afterwards: the meeting's transcript has the sentence under Me, since the meeting records the mic too.
+
+### M-MTG-4: quit during a meeting
+1. Start a meeting recording, talk for a minute, then quit Shepetal from the 🤫 menu.
+2. Expected: both WAVs are kept and play to the end. The meeting is listed as ended, with the transcript up to the last 30 s live pass. It gets no summary: a meeting cut off by quitting is not transcribed again at the next launch.
+
+### M-MTG-5: killed during a meeting (#100)
+1. Start a meeting recording and talk for about 20 s. Then, in Terminal, run `pkill -9 -x Shepetal`, as a crash would end it.
+2. Run `afinfo ~/Library/Application\ Support/Shepetal/meetings/<newest>/Me.wav` (and `Others.wav` if it is there). Expected: `estimated duration` is about 20 s, not 0. Both files play in QuickTime up to the kill.
+
+### M-ACC-1: first launch, sign-in and the free trial
+Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
+0. Without `ShepetalRequiresSignIn` or the variable, signed out: expected the menu still offers Sign in, but no sign-in hint shows at launch and fn dictates normally.
+1. Sign out first if this Mac was signed in (🤫 menu > Sign out). Quit and open Shepetal. Expected: next to 🤫 "Sign in with Google to start your free 30-day trial" for a few seconds; the 🤫 menu shows "Not signed in" and "Sign in with Google to start your free 30-day trial…". Open Shepetal… > Home shows the same under Account.
+2. Hold fn in TextEdit. Expected: nothing is recorded or inserted, and the hint "Sign in with Google to start your free 30-day trial" shows next to 🤫.
+3. Choose Sign in with Google… Expected: a sign-in sheet opens shepetal.backant.io and goes to Google; if the browser is already signed in to Google, one click picks the account. Nothing to type. The menu says "Signing in with Google…". Expected: after the sheet closes, within a few seconds the menu shows "Free trial: 30 days left · <your email>", Get Shepetal for $4.99 (lifetime, updates included)… and Sign out. Run `security find-generic-password -s io.backant.shepetal.account` in Terminal. Expected: an item exists (do not print its secret).
+4. Hold fn and dictate into TextEdit. Expected: it works as in M-FN-1.
+4a. Sign out, choose Sign in with Google… again and close the sheet with Cancel. Expected: no error, the menu is back to "Not signed in" with the Sign in item. Sign in again.
+5. Quit and reopen Shepetal with Wi-Fi off. Expected: the trial line is unchanged and dictation still works (7-day offline grace). Turn Wi-Fi back on.
+
+### M-ACC-2: buy, lifetime, sign out
+1. Choose Get Shepetal for $4.99… Expected: Stripe Checkout opens in the browser. Pay with a Stripe test card on a test deployment. Expected: within about a minute of paying, the menu says "Yours forever · <email>" and has no Buy item.
+2. On the site, end the trial of a test account (or wait for it). Reopen Shepetal. Expected: the menu says "Trial ended" with Get Shepetal for $4.99…; holding fn shows "Trial ended: get Shepetal for $4.99" and records nothing.
+3. Choose Sign out. Expected: "Not signed in", fn shows the sign-in hint, and `security find-generic-password -s io.backant.shepetal.account` finds nothing.
+4. While dictating a long hands-free note, watch Little Snitch or `nettop -p shepetal`: expected no connection during the dictation.
 
 ## iPhone
 
@@ -235,11 +278,22 @@ The Dynamic Island steps need an iPhone 14 Pro or later (any iPhone 15, 16 or 17
 1. Start a dictation (I-DICT-1 steps 1 and 2).
 2. Expected: once you are back in Notes, the Dynamic Island shows 🤫 with a red ring on the left and "Listening" on the right. Touch and hold the island: the expanded view shows the same.
 3. Lock the iPhone. Expected: the lock screen shows the Live Activity with 🤫, a red ring and "Listening". Unlock and go back to Notes.
-4. Tap the mic on the keyboard. Expected: the island shows a blue ring and "Transcribing", then the Live Activity ends when the text is inserted.
+4. Tap the mic on the keyboard. Expected: the island shows a blue ring and "Transcribing", then 🤫 with no ring and "Ready" once the text is inserted (the mic stays open, I-OPEN-1). With "Keep the microphone open" set to "Close after each dictation", the Live Activity ends instead.
 5. Start a Timer in the Clock app, then start a dictation. With two Live Activities, iOS shows one of them as a small circle at the edge of the island. Expected: when that circle is Shepetal's, it shows 🤫 with its ring.
-6. Tap the mic and stop it at once (I-SHORT-1). Expected: the island shows a yellow ring and "Not inserted" for about 4 s, then the Live Activity ends.
+6. Tap the mic and stop it at once (I-SHORT-1). Expected: the island shows a yellow ring and "Not inserted" for about 4 s, then "Ready" again. With "Close after each dictation", it ends after the 4 s instead.
 7. Turn off Settings > Shepetal > Live Activities and run I-DICT-1 again. Expected: no Live Activity, and dictation works the same.
 8. Start a dictation, go back, then force-quit Shepetal from the app switcher. Lock the iPhone. Expected: the Live Activity stays at most about 6 minutes on "Listening" with a red ring, then shows "Stopped" without a ring. Opening Shepetal removes it.
+
+### I-OPEN-1: the next dictation starts without opening Shepetal
+1. In Shepetal, check that "Keep the microphone open" is "5 minutes" (the default). Run I-DICT-1 once.
+2. Expected: after the text is inserted, the orange mic dot stays on, the Live Activity shows 🤫 and "Ready", and Shepetal (if you switch to it) says the microphone stays open and shows "Turn off the microphone".
+3. Back in Notes, play music in another app, then tap the mic within 5 minutes. Expected: Shepetal does NOT open. The keyboard shows "Starting...", then a red ring and "Listening. Tap the mic to finish." within about a second. Say a sentence, tap the mic. Expected: only that sentence is inserted, nothing said or played between the two dictations, and the music kept playing.
+4. Wait 5 minutes without dictating. Expected: the orange mic dot goes off and the Live Activity ends. Tap the mic: Shepetal opens again, as in I-DICT-1.
+5. Set "Keep the microphone open" to "1 hour" (the longest choice), dictate once, then tap "Turn off the microphone" in Shepetal. Expected: the mic dot goes off and the Live Activity ends at once.
+6. Set it to "Close after each dictation" and dictate. Expected: the mic dot goes off as soon as the text is inserted, and every dictation opens Shepetal.
+7. With the mic open (step 2), force-quit Shepetal from the app switcher and lock the iPhone. Expected: within about 1.5 minutes the Live Activity stops saying "Ready" and shows "Stopped" with no ring. Unlock, go back to Notes and tap the mic. Expected: after about 1.5 s the keyboard says "Opening Shepetal..." and Shepetal opens, as in I-DICT-1.
+8. With the mic open, take a phone call or ask Siri something. Expected: the mic dot goes off and the next tap opens Shepetal.
+9. Where your other audio plays while the mic is open: play music on the loudspeaker (no headphones), then dictate once so the mic stays open. Expected: the music keeps playing from the loudspeaker, not the earpiece, at the same volume and quality for the whole open window. Repeat with AirPods connected. Expected: the music stays on the AirPods in normal quality (not the thin call sound). If either moves or changes, report it: the audio session options in `EngineMic.start` need another look.
 
 ### I-CAP-1: 5-minute cap
 1. Start a dictation, go back to Notes and leave it running. Talk now and then.

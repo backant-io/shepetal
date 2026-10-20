@@ -19,7 +19,7 @@ VALUES = {"done", "hand-test", "confirmed", "impossible", "n/a", "outside", "tod
 AUTOMATED = {"done", "hand-test", "confirmed", "impossible", "n/a", "outside"}
 CONFIRMED = AUTOMATED - {"hand-test"}
 DESKTOP = {"M", "W"}  # inventory Wispr-column letters that map to the Mac and Linux columns (goal "Platform mapping")
-NA_CATEGORIES = {"billing", "subscriptions", "referrals", "telemetry", "remote-flags", "ab-tests", "account-admin"}
+NA_CATEGORIES = {"billing", "subscriptions", "referrals", "telemetry", "remote-flags", "ab-tests", "account-admin", "declined"}
 # A docs/manual-test.md step id (M-FN-1, I-DICT-1, L-KEY-2, MEET-3). A cell that waits on one is hand-test, not done (#41).
 HAND_STEP = re.compile(r"\b(?:[MIL]-[A-Z]+-\d+|MEET-\d+)\b")
 STEP_PREFIX = {"Mac": ("M-", "MEET-"), "Linux": ("L-", "MEET-"), "iPhone": ("I-", "MEET-")}  # a hand-test cell's own steps

@@ -196,6 +196,35 @@ final class HandoffTests: XCTestCase {
         XCTAssertTrue(board.contains(pasteboardTypes: [UTType.utf8PlainText.identifier]))
     }
 
+    // MARK: The keyboard skips opening the app only while the app's heartbeat is fresh.
+
+    func testReadingTheSharedStateNeverWritesIt() throws {
+        // A read that wrote back could erase a request the keyboard wrote between the read and the write.
+        let suite = "shepetal-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        XCTAssertEqual(SharedHandoff.read(in: defaults), Handoff())
+        XCTAssertNil(defaults.data(forKey: "handoff"))
+        SharedHandoff.update(in: defaults) { $0.request(a, document: field, now: t0) }
+        let written = defaults.data(forKey: "handoff")
+        XCTAssertEqual(SharedHandoff.read(in: defaults).sessionID, a)
+        XCTAssertEqual(defaults.data(forKey: "handoff"), written)
+    }
+
+    func testKeyboardSeesTheAppListeningOnlyWhileItsHeartbeatIsFresh() throws {
+        let suite = "shepetal-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0, in: defaults)) // never written
+        SharedHandoff.markListening(t0, in: defaults)
+        XCTAssertTrue(SharedHandoff.isAppListening(now: t0, in: defaults))
+        XCTAssertTrue(SharedHandoff.isAppListening(now: t0 + SharedHandoff.listeningWindow - 0.1, in: defaults))
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0 + SharedHandoff.listeningWindow, in: defaults)) // the app died or was suspended
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0 - 10, in: defaults)) // a heartbeat from the future
+        SharedHandoff.markListening(nil, in: defaults) // the app closed the mic
+        XCTAssertFalse(SharedHandoff.isAppListening(now: t0, in: defaults))
+    }
+
     // MARK: Timeouts
 
     func testReadyResultExpiresAfterTimeout() {
@@ -417,10 +446,10 @@ final class IndicatorTests: XCTestCase {
     }
 
     func testLiveActivityGoesStaleOnlyAfterTheStatesTimeout() {
-        // A Live Activity left by an app that died says so instead of "Listening" for hours.
+        // A Live Activity left by an app that died says so instead of "Listening" or "Ready" for hours.
         XCTAssertEqual(Indicator.Mode.recording.staleAfter, Handoff.maxRecording + Handoff.timeout)
         XCTAssertEqual(Indicator.Mode.processing.staleAfter, Handoff.timeout)
-        XCTAssertNil(Indicator.Mode.idle.staleAfter)
-        XCTAssertNil(Indicator.Mode.error.staleAfter) // ended by the app a few seconds later anyway
+        XCTAssertEqual(Indicator.Mode.idle.staleAfter, DictationSession.activityRefresh + 30) // re-sent every minute while open
+        XCTAssertEqual(Indicator.Mode.error.staleAfter, DictationSession.activityRefresh + 30)
     }
 }
