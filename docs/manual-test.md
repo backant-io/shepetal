@@ -67,14 +67,15 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Expected: a red ring while you hold, a pulsing blue ring after release, then the text appears at the cursor. Your earlier clipboard is back (Cmd+V elsewhere pastes what you had copied before).
 
 ### M-FN-2: double-tap for hands-free
-1. In TextEdit, tap fn twice quickly (the second press within half a second of releasing the first).
-2. Expected: the ring turns orange and stays orange after you release.
+1. In TextEdit, tap fn twice as fast as you can (the second press within half a second of releasing the first).
+2. Expected: the ring turns orange on the second press and stays orange after you release.
 3. Speak two sentences without holding anything. Tap fn once.
-4. Expected: the text appears. Recent in the 🤫 menu shows it.
+4. Expected: the ring turns blue on that tap and the text appears, with no further fn press. Recent in the 🤫 menu shows it.
+5. Tap fn once, wait about 1 s, then tap again. Expected: not hands-free. Each tap shows the short-press hint (M-FN-3).
 
 ### M-FN-3: short press
 1. Tap fn once, briefly (under half a second), and don't tap again.
-2. Expected: nothing is inserted. "Hold fn to talk · double-tap for hands-free" shows next to 🤫 for about 2 s.
+2. Expected: nothing is inserted and the ring never turns orange (a short press is never hands-free). "Hold fn to talk · double-tap for hands-free" shows next to 🤫 about half a second after the release, for about 3 s, without another fn press.
 3. Expected: Recent in the 🤫 menu has a "(too short)" entry, and a new WAV is in Open recordings folder.
 
 ### M-FN-4: fn as a modifier
@@ -110,6 +111,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
+3. Meetings follow the same choice. Record a short meeting (M-MTG-1, or start and stop one by hand) and leave Shepetal running. Expected about 25 h later: its folder (Me.wav, Others.wav) is gone from `~/Library/Application Support/Shepetal/meetings/`, but the meeting is still in Meetings with its transcript and summary, and search still finds it. Only the audio is deleted, as with dictation. A meeting recorded in the last 24 h keeps its folder, and so does one that is still recording. (The timing is covered by `MeetingStoreTests.testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording`.)
 
 ### M-INS-5: space before the following word (F109)
 1. In TextEdit type "Hello world", then put the cursor right before "world". Hold fn, say "big", then release.
@@ -212,6 +214,10 @@ Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and 
 ### M-MTG-4: quit during a meeting
 1. Start a meeting recording, talk for a minute, then quit Shepetal from the 🤫 menu.
 2. Expected: both WAVs are kept and play to the end. The meeting is listed as ended, with the transcript up to the last 30 s live pass. It gets no summary: a meeting cut off by quitting is not transcribed again at the next launch.
+
+### M-MTG-5: killed during a meeting (#100)
+1. Start a meeting recording and talk for about 20 s. Then, in Terminal, run `pkill -9 -x Shepetal`, as a crash would end it.
+2. Run `afinfo ~/Library/Application\ Support/Shepetal/meetings/<newest>/Me.wav` (and `Others.wav` if it is there). Expected: `estimated duration` is about 20 s, not 0. Both files play in QuickTime up to the kill.
 
 ### M-ACC-1: first launch, sign-in and the free trial
 Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
