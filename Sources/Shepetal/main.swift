@@ -1,12 +1,37 @@
 import AppKit
+import ServiceManagement
 
 // shepetal                           menu-bar app
 // shepetal --no-permission-prompts   never asks macOS for a permission (checks only)
 // shepetal --show-hint               shows the short-press hint once at launch (for screenshots)
 // shepetal --e2e <wav>... [--engine fallback] [--drop-paste]   real pipeline on audio files, JSON lines out
+// shepetal --e2e-meeting <me.wav> <others.wav>   meeting transcriber, store and summary on two files, JSON out
 // shepetal --quit-from-menu-after <s>   after <s> seconds, picks "Quit Shepetal" from the real status menu
 //                                       (the release check that Quit works; nothing is clicked on screen)
+// shepetal --postinstall              run by the installer as the user: turns on Start at login, then exits
+// shepetal --unregister-login-item    run by the uninstaller: turns Start at login off, then exits
 let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--e2e-meeting") { MeetingE2E.main(Array(args[(i + 1)...])) }
+if args.contains("--postinstall") || args.contains("--unregister-login-item") {
+    let service = SMAppService.mainApp
+    do {
+        if args.contains("--postinstall") {
+            if service.status != .enabled { try service.register() }
+        } else if service.status == .enabled || service.status == .requiresApproval {
+            try service.unregister()
+        }
+    } catch {
+        print("login item: \(error.localizedDescription)")
+    }
+    let status = switch service.status {
+    case .enabled: "enabled"
+    case .requiresApproval: "requires approval in System Settings > General > Login Items"
+    case .notRegistered: "not registered"
+    default: "not found"
+    }
+    print("login item: \(status)")
+    exit(0)
+}
 MainActor.assumeIsolated {
     let delegate: NSApplicationDelegate
     if let i = args.firstIndex(of: "--e2e") {

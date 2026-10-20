@@ -58,6 +58,11 @@ impl Default for Gesture {
 }
 
 impl Gesture {
+    /// Recording hands-free after a double tap: the 🤫 ring is orange instead of red.
+    pub fn hands_free(&self) -> bool {
+        self.state == State::HandsFree
+    }
+
     pub fn feed(&mut self, ev: Event) -> Vec<Action> {
         use Action::*;
         use State::*;

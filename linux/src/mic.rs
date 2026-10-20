@@ -292,8 +292,8 @@ impl RateLimit {
 
 type Sink = Box<dyn Fn(&str) + Send>;
 
-/// Where `hint <text>` and `error <text>` lines for the 🤫 overlay go. Until the overlay socket
-/// is wired in, stderr, as for the short-press hint.
+/// Where `hint <text>` and `error <text>` lines for the 🤫 overlay go: the indicator socket in
+/// the daemon, else stderr.
 static HINTS: Mutex<Option<Sink>> = Mutex::new(None);
 static LIMIT: Mutex<Option<RateLimit>> = Mutex::new(None);
 static PICKER: Mutex<Picker> = Mutex::new(Picker { last: None });

@@ -4,8 +4,8 @@ import UIKit
 /// Mic button that hands dictation to the Shepetal app and inserts the text it sends back.
 final class KeyboardViewController: UIInputViewController {
     private let mic = UIButton(type: .system)
-    /// State text next to the 🤫 indicator in the bottom-left corner.
-    private var label = UILabel()
+    /// 🤫 in the bottom-left corner, with the state ring and text.
+    private var indicator: Indicator!
 
     /// The keyboard process is torn down while the user is in the app, so its session id
     /// lives in the extension's own defaults. Only text for this id is ever inserted.
@@ -30,12 +30,12 @@ final class KeyboardViewController: UIInputViewController {
         row.distribution = .equalCentering
         row.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(row)
-        label = Indicator.install(in: view)
+        indicator = Indicator(in: view)
         NSLayoutConstraint.activate([
             row.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
             row.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
             row.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            row.bottomAnchor.constraint(lessThanOrEqualTo: label.topAnchor, constant: -8),
+            row.bottomAnchor.constraint(lessThanOrEqualTo: indicator.status.topAnchor, constant: -8),
             view.heightAnchor.constraint(equalToConstant: 180),
         ])
         SharedHandoff.observe(SharedHandoff.readyNotification) { [weak self] in self?.refresh() }
@@ -48,24 +48,40 @@ final class KeyboardViewController: UIInputViewController {
 
     @objc private func micTapped() {
         guard hasFullAccess else {
-            label.text = "Turn on Allow Full Access for Shepetal in Settings."
+            indicator.show(.error, "Turn on Allow Full Access for Shepetal in Settings.")
             return
         }
-        let current = SharedHandoff.read()
-        // Stop first, so a recording from an earlier session never keeps the mic on.
-        SharedHandoff.post(SharedHandoff.stopNotification)
-        if let id = sessionID, current.sessionID == id, current.phase == .recording {
-            label.text = "Transcribing..."
+        // The app acts on the stop notification only when the shared state asks it to stop this recording.
+        if let id = sessionID, SharedHandoff.update({ $0.requestStop(id) }) {
+            SharedHandoff.post(SharedHandoff.stopNotification)
+            indicator.show(.processing, "Transcribing...")
             return
         }
+        // A new request supersedes any recording still running; the app stops that one within a second.
         let id = UUID()
         sessionID = id
         // The result is inserted only into this same field.
         let document = textDocumentProxy.documentIdentifier
         SharedHandoff.update { $0.request(id, document: document) }
-        label.text = "Opening Shepetal..."
-        openApp(URL(string: "shepetal://dictate?id=\(id.uuidString)")!)
+        let url = URL(string: "shepetal://dictate?id=\(id.uuidString)")!
+        guard SharedHandoff.isAppListening() else {
+            indicator.show(.processing, "Opening Shepetal...")
+            return openApp(url)
+        }
+        // The app's mic is still open, so it starts recording without leaving this app.
+        SharedHandoff.post(SharedHandoff.startNotification)
+        indicator.show(.processing, "Starting...")
+        // If the app has not taken the request (it was closed meanwhile), open it after all.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.startGrace) { [weak self] in
+            guard let self, self.sessionID == id else { return }
+            guard SharedHandoff.read().canStart(id) else { return self.refresh() } // show where it went instead of "Starting..."
+            self.indicator.show(.processing, "Opening Shepetal...")
+            self.openApp(url)
+        }
     }
+
+    /// How long the app gets to take a request from the start notification before the keyboard opens it.
+    private static let startGrace: TimeInterval = 1.5
 
     @objc private func deleteTapped() {
         textDocumentProxy.deleteBackward()
@@ -74,12 +90,19 @@ final class KeyboardViewController: UIInputViewController {
     /// Inserts a ready result, and shows next to 🤫 how the session stands or why it ended without text.
     private func refresh() {
         guard let id = sessionID else { return }
+        // Without Full Access the keyboard cannot read the App Group, so it would only ever see "timed out".
+        guard hasFullAccess else {
+            return indicator.show(.error, "Turn on Allow Full Access for Shepetal in Settings. The text is in Shepetal's history.")
+        }
         let document = textDocumentProxy.documentIdentifier
-        if let text = SharedHandoff.update({ $0.consume(id, document: document) }) {
-            textDocumentProxy.insertText(text)
+        switch SharedHandoff.update({ $0.consume(id, document: document) }) {
+        case .insert(let text): textDocumentProxy.insertText(text)
+        case .copy(let text): // goal rule 8: a different field gets nothing inserted
+            if !Clipboard.copy(text) { SharedHandoff.update { $0.copyFailed(id) } }
+        case nil: break
         }
         let state = SharedHandoff.read()
-        label.text = state.keyboardStatus(for: id)
+        indicator.show(state.indicatorMode(for: id), state.keyboardStatus(for: id))
         if state.sessionID != id || ![.requested, .recording, .transcribing].contains(state.phase) {
             sessionID = nil // finished; the message stays until the next dictation
         }
@@ -95,6 +118,6 @@ final class KeyboardViewController: UIInputViewController {
             }
             responder = current.next
         }
-        label.text = "Open the Shepetal app to start dictating."
+        indicator.show(.error, "Open the Shepetal app to start dictating.")
     }
 }

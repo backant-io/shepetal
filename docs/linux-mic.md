@@ -46,7 +46,7 @@ While recording, a watcher reads the growing WAV every 0.5 s and the source list
 | No PipeWire or PulseAudio | Neither `pw-dump` nor `pactl` answers at record start. |
 
 Each alert is a desktop notification (`notify-send`) and an `error <text>` line for the 🤫
-overlay (`mic::set_hint_sink`; stderr until the overlay socket is wired in). The same kind
+overlay (the daemon's indicator socket, through `mic::set_hint_sink`). The same kind
 shows at most once a minute.
 
 ## Hand test (real desktop)
@@ -71,7 +71,5 @@ shows at most once a minute.
   is noticed within about 2 s.
 - If a mic sends no frames at all (the file stops growing), no alert shows. Wispr stops after
   5 s without packets.
-- The `Mic:` hint and the alerts go to stderr until the daemon passes the 🤫 overlay socket to
-  `mic::set_hint_sink`.
 - Whether `/proc/acpi/button/lid` is present depends on the laptop's ACPI tables. Some newer
   machines report the lid only through `SW_LID` on an input device, which is not read yet.
