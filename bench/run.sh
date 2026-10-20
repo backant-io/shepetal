@@ -20,6 +20,7 @@ for e in $ENGINES; do
     parakeet-v3)   d=sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 ;;
     moonshine-*)   d=sherpa-onnx-$e-en-int8 ;;
     sensevoice)    d=sherpa-onnx-sense-voice-zh-en-ja-ko-yue-int8-2024-07-17 ;;
+    fluid-parakeet-v3*) d= ; swift build -q -c release --package-path fluid --scratch-path $C/fluid-build ;;
     wcpp-*)        d= ; f=$C/ggml-${e#wcpp-}.bin; [ -f $f ] || { curl -fsSL -o $f.part "$H/ggml-${e#wcpp-}.bin" && mv $f.part $f; } ;;
     *) echo "unknown engine $e" >&2; exit 1 ;;
   esac

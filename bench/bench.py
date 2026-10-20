@@ -1,6 +1,7 @@
 """Run one STT engine over bench/fixtures and print a JSON summary line.
 
-usage: bench.py ENGINE   (parakeet-v3 | parakeet-110m | moonshine-tiny | moonshine-base | sensevoice | wcpp-<ggml model name>)
+usage: bench.py ENGINE   (parakeet-v3 | parakeet-110m | moonshine-tiny | moonshine-base | sensevoice | wcpp-<ggml model name>
+                         | fluid-parakeet-v3[-int8-v2|-int4|-itn]: FluidAudio CoreML through bench/fluid, model in FluidAudio's default cache)
 Latency = wall time from "whole utterance available" to text (model load excluded), i.e. time-to-text
 after end of audio for push-to-talk dictation. RTF = latency / audio seconds.
 """
@@ -57,6 +58,13 @@ def wcpp(model):
         return out.stdout.strip(), ms("total time") - ms("load time")
     return run, None, m
 
+def fluid(opt):  # "" (FluidAudio defaults) | "int8-v2" | "int4" encoder | "itn" (default encoder + ITN)
+    env = dict(os.environ, FLUID_ENCODER=opt if opt not in ("", "itn") else "int8", FLUID_ITN=str(int(opt == "itn")))
+    out = subprocess.run([f"{C}/fluid-build/release/fluid-bench", *FIX], capture_output=True, text=True, check=True, env=env).stdout
+    head, *rows = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
+    res = {r["f"]: (r["text"], r["lat"]) for r in rows}  # the CLI warms up and times every file itself
+    return (lambda p: res[os.path.basename(p)]), head["load"], head["dir"]
+
 def size(p):
     if os.path.isfile(p): return os.path.getsize(p)
     return sum(os.path.getsize(os.path.join(a, f)) for a, _, fs in os.walk(p) for f in fs)
@@ -65,7 +73,7 @@ if __name__ == "__main__":
     assert norm("At 3pm, 4,250 dollars; two-day fix on the 15th") == "at 3 pm 4250 dollars 2 day fix on the 15"
     e = sys.argv[1]
     run, load, mpath = (sherpa(e) if e.split("-")[0] in ("parakeet", "moonshine", "sensevoice") else
-                        wcpp(e[5:]) if e.startswith("wcpp-") else sys.exit(f"unknown engine {e}"))
+                        wcpp(e[5:]) if e.startswith("wcpp-") else fluid(e[18:]) if e.startswith("fluid-parakeet-v3") else sys.exit(f"unknown engine {e}"))
     run(FIX[0])  # warm-up
     rows = []
     for p in FIX:

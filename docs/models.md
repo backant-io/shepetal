@@ -12,6 +12,10 @@ The reference text sits next to each WAV in `bench/fixtures/`.
 
 | Engine (runtime, quant) | Model size | Peak RAM | WER dictation | WER meeting | Time to text after end of audio (dictation mean) | Meeting (57 s) decode | RTF | Status |
 |---|---|---|---|---|---|---|---|---|
+| **Parakeet TDT 0.6B v3** (FluidAudio 0.17.7 CoreML, ANE, default encoder) | 461 MB | 97 MB + ANE (see notes) | 7.2 % (no ITN, see notes) | 0.0 % | **77 ms** | 0.33 s | **0.008** | measured |
+| Parakeet TDT 0.6B v3 (FluidAudio as above + its NeMo ITN) | 461 MB | 109 MB + ANE | 5.4 % | 1.2 % | 108 ms | 0.56 s | 0.013 | measured |
+| Parakeet TDT 0.6B v3 (FluidAudio CoreML, opt-in int8-v2 encoder) | 603 MB | 661 MB | 7.8 % | 0.0 % | 69 ms | 0.30 s | 0.008 | measured |
+| Parakeet TDT 0.6B v3 (sherpa-onnx CPU, int8) | 640 MB | 1,844 MB | 3.6 % | 0.6 % | 177 ms | 1.46 s | 0.025 | measured |
 | Parakeet TDT-CTC 110M EN (sherpa-onnx CPU, int8) | 126 MB | 767 MB | 15.7 % (no ITN, see notes) | 3.7 % | **66 ms** | 0.71 s | **0.011** | measured |
 | Moonshine tiny EN (sherpa-onnx CPU, int8) | 119 MB | 877 MB | 12.0 % | 89.5 % (no VAD, see notes) | 91 ms | 2.00 s | 0.024 | measured |
 | Whisper base.en (whisper.cpp Metal, q5_1) | 57 MB | 287 MB | 3.6 % | 0.0 % | 176 ms | 1.02 s | 0.021 | measured |
@@ -39,15 +43,36 @@ How to read it:
   - The sherpa-onnx rows reach 770 to 880 MB peak RSS even though the models are 120 MB. Most of that is the
     onnxruntime memory arena growing on the 57 s meeting. Time to text for these two is CPU-only (4 threads).
     whisper.cpp uses the M4 Pro GPU through Metal.
+- **Parakeet TDT 0.6B v3** (the default in the tier table):
+  - The goal asks the default on this Mac for WER ≤ 8 % and text ≤ 700 ms after release for a 10 s utterance.
+    FluidAudio with its default encoder gives 7.2 % and 101 ms on the longest clip (9.2 s), so it passes, but
+    with little WER margin (12 wrong words out of 166). With FluidAudio's ITN on top it is 5.4 %, 275 ms worst
+    case. A second pass of the default gave the same WER, 62 ms mean and 133 MB RSS.
+  - Same model, two runtimes, different text. FluidAudio wrote numbers as words ("four thousand two hundred
+    fifty dollars and seventy five cents", "march fifteenth"): 8 of its 12 errors are that one money clip.
+    sherpa-onnx int8 wrote "$4,250.75" and "March 15" like Whisper. FluidAudio also heard Postgres as
+    "PostGer's" and Redis as "redisc", which sherpa-onnx got right. sherpa-onnx heard "Parakeet" as "paracet"
+    in the meeting.
+  - FluidAudio's ITN (`TextNormalizer.normalizeSentence`, NeMo rules, linked by default) fixed the money
+    clip but dropped the "a" in "with a 2 percent discount" and wrote "First item" as "1st item". Use it, and
+    keep the dictation fixtures as its regression test.
+  - FluidAudio's opt-in `int8-v2` encoder (`ParakeetEncoderPrecision.int8V2` in FluidAudio's
+    `Sources/FluidAudio/ModelNames.swift`, a re-quantized rebuild of the default 6-bit palettized encoder) was
+    not better here: 7.8 %, the same word errors plus one, 142 MB more on disk and 661 MB RSS. Keep the default encoder.
+  - Peak RAM for the FluidAudio rows is the `fluid-bench` process. Model weights that live on the ANE are mostly
+    outside RSS, so the real footprint is higher than 97 MB. Load time (0.1 to 0.7 s) is with CoreML's compiled
+    cache warm; the first load right after the download, which compiles for the ANE, was not timed.
+  - sherpa-onnx int8 is the most accurate run on these fixtures, but it runs on the CPU at 177 ms and peaks at
+    1.8 GB RSS (onnxruntime arena on the 57 s meeting). That fits the Linux CPU tier, not an 8 GB Mac.
+  - `model_mb` in `results/summary.jsonl` counts FluidAudio's whole model folder, so rows run after the
+    int8-v2 encoder was downloaded show 1,029 MB. The table above gives each build's own size.
 - Synthetic voices are cleaner than a real microphone, so real-world WER will be higher for every model.
   Use these numbers to compare models, not as absolute values.
 - Per-file transcripts are in `bench/results/<engine>.json`. A second full `run.sh` pass
   (`bench/results/summary.jsonl`) gave the same WER, and latency within about 15 %.
 
-Skipped in this sprint: Parakeet TDT 0.6B v3 (sherpa-onnx int8, 640 MB) and the FluidAudio and WhisperKit
-CoreML builds. The shared network gave about 0.5 MB/s, so the 0.6B weights could not download in the time
-box. `./bench/run.sh parakeet-v3` runs it when the bandwidth allows. The FluidAudio and WhisperKit Swift
-CLIs are not in the harness yet.
+Not measured yet: WhisperKit (no Swift CLI in the harness), Whisper large-v3-turbo, the streaming models and
+the diarizers. All rows ran on one M4 Pro; no other Mac, iPhone or Linux machine was measured.
 
 ## Candidates (research)
 
@@ -72,15 +97,15 @@ CLIs are not in the harness yet.
 
 | Device class | Default | Fallback | Why | Status |
 |---|---|---|---|---|
-| Apple Silicon, 8 GB | Parakeet TDT 0.6B v3, FluidAudio CoreML on the ANE | Whisper base.en q5_1, whisper.cpp Metal (57 MB, 287 MB RAM, 176 ms) | The ANE keeps the GPU and CPU free. base.en is the smallest model that still scored 3.6 % here | default: research; fallback: measured |
-| Apple Silicon, 16 GB | Parakeet TDT 0.6B v3 (FluidAudio) + custom vocabulary | Whisper large-v3-turbo q5_0 (whisper.cpp Metal or WhisperKit) for languages Parakeet does not cover | Parakeet has the best accuracy per watt for the 25 EU languages. Turbo covers 99 languages | research (Whisper small measured: 825 MB, 413 ms) |
-| Apple Silicon, 24 GB+ | Parakeet TDT 0.6B v3 (FluidAudio) + custom vocabulary + diarizer | WhisperKit large-v3-turbo | There is RAM to keep ASR, the diarizer and a local LLM cleanup model loaded together | research |
+| Apple Silicon, 8 GB | Parakeet TDT 0.6B v3, FluidAudio CoreML on the ANE | Whisper base.en q5_1, whisper.cpp Metal (57 MB, 287 MB RAM, 176 ms) | The ANE keeps the GPU and CPU free. base.en is the smallest model that still scored 3.6 % here | default: measured, on the M4 Pro 24 GB, not on an 8 GB Mac (461 MB on disk, 7.2 % / 5.4 % with ITN, 77 ms); fallback: measured |
+| Apple Silicon, 16 GB | Parakeet TDT 0.6B v3 (FluidAudio) + custom vocabulary | Whisper large-v3-turbo q5_0 (whisper.cpp Metal or WhisperKit) for languages Parakeet does not cover | Parakeet has the best accuracy per watt for the 25 EU languages. Turbo covers 99 languages | default: measured on the M4 Pro (see the 8 GB row); fallback: research (Whisper small measured: 825 MB, 413 ms) |
+| Apple Silicon, 24 GB+ | Parakeet TDT 0.6B v3 (FluidAudio) + custom vocabulary + diarizer | WhisperKit large-v3-turbo | There is RAM to keep ASR, the diarizer and a local LLM cleanup model loaded together | default: measured (this Mac's class); fallback and diarizer: research |
 | iPhone, A15 (4 to 6 GB) | Parakeet TDT 0.6B v3 CoreML (FluidAudio needs iOS 17+), run in the host app | WhisperKit base.en / tiny | A keyboard extension has a small memory limit (about 60 MB, not verified), so ASR has to run in the app, not in the keyboard. Not verified on 4 GB phones | research |
 | iPhone, A16 / A17 Pro (6 to 8 GB) | Parakeet TDT 0.6B v3 (FluidAudio) | WhisperKit small | | research |
 | iPhone, A18 / A19 (8 GB+) | Parakeet TDT 0.6B v3 (FluidAudio) + custom vocabulary | WhisperKit large-v3-turbo (626 MB) | | research |
-| Linux CPU only, x86 / ARM | Parakeet TDT 0.6B v3 int8, sherpa-onnx | Parakeet TDT-CTC 110M int8 (sherpa-onnx, 66 ms, 0.011 RTF on CPU) for low-end ARM such as a Raspberry Pi. Moonshine tiny only behind VAD | Same model family as the Mac, one ONNX runtime, no GPU needed | fallbacks: measured on M4 Pro CPU; default: research |
+| Linux CPU only, x86 / ARM | Parakeet TDT 0.6B v3 int8, sherpa-onnx | Parakeet TDT-CTC 110M int8 (sherpa-onnx, 66 ms, 0.011 RTF on CPU) for low-end ARM such as a Raspberry Pi. Moonshine tiny only behind VAD | Same model family as the Mac, one ONNX runtime, no GPU needed | default and fallbacks: measured on the M4 Pro CPU, not on x86 or ARM Linux (default: 3.6 %, 177 ms, 1.8 GB peak RSS) |
 | Linux NVIDIA CUDA | Parakeet TDT 0.6B v3 (sherpa-onnx CUDA provider or NeMo) | Whisper large-v3-turbo, whisper.cpp CUDA (99 languages) | Parakeet runs at thousands of times real time on a GPU, which is enough headroom for diarization next to it | research |
-| Linux AMD / Intel Vulkan | Whisper large-v3-turbo q5_0, whisper.cpp Vulkan | Parakeet TDT 0.6B v3 int8 on CPU (sherpa-onnx) | whisper.cpp is the only runtime here with mature Vulkan support (and HIP for AMD) | research |
+| Linux AMD / Intel Vulkan | Whisper large-v3-turbo q5_0, whisper.cpp Vulkan | Parakeet TDT 0.6B v3 int8 on CPU (sherpa-onnx) | whisper.cpp is the only runtime here with mature Vulkan support (and HIP for AMD) | default: research; fallback: measured on the M4 Pro CPU |
 
 ### Streaming model for live meeting transcripts
 
@@ -108,8 +133,14 @@ diarizer above loses a lot of accuracy.
 
 ```bash
 ./bench/run.sh                                   # default engines from the measured table
-./bench/run.sh parakeet-v3 wcpp-large-v3-turbo-q5_0  # bigger models when the bandwidth allows
+./bench/run.sh parakeet-v3 fluid-parakeet-v3 fluid-parakeet-v3-itn fluid-parakeet-v3-int8-v2  # Parakeet v3 rows
+./bench/run.sh wcpp-large-v3-turbo-q5_0          # not measured yet
 ```
+
+The `fluid-*` engines build `bench/fluid` (a small SwiftPM CLI on FluidAudio 0.17.7) into `bench/.cache/fluid-build`.
+It downloads the model with FluidAudio's own `AsrModels.download` into FluidAudio's default cache,
+`~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3`, which is where the Mac app loads it from.
+Run `bench/.cache/fluid-build/release/fluid-bench` with no arguments to only download and load it.
 
 `run.sh` creates `bench/.venv` (uv, sherpa-onnx, jiwer), builds `whisper-cli` in `bench/.cache/whisper.cpp`,
 downloads models to `bench/.cache`, regenerates fixtures if they are missing, and appends one JSON line per
