@@ -22,7 +22,7 @@ migrations_dir = "migrations"
 NEXTAUTH_URL = "https://shepetal.backant.io"
 AUTH_URL = "https://shepetal.backant.io"
 # One-time $4.99 price in backant's Stripe account. Set once the price exists.
-STRIPE_PRICE_ID = ""
+STRIPE_PRICE_ID = "price_1USl5ADrjgXysMQjColtJKH5"
 
 # Secrets: wrangler secret put AUTH_SECRET
 #          wrangler secret put GOOGLE_CLIENT_ID
