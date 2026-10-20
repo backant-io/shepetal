@@ -180,3 +180,180 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Open History. Expected: the rows show "TextEdit", "Safari · github.com" and "Google Chrome · github.com". The URL is stored only in `history.sqlite` (`sqlite3 … 'select app, bundle_id, url from history order by created_at desc limit 3'`).
 3. If a Chrome row has no host, note it on the PR: Chrome had no accessibility tree for the page (see the `ponytail:` note in `Sources/Shepetal/AppContext.swift`).
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
+
+## Linux
+
+Setup: a real Ubuntu 24.04 desktop, not a VM without a keyboard of its own. Log in to each session from the gear at the bottom right of the login screen: "Ubuntu" is GNOME on Wayland (the default), "Ubuntu on Xorg" is X11, and "Plasma (Wayland)" is KDE once `sudo apt install kde-plasma-desktop` is installed (keep gdm3 when asked). `echo $XDG_SESSION_TYPE $XDG_CURRENT_DESKTOP` tells you which one you are in. The gesture and audio steps (L-FN, L-AUD) behave the same in every session because evdev sits below the display server, so run them once. The L-INS steps run once per session.
+
+What is not on main yet, so not tested here: the 🤫 indicator (#56; the short-press hint goes to the daemon's stderr), rule 8 focus checks (#58; text goes to whatever window has focus when it is ready), history (#67), Esc cancel in hands-free, retention, and meeting recording (detection only runs in `probe`). Keep the terminal that runs `shepetal daemon` visible: its stderr is the only feedback.
+
+The automated part of every step runs with the Docker command in `linux/README.md` (`cargo test`). Test names below are the `#[test]` functions under `linux/src/`.
+
+### L-SETUP-1: build, install and the speech model
+1. `sudo apt install git cargo pipewire-bin wtype xdotool ydotool wl-clipboard xclip file`
+2. `git clone https://github.com/backant-io/shepetal && cd shepetal/linux && cargo build --release && sudo install target/release/shepetal /usr/local/bin/`. Expected: the build ends with `Finished` (Ubuntu's cargo 1.75 reads the version 3 `Cargo.lock`).
+3. Install the runner and the model into `~/.local/share/shepetal/` (CPU machines; for CUDA or Vulkan see docs/linux.md, "Manual test steps", step 2):
+   ```sh
+   mkdir -p ~/.local/share/shepetal && cd ~/.local/share/shepetal
+   curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-v1.13.8-linux-x64-shared.tar.bz2 | tar xj
+   curl -L https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2 | tar xj
+   echo 'PATH="$HOME/.local/share/shepetal/sherpa-onnx-v1.13.8-linux-x64-shared/bin:$PATH"' >> ~/.profile
+   ```
+   Log out and back in.
+4. `cd ~/.local/share/shepetal/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 && sherpa-onnx-offline --encoder=encoder.int8.onnx --decoder=decoder.int8.onnx --joiner=joiner.int8.onnx --tokens=tokens.txt --model-type=nemo_transducer test_wavs/en.wav` (use any file in `test_wavs/`). Expected: a JSON line on stdout whose `text` matches the clip.
+(Automated: `transcribe_runs_the_engine_the_tier_table_picked`, `whisper_markers_are_dropped_and_other_text_kept`, and the model choice tests `cpu_runs_parakeet_v3_never_a_small_whisper`, `low_end_cpu_falls_back_to_parakeet_110m`, `cuda_runs_parakeet_v3_and_beats_vulkan`, `vulkan_runs_whisper_turbo_q5`, `gpu_with_too_little_ram_falls_back_to_cpu`.)
+
+### L-SETUP-2: the input group
+1. Check `id -nG | tr ' ' '\n' | grep -x input`. If it prints nothing, you are not in the group yet: run `SHEPETAL_KEY=rightalt shepetal daemon` (any key your keyboard has, so the fn check passes). Expected: it exits with ``shepetal: cannot read any /dev/input/event*: run `sudo usermod -aG input $USER` and log in again``, and `echo $?` prints 1.
+2. `sudo usermod -aG input $USER`, then log out and back in (a new terminal is not enough).
+3. Run the command from step 1 again. Expected: `shepetal: hold rightalt to talk, double-tap for hands-free. keyboards /dev/input/eventN (…), model …, insert …` and it keeps running. Stop it with Ctrl+C.
+
+### L-SETUP-3: `shepetal probe` in each session
+1. In GNOME Wayland run `shepetal probe`. Expected lines:
+   - `hardware:` RAM and cores match `free -g` (rounded up) and `nproc`. `cuda=true` only with `/dev/nvidia0`; `vulkan=true` when `/usr/share/vulkan/icd.d` has a file (Mesa's lavapipe counts too, #46).
+   - `model:` on a machine without a GPU and with at least 4 GB: `sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 (SherpaTransducer) on cpu (/home/<you>/.local/share/shepetal/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8)`.
+   - `session:   "wayland" desktop "ubuntu:GNOME"` and `insert:    Some(Ydotool)`.
+   - one `fn key:` line (L-KEY-1, L-KEY-2), a `mic user:` line per app recording the mic, and `system audio: Some("<sink>.monitor")` where `<sink>` is what `pactl get-default-sink` prints.
+2. In "Ubuntu on Xorg": expected `session:   "x11" desktop "ubuntu:GNOME"` and `insert:    Some(Xdotool)`.
+3. In Plasma (Wayland): expected `session:   "wayland" desktop "KDE"` and `insert:    Some(Wtype)`.
+(Automated: `session_type_picks_native_typer`, `gnome_wayland_skips_wtype`, `ydotool_then_clipboard_are_fallbacks`; `probe` itself runs on the fixture in the Docker command.)
+
+### L-SETUP-4: ydotoold (GNOME Wayland)
+1. Let your user open `/dev/uinput`: `echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/80-uinput.rules`, then `sudo modprobe uinput && sudo udevadm control --reload && sudo udevadm trigger`. Check `ls -l /dev/uinput` shows group `input` and `crw-rw----`.
+2. Note the `fn key:` line of `shepetal probe`. Start `ydotoold &` in a terminal and run `shepetal probe` again.
+3. Expected: the `fn key:` line is the same as before, and no line names `ydotoold virtual device`.
+4. With the laptop keyboard only (fn not visible, L-KEY-2), run `shepetal daemon` while ydotoold runs. Expected: it still exits with the "fn is not visible to Linux" message and does not start.
+(Automated: `daemon_waits_for_fn_only_on_keyboards_that_can_send_it`, which includes a fake ydotoold device that declares every key.)
+
+### L-KEY-1: fn visible on an Apple keyboard
+1. Connect an Apple keyboard (Magic Keyboard, USB or Bluetooth) and run `shepetal probe`.
+2. Expected: `fn key:    visible on /dev/input/eventN (<the keyboard's name, e.g. Apple Inc. Magic Keyboard>)`. Write down `cat /sys/module/hid_apple/parameters/fnmode` next to the result.
+3. `shepetal daemon`. Expected: `shepetal: hold fn to talk, double-tap for hands-free. keyboards /dev/input/eventN (<same name>), …`. Only devices that can send fn are listed.
+(Automated: `fn_is_bit_464_of_the_sysfs_key_bitmap`, `last_word_holds_bit_0`, `leading_zero_words_are_dropped`, `default_hotkey_is_fn`, `decodes_fn_press_and_skips_sync`, `daemon_waits_for_fn_only_on_keyboards_that_can_send_it`.)
+
+### L-KEY-2: fn not visible on a laptop keyboard
+1. Disconnect every Apple keyboard. On a laptop whose fn is handled in firmware (most are), run `shepetal probe`.
+2. Expected: `fn key:    not visible to Linux (many laptops handle fn in firmware); set SHEPETAL_KEY, e.g. rightalt`.
+3. `shepetal daemon; echo $?`. Expected: it exits at once with `shepetal: fn is not visible to Linux on this keyboard: no /dev/input/event* device reports KEY_FN (464).`, the lines that say to pick another key with `SHEPETAL_KEY=rightalt shepetal daemon`, and `1`. Pressing fn does nothing; no other key was picked silently.
+4. If probe says fn is visible on a laptop keyboard instead, write down the laptop model and run the L-FN steps with its fn.
+(Automated: `daemon_waits_for_fn_only_on_keyboards_that_can_send_it`.)
+
+### L-KEY-3: SHEPETAL_KEY
+1. `SHEPETAL_KEY=rightalt shepetal daemon`. Expected: `hold rightalt to talk`, and the keyboards that have Right Alt. Hold Right Alt in a text editor and speak: the text is typed (as L-FN-1). With an Apple keyboard connected, fn now does nothing.
+2. `SHEPETAL_KEY=58 shepetal daemon` (Caps Lock by evdev code), then tap Caps Lock once. Expected: the hint reads `Hold key 58 to talk · double-tap for hands-free`.
+3. `SHEPETAL_KEY=banana shepetal daemon`. Expected: `shepetal: unknown SHEPETAL_KEY "banana"` and exit code 1.
+4. `SHEPETAL_KEY` also takes `rightmeta`, `capslock`, `f13` and `rightctrl`. Try one that your keyboard has: it works as in step 1.
+(Automated: `daemon_waits_for_fn_only_on_keyboards_that_can_send_it`, `a_numeric_key_is_named_key_n_in_the_hint`.)
+
+In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from L-KEY-3. Open the GNOME Text Editor (or Kate on KDE) and click into a new document before each step. Each run of the speech model loads the model again, so the text can take a few seconds after release on a CPU; note the time for #46.
+
+### L-FN-1: hold to talk
+1. Hold fn, say "Testing one two three, this is a hold to talk check.", then release.
+2. Expected: the sentence is typed at the cursor, starting with "Testing" (recording starts on the press, so the first word is not cut off). The daemon prints no hint.
+3. Hold fn for about 5 s without pressing anything else, then release. Expected: one dictation, not several (key repeat is ignored).
+4. Tap fn briefly, wait about 1 s, then hold fn and speak. Expected: the first tap prints the hint (L-FN-3), and the hold is typed as in step 2.
+(Automated: `hold_of_500ms_is_push_to_talk`, `release_at_499ms_is_a_tap_not_a_stop`, `second_press_after_window_starts_fresh`, `evdev_key_values_become_gesture_events`, `a_key_event_is_stamped_when_it_arrives`, `dictation_keeps_the_audio_the_model_heard`.)
+
+### L-FN-2: double-tap for hands-free
+1. Tap fn twice quickly (the second press within half a second of releasing the first) and release.
+2. Speak for about 20 s without holding anything. Meanwhile type a few words into the document. Expected: the typing does not stop the recording.
+3. Click back to where the text should go and press fn once.
+4. Expected: the whole spoken passage is typed there. The daemon prints no hint.
+(Automated: `double_tap_gap_is_500ms`, `double_tap_inside_window_is_hands_free_until_next_press`.)
+
+### L-FN-3: too-short press and its hint
+1. Tap fn once, briefly (under half a second), and don't tap again.
+2. Expected: nothing is typed. About half a second after the release the daemon prints `shepetal: hint: Hold fn to talk · double-tap for hands-free` (with the L-KEY-3 key's name in place of fn). A new `<unix-ms>.tooshort.wav` is in `~/.local/share/shepetal/audio/`.
+3. Tap fn and type a word right after it. Expected: the same hint, nothing transcribed.
+4. Tap fn and then hold a letter key down so it repeats. Expected: the hint still comes about half a second after the tap, not when you let go of the letter.
+(Automated: `single_tap_is_too_short_once_window_expires`, `typing_after_a_tap_is_still_too_short`, `a_tap_ends_as_too_short_on_time_while_a_key_repeats`, `too_short_press_keeps_the_clip_and_shows_the_hint`.)
+
+### L-FN-4: chords and Esc
+1. Hold fn and press F1 (on an Apple keyboard, fn+F1 is F1 or brightness down, depending on `fnmode`). Expected: nothing is typed, no hint is printed, and a new `<unix-ms>.cancelled.wav` is in the audio folder.
+2. In a long document hold fn and press Left or Down arrow. Expected: the arrow does its fn action (Home or Page Down) or moves the cursor, nothing is typed, no hint, one more `.cancelled.wav`.
+3. Hold fn, say a few words, and press Esc while still holding. Expected: the same as step 1: Esc while the hotkey is down is a chord and cancels.
+4. Hold fn for about 2 s while speaking, then press Down arrow. Expected: also cancelled, nothing is typed. (Linux cancels at any point of the hold; the Mac only in the first second. Known gap in docs/linux.md.)
+5. Double-tap fn for hands-free, speak, and press Esc. Expected: nothing happens; the recording goes on, and fn types it. Esc cancel for hands-free is not built on Linux (F03).
+6. With both an Apple keyboard and the laptop keyboard: hold fn on the Apple keyboard and press a key on the laptop keyboard. Expected: no cancel, the hold is typed on release (only keyboards that can send the hotkey are read; known gap).
+(Automated: `chord_with_another_key_cancels`, `cancel_keeps_the_recording`.)
+
+### L-AUD-1: every recording is kept, owner-only
+1. After L-FN-1 to L-FN-4, run `stat -c '%a %U %n' ~/.local/share/shepetal/audio ~/.local/share/shepetal/audio/*`.
+2. Expected: the folder is `700` and each file is `600`, all owned by you. There is one file per press: `<unix-ms>.wav` for each dictation, `<unix-ms>.tooshort.wav` for each tap, `<unix-ms>.cancelled.wav` for each chord. Nothing was deleted.
+3. `file ~/.local/share/shepetal/audio/*.wav`. Expected: every one is `RIFF (little-endian) data, WAVE audio, Microsoft PCM, 16 bit, mono 16000 Hz`.
+4. `pw-play` the newest `<unix-ms>.wav` (no label). Expected: you hear the whole sentence of that dictation, first word included. It is the file the model read. Play a `.cancelled.wav`: you hear what you said until the chord.
+5. `ls -la /tmp | grep -i -e shepetal -e '\.wav'`. Expected: nothing from shepetal.
+(Automated: `recording_is_private_and_always_kept`, `dictation_keeps_the_audio_the_model_heard`, `cancel_keeps_the_recording`, `too_short_press_keeps_the_clip_and_shows_the_hint`.)
+
+### L-AUD-2: an unsafe audio folder is refused
+1. With the daemon running, `chmod 755 ~/.local/share/shepetal/audio` and press fn.
+2. Expected: the daemon exits with `shepetal: audio file: /home/<you>/.local/share/shepetal/audio must be a 0700 directory`. Nothing is recorded or typed.
+3. `chmod 700 ~/.local/share/shepetal/audio`. Then `mv ~/.local/share/shepetal/audio ~/audio-kept && mkdir -m 700 /tmp/swap && ln -s /tmp/swap ~/.local/share/shepetal/audio`, start the daemon, and press fn. Expected: the same refusal, and `/tmp/swap` stays empty.
+4. Undo: `rm ~/.local/share/shepetal/audio && rmdir /tmp/swap && mv ~/audio-kept ~/.local/share/shepetal/audio`.
+(Automated: `an_audio_dir_open_to_others_is_refused`.)
+
+### L-AUD-3: XDG_DATA_HOME
+1. `cd /tmp && XDG_DATA_HOME=relative shepetal daemon`, hold fn and speak. Expected: the clip lands in `~/.local/share/shepetal/audio/`, and no `/tmp/relative` exists.
+2. `XDG_DATA_HOME=$HOME/xdg-test SHEPETAL_MODEL=$HOME/.local/share/shepetal/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8 shepetal daemon`, hold fn and speak. Expected: the clip lands in `~/xdg-test/shepetal/audio/`, folder `700`, file `600`. Remove `~/xdg-test` afterwards.
+(Automated: `audio_never_goes_under_a_relative_or_empty_xdg_data_home`.)
+
+### L-AUD-4: the keyboard goes away mid-recording
+1. With fn visible only on an Apple keyboard, start the daemon, double-tap fn and speak. Unplug the keyboard (or switch a Bluetooth one off).
+2. Expected: the daemon exits with `shepetal: all input devices closed`, a new `.cancelled.wav` is in the audio folder, and `pgrep -a pw-record` prints nothing (the mic is released).
+(Automated: `losing_every_keyboard_mid_recording_stops_the_recorder`.)
+
+### L-INS-1: ydotool on GNOME Wayland
+1. In the "Ubuntu" session, with `ydotoold` running (L-SETUP-4), start `shepetal daemon`. Expected: its first line ends with `insert Ydotool`.
+2. In the GNOME Text Editor hold fn and say "Send the report today, then call Anna."
+3. Expected: the sentence is typed at the cursor, with the comma and the period. Repeat in GNOME Terminal and in a Firefox text field: the same.
+4. ydotool sends keycodes, so the result depends on the layout. With a non-US layout (for example German), write down any swapped letters (y/z) or wrong punctuation.
+5. Stop ydotoold and dictate again. Write down what happens: ydotool 0.1.8 may still type without the daemon (it prints `ydotoold backend unavailable`), or the daemon prints `shepetal: insert: ydotool failed: …` and nothing is typed. v0 does not fall back to the clipboard after a failure; the clip is still kept.
+(Automated: `gnome_wayland_skips_wtype`, `text_goes_over_stdin_not_argv`.)
+
+### L-INS-2: wtype on KDE Wayland
+1. In "Plasma (Wayland)", start `shepetal daemon`. Expected: `insert Wtype`.
+2. In Kate hold fn and say "Send the report today, then call Anna."
+3. Expected: the sentence is typed at the cursor. If nothing is typed and the daemon prints `shepetal: insert: wtype failed: …` (for example "Compositor does not support the virtual keyboard protocol"), write it down with `plasmashell --version`: KWin may refuse wtype, and v0 does not fall back to ydotool after a failure.
+(Automated: `session_type_picks_native_typer`, `text_goes_over_stdin_not_argv`.)
+
+### L-INS-3: xdotool on X11
+1. In "Ubuntu on Xorg", start `shepetal daemon`. Expected: `insert Xdotool`.
+2. In the GNOME Text Editor, in GNOME Terminal and in a Firefox text field, hold fn and say "Send the report today, then call Anna."
+3. Expected: the sentence is typed in each, with no stuck Shift or Ctrl afterwards (`--clearmodifiers`). Say "café" once: write down whether the é is typed.
+(Automated: `session_type_picks_native_typer`, `text_goes_over_stdin_not_argv`.)
+
+### L-INS-4: ydotool as the fallback on X11 and KDE
+1. On X11: `sudo apt remove xdotool`, start `ydotoold &` (L-SETUP-4) and run `shepetal probe`. Expected: `insert:    Some(Ydotool)`. Dictate as in L-INS-3: the sentence is typed.
+2. On KDE: `sudo apt remove wtype` and do the same. Expected: `Some(Ydotool)`, and the sentence is typed.
+3. `sudo apt install xdotool wtype` again.
+(Automated: `ydotool_then_clipboard_are_fallbacks`.)
+
+### L-INS-5: clipboard fallback
+1. On GNOME Wayland: `sudo apt remove wtype ydotool`. `shepetal probe`. Expected: `insert:    Some(WlCopy)`.
+2. Copy a word, say "earlier", with Ctrl+C. Start the daemon, hold fn in the Text Editor, say a sentence, release.
+3. Expected: nothing is typed. Ctrl+V pastes the sentence, not "earlier" (the old clipboard is not restored, docs/linux.md). The daemon prints no paste hint yet (#58).
+4. On X11: `sudo apt remove xdotool ydotool`. Expected: `Some(Xclip)`, and steps 2 and 3 give the same result.
+5. Remove `wl-clipboard` and `xclip` too and start the daemon. Expected: it exits with `shepetal: no text insertion tool: install wtype, xdotool, ydotool, wl-clipboard or xclip`.
+6. `sudo apt install wtype xdotool ydotool wl-clipboard xclip` again.
+(Automated: `ydotool_then_clipboard_are_fallbacks`, `text_goes_over_stdin_not_argv`.)
+
+### L-MEET-1: a Zoom call in probe
+1. Install the Zoom `.deb` from zoom.us and join a call (zoom.us/test, or a call with a second device). Unmute.
+2. `shepetal probe`. Expected: a `mic user:` line with `meeting=Some("Zoom")`. Write down the full line (the app and binary names Zoom uses).
+3. Mute in Zoom and run `probe` again. Write down whether the line stays (Zoom may keep the stream running).
+4. Leave the call and run `probe` again. Expected: no Zoom line.
+(Automated: `finds_meeting_apps_on_the_mic`, `ignores_idle_streams_monitors_playback_and_itself`, `garbage_dump_is_empty_not_a_panic`.)
+
+### L-MEET-2: a Google Meet call in a browser
+1. In Firefox open meet.google.com, start a new meeting and allow the microphone.
+2. `shepetal probe`. Expected: a `mic user:` line with `meeting=Some("Browser (Firefox)")`, and `system audio: Some("<pactl get-default-sink>.monitor")`.
+3. Close the tab and run `probe` again. Expected: the line is gone.
+4. Repeat in Chrome or Chromium. Expected: `meeting=Some("Browser (Chrome/Chromium)")`.
+5. Keep the Zoom call from L-MEET-1 open at the same time as a Meet tab. Expected: both lines are listed.
+(Automated: `finds_meeting_apps_on_the_mic`, `system_audio_is_default_sink_monitor`.)
+
+### L-MEET-3: shepetal's own recording is not a meeting
+1. Start the daemon, double-tap fn and keep speaking. In another terminal run `shepetal probe`.
+2. Expected: no `mic user:` line for shepetal or `pw-record`. If one shows (for example `pw-record (pw-record)`), `pw-record -P '{ application.name = shepetal }'` did not rename the stream: write down the line (docs/linux.md, known gaps).
+3. Tap fn to end the dictation.
+(Automated: `ignores_idle_streams_monitors_playback_and_itself`.)
