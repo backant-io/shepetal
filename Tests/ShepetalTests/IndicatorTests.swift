@@ -30,6 +30,16 @@ final class IndicatorTests: XCTestCase {
                        NSRect(x: -1912, y: -192, width: 18, height: 18))
     }
 
+    /// The main display holds the menu bar; with no display (headless) layout() falls back to .zero.
+    var mainScreen: NSRect { NSScreen.screens.first?.frame ?? .zero }
+
+    func testLivePanelSitsInTheBottomLeftCorner() {
+        let indicator = make()
+        XCTAssertEqual(indicator.panel.frame, Indicator.frame(screen: mainScreen, labelWidth: nil),
+                       "the running 🤫 must be 8 pt in from the bottom-left of the main display")
+        XCTAssertEqual(indicator.emoji.frame, NSRect(x: 0, y: 0, width: Indicator.size, height: Indicator.size))
+    }
+
     func testLabelGrowsRightwardAndKeepsTheCorner() {
         let frame = Indicator.frame(screen: NSRect(x: 0, y: 0, width: 1440, height: 900), labelWidth: 200)
         XCTAssertEqual(frame.origin, NSPoint(x: 8, y: 8), "the emoji must not move when text shows next to it")
@@ -60,15 +70,20 @@ final class IndicatorTests: XCTestCase {
         XCTAssertTrue(indicator.panel.isVisible)
     }
 
-    func testHintShowsThenHides() {
+    func testHintShowsThenHides() throws {
         let indicator = make()
+        let corner = indicator.panel.frame.origin
         indicator.show(Hint.shortPress, seconds: 0.2)
         XCTAssertEqual(indicator.labelText, Hint.shortPress)
         XCTAssertGreaterThan(indicator.panel.frame.width, Indicator.size, "the hint shows next to 🤫")
         XCTAssertEqual(indicator.panel.frame.height, Indicator.size)
+        XCTAssertEqual(indicator.panel.frame.origin, corner, "🤫 must not move when the hint shows")
+        let label = try XCTUnwrap(indicator.panel.contentView?.subviews.compactMap { $0 as? NSTextField }.first)
+        XCTAssertGreaterThanOrEqual(label.frame.minX, indicator.emoji.frame.maxX, "the hint must not cover 🤫")
+        XCTAssertLessThanOrEqual(label.frame.maxX, indicator.panel.frame.width, "the hint must fit in the panel")
         RunLoop.main.run(until: Date().addingTimeInterval(0.4))
         XCTAssertNil(indicator.labelText)
-        XCTAssertEqual(indicator.panel.frame.width, Indicator.size)
+        XCTAssertEqual(indicator.panel.frame, Indicator.frame(screen: mainScreen, labelWidth: nil))
     }
 
     func testModeRings() throws {
