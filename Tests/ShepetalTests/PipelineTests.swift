@@ -202,6 +202,30 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(failedRow.model, "fake")
         XCTAssertEqual(pastes, 0)
     }
+
+    // The WAV is written off the main thread while Parakeet works on the samples. whisper-cli reads the file,
+    // so it must get it written in full, even from a slow disk.
+    @MainActor
+    func testAnEngineThatReadsTheWavGetsItWritten() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let write = pipeline.writeAudio
+        pipeline.writeAudio = { Thread.sleep(forTimeInterval: 0.2); return try write($0, $1) }  // a slow disk
+        let engine = WavReadingEngine()
+        let run = await pipeline.process(speech, engine: engine, context: { ("", "") }, sendPaste: { _ in })
+        XCTAssertEqual(engine.read, AudioStore.wav(speech))
+        XCTAssertEqual(run.entry.rawText, "from the file")
+    }
+}
+
+private final class WavReadingEngine: SpeechEngine {
+    let name = "reads wav"
+    let readsWav = true
+    private(set) var read: Data?
+
+    func transcribe(_ samples: [Float], wav: URL) async throws -> String {
+        read = try Data(contentsOf: wav)
+        return "from the file"
+    }
 }
 
 /// 1 s sine at an RMS of `db` dBFS.
