@@ -5,6 +5,7 @@
 # Asserts WER <= 8 %, text ready <= 700 ms after release, and an owner-only audio file per recording.
 # A dictionary.txt in SHEPETAL_HOME replaces one word of e03; that clip is checked for the replacement and
 # left out of the WER. SHEPETAL_HOME defaults to .cache/e2e/home.
+# A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -37,7 +38,11 @@ FIXTURES
 
 "$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl"
 
-python3 - "$WORK/results.jsonl" "$FIX" "$DICT" <<'PY'
+# Silence exits 1 by design ("No speech heard"); the checks below read its JSON line.
+python3 -c 'import sys, wave; w = wave.open(sys.argv[1], "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close()' "$FIX/silence.wav"
+"$BIN" --e2e "$FIX/silence.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/silence.jsonl" || true
+
+python3 - "$WORK/results.jsonl" "$FIX" "$DICT" "$WORK/silence.jsonl" <<'PY'
 import json, os, re, stat, struct, sys
 
 def words(s):
@@ -91,6 +96,18 @@ wer = errors / ref_words
 print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows) - len(replaced)} clips ({ref_words} words), "
       f"dictionary replacement in {', '.join(replaced)}")
 assert wer <= 0.08, f"WER {wer:.1%} > 8%"
+
+(s,) = [json.loads(l) for l in open(sys.argv[4]) if l.strip()]
+assert s["error"] == "No speech heard" and s["history_outcome"] == "no_speech", s
+assert s["inserted_text"] == "" and not s["paste_landed"], ("silence pasted something", s)
+assert s["pasteboard_text"] == "" and not s["window_visible"], ("silence touched the clipboard or showed a window", s)
+assert stat.S_IMODE(os.stat(s["audio_path"]).st_mode) == 0o600, s["audio_mode"]
+assert stat.S_IMODE(os.stat(os.path.dirname(s["audio_path"])).st_mode) == 0o700, s["audio_dir_mode"]
+assert s["history_audio_path"] == s["audio_path"], s
+data = open(s["audio_path"], "rb").read()
+assert abs(s["audio_seconds"] - 2) < 0.05 and abs((len(data) - 44) / 4 / 16000 - s["audio_seconds"]) < 1e-3, s
+assert set(data[44:]) == {0}, "the kept WAV must hold the silent samples the guard saw"
+print(f"silence.wav: outcome {s['history_outcome']}, inserted_text {s['inserted_text']!r}, audio {s['audio_mode']} in a {s['audio_dir_mode']} dir")
 PY
 
 # A paste that does not land (the target lost focus) must leave the text on the clipboard.

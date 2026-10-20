@@ -24,13 +24,16 @@ final class Pipeline {
     let store: AudioStore
     let history: History
     let inserter: Inserter
+    private let dictionary: URL
 
-    /// No default: a forgotten argument must not fall back to the user's clipboard.
-    init(pasteboard: NSPasteboard) throws {
+    /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
+    /// Tests pass a temp `root` and a private named pasteboard.
+    init(root: URL = Paths.root, pasteboard: NSPasteboard) throws {
         inserter = Inserter(pasteboard: pasteboard)
-        try AudioStore.makeOwnerOnlyDirectory(Paths.root)
-        store = try AudioStore(dir: Paths.audio)
-        history = try History(path: Paths.history)
+        try AudioStore.makeOwnerOnlyDirectory(root)
+        store = try AudioStore(dir: root.appendingPathComponent("audio"))
+        history = try History(path: root.appendingPathComponent("history.sqlite"))
+        dictionary = root.appendingPathComponent("dictionary.txt")
     }
 
     func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
@@ -51,21 +54,29 @@ final class Pipeline {
                                      _ context: () -> (before: String, after: String),
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
         guard let engine else { return "Speech model is not loaded" }
+        guard SpeechGuard.isSpeech(samples) else { return noSpeech(&run) }  // silence never reaches the model
         run.entry.model = engine.name
         do {
             run.entry.rawText = try await engine.transcribe(samples, wav: URL(fileURLWithPath: run.entry.audioPath))
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Vocabulary.load(Paths.dictionary).apply(Cleanup.apply(run.entry.rawText))
+        // Cleanup, then the personal dictionary (F39); InsertionRules fits the result to the cursor below.
+        run.entry.text = Vocabulary.load(dictionary).apply(Cleanup.apply(SpeechGuard.stripTags(run.entry.rawText)))
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
-        guard !run.entry.text.isEmpty else { return "No speech heard" }
+        guard !run.entry.text.isEmpty else { return noSpeech(&run) }
         let (before, after) = context()
         run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after)
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
         return paste.landed ? nil : "Paste did not land. The text is on the clipboard: press ⌘V to paste it."
+    }
+
+    /// Silence, non-speech tags or fillers only: nothing is pasted and the clipboard is not touched.
+    private func noSpeech(_ run: inout Run) -> String {
+        run.entry.outcome = .noSpeech
+        return "No speech heard"
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {
