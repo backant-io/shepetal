@@ -62,7 +62,7 @@ Both directions use `HelperAPIRequest` (event-style messages flow both ways). `H
 
 Helper macOS APIs seen in the disasm (grep counts): `AXIsProcessTrusted` (18), `CGEventTapCreate` (5), `CGEventPost` (22), `NSPasteboard` (21), `NSWorkspace` (15), `CGPreflightListenEventAccess` (1), `CBCentralManager` (2).
 
-shepetal minimal helper surface (P0): IsReady, UpdateShortcuts, KeypressEvent, DictationStart/Stop, AppContextUpdate, GetTextBoxInfo, PasteText, PasteOutcome, Get/RequestAccessibilityStatus, SecureInputStatus, PlayDictation*Sound. Everything else is P1 or P2.
+shepetal minimal helper surface (P0): IsReady, UpdateShortcuts, KeypressEvent, DictationStart/Stop, AppContextUpdate, GetTextBoxInfo, PasteText, PasteOutcome, Get/RequestAccessibilityStatus, SecureInputStatus. Everything else is P1 or P2.
 
 ## 3. Local storage
 
