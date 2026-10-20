@@ -19,6 +19,7 @@ import plistlib
 import signal
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import anthropic
@@ -134,10 +135,31 @@ def install(n="1"):
             "StandardErrorPath": str(LOG),
         }, f)
     domain = f"gui/{os.getuid()}"
-    subprocess.run(["launchctl", "bootout", f"{domain}/{LABEL}"], capture_output=True)  # reload if already installed
-    subprocess.run(["launchctl", "bootstrap", domain, str(PLIST)], check=True)
+    reload_job(domain)
     print(f"{n} worker(s) installed and running, start at every login. Log: {LOG}\n"
           f"Stop for good: launchctl bootout {domain}/{LABEL} && rm {PLIST}")
+
+
+def reload_job(domain, wait=30.0):
+    """Stop the installed job if there is one, then load the plist.
+
+    bootout returns before the old job has exited, and bootstrap fails with error 5 while launchd
+    still has it, so wait until `launchctl print` stops finding it (launchd's default ExitTimeOut
+    before SIGKILL is system-defined, 20 s in practice), and retry a bootstrap that still fails.
+    """
+    target = f"{domain}/{LABEL}"
+    subprocess.run(["launchctl", "bootout", target], capture_output=True)
+    deadline = time.monotonic() + wait
+    while subprocess.run(["launchctl", "print", target], capture_output=True).returncode == 0:
+        if time.monotonic() > deadline:
+            sys.exit(f"{target} is still loaded {wait:.0f} s after bootout; run install again")
+        time.sleep(0.25)
+    for attempt in range(3):
+        done = subprocess.run(["launchctl", "bootstrap", domain, str(PLIST)], capture_output=True, text=True)
+        if done.returncode == 0:
+            return
+        time.sleep(1)
+    sys.exit(f"launchctl bootstrap {domain} {PLIST} failed ({done.returncode}): {done.stderr.strip()}")
 
 
 def check_cents(cents):

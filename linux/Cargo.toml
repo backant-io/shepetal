@@ -1,0 +1,12 @@
+[package]
+name = "shepetal"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "Local dictation for Linux: hold a key, talk, text lands at the cursor."
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+strip = true

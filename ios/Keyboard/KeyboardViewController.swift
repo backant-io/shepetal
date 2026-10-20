@@ -89,10 +89,15 @@ final class KeyboardViewController: UIInputViewController {
     /// Inserts a ready result, and shows next to 🤫 how the session stands or why it ended without text.
     private func refresh() {
         guard let id = sessionID else { return }
+        // Without Full Access the keyboard cannot read the App Group, so it would only ever see "timed out".
+        guard hasFullAccess else {
+            return indicator.show(.error, "Turn on Allow Full Access for Shepetal in Settings. The text is in Shepetal's history.")
+        }
         let document = textDocumentProxy.documentIdentifier
-        switch SharedHandoff.update({ $0.consume(id, document: document, canCopy: hasFullAccess) }) {
+        switch SharedHandoff.update({ $0.consume(id, document: document) }) {
         case .insert(let text): textDocumentProxy.insertText(text)
-        case .copy(let text): Clipboard.copy(text) // goal rule 8: a different field gets nothing inserted
+        case .copy(let text): // goal rule 8: a different field gets nothing inserted
+            if !Clipboard.copy(text) { SharedHandoff.update { $0.copyFailed(id) } }
         case nil: break
         }
         let state = SharedHandoff.read()

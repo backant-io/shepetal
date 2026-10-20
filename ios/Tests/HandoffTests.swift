@@ -25,16 +25,16 @@ final class HandoffTests: XCTestCase {
 
     func testHappyPathInsertsTextExactlyOnce() {
         var h = ready(a, text: "hello", at: t0)
-        XCTAssertEqual(h.consume(a, document: field, canCopy: true, now: t0), .insert("hello"))
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("hello"))
         XCTAssertEqual(h.phase, .inserted)
         // A second keyboard appearance must not paste the same dictation again.
-        XCTAssertNil(h.consume(a, document: field, canCopy: true, now: t0))
+        XCTAssertNil(h.consume(a, document: field, now: t0))
     }
 
     func testResultForAnotherSessionIsNeverInserted() {
         var h = ready(a, text: "old", at: t0)
         // The keyboard only knows its own session; the old text must stay out of the field.
-        XCTAssertNil(h.consume(b, document: field, canCopy: true, now: t0))
+        XCTAssertNil(h.consume(b, document: field, now: t0))
         XCTAssertEqual(h.phase, .ready)
     }
 
@@ -45,8 +45,8 @@ final class HandoffTests: XCTestCase {
         h.request(b, document: field, now: t0)
         XCTAssertFalse(h.deliver(a, text: "stale", now: t0))
         XCTAssertNil(h.text)
-        XCTAssertNil(h.consume(b, document: field, canCopy: true, now: t0))
-        XCTAssertNil(h.consume(a, document: field, canCopy: true, now: t0))
+        XCTAssertNil(h.consume(b, document: field, now: t0))
+        XCTAssertNil(h.consume(a, document: field, now: t0))
     }
 
     // MARK: Security fix 1: an outside app opening shepetal://dictate must not turn the mic on.
@@ -114,7 +114,7 @@ final class HandoffTests: XCTestCase {
         let atCap = t0.addingTimeInterval(Handoff.maxRecording + 1)
         XCTAssertTrue(h.finishRecording(a, now: atCap))
         XCTAssertTrue(h.deliver(a, text: "long", now: atCap))
-        XCTAssertEqual(h.consume(a, document: field, canCopy: true, now: atCap), .insert("long"))
+        XCTAssertEqual(h.consume(a, document: field, now: atCap), .insert("long"))
     }
 
     func testAbandonedRecordingExpires() {
@@ -144,7 +144,7 @@ final class HandoffTests: XCTestCase {
 
     func testResultForAnotherFieldIsCopiedNotInserted() {
         var h = ready(a, text: "private", at: t0)
-        XCTAssertEqual(h.consume(a, document: otherField, canCopy: true, now: t0), .copy("private"))
+        XCTAssertEqual(h.consume(a, document: otherField, now: t0), .copy("private"))
         XCTAssertNil(h.text)
         // The hint says to paste, without an error ring: the text was not lost.
         XCTAssertEqual(h.phase, .inserted)
@@ -152,23 +152,37 @@ final class HandoffTests: XCTestCase {
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("Paste"), true)
         XCTAssertEqual(h.indicatorMode(for: a, now: t0), .idle)
         // Delivered once: going back to the original field must not insert it as well.
-        XCTAssertNil(h.consume(a, document: field, canCopy: true, now: t0))
+        XCTAssertNil(h.consume(a, document: field, now: t0))
     }
 
-    func testResultForAnotherFieldWithoutFullAccessStaysOnlyInHistory() {
+    func testClipboardWriteThatDidNotLandSaysTheTextIsInHistory() {
         var h = ready(a, text: "private", at: t0)
-        XCTAssertNil(h.consume(a, document: otherField, canCopy: false, now: t0))
-        XCTAssertNil(h.text)
-        // The keyboard says so instead of sitting on "Transcribing..." until the session expires.
+        XCTAssertEqual(h.consume(a, document: otherField, now: t0), .copy("private"))
+        XCTAssertFalse(h.copyFailed(b, now: t0)) // another session's failure changes nothing
+        XCTAssertTrue(h.copyFailed(a, now: t0))
         XCTAssertEqual(h.phase, .failed)
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("history"), true)
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("clipboard"), false) // no wrong paste hint
         XCTAssertEqual(h.indicatorMode(for: a, now: t0), .error)
-        XCTAssertNil(h.consume(a, document: field, canCopy: true, now: t0))
+        XCTAssertFalse(h.copyFailed(a, now: t0)) // once
+        XCTAssertNil(h.consume(a, document: field, now: t0))
     }
 
-    func testResultForTheSameFieldIsInsertedEvenWithoutClipboardAccess() {
+    func testCopyHintKeepsTheNoteDeliveredWithTheText() {
+        var h = Handoff()
+        h.request(a, document: field, now: t0)
+        h.startRecording(a, now: t0) {}
+        h.finishRecording(a, now: t0)
+        h.deliver(a, text: "long", note: "Stopped at the 5-minute limit.", now: t0)
+        XCTAssertEqual(h.consume(a, document: otherField, now: t0), .copy("long"))
+        let status = h.keyboardStatus(for: a, now: t0) ?? ""
+        XCTAssertTrue(status.contains("clipboard"))
+        XCTAssertTrue(status.hasSuffix("Stopped at the 5-minute limit."))
+    }
+
+    func testResultForTheSameFieldIsInserted() {
         var h = ready(a, text: "hi", at: t0)
-        XCTAssertEqual(h.consume(a, document: field, canCopy: false, now: t0), .insert("hi"))
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("hi"))
     }
 
     func testCopyLeavesThePlainTextOnThePasteboardWithoutRestoringTheOldOne() throws {
@@ -176,7 +190,7 @@ final class HandoffTests: XCTestCase {
         let board = try XCTUnwrap(UIPasteboard(name: UIPasteboard.Name("io.backant.shepetal.tests.\(UUID().uuidString)"), create: true))
         defer { UIPasteboard.remove(withName: board.name) }
         board.string = "old clipboard"
-        Clipboard.copy("dictated text", to: board)
+        XCTAssertTrue(Clipboard.copy("dictated text", to: board)) // the write is checked
         XCTAssertEqual(board.string, "dictated text")
         XCTAssertEqual(board.numberOfItems, 1)
         XCTAssertTrue(board.contains(pasteboardTypes: [UTType.utf8PlainText.identifier]))
@@ -202,14 +216,14 @@ final class HandoffTests: XCTestCase {
 
     func testReadyResultExpiresAfterTimeout() {
         var h = ready(a, text: "late", at: t0)
-        XCTAssertNil(h.consume(a, document: field, canCopy: true, now: t0.addingTimeInterval(Handoff.timeout + 1)))
+        XCTAssertNil(h.consume(a, document: field, now: t0.addingTimeInterval(Handoff.timeout + 1)))
         XCTAssertEqual(h.phase, .idle)
         XCTAssertNil(h.text)
     }
 
     func testReadyResultIsInsertedRightAtTheTimeout() {
         var h = ready(a, text: "edge", at: t0)
-        XCTAssertEqual(h.consume(a, document: field, canCopy: true, now: t0.addingTimeInterval(Handoff.timeout)), .insert("edge"))
+        XCTAssertEqual(h.consume(a, document: field, now: t0.addingTimeInterval(Handoff.timeout)), .insert("edge"))
     }
 
     // MARK: The keyboard is told how every dictation ended (product rule 3: errors show at the indicator).
@@ -220,7 +234,7 @@ final class HandoffTests: XCTestCase {
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Transcribing...")
         XCTAssertTrue(h.fail(a, "Could not transcribe: bad audio", now: t0))
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Could not transcribe: bad audio")
-        XCTAssertNil(h.consume(a, document: field, canCopy: true, now: t0))
+        XCTAssertNil(h.consume(a, document: field, now: t0))
     }
 
     func testKeyboardShowsCancelledAndTimedOutSessions() {
@@ -237,7 +251,7 @@ final class HandoffTests: XCTestCase {
         var h = recording(a, at: t0)
         h.finishRecording(a, now: t0)
         h.deliver(a, text: "partial", note: "Recording stopped early", now: t0)
-        XCTAssertEqual(h.consume(a, document: field, canCopy: true, now: t0), .insert("partial"))
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("partial"))
         XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Recording stopped early")
     }
 
@@ -276,12 +290,14 @@ final class HandoffTests: XCTestCase {
         h.deliver(a, text: "hi", now: t0)
         XCTAssertEqual(h.indicatorMode(for: a, now: t0), .processing)
         XCTAssertEqual(h.indicatorMode(for: a, now: t0 + Handoff.timeout + 1), .error) // timed out
-        XCTAssertEqual(h.consume(a, document: field, canCopy: true, now: t0), .insert("hi"))
+        XCTAssertEqual(h.consume(a, document: field, now: t0), .insert("hi"))
         XCTAssertEqual(h.indicatorMode(for: a, now: t0), .idle)
         XCTAssertEqual(h.indicatorMode(for: b, now: t0), .error) // the keyboard's session is gone
 
         var wrongField = ready(a, text: "hi", at: t0)
-        XCTAssertNil(wrongField.consume(a, document: otherField, canCopy: false, now: t0))
+        XCTAssertEqual(wrongField.consume(a, document: otherField, now: t0), .copy("hi"))
+        XCTAssertEqual(wrongField.indicatorMode(for: a, now: t0), .idle) // copied, not lost
+        wrongField.copyFailed(a, now: t0)
         XCTAssertEqual(wrongField.indicatorMode(for: a, now: t0), .error)
 
         var cancelled = recording(a, at: t0)
@@ -293,7 +309,7 @@ final class HandoffTests: XCTestCase {
         var h = Handoff()
         h.request(a, document: field, now: t0)
         XCTAssertFalse(h.deliver(a, text: "skip", now: t0))
-        XCTAssertNil(h.consume(a, document: field, canCopy: true, now: t0))
+        XCTAssertNil(h.consume(a, document: field, now: t0))
     }
 
     func testSurvivesCodableRoundTrip() throws {

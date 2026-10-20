@@ -79,6 +79,30 @@ How to read it:
 Not measured yet: WhisperKit (no Swift CLI in the harness), Whisper large-v3-turbo, the streaming models and
 the diarizers. All rows ran on one M4 Pro; no other Mac, iPhone or Linux machine was measured.
 
+### End to end in the Mac app (Parakeet v3, FluidAudio)
+
+`scripts/e2e-mac.sh` runs the app's own pipeline on 6 `say` clips (4.5 to 10.7 s, 127 words): capture resampler,
+Parakeet TDT 0.6B v3, cleanup, kept audio and history, then clipboard plus Cmd+V into a text view the app owns.
+Run on 2026-10-20 at `36f3e0d` (branch `feat/mac-mac-shell-tests`) from a clean clone, release build, with the
+network denied by `sandbox-exec`:
+
+| Clip | Audio | Word errors | Text ready after release |
+|---|---|---|---|
+| e01 | 6.2 s | 0 / 20 | 72 ms |
+| e02 | 5.4 s | 0 / 15 | 57 ms |
+| e03 | 4.5 s | 0 / 17 | 63 ms |
+| e04 | 6.6 s | 0 / 21 | 63 ms |
+| e05 | 10.7 s | 0 / 36 | 89 ms |
+| e06 | 5.8 s | 0 / 18 | 69 ms |
+
+- WER 0.0 % over 127 words, text ready 57 to 89 ms (mean 69 ms). The goal bar is WER ≤ 8 % and ≤ 700 ms for a 10 s
+  utterance; the 10.7 s clip took 89 ms. The earlier run on `982e547` gave 0.0 % and 58 to 78 ms.
+- These clips are easier than the bench fixtures above (no numbers, no product names), so the 0.0 % here and the
+  7.2 % above do not disagree.
+- Model load was 380 ms with CoreML's compiled cache warm. A second process right after it (the silent-WAV run)
+  took 38 s to load while the machine had a load average of about 45 from parallel builds. Cold and contended
+  load times are not measured yet (#17).
+
 ## Candidates (research)
 
 | Model | Params / disk | Languages | Streaming | Word timestamps | Custom vocab / hotwords | Runtimes | Published WER |

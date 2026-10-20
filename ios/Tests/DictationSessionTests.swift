@@ -237,7 +237,28 @@ final class DictationSessionTests: XCTestCase {
         keyboardRequests(new)
         await session.open(url(new)) // the old recording is transcribed into history meanwhile
         XCTAssertTrue(session.isRecording)
-        XCTAssertEqual(shown, [.recording])
+        XCTAssertEqual(shown, [.recording, .recording]) // sent again for the new recording, never ended
+    }
+
+    /// Holds a fake transcription until the test releases it, so the order of events does not depend on timing.
+    final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var isOpen = false
+        private var waiter: CheckedContinuation<Void, Never>?
+        func wait() async {
+            await withCheckedContinuation { continuation in
+                lock.lock()
+                if isOpen { lock.unlock(); continuation.resume() } else { waiter = continuation; lock.unlock() }
+            }
+        }
+        func release() {
+            lock.lock()
+            isOpen = true
+            let waiting = waiter
+            waiter = nil
+            lock.unlock()
+            waiting?.resume()
+        }
     }
 
     @MainActor
@@ -245,9 +266,9 @@ final class DictationSessionTests: XCTestCase {
         let session = DictationSession(mic: mic, directory: dir, handoff: handoff, settings: UserDefaults(suiteName: settingsSuite)!) { true }
         session.keepOpen = .afterEach
         let newer = Array(speech.reversed())
+        let olderDone = Gate(), newerDone = Gate()
         session.modelReady { samples in
-            // The superseded recording takes 0.3 s; the newer one takes 1.5 s, so the older finishes in between.
-            try await Task.sleep(for: .milliseconds(samples == newer ? 1500 : 300))
+            await (samples == newer ? newerDone : olderDone).wait()
             return samples == newer ? "newer" : "older"
         }
         var shown: [Indicator.Mode?] = []
@@ -256,19 +277,23 @@ final class DictationSessionTests: XCTestCase {
         let new = UUID()
         keyboardRequests(new)
         let opening = Task { await session.open(url(new)) } // ends the old recording, starts the new one, transcribes the old
-        for _ in 0..<200 where state.sessionID != new || state.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<500 where state.sessionID != new || state.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
         XCTAssertTrue(session.isRecording)
         session.append(newer)
         let stopping = Task { await session.stop() } // the user stops the new one while the old is still transcribing
+        for _ in 0..<500 where session.activity != .processing { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(session.activity, .processing)
+        olderDone.release() // the old transcription finishes while the new one is still transcribing
         await opening.value
         XCTAssertEqual(entry(old)?.text, "older")
         XCTAssertEqual(session.activity, .processing) // still "Transcribing" for the new recording
         XCTAssertEqual(session.status, "Transcribing...")
+        newerDone.release()
         await stopping.value
         XCTAssertNil(session.activity)
-        XCTAssertEqual(shown, [.recording, .processing, nil])
+        XCTAssertEqual(shown, [.recording, .recording, .processing, nil])
         var h = state
-        XCTAssertEqual(h.consume(new, document: field, canCopy: true), .insert("newer"))
+        XCTAssertEqual(h.consume(new, document: field), .insert("newer"))
     }
 
     @MainActor
@@ -283,7 +308,7 @@ final class DictationSessionTests: XCTestCase {
         await session.open(url(new))
         XCTAssertFalse(session.isRecording)
         XCTAssertFalse(mic.running)
-        XCTAssertEqual(shown.last, .error) // not stuck on "Listening" while nothing records
+        XCTAssertEqual(shown, [.recording, .error]) // not stuck on "Listening", and not ended before the error shows
         XCTAssertEqual(entry(old)?.outcome, .transcribed)
         XCTAssertEqual(state.phase, .failed)
         XCTAssertTrue(session.status.hasPrefix("Could not start recording"))
@@ -303,7 +328,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertEqual(entry(id)?.text, "hello")
         XCTAssertEqual(entry(id)?.audio, AudioArchive.url(for: id, in: dir).lastPathComponent)
         var h = state
-        XCTAssertEqual(h.consume(id, document: field, canCopy: true), .insert("hello"))
+        XCTAssertEqual(h.consume(id, document: field), .insert("hello"))
     }
 
     @MainActor
@@ -407,7 +432,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertFalse(session.isRecording)
         XCTAssertEqual(try savedSamples(id), speech)
         var h = state
-        XCTAssertEqual(h.consume(id, document: field, canCopy: true), .insert("hello"))
+        XCTAssertEqual(h.consume(id, document: field), .insert("hello"))
         XCTAssertEqual(h.keyboardStatus(for: id)?.hasPrefix("Recording stopped early"), true)
         XCTAssertEqual(entry(id)?.note?.hasPrefix("Recording stopped early"), true)
     }
@@ -480,7 +505,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertEqual(try savedSamples(second), words)
         XCTAssertEqual(heard, [speech, words])
         var h = state
-        XCTAssertEqual(h.consume(second, document: field, canCopy: true), .insert("hello"))
+        XCTAssertEqual(h.consume(second, document: field), .insert("hello"))
     }
 
     @MainActor

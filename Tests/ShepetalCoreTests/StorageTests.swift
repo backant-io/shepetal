@@ -47,6 +47,45 @@ final class StorageTests: XCTestCase {
         XCTAssertEqual(back, samples)
     }
 
+    // Replay and re-transcription get exactly what the model heard the first time.
+    func testReadReturnsTheExactSavedSamples() throws {
+        let samples: [Float] = (0..<1600).map { sin(Float($0) * 0.01) * 0.3 }
+            + [-0.0, .nan, .infinity, -.infinity, .leastNonzeroMagnitude, .greatestFiniteMagnitude, 1, -1]
+        let store = try AudioStore(dir: root)
+        XCTAssertEqual(try AudioStore.read(store.save(samples, id: "x")).map(\.bitPattern), samples.map(\.bitPattern))
+        XCTAssertEqual(try AudioStore.read(store.save([], id: "empty")), [])
+
+        let notOurs = root.appendingPathComponent("pcm16.wav")
+        var header = AudioStore.wav([0, 0])
+        header[20] = 1  // PCM, not float
+        try header.write(to: notOurs)
+        XCTAssertThrowsError(try AudioStore.read(notOurs))
+        try AudioStore.wav([1, 2]).dropLast(2).write(to: notOurs)
+        XCTAssertThrowsError(try AudioStore.read(notOurs), "truncated")
+    }
+
+    // Once the 24 h retention deleted the WAV, play and re-transcribe are off, and the row stays as it was.
+    func testRetryNeedsTheAudio() throws {
+        let store = try AudioStore(dir: root.appendingPathComponent("audio"))
+        let history = try History(path: root.appendingPathComponent("history.sqlite"))
+        let url = try store.save([0.1, 0.2], id: "a")
+        let entry = HistoryEntry(id: "a", createdAt: Date(timeIntervalSince1970: 1_000), outcome: .inserted, audioPath: url.path, durationMs: 2,
+                                 model: "m", rawText: "hi", text: "Hi", app: "Notes")
+        try history.add(entry)
+        XCTAssertTrue(entry.canReplay())
+
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-25 * 3600)], ofItemAtPath: url.path)
+        XCTAssertEqual(try store.applyRetention(.delete24h).map(\.lastPathComponent), ["a.wav"])
+        XCTAssertFalse(entry.canReplay())
+        XCTAssertEqual(try history.recent(), [entry])
+        XCTAssertFalse(try XCTUnwrap(history.recent().first).canReplay())
+
+        XCTAssertTrue(entry.canReplay(fileExists: { $0 == url.path }))
+        var unsaved = entry
+        unsaved.audioPath = ""
+        XCTAssertFalse(unsaved.canReplay(fileExists: { _ in true }), "audio that was never saved")
+    }
+
     func testRetentionKeepDeletesNothing() throws {
         let store = try AudioStore(dir: root)
         let url = try store.save([0], id: "old")

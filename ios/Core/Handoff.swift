@@ -98,20 +98,27 @@ public struct Handoff: Codable, Equatable {
     /// Keyboard: take the text for the session it requested, in the field it is showing now.
     /// Returns nil for a stale, expired or already delivered result, so the same text is never
     /// delivered twice. A ready result shown in a different field is never inserted there: it is copied
-    /// instead (goal rule 8), or, when the keyboard cannot write the clipboard (`canCopy` false: no Full
-    /// Access), the session fails and the keyboard says the text is in the app's history.
-    public mutating func consume(_ id: UUID, document: UUID, canCopy: Bool, now: Date = Date()) -> Delivery? {
+    /// instead (goal rule 8), and the paste hint goes before any note delivered with the text.
+    public mutating func consume(_ id: UUID, document: UUID, now: Date = Date()) -> Delivery? {
         let result = text
         guard advance(id, from: .ready, to: .inserted, now: now), let result else { return nil }
         text = nil
         if document == documentID { return .insert(result) }
-        guard canCopy else {
-            phase = .failed
-            message = "Not inserted, because you are in a different field now. The text is in Shepetal's history."
-            return nil
-        }
-        message = "You are in a different field now, so the text is on the clipboard. Tap the field and choose Paste."
+        message = [Self.copiedHint, message].compactMap { $0 }.joined(separator: " ")
         return .copy(result)
+    }
+
+    static let copiedHint = "You are in a different field now, so the text is on the clipboard. Tap the field and choose Paste."
+
+    /// Keyboard: the clipboard write for a `.copy` did not land, so the paste hint would be wrong.
+    /// The session fails and says where the text is instead.
+    @discardableResult
+    public mutating func copyFailed(_ id: UUID, now: Date = Date()) -> Bool {
+        guard sessionID == id, phase == .inserted else { return false }
+        phase = .failed
+        message = "Not inserted, because you are in a different field now. The text is in Shepetal's history."
+        updatedAt = now
+        return true
     }
 
     /// Either side: give up on the session. Only the session id is needed; the app keeps the audio.
@@ -289,8 +296,12 @@ public enum AudioArchive {
 public enum Clipboard {
     /// Replaces the clipboard with `text` as plain text. Local only: it is not sent to the user's other
     /// devices by Universal Clipboard. Tests pass a private named pasteboard, never `.general`.
-    public static func copy(_ text: String, to pasteboard: UIPasteboard = .general) {
+    /// Returns false when the write did not land (the change count did not move or the text differs).
+    @discardableResult
+    public static func copy(_ text: String, to pasteboard: UIPasteboard = .general) -> Bool {
+        let before = pasteboard.changeCount
         pasteboard.setItems([[UTType.utf8PlainText.identifier: text]], options: [.localOnly: true])
+        return pasteboard.changeCount != before && pasteboard.string == text
     }
 }
 

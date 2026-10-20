@@ -148,8 +148,8 @@ public final class DictationSession: ObservableObject {
         guard SharedHandoff.update(in: handoff, { $0.startRecording(id) { if !mic.isRunning { try mic.start() } } }) else {
             close(endActivity: false)
             SharedHandoff.post(SharedHandoff.readyNotification)
+            latestID = id // the older recording still goes to history, but no longer sets the status
             if let superseded { await finish(superseded) }
-            latestID = id
             setStatus("Could not start recording. Tap the mic again.", activity: .error, for: id)
             return
         }
@@ -161,7 +161,8 @@ public final class DictationSession: ObservableObject {
         closeAt = nil
         errorAt = nil
         status = "Listening. Go back to your app and tap the mic to finish."
-        activity = .recording
+        // Sent again when a superseded recording was already showing it, so the Live Activity's stale date restarts.
+        if activity == .recording { onActivity(.recording) } else { activity = .recording }
         SharedHandoff.markListening(Date(), in: handoff)
         SharedHandoff.post(SharedHandoff.readyNotification) // a keyboard that sent the start shows "Listening"
         if watchdog == nil {
