@@ -177,6 +177,31 @@ text is ready (`linux/src/focus.rs`):
 Typing tools give no "landed" signal on Linux (unlike the Mac's paste check), so a typed text
 that the window ignores is not caught. The audio is kept either way.
 
+## History, retention and paste last
+
+Every recording gets one line in `$XDG_DATA_HOME/shepetal/history.jsonl` (0600, in the 0700
+`shepetal` dir; `linux/src/history.rs`): its id (the unix ms it started, also the audio file's
+stem), the outcome, the kept WAV's path, its length, the model and the text. The outcomes are the
+Mac's: `inserted`, `paste_failed` (left on the clipboard, rule 8), `too_short`, `cancelled`,
+`no_speech` (the model heard no words: nothing is typed) and `failed` (speech-to-text failed, or
+neither typing nor the clipboard worked; the text is still in the line). A symlink or a file that
+others can read in place of the history is refused.
+
+| Command | Does |
+| --- | --- |
+| `shepetal history [WORDS...]` | lists entries, newest first, whose text has every word (any case) |
+| `shepetal history play ID` | plays the kept audio with `pw-play` (or `paplay`) |
+| `shepetal history copy ID` | puts the entry's text on the clipboard |
+| `shepetal history retranscribe ID` | runs the model the tier table picks now (or `SHEPETAL_MODEL`) on the kept audio, prints the text and stores it in the entry |
+| `shepetal paste-last` | types the newest dictated text at the cursor (F21; bind it to a desktop shortcut) |
+| `shepetal copy-last` | copies it |
+
+Retention (goal rule 4) is `keep`, the default, or `delete_after_24h`, set in
+`$XDG_CONFIG_HOME/shepetal/config.json` as `{"retention": "delete_after_24h"}`. With 24 h the
+daemon deletes, at start and every hour, each recording that started 24 h ago or earlier: the
+audio file of any outcome (also one without a history line) and its history line. A missing,
+broken or unknown setting keeps everything. There is no "never store" setting.
+
 ## Security
 
 - Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`
@@ -304,6 +329,16 @@ Not yet done. These are the steps:
     what it held before.
 12. **Rule 8, GNOME or KDE Wayland**: the same steps type the sentence into whatever window has
     focus at the end, since these desktops do not tell an app which window has focus.
+13. **History**: after steps 6 to 8, `shepetal history` lists the dictations newest first with
+    `inserted`, `too_short` and `cancelled`. `shepetal history play ID` plays the first one
+    through the speakers. `shepetal history hello` lists only the entries with "hello".
+14. **Paste last**: bind `shepetal paste-last` to a desktop shortcut (GNOME Settings > Keyboard >
+    Custom Shortcuts). Dictate into gedit, click into another text field, press the shortcut: the
+    same text is typed there.
+15. **24 h retention**: write `{"retention": "delete_after_24h"}` to
+    `~/.config/shepetal/config.json` and start the daemon with a recording from
+    more than 24 h ago in `~/.local/share/shepetal/audio/`: it prints
+    `retention: deleted N recordings older than 24 h`, and the file and its history line are gone.
 
 ### Manual test steps: 🤫 indicator
 

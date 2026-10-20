@@ -1,6 +1,6 @@
 use shepetal::gesture::{Action, Event, Gesture};
 use shepetal::indicator::{self, Indicator};
-use shepetal::{focus, insert, meeting, model};
+use shepetal::{focus, history, insert, meeting, model};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
@@ -8,6 +8,8 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon | shepetal indicator\n\
+       shepetal history [WORDS...] | shepetal history play|copy|retranscribe ID\n\
+       shepetal paste-last | shepetal copy-last\n\
 env: SHEPETAL_KEY (default fn), SHEPETAL_MODEL (path to the model `probe` names: a sherpa-onnx dir or a ggml .bin)";
 
 fn main() {
@@ -16,6 +18,9 @@ fn main() {
         Some("probe") => probe(args.get(1).filter(|a| *a == "--pw-dump").and(args.get(2))),
         Some("daemon") => daemon(),
         Some("indicator") => show_indicator(),
+        Some("history") => history_cmd(&args[1..]),
+        Some("paste-last") => last_cmd(false),
+        Some("copy-last") => last_cmd(true),
         _ => Err(USAGE.into()),
     };
     if let Err(e) = res {
@@ -60,6 +65,87 @@ fn data_home_from(xdg: Option<&str>, home: &str) -> String {
         Some(d) if d.starts_with('/') => d.to_string(),
         _ => format!("{home}/.local/share"),
     }
+}
+
+fn config_home() -> PathBuf {
+    match std::env::var("XDG_CONFIG_HOME") {
+        Ok(d) if d.starts_with('/') => d.into(),
+        _ => PathBuf::from(env("HOME")).join(".config"),
+    }
+}
+
+fn now_ms() -> u128 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis()
+}
+
+/// Goal rule 4: delete recordings older than 24 h when config.json asks for it.
+fn retention(data_home: &Path) {
+    let r = history::retention(std::fs::read_to_string(history::config_file(&config_home())).ok().as_deref());
+    match history::apply_retention(data_home, r, now_ms()) {
+        Ok(gone) if !gone.is_empty() => eprintln!("shepetal: retention: deleted {} recordings older than 24 h", gone.len()),
+        Ok(_) => {}
+        Err(e) => eprintln!("shepetal: retention: {e}"),
+    }
+}
+
+/// One history line per recording; a failure to write it is reported and dictation goes on.
+fn remember(data_home: &Path, id: u128, outcome: &str, audio: &Path, stt: &model::Choice, text: &str) {
+    let e = history::Entry { id, outcome: outcome.into(), audio: audio.into(), duration_ms: history::wav_duration_ms(audio), model: stt.model.into(), text: text.into() };
+    if let Err(err) = history::append(data_home, &e) {
+        eprintln!("shepetal: history: {err}");
+    }
+}
+
+/// `shepetal history`: list (newest first, filtered by words), or play, copy or re-transcribe one.
+fn history_cmd(args: &[String]) -> Res {
+    let home = PathBuf::from(data_home());
+    let entries = history::load(&home);
+    let find = |id: Option<&String>| -> Result<&history::Entry, String> {
+        let id = id.ok_or("which entry? give its ID from `shepetal history`")?;
+        entries.iter().find(|e| e.id.to_string() == *id).ok_or(format!("no history entry {id}"))
+    };
+    match args.first().map(String::as_str) {
+        Some("play") => {
+            let e = find(args.get(1))?;
+            let player = if insert::on_path("pw-play") { "pw-play" } else { "paplay" };
+            let st = Command::new(player).arg(&e.audio).status().map_err(|err| format!("{player}: {err}"))?;
+            st.success().then_some(()).ok_or(format!("{player} failed: {st}"))
+        }
+        Some("copy") => copy(&find(args.get(1))?.text),
+        Some("retranscribe") => {
+            // With the model the tier table picks now (or SHEPETAL_MODEL); the entry gets the new text.
+            let e = find(args.get(1))?;
+            let stt = model::choose(&model::detect());
+            let text = transcribe(&stt, &e.audio)?;
+            println!("{text}");
+            let all: Vec<_> = entries.iter().map(|x| if x.id == e.id { history::Entry { text: text.clone(), model: stt.model.into(), ..x.clone() } } else { x.clone() }).collect();
+            history::save(&home, &all).map_err(|err| format!("history: {err}"))
+        }
+        _ => {
+            for e in history::search(&entries, &args.join(" ")) {
+                println!("{}  {:>12}  {:>6} ms  {}", e.id, e.outcome, e.duration_ms, e.text);
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Put `text` on the clipboard of this session.
+fn copy(text: &str) -> Res {
+    let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
+    let clip = insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("no wl-copy or xclip")?;
+    clip.insert(text).map_err(|e| e.to_string())
+}
+
+/// `shepetal paste-last` / `copy-last` (F21): the newest dictated text, typed at the cursor or
+/// copied. Bind them to desktop shortcuts.
+fn last_cmd(copy_only: bool) -> Res {
+    let entries = history::load(Path::new(&data_home()));
+    let text = &history::last_text(&entries).ok_or("no dictation with text in the history yet")?.text;
+    if copy_only {
+        return copy(text);
+    }
+    backend().ok_or("no text insertion tool")?.insert(text).map_err(|e| e.to_string())
 }
 
 fn model_path(m: &model::Choice) -> PathBuf {
@@ -252,6 +338,7 @@ fn daemon() -> Res {
     let typer = backend().ok_or("no text insertion tool: install wtype, xdotool, ydotool, wl-clipboard or xclip")?;
     let data_home = PathBuf::from(data_home());
     let ind = start_indicator()?;
+    retention(&data_home);
 
     let (tx, rx) = mpsc::channel();
     watch_keys(tx, &devs)?;
@@ -311,7 +398,12 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
     let t0 = Instant::now();
     let mut g = Gesture::default();
     let mut rec: Option<Rec> = None;
+    let mut retention_at = Instant::now();
     loop {
+        if retention_at.elapsed() >= Duration::from_secs(3600) {
+            retention_at = Instant::now();
+            retention(data_home);
+        }
         let ev = match next_event(rx, key, t0) {
             Ok(ev) => ev,
             Err(e) => {
@@ -350,7 +442,7 @@ type Rec = (Child, PathBuf, Option<String>);
 fn act(a: Action, rec: &mut Option<Rec>, data_home: &Path, stt: &model::Choice, typer: insert::Backend, key_name: &str, ind: &Indicator) -> Result<Option<String>, String> {
     match a {
         Action::Start => {
-            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis();
+            let stamp = now_ms();
             let wav = shepetal::new_recording(data_home, stamp).map_err(|e| format!("audio file: {e}"))?;
             let recorder = record(&wav).map_err(|e| format!("recorder: {e}"))?;
             ind.send("recording");
@@ -361,9 +453,12 @@ fn act(a: Action, rec: &mut Option<Rec>, data_home: &Path, stt: &model::Choice, 
             let label = if a == Action::Cancel { "cancelled" } else { "tooshort" };
             if let Some((c, wav, _)) = rec.take() {
                 stop(c);
-                if let Err(e) = shepetal::mark(&wav, label) {
+                let kept = shepetal::mark(&wav, label).unwrap_or_else(|e| {
                     eprintln!("shepetal: mark {label} {}: {e}", wav.display());
-                }
+                    wav.clone()
+                });
+                let outcome = if a == Action::Cancel { "cancelled" } else { "too_short" };
+                remember(data_home, stamp_of(&wav), outcome, &kept, stt, "");
             }
             ind.send("idle");
             return Ok((a == Action::TooShort).then(|| shepetal::short_press_hint(key_name)));
@@ -375,11 +470,21 @@ fn act(a: Action, rec: &mut Option<Rec>, data_home: &Path, stt: &model::Choice, 
             // ponytail: transcribes on the input thread, so keys pressed meanwhile queue up.
             // The WAV stays in the audio history: it is exactly what the model heard.
             // 🤫 shows a short text in our own words; the details go to stderr.
+            let id = stamp_of(&wav);
             match transcribe(stt, &wav) {
-                Ok(t) if !t.is_empty() => return Ok(deliver(&t, typer, focused_at_start.as_deref(), ind)),
-                Ok(_) => ind.send("idle"),
+                Ok(t) if !t.is_empty() => {
+                    let (outcome, hint) = deliver(&t, typer, focused_at_start.as_deref(), ind);
+                    remember(data_home, id, outcome, &wav, stt, &t);
+                    return Ok(hint);
+                }
+                Ok(_) => {
+                    // F51: no words, nothing typed; the audio and a no_speech line are kept.
+                    remember(data_home, id, "no_speech", &wav, stt, "");
+                    ind.send("idle");
+                }
                 Err(e) => {
                     eprintln!("shepetal: {e}");
+                    remember(data_home, id, "failed", &wav, stt, "");
                     ind.send("error Transcription failed");
                 }
             }
@@ -391,7 +496,13 @@ fn act(a: Action, rec: &mut Option<Rec>, data_home: &Path, stt: &model::Choice, 
 /// Goal rule 8: type `text` only if the window that had focus when the dictation started still
 /// has it. Otherwise, or if typing fails, leave the text on the clipboard (the old clipboard is not
 /// restored) and return the hint that says to paste. Never moves focus back.
-fn deliver(text: &str, typer: insert::Backend, focused_at_start: Option<&str>, ind: &Indicator) -> Option<String> {
+/// The recording's id: its file's stem, the unix ms it started.
+fn stamp_of(wav: &Path) -> u128 {
+    wav.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse().ok()).unwrap_or(0)
+}
+
+/// Returns the history outcome and the hint.
+fn deliver(text: &str, typer: insert::Backend, focused_at_start: Option<&str>, ind: &Indicator) -> (&'static str, Option<String>) {
     let why = if typer.is_clipboard() {
         "No typing tool."
     } else if focus::target(focused_at_start, focus::Session::from_env().focused().as_deref()) == focus::Target::Clipboard {
@@ -400,7 +511,7 @@ fn deliver(text: &str, typer: insert::Backend, focused_at_start: Option<&str>, i
         match typer.insert(text) {
             Ok(()) => {
                 ind.send("idle");
-                return None;
+                return ("inserted", None);
             }
             Err(e) => {
                 eprintln!("shepetal: insert: {e}");
@@ -413,12 +524,13 @@ fn deliver(text: &str, typer: insert::Backend, focused_at_start: Option<&str>, i
     match clip.ok_or_else(|| std::io::Error::other("no wl-copy or xclip")).and_then(|c| c.insert(text)) {
         Ok(()) => {
             ind.send("idle");
-            Some(focus::clipboard_hint(why))
+            ("paste_failed", Some(focus::clipboard_hint(why)))
         }
         Err(e) => {
+            // The text stays in the history, where `shepetal history copy` can get it.
             eprintln!("shepetal: {why} clipboard: {e}");
             ind.send("error Could not type or copy the text");
-            None
+            ("failed", None)
         }
     }
 }
@@ -576,6 +688,7 @@ mod tests {
             ("xdotool", format!("if [ \"$1\" = getactivewindow ]; then cat \"{d_}/active\"; else cat > \"{d_}/typed\"; fi\n")),
             ("xclip", format!("cat > \"{d_}/clipboard\"\n")),
             ("wl-copy", format!("cat > \"{d_}/clipboard\"\n")),
+            ("pw-play", format!("echo \"$*\" > \"{d_}/played\"\n")),
         ];
         for (bin, body) in tools {
             std::fs::write(d.join(bin), format!("#!/bin/sh\n{body}")).unwrap();
@@ -583,7 +696,7 @@ mod tests {
         }
         // Put PATH back and remove the tools also when `f` panics, or the next test would run
         // this test's tools.
-        const SESSION: [&str; 4] = ["XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE"];
+        const SESSION: [&str; 6] = ["XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE", "XDG_DATA_HOME", "XDG_CONFIG_HOME"];
         struct Restore(Vec<(&'static str, Option<std::ffi::OsString>)>, PathBuf);
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -849,6 +962,95 @@ mod tests {
         std::fs::remove_dir_all(sys).unwrap();
         let (key, name, _) = got.unwrap();
         assert_eq!((key, shepetal::short_press_hint(&name).as_str()), (58, "Hold key 58 to talk · double-tap for hands-free"));
+    }
+
+    #[test]
+    fn every_recording_gets_a_history_line_pointing_at_the_audio_the_model_heard() {
+        // Goal rule 4 and F52: inserted, left on the clipboard, too short, cancelled, no speech
+        // and failed recordings each get a line whose audio is the owner-only file the model read.
+        use std::os::unix::fs::PermissionsExt;
+        with_fake_tools("hist", |d| {
+            let home = d.join("home");
+            let ind = Indicator::default();
+            let run = |actions: &[Action], typer| {
+                let mut rec = None;
+                for a in actions {
+                    if *a != Action::Start {
+                        wait_until("the recorder", || rec.as_ref().is_some_and(|r: &Rec| std::fs::read(&r.1).is_ok_and(|b| b == b"RIFF partial")));
+                    }
+                    act(*a, &mut rec, &home, &cpu(), typer, "fn", &ind).unwrap();
+                }
+            };
+            let sherpa = std::fs::read_to_string(d.join("sherpa-onnx-offline")).unwrap();
+            run(&[Action::Start, Action::Stop], insert::Backend::Wtype);
+            assert_eq!(std::fs::read(d.join("heard.wav")).unwrap(), b"RIFF final");
+            run(&[Action::Start, Action::Stop], insert::Backend::Xclip);
+            run(&[Action::Start, Action::TooShort], insert::Backend::Wtype);
+            run(&[Action::Start, Action::Cancel], insert::Backend::Wtype);
+            std::fs::write(d.join("sherpa-onnx-offline"), sherpa.replace("Hello\\n  world.", "")).unwrap();
+            run(&[Action::Start, Action::Stop], insert::Backend::Wtype);
+            std::fs::write(d.join("sherpa-onnx-offline"), "#!/bin/sh\nexit 1\n").unwrap();
+            run(&[Action::Start, Action::Stop], insert::Backend::Wtype);
+
+            let es = history::load(&home);
+            let got: Vec<_> = es.iter().map(|e| (e.outcome.as_str(), e.text.as_str())).collect();
+            assert_eq!(got, [("inserted", "Hello world."), ("paste_failed", "Hello world."), ("too_short", ""),
+                             ("cancelled", ""), ("no_speech", ""), ("failed", "")]);
+            for e in &es {
+                assert_eq!(std::fs::read(&e.audio).unwrap(), b"RIFF final", "{e:?}");
+                assert_eq!(std::fs::metadata(&e.audio).unwrap().permissions().mode() & 0o777, 0o600);
+                assert_eq!(e.audio.parent().unwrap(), home.join("shepetal/audio"));
+                assert_eq!(e.audio.file_name().unwrap().to_str().unwrap().split('.').next().unwrap(), e.id.to_string());
+                assert_eq!(e.model, cpu().model);
+            }
+            assert!(es[2].audio.to_str().unwrap().ends_with(".tooshort.wav") && es[3].audio.to_str().unwrap().ends_with(".cancelled.wav"));
+        });
+    }
+
+    #[test]
+    fn history_lists_plays_copies_and_pastes_the_last_text() {
+        with_fake_tools("histcli", |d| {
+            let home = d.join("data");
+            std::env::set_var("XDG_DATA_HOME", &home);
+            std::env::set_var("XDG_SESSION_TYPE", "x11");
+            let wav = shepetal::new_recording(&home, 5).unwrap();
+            for (id, outcome, text) in [(5u128, "inserted", "first note"), (6, "paste_failed", "second note"), (7, "too_short", "")] {
+                history::append(&home, &history::Entry { id, outcome: outcome.into(), audio: wav.clone(), duration_ms: 0, model: "m".into(), text: text.into() }).unwrap();
+            }
+            history_cmd(&["play".into(), "5".into()]).unwrap();
+            assert_eq!(std::fs::read_to_string(d.join("played")).unwrap(), format!("{}\n", wav.display()));
+            assert_eq!(history_cmd(&["play".into(), "99".into()]).unwrap_err(), "no history entry 99");
+            history_cmd(&["copy".into(), "5".into()]).unwrap();
+            assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "first note");
+            // F21: the newest entry with text, not the too-short one after it.
+            last_cmd(true).unwrap();
+            assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "second note");
+            last_cmd(false).unwrap();
+            assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "second note", "typed by xdotool on X11");
+            // Re-transcribe with the current model: the entry gets the new text.
+            std::env::set_var("SHEPETAL_MODEL", d);
+            let r = history_cmd(&["retranscribe".into(), "5".into()]);
+            std::env::remove_var("SHEPETAL_MODEL");
+            r.unwrap();
+            assert_eq!(history::load(&home)[0].text, "Hello world.");
+            assert_eq!(history::load(&home)[1].text, "second note");
+        });
+    }
+
+    #[test]
+    fn the_daemon_applies_24h_retention_from_config() {
+        with_fake_tools("retcfg", |d| {
+            let (data, config) = (d.join("data"), d.join("config"));
+            std::env::set_var("XDG_CONFIG_HOME", &config);
+            let old = shepetal::new_recording(&data, now_ms() - 25 * 3600 * 1000).unwrap();
+            let new = shepetal::new_recording(&data, now_ms()).unwrap();
+            retention(&data);
+            assert!(old.exists(), "no config: keep");
+            std::fs::create_dir_all(config.join("shepetal")).unwrap();
+            std::fs::write(config.join("shepetal/config.json"), r#"{"retention": "delete_after_24h"}"#).unwrap();
+            retention(&data);
+            assert!(!old.exists() && new.exists());
+        });
     }
 
     #[test]
