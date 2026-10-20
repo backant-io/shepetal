@@ -20,6 +20,8 @@ scripts/ci/run-checks.sh --only ios   # one suite
 scripts/ci/run-checks.sh --self-test  # check the runner itself
 ```
 
+Tools it needs on PATH: `swift` and Xcode, `xcodegen` (ios), `python3` (summarize, scripts), `uv` (bench; often in `~/.local/bin`), and Docker (linux, meeting-linux). A missing tool fails its suite loudly (for example `uv: command not found`, exit 127).
+
 Build caches (Docker targets, the iOS DerivedData) go to `.cache/ci/` (gitignored), or to `CI_CACHE` if set. Delete that folder to free disk.
 
 `--self-test` checks that a suite whose middle command fails stops the run with exit 1, that the suites after it do not run, and that every suite has its own `--only` step in the workflow. It is the last command of the `scripts` suite.
