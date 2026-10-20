@@ -6,6 +6,8 @@
 # A dictionary.txt in SHEPETAL_HOME replaces one word of e03; that clip is checked for the replacement and
 # left out of the WER. SHEPETAL_HOME defaults to .cache/e2e/home.
 # A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
+# e01-quiet is e01 at -40 dB (loudest 100 ms about -52 dBFS): it must still be inserted word for word,
+# so a speech floor set too high fails here.
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -36,7 +38,26 @@ e05|Samantha|I reviewed the pull request this morning. The tests pass on my mach
 e06|Daniel|Could you move our weekly sync to Thursday afternoon, since half of the team is traveling on Wednesday?
 FIXTURES
 
-"$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl"
+# e01 scaled by -40 dB, written as 32-bit float so the quiet samples keep their resolution.
+python3 - "$FIX/e01.wav" "$FIX/e01-quiet.wav" <<'PY'
+import math, struct, sys, wave
+w = wave.open(sys.argv[1])
+assert (w.getnchannels(), w.getsampwidth()) == (1, 2), "say writes 16-bit mono"
+rate, n = w.getframerate(), w.getnframes()
+x = [v / 32768 * 10 ** (-40 / 20) for v in struct.unpack(f"<{n}h", w.readframes(n))]
+win = rate // 10
+loudest = max(math.sqrt(sum(v * v for v in x[i:i + win]) / win) for i in range(0, n - win, win))
+db = 20 * math.log10(loudest)
+assert -56 < db < -48, f"quiet clip at {db:.1f} dBFS"
+data = struct.pack(f"<{n}f", *x)
+hdr = b"RIFF" + struct.pack("<I", 36 + len(data)) + b"WAVEfmt " + struct.pack("<IHHIIHH", 16, 3, 1, rate, rate * 4, 4, 32)
+open(sys.argv[2], "wb").write(hdr + b"data" + struct.pack("<I", len(data)) + data)
+print(f"e01-quiet.wav: loudest 100 ms window {db:.1f} dBFS")
+PY
+cp "$FIX/e01.txt" "$FIX/e01-quiet.txt"
+
+# A clip with an error exits 1; the checks below name it.
+"$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl" || true
 
 # Silence exits 1 by design ("No speech heard"); the checks below read its JSON line.
 python3 -c 'import sys, wave; w = wave.open(sys.argv[1], "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close()' "$FIX/silence.wav"
@@ -63,6 +84,7 @@ replaced = {"e03.wav": ("dentist", "orthodontist")}  # clip -> what dictionary.t
 assert stat.S_IMODE(os.stat(dictionary).st_mode) == 0o600, "dictionary.txt is not owner-only"
 rows = [json.loads(l) for l in open(results) if l.strip()]
 assert rows and all("wav" in r for r in rows), f"no results: {rows}"
+assert "e01-quiet.wav" in [os.path.basename(r["wav"]) for r in rows], "the quiet clip did not run"
 errors = ref_words = 0
 for r in rows:
     name = os.path.basename(r["wav"])
@@ -75,6 +97,8 @@ for r in rows:
         assert written in got and spoken not in got, (name, "dictionary replacement missing", r["inserted_text"])
     else:
         errors += e; ref_words += len(ref)
+    if name == "e01-quiet.wav":
+        assert e == 0, (name, "quiet speech lost words", r["error"], r["inserted_text"])
     assert r["inserted_text"] == r["text"], (name, "field holds something else", r["inserted_text"])
     assert r["paste_landed"] and r["clipboard_restored"], (name, "paste", r)
     assert r["pasteboard"].startswith("io.backant.shepetal.e2e."), (name, "not the private pasteboard", r["pasteboard"])
