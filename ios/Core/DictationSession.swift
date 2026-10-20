@@ -211,7 +211,7 @@ public final class DictationSession: ObservableObject {
             cancel()
             return true
         }
-        guard state.phase == .recording, state.stopRequested else { return false }
+        guard state.phase == .recording, SharedHandoff.isStopRequested(id, in: handoff) else { return false }
         await stop()
         return true
     }

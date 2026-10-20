@@ -1,5 +1,5 @@
+import AppKit
 import FluidAudio
-import Foundation
 import ShepetalCore
 
 protocol SpeechEngine: AnyObject {
@@ -22,27 +22,98 @@ struct SpeechError: LocalizedError {
 }
 
 enum Speech {
-    /// The tier's default model, then its fallback. Never downloads anything.
-    static func load(prefer: SpeechModel? = nil) async throws -> SpeechEngine {
+    /// The model for the selected languages (`speechRoute`), then the tier's fallback when that model is the
+    /// tier's default. Never downloads anything.
+    static func load(prefer: SpeechModel? = nil, languages: [String] = []) async throws -> SpeechEngine {
         let tier = currentModelTier()
+        let route = speechRoute(languages: languages, tier: tier)
         var tried: [String] = []
-        var models = [prefer ?? tier.primary]
-        if let f = tier.fallback, f != models[0] { models.append(f) }
+        var models = [prefer ?? route.model]
+        // A language only whisper knows gets no fallback: Parakeet would write it in the wrong language.
+        if route.model == tier.primary, let f = tier.fallback, f != models[0] { models.append(f) }
         for model in models {
-            do { return try await engine(for: model) } catch { tried.append("\(model.rawValue): \(error.localizedDescription)") }  // not shown: logged below
+            do { return try await engine(for: model, language: route.language ?? "auto") } catch {
+                tried.append("\(model.rawValue): \(error.localizedDescription)")  // not shown: logged below
+            }
         }
         NSLog("shepetal: no speech model: %@", tried.joined(separator: "; "))  // names in the log, not the UI
+        guard route.model == tier.primary else {
+            let names = languages.map { Locale.current.localizedString(forLanguageCode: $0) ?? $0 }
+            throw SpeechError("On-device speech recognition for \(names.joined(separator: ", ")) is not installed")
+        }
         throw SpeechError("On-device speech recognition is not available")
     }
 
-    static func engine(for model: SpeechModel) async throws -> SpeechEngine {
+    static func engine(for model: SpeechModel, language: String = "auto") async throws -> SpeechEngine {
         do {
             switch model {
             case .parakeetV3: return try await ParakeetEngine.load()
-            case .whisperBaseEn, .whisperLargeV3Turbo: return try WhisperCppEngine(model)
+            case .whisperBaseEn, .whisperLargeV3Turbo: return try WhisperCppEngine(model, language: language)
             }
         } catch {
             throw SpeechError(plain: error, "On-device speech recognition could not start")
+        }
+    }
+}
+
+extension Paths {
+    /// The personal dictionary, re-read on every dictation.
+    static var dictionary: URL { root.appendingPathComponent("dictionary.txt") }
+}
+
+/// The 🤫 menu's Languages submenu and Dictionary item.
+@MainActor
+final class SpeechMenu: NSObject {
+    /// Called when a language change needs another model.
+    var reload: () -> Void = {}
+    /// Shows an error next to 🤫.
+    var fail: (String) -> Void = { _ in }
+
+    /// BCP-47 codes; empty means automatic.
+    var languages: [String] {
+        get { UserDefaults.standard.stringArray(forKey: "languages") ?? [] }
+        set {
+            let before = speechRoute(languages: languages, tier: currentModelTier())
+            UserDefaults.standard.set(newValue, forKey: "languages")
+            if speechRoute(languages: newValue, tier: currentModelTier()) != before { reload() }
+        }
+    }
+
+    func items() -> [NSMenuItem] {
+        let menu = NSMenu()
+        let auto = menu.addItem(withTitle: "Automatic", action: #selector(automatic), keyEquivalent: "")
+        auto.target = self
+        auto.state = languages.isEmpty ? .on : .off
+        menu.addItem(.separator())
+        let name = { (code: String) in Locale.current.localizedString(forLanguageCode: code) ?? code }
+        for code in whisperLanguages.sorted(by: { name($0) < name($1) }) {
+            let i = menu.addItem(withTitle: name(code), action: #selector(toggle(_:)), keyEquivalent: "")
+            i.target = self
+            i.representedObject = code
+            i.state = languages.contains(code) ? .on : .off
+        }
+        let languagesItem = NSMenuItem(title: "Languages", action: nil, keyEquivalent: "")
+        languagesItem.submenu = menu
+        let dictionary = NSMenuItem(title: "Dictionary…", action: #selector(openDictionary), keyEquivalent: "")
+        dictionary.target = self
+        return [languagesItem, dictionary]
+    }
+
+    @objc private func automatic() { languages = [] }
+
+    @objc private func toggle(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String else { return }
+        languages = languages.contains(code) ? languages.filter { $0 != code } : languages + [code]
+    }
+
+    /// Creates dictionary.txt with its header comment if needed and opens it in the default editor.
+    @objc private func openDictionary() {
+        do {
+            try AudioStore.makeOwnerOnlyDirectory(Paths.root)
+            try Vocabulary.create(Paths.dictionary)
+            NSWorkspace.shared.open(Paths.dictionary)
+        } catch {
+            fail("Dictionary: \(error.localizedDescription)")
         }
     }
 }
@@ -97,13 +168,16 @@ final class WhisperCppEngine: SpeechEngine {
     let name: String
     private let cli: URL
     private let model: URL
+    private let language: String
 
-    init(_ m: SpeechModel) throws {
+    /// `language` is whisper's `-l` value: a code, or "auto".
+    init(_ m: SpeechModel, language: String = "auto") throws {
         let env = ProcessInfo.processInfo.environment
         cli = env["SHEPETAL_WHISPER_CLI"].map { URL(fileURLWithPath: $0) }
             ?? Paths.models.appendingPathComponent("whisper.cpp/whisper-cli")
         model = env["SHEPETAL_WHISPER_MODEL"].map { URL(fileURLWithPath: $0) }
             ?? Paths.models.appendingPathComponent("\(m.rawValue).bin")  // not shown: a path
+        self.language = language
         name = model.deletingPathExtension().lastPathComponent
         for url in [cli, model] where !FileManager.default.fileExists(atPath: url.path) {
             NSLog("shepetal: %@ not found", url.path)
@@ -112,17 +186,19 @@ final class WhisperCppEngine: SpeechEngine {
     }
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
-        let (cli, model) = (cli, model)
-        do { return try await run(cli, model, wav) } catch {
+        // The dictionary hint (F39), read fresh for every dictation like the replacements.
+        let args = whisperArguments(model: model.path, wav: wav.path, language: language,
+                                    vocabulary: Vocabulary.load(Paths.dictionary))
+        do { return try await run(cli, args) } catch {
             throw SpeechError(plain: error, "The alternative engine could not read this recording")
         }
     }
 
-    private func run(_ cli: URL, _ model: URL, _ wav: URL) async throws -> String {
+    private func run(_ cli: URL, _ args: [String]) async throws -> String {
         try await Task.detached {
             let p = Process()
             p.executableURL = cli
-            p.arguments = ["-m", model.path, "-f", wav.path, "-l", "auto", "-nt", "-np"]
+            p.arguments = args
             let out = Pipe()
             p.standardOutput = out
             p.standardError = FileHandle.nullDevice
