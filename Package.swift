@@ -21,7 +21,7 @@ let package = Package(
             .product(name: "MeetingMac", package: "meeting"),
         ]),
         // Meeting summarizer: not an LLM (rule 6).
-        .target(name: "ShepetalSummary", dependencies: ["ShepetalCore"]),
+        .target(name: "ShepetalSummary", dependencies: ["ShepetalCore"], resources: [.copy("actions_model.json")]),
         .testTarget(name: "ShepetalCoreTests", dependencies: ["ShepetalCore"]),
         .testTarget(name: "ShepetalTests", dependencies: ["Shepetal"]),
         .testTarget(name: "ShepetalSummaryTests", dependencies: ["ShepetalSummary"]),
