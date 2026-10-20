@@ -1,3 +1,4 @@
+import ActivityKit
 import AVFoundation
 import FluidAudio
 import ShepetalSessionCore
@@ -15,7 +16,9 @@ struct ShepetalApp: App {
         mic.onInterruption = { [weak session] in
             Task { @MainActor in await session?.stop(reason: "Recording stopped early: a call, Siri or another app took the microphone.") }
         }
-        SharedHandoff.observe(SharedHandoff.stopNotification) { [weak session] in Task { await session?.stop() } }
+        session.observeKeyboard()
+        let live = LiveIndicator()
+        session.onActivity = { live.show($0) }
         // Audio saved while the iPhone was locked could not be written; write it now.
         NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main) { [weak session] _ in
             Task { @MainActor in session?.flush() }
@@ -70,6 +73,41 @@ struct ShepetalApp: App {
         } catch {
             session.modelFailed(error)
         }
+    }
+}
+
+/// 🤫 on the lock screen and in the Dynamic Island while a dictation runs (iOS has no overlay elsewhere).
+@MainActor
+final class LiveIndicator {
+    private var activity: Activity<DictationActivity>?
+
+    init() {
+        // A Live Activity left by a run that died would keep saying "Listening". Read the list now, so a
+        // dictation that starts right after launch is not ended with them.
+        let leftovers = Activity<DictationActivity>.activities
+        Task { for old in leftovers { await old.end(nil, dismissalPolicy: .immediate) } }
+    }
+
+    /// Nil ends the Live Activity. An error stays for a few seconds, then it ends.
+    func show(_ mode: Indicator.Mode?) {
+        guard let mode else { return end(nil, .immediate) }
+        // If the app dies mid-dictation, the widget shows the activity as stale once the state is past its timeout.
+        let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: mode.staleAfter.map { .now + $0 })
+        if mode == .error { return end(content, .after(.now + 4)) }
+        if let activity {
+            Task { await activity.update(content) }
+        } else {
+            // Fails when the user turned Live Activities off for Shepetal; the keyboard still shows the state.
+            activity = try? Activity.request(attributes: DictationActivity(), content: content)
+        }
+    }
+
+    // ponytail: update and end run as separate Tasks; ActivityKit applies them in order in practice.
+    // Chain them through one Task if a stale state ever shows after the end.
+    private func end(_ content: ActivityContent<DictationActivity.ContentState>?, _ policy: ActivityUIDismissalPolicy) {
+        guard let activity else { return }
+        self.activity = nil
+        Task { await activity.end(content, dismissalPolicy: policy) }
     }
 }
 
