@@ -24,7 +24,7 @@ final class Pipeline {
     let store: AudioStore
     let history: History
     let inserter: Inserter
-    private let dictionary: URL
+    let dictionary: URL  // dictionary.txt in this pipeline's data dir
 
     /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
     /// Tests pass a temp `root` and a private named pasteboard.
@@ -36,11 +36,11 @@ final class Pipeline {
         dictionary = root.appendingPathComponent("dictionary.txt")
     }
 
-    func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
-                 sendPaste: (CGEvent) -> Void) async -> Run {
+    func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
+                 context: () -> (before: String, after: String), sendPaste: (CGEvent) -> Void) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
-                                          durationMs: Self.ms(samples)))
+                                          durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
         save(samples, &run)  // first, so the audio survives anything below
         let saveError = run.error
         let error = await transcribeAndInsert(samples, engine, t0, context, sendPaste, &run)
@@ -61,8 +61,7 @@ final class Pipeline {
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        // Cleanup, then the personal dictionary (F39); InsertionRules fits the result to the cursor below.
-        run.entry.text = Vocabulary.load(dictionary).apply(Cleanup.apply(SpeechGuard.stripTags(run.entry.rawText)))
+        run.entry.text = Self.finishText(run.entry.rawText, dictionary: dictionary)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
         let (before, after) = context()
@@ -77,6 +76,12 @@ final class Pipeline {
     private func noSpeech(_ run: inout Run) -> String {
         run.entry.outcome = .noSpeech
         return "No speech heard"
+    }
+
+    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
+    /// Cleanup, then the personal dictionary (F39); InsertionRules fits the result to the cursor afterwards.
+    static func finishText(_ raw: String, dictionary: URL) -> String {
+        Vocabulary.load(dictionary).apply(Cleanup.apply(SpeechGuard.stripTags(raw)))
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {

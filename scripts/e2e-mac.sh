@@ -2,7 +2,10 @@
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
 # cleanup -> audio store + history -> pasteboard + Cmd+V into a text view the app owns.
 # The test shows no window, never takes focus, and uses a private pasteboard, never the user's clipboard.
-# Asserts WER <= 8 %, text ready <= 700 ms after release, and an owner-only audio file per recording.
+# Asserts WER <= 8 %, text ready <= 700 ms after release, an owner-only audio file per recording, and
+# that history kept the app, bundle id and page URL given for each dictation. The page-URL lookup must
+# return at once and do its work off the main thread. Each clip is then re-transcribed from its kept WAV,
+# as History's re-transcribe does, and must give the same text and the engine's model name on the same row.
 # A dictionary.txt in SHEPETAL_HOME replaces one word of e03; that clip is checked for the replacement and
 # left out of the WER. SHEPETAL_HOME defaults to .cache/e2e/home.
 # A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
@@ -84,7 +87,11 @@ replaced = {"e03.wav": ("dentist", "orthodontist")}  # clip -> what dictionary.t
 assert stat.S_IMODE(os.stat(dictionary).st_mode) == 0o600, "dictionary.txt is not owner-only"
 rows = [json.loads(l) for l in open(results) if l.strip()]
 assert rows and all("wav" in r for r in rows), f"no results: {rows}"
-assert "e01-quiet.wav" in [os.path.basename(r["wav"]) for r in rows], "the quiet clip did not run"
+# The batch exits 1 when a clip has an error, so its exit code is ignored above; every clip must have a row,
+# or a run that died partway would pass on the clips it finished.
+ran = sorted(os.path.basename(r["wav"]) for r in rows)
+want = sorted(f for f in os.listdir(fix) if re.fullmatch(r"e\d\d(-quiet)?\.wav", f))
+assert ran == want and "e01-quiet.wav" in want, ("clips missing from the run", sorted(set(want) - set(ran)), ran)
 errors = ref_words = 0
 for r in rows:
     name = os.path.basename(r["wav"])
@@ -111,6 +118,11 @@ for r in rows:
     assert stat.S_IMODE(os.stat(os.path.dirname(p)).st_mode) == 0o700, name
     assert not p.startswith(("/tmp", "/private/tmp")), p
     assert r["history_outcome"] == "inserted" and r["history_audio_path"] == p, (name, r["history_outcome"])
+    app = (r["history_app"], r["history_bundle_id"], r["history_url"])
+    assert app == ("E2E Browser", "com.apple.Safari", "https://example.com/e2e/page"), (name, "app at dictation start", app)
+    assert r["app_resolve_ms"] < 100, (name, "page-URL lookup held the main thread", r["app_resolve_ms"])
+    assert r["retranscribed_text"] == r["text"] and r["retranscribed_row_kept"], (name, "re-transcribe", r)
+    assert r["retranscribed_model"] == r["model"], (name, "re-transcribe model", r["retranscribed_model"])
     data = open(p, "rb").read()
     fmt, ch, rate = struct.unpack("<HHI", data[20:28])
     assert (fmt, ch, rate) == (3, 1, 16000), (name, fmt, ch, rate)

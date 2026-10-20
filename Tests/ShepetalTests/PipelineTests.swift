@@ -156,6 +156,17 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(run.inserted, pasted)
     }
 
+    /// Re-transcribe in the hub runs the same text step as dictation, so it strips non-speech tags too.
+    @MainActor
+    func testFinishTextStripsTagsForReTranscribeToo() {
+        XCTAssertEqual(Pipeline.finishText("[BLANK_AUDIO] um, send it", dictionary: root.appendingPathComponent("dictionary.txt")), Cleanup.apply("send it"))
+        XCTAssertEqual(Pipeline.finishText("[Music]", dictionary: root.appendingPathComponent("dictionary.txt")), "")
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try? "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(Pipeline.finishText("call the dentist", dictionary: root.appendingPathComponent("dictionary.txt")),
+                       Cleanup.apply("call the orthodontist"), "re-transcribe applies the personal dictionary too")
+    }
+
     @MainActor
     func testNoEngineAndEngineErrorKeepAudio() async throws {
         let (none, noneRow) = try await process(speech, nil)
