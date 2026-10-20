@@ -97,7 +97,8 @@ public final class DictationSession: ObservableObject {
         guard SharedHandoff.update(in: handoff, { $0.startRecording(id) { try mic.start() } }) else {
             mic.stop()
             SharedHandoff.post(SharedHandoff.readyNotification)
-            status = "Could not start recording. Tap the mic again."
+            if let superseded { await finish(superseded) }
+            setStatus("Could not start recording. Tap the mic again.", activity: .error)
             return
         }
         sessionID = id

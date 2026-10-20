@@ -8,12 +8,18 @@ final class DictationSessionTests: XCTestCase {
     final class FakeMic: Microphone {
         var starts = 0
         var running = false
-        func start() throws { starts += 1; running = true }
+        var failStart = false
+        func start() throws {
+            if failStart { throw MicError() }
+            starts += 1
+            running = true
+        }
         func stop() { running = false }
         var isRunning: Bool { running }
     }
 
     struct ModelError: LocalizedError { var errorDescription: String? { "model broke" } }
+    struct MicError: Error {}
 
     let mic = FakeMic()
     let field = UUID()
@@ -156,6 +162,20 @@ final class DictationSessionTests: XCTestCase {
     }
 
     @MainActor
+    func testCancelForAnotherSessionDoesNotCancelTheRecording() async {
+        let session = makeSession()
+        let id = await recording(session)
+        let other = UUID()
+        keyboardRequests(other)
+        SharedHandoff.update(in: handoff) { _ = $0.cancel(other) } // what the keyboard's cancel (#13) writes
+        let ended = await session.followKeyboard()
+        XCTAssertFalse(ended)
+        XCTAssertTrue(session.isRecording)
+        await session.tick() // superseded: kept and transcribed into history, not marked cancelled
+        XCTAssertEqual(entry(id)?.outcome, .transcribed)
+    }
+
+    @MainActor
     func testStopRequestIsFollowedByTheTickWhenItsNotificationIsLost() async {
         let session = makeSession()
         let id = await recording(session)
@@ -215,6 +235,24 @@ final class DictationSessionTests: XCTestCase {
         await session.open(url(new)) // the old recording is transcribed into history meanwhile
         XCTAssertTrue(session.isRecording)
         XCTAssertEqual(shown, [.recording])
+    }
+
+    @MainActor
+    func testMicThatFailsToStartForANewRequestEndsTheLiveActivityAndTranscribesTheOldRecording() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        let old = await recording(session)
+        mic.failStart = true
+        let new = UUID()
+        keyboardRequests(new)
+        await session.open(url(new))
+        XCTAssertFalse(session.isRecording)
+        XCTAssertFalse(mic.running)
+        XCTAssertEqual(shown.last, .error) // not stuck on "Listening" while nothing records
+        XCTAssertEqual(entry(old)?.outcome, .transcribed)
+        XCTAssertEqual(state.phase, .failed)
+        XCTAssertTrue(session.status.hasPrefix("Could not start recording"))
     }
 
     // MARK: Product rule 4: every recording keeps the exact samples the model got, next to its history entry.
