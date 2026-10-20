@@ -197,7 +197,7 @@ times the latency plus a 90 MB model and a runtime), so TF-IDF stays the default
 hallucination-free. The action-item rule must be rebuilt before the summarizer meets the goal (issue #8): on real
 meetings it is the weakest part, not the strongest. Add a seq2seq model only for the Overview line, once it has been measured: distilBART-CNN-12-6 or
 a SAMSum fine-tune on Mac and Linux. Re-evaluate NCM when a meeting or dialogue checkpoint and a non-CUDA path
-exist.
+exist; issue #12 tracks this.
 
 ## Long transcripts
 

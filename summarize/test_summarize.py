@@ -1,5 +1,5 @@
 """Run from summarize/: .venv/bin/python -m unittest -v"""
-import os, sys, unittest
+import glob, os, re, sys, unittest
 from unittest.mock import patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -17,6 +17,71 @@ class DefaultSummarizer(unittest.TestCase):
             overview, points = S.load("textrank-tfidf")(text, sents)
         self.assertTrue(overview)
         self.assertGreaterEqual(len(points), 3)
+
+    def test_fixtures_match_committed_summaries(self):
+        # docs/summarization.md cites out/textrank-tfidf/*.md and its ROUGE; a change to ranking or rules must regenerate them on purpose.
+        for path in sorted(glob.glob(os.path.join(HERE, "fixtures", "*.txt"))):
+            text, sents = fixture(path)
+            md = S.render(*S.load("textrank-tfidf")(text, sents), S.decisions(sents), S.actions(sents))
+            with self.subTest(os.path.basename(path)):
+                self.assertEqual(md, open(os.path.join(HERE, "out", "textrank-tfidf", os.path.basename(path)[:-4] + ".md")).read())
+
+    def test_fixture_action_items_keep_owner_and_due(self):
+        # Goal: action items are recovered with the right owner; the due date is what makes them schedulable.
+        for path in sorted(glob.glob(os.path.join(HERE, "fixtures", "*.txt"))):
+            _, sents = fixture(path)
+            got = [(o, d) for o, _, d in S.actions(sents)]
+            ref = re.findall(r"^- (\w+): .*?(?:\(due ([^)]+)\))?\.?$", open(path[:-4] + ".ref.md").read().split("## Action items")[1], re.M)
+            with self.subTest(os.path.basename(path)):
+                self.assertTrue(ref)
+                for owner, due in ref:
+                    self.assertTrue(any(o == owner and d.startswith(due) for o, d in got), (owner, due, got))
+
+    def test_question_is_not_a_commitment(self):
+        self.assertEqual(S.actions([("Tom", "So I'll send the notes tomorrow?")]), [])
+        self.assertEqual(S.actions([("Tom", "I'll send the notes tomorrow.")]), [("Tom", "send the notes", "tomorrow")])
+
+    def test_decision_keeps_the_clause_after_the_keyword(self):
+        self.assertEqual(S.decisions([("Ana", "Okay, decision: we ship the beta on Friday.")]), ["We ship the beta on Friday."])
+
+    def test_decision_sentence_ending_at_the_keyword_is_skipped(self):
+        # One such line in a real STT transcript used to raise IndexError and lose the whole summary.
+        sents = S.parse("Alice: After a long talk we have finally reached our decision:\nBob: Fine.")
+        self.assertEqual(S.decisions(sents), [])
+
+    def test_empty_transcript_gives_an_empty_summary(self):
+        # Cancelled or silent recordings are kept (goal rule 4), so the summarizer sees empty text.
+        self.assertEqual(S.load("textrank-tfidf")("", S.parse("")), ("", []))
+
+    def test_undiarized_transcript_is_summarized(self):
+        # An iPhone in-person mic recording has no speaker labels; it still gets a summary and action items.
+        text = ("We need to ship the release by Friday and I will send the notes tomorrow. "
+                "The release notes cover the new onboarding flow and the audio crash fix for older phones. "
+                "The audio crash fix is merged and the regression suite passed on every device we own.")
+        sents = S.parse(text)
+        overview, points = S.load("textrank-tfidf")(text, sents)
+        self.assertTrue(overview)
+        self.assertEqual(S.actions(sents), [("", "send the notes", "tomorrow")])
+        self.assertIn("- send the notes (due tomorrow)", S.render(overview, points, [], S.actions(sents)))
+
+
+class Ranking(unittest.TestCase):
+    def test_word_in_every_sentence_carries_no_weight(self):
+        m = S.tfidf(["the release slips", "the crash is fixed"])
+        vocab = sorted({"the", "release", "slips", "crash", "is", "fixed"})
+        self.assertEqual(list(m[:, vocab.index("the")]), [0, 0])
+        self.assertGreater(m[0, vocab.index("release")], 0)
+
+    def test_central_sentence_outranks_the_outlier(self):
+        texts = ["the release moves to tuesday", "release tuesday needs qa", "qa runs before the tuesday release", "my cat likes fish"]
+        r = S.textrank(S.tfidf(texts))
+        self.assertEqual(min(range(4), key=lambda i: r[i]), 3)
+        self.assertLess(r[3], r[0])
+
+
+def fixture(path):
+    text = open(path).read()
+    return text, S.parse(text)
 
 
 class AmiActionScoring(unittest.TestCase):

@@ -21,9 +21,7 @@ def parse(text):
     """-> [(speaker, sentence)] in transcript order."""
     out = []
     for line in text.splitlines():
-        if ":" not in line:
-            continue
-        spk, body = line.split(":", 1)
+        spk, body = line.split(":", 1) if ":" in line else ("", line)  # undiarized lines keep an unknown speaker
         out += [(spk.strip(), s.strip()) for s in re.split(r"(?<=[.!?])\s+", body.strip()) if s.strip()]
     return out
 
@@ -53,6 +51,8 @@ def decisions(sents):
             continue
         s = re.split(r"(?i)decision(?: made)?\s*(?::|is)\s*", s)[-1]
         s = re.sub(r"^(?:so|okay|yes|and)[, ]+", "", s, flags=re.I)
+        if not words(s):  # "we reached our decision:" with the content in a later sentence
+            continue
         out.append(s[0].upper() + s[1:])
     return dedupe(out)
 
@@ -98,6 +98,8 @@ def tfidf(texts):
 
 
 def extractive(sents, embed, k=5):
+    if not sents:  # empty or silent recording
+        return "", []
     texts = [s for _, s in sents]
     rank = textrank(embed(texts))
     used = {s for s in decisions(sents)} | {a[1] for a in actions(sents)}
@@ -145,7 +147,7 @@ def rouge(ref, hyp):
 def render(overview, points, decs, acts):
     md = f"## Overview\n{overview}\n\n## Key points\n" + "".join(f"- {p}\n" for p in points)
     md += "\n## Decisions\n" + "".join(f"- {d}\n" for d in decs)
-    md += "\n## Action items\n" + "".join(f"- {o}: {t}" + (f" (due {d})" if d else "") + "\n" for o, t, d in acts)
+    md += "\n## Action items\n" + "".join(f"- {o + ': ' if o else ''}{t}" + (f" (due {d})" if d else "") + "\n" for o, t, d in acts)
     return md
 
 
