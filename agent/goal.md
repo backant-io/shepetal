@@ -87,7 +87,8 @@ On Pavel's Mac: Apple M4 Pro, 24 GB, macOS 15.7, Xcode 26.3 with the iOS 26.3 si
    - Capture mic and system audio as separate channels: a Core Audio process tap on Mac, the PipeWire monitor source on Linux.
    - Transcribe live with a streaming model, diarize locally, and use calendar names when available.
    - On iPhone, record in-person meetings from the mic.
-8. **Donate.** Every app shows Donate links: https://buymeacoffee.com/sorcecoder and https://github.com/sponsors/backant-io.
+8. **Text only goes into the window that stayed in focus; otherwise it goes to the clipboard.** When a dictation starts, shepetal remembers the focused window. It pastes only if that same window is still in focus when the text is ready, and it never moves focus back: no refocusing or reactivating the original app. If focus moved, or the paste does not land, the text is left on the clipboard as plain text (the user's old clipboard is not restored in that case), and the hint next to 🤫 says to press ⌘V. This applies on every platform that can tell which window or field is focused. On iPhone, a result for a different field goes to the clipboard instead of being discarded.
+9. **Donate.** Every app shows Donate links: https://buymeacoffee.com/sorcecoder and https://github.com/sponsors/backant-io.
 
 ## Milestones (each ends in merged PRs)
 
