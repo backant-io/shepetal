@@ -23,14 +23,19 @@ export async function createToken(email: string): Promise<string> {
   return token;
 }
 
-/** The user an unrevoked token belongs to, or null. */
-export async function userForToken(token: string): Promise<User | null> {
-  return db()
+/** A token dies after this many days without use (API.md). Each use starts the count again. */
+export const TOKEN_IDLE_DAYS = 90;
+
+/** The user of an unrevoked token used in the last 90 days, or null. Counts as a use. */
+export async function userForToken(token: string, now = Date.now()): Promise<User | null> {
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const live = await db()
     .prepare(
-      'SELECT users.* FROM tokens JOIN users ON users.email = tokens.email WHERE tokens.hash = ?1 AND tokens.revoked_at IS NULL',
+      'UPDATE tokens SET last_used_at = ?2 WHERE hash = ?1 AND revoked_at IS NULL AND COALESCE(last_used_at, created_at) > ?3 RETURNING email',
     )
-    .bind(await sha256(token))
-    .first<User>();
+    .bind(await sha256(token), iso(now), iso(now - TOKEN_IDLE_DAYS * 86_400_000))
+    .first<{ email: string }>();
+  return live && db().prepare('SELECT * FROM users WHERE email = ?1').bind(live.email).first<User>();
 }
 
 export async function revokeToken(token: string, now = Date.now()): Promise<void> {

@@ -38,6 +38,18 @@ it('revokes one token without signing out the user elsewhere', async () => {
   expect((await userForToken(other))?.email).toBe(email);
 });
 
+// 90 days from the last use, not from creation: an app that checks its license stays signed in.
+it('ends a token after 90 days without use, and every use starts the 90 days again', async () => {
+  const { email } = await upsertUser('a@example.com');
+  const t0 = Date.now();
+  const token = await createToken(email);
+  expect((await userForToken(token, t0 + 89 * DAY))?.email).toBe(email);
+  expect((await userForToken(token, t0 + 178 * DAY))?.email).toBe(email); // 89 days after the last use
+  expect(await userForToken(token, t0 + 268 * DAY)).toBeNull(); // 90 days after it
+  const unused = await createToken(email);
+  expect(await userForToken(unused, t0 + 90 * DAY + 1000)).toBeNull();
+});
+
 it('knows no user for an unknown token', async () => {
   await upsertUser('a@example.com');
   expect(await userForToken('not-a-token')).toBeNull();

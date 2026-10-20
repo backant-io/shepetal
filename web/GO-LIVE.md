@@ -35,7 +35,7 @@ git switch main && git pull
 npm ci
 npx wrangler whoami                      # Hegler Technologies
 npx wrangler secret list                 # names only: AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY
-npm run db:migrate:remote                # applies 0002_app_login (drops device_codes, creates app_codes)
+npm run db:migrate:remote                # applies 0002_app_login (drops device_codes, creates app_codes, adds tokens.last_used_at)
 npx wrangler secret put STRIPE_WEBHOOK_SECRET   # paste the whsec_ value from step 3
 npm run deploy
 ```
@@ -72,6 +72,7 @@ sed -i '' 's/^# routes = /routes = /' wrangler.toml && npm run deploy
 B=https://shepetal.backant.io
 CH=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM   # any 43-character challenge
 curl -sI $B/ | grep -iE '^(HTTP|strict-transport)'                       # 200, HSTS
+curl -sI $B/ | grep -io "form-action[^;]*"                                # includes shepetal: http://127.0.0.1:* (the consent form's redirect)
 curl -s $B/api/auth/providers                                           # callbackUrl https://shepetal.backant.io/api/auth/callback/google
 curl -s -o /dev/null -w '%{http_code}\n' "$B/app/login?redirect_uri=https%3A%2F%2Fevil.com&state=x&code_challenge=$CH&code_challenge_method=S256"   # 400
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$B/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=x&code_challenge=$CH&code_challenge_method=S256"   # 307 https://accounts.google.com/...redirect_uri=https%3A%2F%2Fshepetal.backant.io%2Fapi%2Fauth%2Fcallback%2Fgoogle...
@@ -82,11 +83,11 @@ curl -s https://backant.io/ | grep -ci shepetal                         # 0: not
 curl -s https://backant.io/sitemap.xml | grep -ci shepetal              # 0
 ```
 
-Then a real sign-in as the Linux and Windows apps do it (loopback redirect, PKCE). It opens the browser, waits for the redirect, checks the state, prints the license and a checkout link, and never prints the token:
+Then a real sign-in as the Linux and Windows apps do it (loopback redirect, PKCE). It opens the browser. Sign in with Google, check that the page asks "Sign in to the Shepetal app on this computer as <you>?" and names the desktop app, and press Continue. The script waits for the redirect, checks the state, prints the license and a checkout link, signs out (revokes), and never prints the token:
 
 ```sh
 python3 - <<'PY'
-import base64, hashlib, http.server, json, os, secrets, urllib.parse, urllib.request, webbrowser
+import base64, hashlib, http.server, json, secrets, urllib.error, urllib.parse, urllib.request, webbrowser
 B, R = 'https://shepetal.backant.io', 'http://127.0.0.1:53682/callback'
 v = secrets.token_urlsafe(48); st = secrets.token_urlsafe(16)
 ch = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).rstrip(b'=').decode()
@@ -109,6 +110,9 @@ print('license', call('/api/license', tok=t['access_token']))        # trial, tr
 print('checkout', call('/api/checkout', {}, t['access_token'])['url'])  # https://checkout.stripe.com/...
 input('Pay in the browser (live, $4.99), then press Enter: ')
 print('license', call('/api/license', tok=t['access_token']))        # active, trial_ends_at null
+print('sign out', call('/api/app/revoke', {}, t['access_token']))    # {'ok': True}
+try: call('/api/license', tok=t['access_token']); print('FAIL: the revoked token still works')
+except urllib.error.HTTPError as e: print('after sign out', e.code)  # 401
 PY
 ```
 
@@ -120,6 +124,6 @@ If something is wrong: `npx wrangler rollback` (previous version) or remove the 
 
 ## Known limits
 
-- `/app/login` redirects without a consent page. Any program on a signed-in user's computer that opens it with its own loopback port and verifier gets a token for that user's license (RFC 8252, section 8). The token can only read the license and start a checkout.
-- Access tokens do not expire, and there is no revoke endpoint yet (`revokeToken()` exists in `src/lib/tokens.ts`).
+- A program on the user's computer can still open `/app/login` with its own loopback port and verifier (RFC 8252, section 8). It gets a code only if the user presses Continue on the consent page, which names the account and the kind of app. The token can only read the license and start a checkout.
+- Access tokens end 90 days after their last use, and the apps revoke theirs on Sign out (`POST /api/app/revoke`). There is no page yet to revoke every token of an account. For that, use `UPDATE tokens SET revoked_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE email = '<email>'` with `npx wrangler d1 execute DB --remote --command`.
 - The trial starts at the first sign-in, web included, so someone who signs in on the site before an installer exists loses trial days.

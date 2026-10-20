@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { upsertUser } from './account';
-import { CODE_TTL, isAllowedRedirect, issueCode, parseLogin, redeemCode, s256 } from './app-login';
+import { CODE_TTL, consentPage, isAllowedRedirect, issueCode, parseLogin, redeemCode, s256 } from './app-login';
 import { db } from './db';
 import { useTestDb } from './test-db';
 import { userForToken } from './tokens';
@@ -145,5 +145,27 @@ describe('code and PKCE', () => {
 
   it('refuses an unknown code', async () => {
     expect(await redeemCode('nope', VERIFIER, MAC, T)).toBeNull();
+  });
+});
+
+describe('consent page', () => {
+  const r = { redirect_uri: MAC, state: '"><script>x</script>', code_challenge: CHALLENGE };
+
+  it('asks before signing the app in, and names the kind of app', () => {
+    const html = consentPage('a@example.com', r, 'csrf-1');
+    expect(html).toContain('Sign in to the Shepetal app on this computer as a@example.com?');
+    expect(html).toContain('Mac or iPhone app');
+    expect(consentPage('a@example.com', { ...r, redirect_uri: 'http://127.0.0.1:53682/callback' }, 'c')).toContain('desktop app');
+    expect(html).toContain('<form method="post" action="/app/login">');
+    expect(html).toContain('<input type="hidden" name="csrf" value="csrf-1">');
+    expect(html).toContain('Not you? Use another account');
+  });
+
+  // state and email come from outside: they must never become markup.
+  it('escapes what it echoes', () => {
+    const html = consentPage('<b>@example.com', r, 'c');
+    expect(html).not.toContain('<script>');
+    expect(html).not.toContain('<b>@');
+    expect(html).toContain('value="&#34;&#62;&#60;script&#62;x&#60;/script&#62;"');
   });
 });

@@ -11,3 +11,6 @@ CREATE TABLE app_codes (
   redirect_uri TEXT NOT NULL,
   expires_at TEXT NOT NULL
 );
+
+-- App tokens die after 90 days without use (API.md). NULL means not used since created_at.
+ALTER TABLE tokens ADD COLUMN last_used_at TEXT;

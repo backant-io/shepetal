@@ -40,6 +40,33 @@ export function parseLogin(q: URLSearchParams): LoginRequest | null {
   return valid ? { redirect_uri, state, code_challenge } : null;
 }
 
+/** The /app/login query for a login request, in a fixed order. */
+export const loginQuery = (r: LoginRequest) =>
+  new URLSearchParams({ redirect_uri: r.redirect_uri, state: r.state, code_challenge: r.code_challenge, code_challenge_method: 'S256' }).toString();
+
+/** What the consent page calls the app that asked. */
+export const appKind = (redirectUri: string) => (redirectUri === 'shepetal://auth' ? 'Mac or iPhone app' : 'desktop app');
+
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * The consent page /app/login shows to a signed-in user. A GET never issues a code: only this
+ * form, posted back with its CSRF token, does.
+ */
+export function consentPage(email: string, r: LoginRequest, csrf: string): string {
+  const fields = { redirect_uri: r.redirect_uri, state: r.state, code_challenge: r.code_challenge, code_challenge_method: 'S256', csrf };
+  const inputs = Object.entries(fields)
+    .map(([k, v]) => `<input type="hidden" name="${k}" value="${esc(v)}">`)
+    .join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>Sign in to Shepetal</title></head>
+<body style="font-family:system-ui,sans-serif;max-width:32rem;margin:6rem auto;padding:0 1rem;line-height:1.5">
+<h1 style="font-size:1.5rem">Sign in to the Shepetal app on this computer as ${esc(email)}?</h1>
+<p>The Shepetal ${appKind(r.redirect_uri)} asked to sign in. Continue only if you just chose Sign in in the app yourself.</p>
+<form method="post" action="/app/login">${inputs}<button type="submit" style="font:inherit;padding:.6rem 1.4rem">Continue</button></form>
+<p><a href="/app/login?${esc(loginQuery(r))}&amp;switch=1">Not you? Use another account</a></p>
+</body></html>`;
+}
+
 /** A one-time code for `email` (an existing users row). Returns the redirect: <redirect_uri>?code=&state=. */
 export async function issueCode(email: string, r: LoginRequest, now = Date.now()): Promise<string> {
   const code = randomSecret();

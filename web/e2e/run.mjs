@@ -120,6 +120,19 @@ function pkce(redirect_uri = MAC, state = `${b64url(randomBytes(12))} &=+/é%`) 
 }
 /** The browser (ASWebAuthenticationSession) on /app/login: it stops at the first redirect. */
 const browse = (url, cookie) => fetch(url, { redirect: 'manual', headers: cookie ? { cookie } : {} });
+const unescape = (s) => s.replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n)).replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+/** The consent page's form fields. */
+const formOf = (html) =>
+  Object.fromEntries([...html.matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map(([, k, v]) => [k, unescape(v)]));
+/** GET the consent page as the signed-in user, then press Continue: the POST a browser sends. */
+async function consent(url, session, { origin = BASE, fields = {}, cookies = true } = {}) {
+  const page = await browse(url, session);
+  assert.equal(page.status, 200, `consent page: ${page.status} ${page.headers.get('location')}`);
+  const jar = [session, ...(cookies ? page.headers.getSetCookie().map((c) => c.split(';')[0]) : [])].filter(Boolean).join('; ');
+  const headers = { cookie: jar, 'content-type': 'application/x-www-form-urlencoded', ...(origin && { origin }) };
+  const body = new URLSearchParams(Object.entries({ ...formOf(await page.text()), ...fields }).filter(([, v]) => v !== null));
+  return fetch(`${BASE}/app/login`, { method: 'POST', redirect: 'manual', headers, body });
+}
 /** The redirect to the app: its code and state. */
 function landing(res, redirect_uri) {
   const to = res.headers.get('location') ?? '';
@@ -212,11 +225,21 @@ async function main() {
   assert.equal(me?.user?.email, email, 'the test session is accepted');
   ok(`test session for ${email}`);
 
-  // ---- 3. Signed in, /app/login redirects to the app with a one-time code and the state unchanged.
-  const got = landing(await browse(login.url, session), MAC);
+  // ---- 3. Signed in, a GET shows the consent page and issues nothing; Continue (a POST) redirects
+  // to the app with a one-time code and the state unchanged.
+  const codes = async () => (await d1('SELECT count(*) FROM app_codes'))[0][0];
+  const page = await browse(login.url, session);
+  const html = await page.text();
+  assert.equal(page.status, 200, `consent page: ${page.status} ${page.headers.get('location')}`);
+  assert.equal(page.headers.get('location'), null);
+  assert.ok(html.includes(`Sign in to the Shepetal app on this computer as ${email}?`) && html.includes('Mac or iPhone app'), 'consent text');
+  assert.ok(html.includes('Not you? Use another account'));
+  assert.equal(await codes(), 0, 'a GET issues no code');
+  assert.match(page.headers.get('content-security-policy') ?? '', /form-action [^;]*shepetal: http:\/\/127\.0\.0\.1:\*/, 'CSP lets the form redirect to the app');
+  const got = landing(await consent(login.url, session), MAC);
   assert.equal(got.state, login.state, 'state comes back unchanged');
   assert.match(got.code ?? '', /^[A-Za-z0-9_-]{43}$/, 'code');
-  ok(`/app/login signed in: 302 to ${MAC}?code=…&state=… (state ${JSON.stringify(got.state)} unchanged)`);
+  ok(`/app/login signed in: GET is the consent page ("…as ${email}?", Mac or iPhone app) with no code; Continue is 302 to ${MAC}?code=…&state=… (state ${JSON.stringify(got.state)} unchanged)`);
 
   // ---- 4. The app trades the code for a token, once.
   const grant = await token({ code: got.code, code_verifier: login.verifier, redirect_uri: MAC });
@@ -301,10 +324,48 @@ async function main() {
   assert.deepEqual(lic.body, { status: 'active', trial_ends_at: null, email });
   ok("webhook: bad signature 400, backant's subscription checkout and an unpaid one 200 with no license; a paid shepetal checkout makes it active, trial_ends_at null");
 
-  // ---- 8. The redirect_uri allowlist and PKCE on the running Worker (more cases in app-login.test.ts).
+  // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.
+  await check('/app/login POST: no code without the CSRF token, with a wrong one, cross-site, or signed out', async () => {
+    const before = await codes();
+    const refused = [
+      ['no CSRF field', { fields: { csrf: null } }, 403],
+      ['a wrong CSRF token', { fields: { csrf: b64url(randomBytes(32)) } }, 403],
+      ['no CSRF cookie', { cookies: false }, 403],
+      ['a cross-site Origin', { origin: 'https://evil.example' }, 403],
+      ['no Origin', { origin: null }, 403],
+      ['a redirect_uri swapped in the form', { fields: { redirect_uri: 'http://127.0.0.1.evil.com/callback' } }, 400],
+    ];
+    for (const [why, opts, status] of refused) {
+      const r = await consent(pkce().url, session, opts);
+      assert.equal(r.status, status, `${why}: ${r.status} ${r.headers.get('location')}`);
+      assert.equal(r.headers.get('location'), null, why);
+    }
+    // Signed out at POST time: a valid CSRF pair but no session.
+    const page = await browse(pkce().url, session);
+    const csrfCookie = page.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
+    const r = await fetch(`${BASE}/app/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { cookie: csrfCookie, origin: BASE, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(formOf(await page.text())),
+    });
+    assert.equal(r.status, 401, `signed out: ${r.status}`);
+    assert.equal(await codes(), before, 'no code was issued');
+  });
+  await check('/app/login: "Not you? Use another account" goes to Google with the account chooser, then back to the same login', async () => {
+    const l = pkce();
+    const r = await browse(`${l.url}&switch=1`, session);
+    const to = new URL(r.headers.get('location') ?? 'about:blank');
+    assert.equal(to.origin, 'https://accounts.google.com', `${r.status} ${to}`);
+    assert.equal(to.searchParams.get('prompt'), 'select_account');
+    const back = r.headers.getSetCookie().find((c) => c.startsWith('authjs.callback-url='));
+    assert.equal(decodeURIComponent(back?.split(';')[0].split('=')[1] ?? ''), l.url);
+  });
+
+  // ---- 9. The redirect_uri allowlist and PKCE on the running Worker (more cases in app-login.test.ts).
   await check('/app/login: only shepetal://auth and http://127.0.0.1:<port>/callback, exactly; anything else 400 and no code', async () => {
     const loopback = pkce('http://127.0.0.1:53682/callback');
-    assert.equal(landing(await browse(loopback.url, session), loopback.redirect_uri).state, loopback.state);
+    assert.equal(landing(await consent(loopback.url, session), loopback.redirect_uri).state, loopback.state);
     for (const uri of [
       'shepetal://auth.evil',
       'shepetal://auth/',
@@ -335,18 +396,18 @@ async function main() {
   });
   await check('app/token: a wrong verifier is invalid_grant and spends the code', async () => {
     const l = pkce();
-    const { code } = landing(await browse(l.url, session), MAC);
+    const { code } = landing(await consent(l.url, session), MAC);
     assert.deepEqual(await token({ code, code_verifier: b64url(randomBytes(32)), redirect_uri: MAC }), { status: 400, body: { error: 'invalid_grant' } });
     assert.equal((await token({ code, code_verifier: l.verifier, redirect_uri: MAC })).status, 400, 'no retry after a wrong verifier');
   });
   await check('app/token: a redirect_uri other than the one given to /app/login is invalid_grant', async () => {
     const l = pkce();
-    const { code } = landing(await browse(l.url, session), MAC);
+    const { code } = landing(await consent(l.url, session), MAC);
     assert.deepEqual(await token({ code, code_verifier: l.verifier, redirect_uri: 'http://127.0.0.1:53682/callback' }), { status: 400, body: { error: 'invalid_grant' } });
   });
   await check('app/token: a code lives 60 s; an expired one is invalid_grant', async () => {
     const l = pkce();
-    const { code } = landing(await browse(l.url, session), MAC);
+    const { code } = landing(await consent(l.url, session), MAC);
     const [[ttl]] = await d1("SELECT (julianday(expires_at) - julianday('now')) * 86400 FROM app_codes ORDER BY expires_at DESC LIMIT 1");
     assert.ok(ttl > 55 && ttl <= 60, `the newest code lives ${ttl} s`);
     await d1("UPDATE app_codes SET expires_at = '2000-01-01T00:00:00.000Z'");
@@ -354,8 +415,35 @@ async function main() {
   });
   await check('app/token: a missing field is invalid_request; D1 holds only the hash of a code', async () => {
     assert.deepEqual(await token({ code: 'x', redirect_uri: MAC }), { status: 400, body: { error: 'invalid_request' } });
-    const { code } = landing(await browse(pkce().url, session), MAC);
+    const { code } = landing(await consent(pkce().url, session), MAC);
     assert.ok(!JSON.stringify(await d1('SELECT * FROM app_codes')).includes(code), 'the raw code is not in D1');
+  });
+
+  // ---- 10. Token lifetime: 90 days from the last use; Sign out revokes.
+  const freshToken = async () => {
+    const l = pkce();
+    const { code } = landing(await consent(l.url, session), MAC);
+    return (await token({ code, code_verifier: l.verifier, redirect_uri: MAC })).body.access_token;
+  };
+  await check('a token unused for 90 days gets 401; one used within 90 days works and its 90 days start again', async () => {
+    const [old, recent] = [await freshToken(), await freshToken()];
+    const lastUse = (t, days) => {
+      const at = new Date(Date.now() - days * DAY).toISOString();
+      return d1(`UPDATE tokens SET created_at = '${at}', last_used_at = '${at}' WHERE hash = '${createHash('sha256').update(t).digest('hex')}'`);
+    };
+    await lastUse(old, 91);
+    await lastUse(recent, 89);
+    assert.equal((await app('GET', '/api/license', { token: old })).status, 401, 'unused for 91 days');
+    assert.equal((await app('GET', '/api/license', { token: recent })).status, 200, 'used 89 days ago');
+    const [[last]] = await d1(`SELECT last_used_at FROM tokens WHERE hash = '${createHash('sha256').update(recent).digest('hex')}'`);
+    assert.ok(Date.now() - Date.parse(last) < 60_000, `the use moved last_used_at to now: ${last}`);
+  });
+  await check('app/revoke (Sign out): 200, then the token gets 401 on license and checkout', async () => {
+    assert.equal((await app('POST', '/api/app/revoke')).status, 401, 'no token');
+    const r = await app('POST', '/api/app/revoke', { token: accessToken });
+    assert.deepEqual([r.status, r.body], [200, { ok: true }]);
+    assert.equal((await app('GET', '/api/license', { token: accessToken })).status, 401);
+    assert.equal((await app('POST', '/api/checkout', { token: accessToken, json: {} })).status, 401);
   });
 }
 

@@ -15,16 +15,22 @@ The app makes a code_verifier (43 to 128 characters from A-Z a-z 0-9 - . _ ~), i
   - state: 1 to 512 characters, returned unchanged. code_challenge: 43 base64url characters. code_challenge_method: S256 only. Otherwise 400.
   - With no next-auth session, the site runs the normal Google sign-in (backant's Google client), then comes back to this same URL.
   - A user's first sign-in, web or app, starts their 30-day trial.
+  - Signed in, it answers 200 with a consent page and never issues a code: "Sign in to the Shepetal app on this computer as <email>?", naming the app from redirect_uri ("Mac or iPhone app" for shepetal://auth, "desktop app" for the loopback), with a "Continue" button and a "Not you? Use another account" link. This holds right after a fresh Google sign-in too: one click.
+  - "Not you? Use another account" is the same URL plus `&switch=1`: Google sign-in with the account chooser, then back to the consent page.
+  - The GET sets a CSRF cookie (`__Host-app-login-csrf` on https: HttpOnly, SameSite=Lax, 10 minutes) and puts the same value in the form.
+- POST /app/login (the consent form, form-encoded): redirect_uri, state, code_challenge, code_challenge_method and csrf.
+  - 403 unless csrf equals the CSRF cookie and the Origin header is the site's origin. 401 without a session. 400 for fields that fail the GET rules.
   - Then it responds 302 to `<redirect_uri>?code=<code>&state=<state>` (state percent-encoded, a space as %20). code is a one-time code: 60 s TTL, single use, stored as its SHA-256 in D1 with the code_challenge and the redirect_uri.
 - POST /api/app/token with JSON {code, code_verifier, redirect_uri}:
-  - 200 {access_token, email}. access_token is opaque (32 random bytes, base64url), revocable, stored as its SHA-256 in D1, and does not expire.
+  - 200 {access_token, email}. access_token is opaque (32 random bytes, base64url), revocable and stored as its SHA-256 in D1. It ends 90 days after its last use: every call that sends it (license, checkout) starts the 90 days again.
   - 400 {error:"invalid_grant"} for a wrong code_verifier, an unknown, reused or expired code, or a redirect_uri other than the one given to /app/login. The first redemption spends the code, even a failed one.
   - 400 {error:"invalid_request"} when a field is missing or is not a string.
   - Before calling it, the app checks that the state in the redirect equals the state it sent, and drops the redirect if not.
+- POST /api/app/revoke with Authorization: Bearer <access_token>: the app calls it on Sign out. 200 {ok:true} for any token (RFC 7009), and the token gets 401 from then on. 401 without a token.
 
 ## License and purchase
 
-- GET /api/license with Authorization: Bearer <access_token>: 200 {status:"trial"|"active"|"expired", trial_ends_at: ISO-8601 or null, email}; 401 for an invalid or revoked token. trial_ends_at is the first sign-in plus 30 days, and null for "active".
+- GET /api/license with Authorization: Bearer <access_token>: 200 {status:"trial"|"active"|"expired", trial_ends_at: ISO-8601 or null, email}; 401 for an invalid, revoked or expired (90 days unused) token. trial_ends_at is the first sign-in plus 30 days, and null for "active".
 - POST /api/checkout (Bearer token or web session): 200 {url} to a Stripe Checkout session (mode payment) for the one-time $4.99 price (STRIPE_PRICE_ID), with client_reference_id set to the user id and metadata.app = "shepetal". Success returns to /account?purchased=1, cancel to /account. 401 when signed out; 409 {error:"already_active"} once bought.
 - POST /api/stripe/webhook (Stripe only; the Stripe-Signature is checked against STRIPE_WEBHOOK_SECRET over the raw body, 400 if it does not match): a checkout.session.completed or checkout.session.async_payment_succeeded whose session has payment_status "paid" and metadata.app "shepetal" makes that user "active" forever. Every other event and session gets 200 and changes nothing. backant.io uses the same Stripe account, so its own checkouts (subscriptions, no shepetal metadata) arrive here too.
 
