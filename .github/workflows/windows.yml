@@ -1,6 +1,6 @@
 # The Windows workspace (windows/): release build, tests, the per-user installer, a silent
-# install and uninstall of it, and the installer as an artifact. Its own file so it doesn't collide
-# with ci.yml from PR #25, which is not on main yet; the job is named `windows` either way.
+# install and uninstall of it, and the installer as an artifact. Its own file, apart from ci.yml,
+# so it runs only when windows/ changes.
 name: Windows
 on:
   pull_request:

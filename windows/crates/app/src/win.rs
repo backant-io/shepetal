@@ -3,7 +3,9 @@
 //! the hook, the 🤫 overlay and the tray on its own thread; this one runs the gesture and
 //! `flow::Flow`; one more loads the model and transcribes; meetings poll on another.
 
+use crate::dialog::{self, Card};
 use crate::flow::{self, Flow, Kept};
+use crate::meeting::{self, Show};
 use crate::system::{self, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RUN_KEY, RUN_VALUE};
 use shepetal_core::gesture::{Action, Gesture, HINT_MS};
 use std::path::{Path, PathBuf};
@@ -17,9 +19,7 @@ use windows_sys::Win32::System::Registry::{
 };
 use windows_sys::Win32::System::Threading::CreateMutexW;
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
-use windows_sys::Win32::UI::WindowsAndMessaging::{
-    MessageBoxW, IDYES, MB_ICONINFORMATION, MB_ICONQUESTION, MB_OK, MB_YESNO, SW_SHOWNORMAL,
-};
+use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
 /// Audio kept from just before the hotkey went down, so the first syllable is never cut.
 const PRE_ROLL: Duration = Duration::from_millis(300);
@@ -72,11 +72,11 @@ fn mic_allowed() -> bool {
 }
 
 fn message(text: &str) {
-    unsafe { MessageBoxW(null_mut(), wide(text).as_ptr(), wide("Shepetal").as_ptr(), MB_OK | MB_ICONINFORMATION) };
+    dialog::ask(text, &["OK"]);
 }
 
 fn ask(text: &str) -> bool {
-    unsafe { MessageBoxW(null_mut(), wide(text).as_ptr(), wide("Shepetal").as_ptr(), MB_YESNO | MB_ICONQUESTION) == IDYES }
+    dialog::ask(text, &["Yes", "No"]) == Some(0)
 }
 
 /// Opens a folder, a URL or an ms-settings: page with its default handler.
@@ -162,7 +162,7 @@ fn spawn_stt(dir: PathBuf, model: &'static audio::model::Model, tx: Sender<Msg>)
             let text = match &mut whisper {
                 Ok(w) => audio::transcribe(w, &samples).map_err(|e| match e {
                     audio::SttError::NoAudio => "The mic recorded only silence. Check that it is on and not muted.".into(),
-                    audio::SttError::Engine(e) => format!("Speech-to-text failed: {e}"),
+                    audio::SttError::Engine(e) => e,
                 }),
                 Err(e) => Err(e.clone()),
             };
@@ -187,12 +187,7 @@ fn onboarding(models: &Path, model: &audio::model::Model) -> bool {
     if models.join(model.file).is_file() {
         return true;
     }
-    let mb = model.bytes.div_ceil(1_000_000);
-    if ask(&format!(
-        "Shepetal turns your speech into text on this PC. It needs a speech model first ({}, {mb} MB).\n\n\
-         Download it now? This is the only time Shepetal goes online; your voice never leaves the PC.",
-        model.file
-    )) {
+    if ask(&system::download_question(model.bytes)) {
         return true;
     }
     message("Shepetal can't transcribe without the speech model, so it is closing. It asks again the next time it starts.");
@@ -226,9 +221,10 @@ pub fn run() {
     let (tx, rx) = mpsc::channel();
     let forward = tx.clone();
     thread::spawn(move || events.into_iter().try_for_each(|e| forward.send(Msg::Input(e))));
+    // A meeting records only after a click on the card's Record.
+    let (record, clicks) = mpsc::channel();
+    let card = Card::spawn(record);
     let meeting = tx.clone();
-    // Nothing sends a Record click yet, so meetings are detected but not recorded.
-    let (_record, clicks) = mpsc::channel();
     thread::spawn(move || meetings::watch(meetings::Config::default(), clicks, move |n| drop(meeting.send(Msg::Meeting(n)))));
     let stt = spawn_stt(data.join("models"), model, tx);
 
@@ -243,6 +239,8 @@ pub fn run() {
     let t0 = Instant::now();
     let ms = |at: Instant| at.saturating_duration_since(t0).as_millis() as u64;
     let mut paused = false;
+    let mut meeting_app = String::new();
+    let card = card.map_err(|e| flow.error(&format!("Shepetal can't offer to record meetings: {e}"), 0)).ok();
     loop {
         let msg = rx.recv_timeout(Duration::from_millis(50));
         let now = ms(Instant::now());
@@ -280,10 +278,14 @@ pub fn run() {
             }
             Ok(Msg::Meeting(notice)) => {
                 match notice {
-                    meetings::Notice::Event(meetings::Event::Started(app)) => flow.show.show_hint(&format!("{app} meeting detected"), HINT),
+                    meetings::Notice::Event(e) => match (meeting::show(&e, &mut meeting_app), &card) {
+                        (Show::Offer(label), Some(card)) => card.offer(&label),
+                        (Show::Withdraw, Some(card)) => card.hide(),
+                        (Show::Hint(text), _) => flow.show.show_hint(text, HINT),
+                        _ => {}
+                    },
                     meetings::Notice::Saved(dir) => flow.show.show_hint(&format!("Meeting saved in {}", dir.display()), HINT),
                     meetings::Notice::Failed(e) => flow.error(&e, now),
-                    meetings::Notice::Event(_) => {}
                 }
                 vec![]
             }

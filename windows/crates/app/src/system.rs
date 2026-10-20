@@ -30,6 +30,15 @@ pub fn mic_allowed(values: [Option<&str>; 3]) -> bool {
     values.iter().all(|v| !v.is_some_and(|v| v.eq_ignore_ascii_case("Deny")))
 }
 
+/// The first-run question before the one download. The UI names no model, only its size.
+pub fn download_question(bytes: u64) -> String {
+    format!(
+        "Shepetal turns your speech into text on this PC. It needs a speech model first ({} MB).\n\n\
+         Download it now? This is the only time Shepetal goes online; your voice never leaves the PC.",
+        bytes.div_ceil(1_000_000)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,6 +69,33 @@ mod tests {
     fn run_value_is_the_quoted_exe() {
         let exe = Path::new(r"C:\Users\Pavel Hegler\AppData\Local\Programs\Shepetal\shepetal.exe");
         assert_eq!(run_command(exe), format!("\"{}\"", exe.display()), "a path with a space must be quoted");
+    }
+
+    #[test]
+    fn the_download_question_gives_the_size_but_names_no_model() {
+        let q = download_question(59_721_011);
+        assert!(q.contains("(60 MB)"), "{q}");
+        for name in ["ggml", "whisper", "base", "large", "turbo", "q5", ".bin"] {
+            assert!(!q.to_lowercase().contains(name), "{q} names the model ({name})");
+        }
+    }
+
+    #[test]
+    fn shepetal_on_windows_makes_no_sound() {
+        // Pavel removed every sound (2026-10-21). The system message box plays its icon's sound,
+        // so the app's dialogs are its own (dialog.rs), and no crate plays one either.
+        let sources = [
+            ("app/src/win.rs", include_str!("win.rs")),
+            ("app/src/dialog.rs", include_str!("dialog.rs")),
+            ("input/src/win.rs", include_str!("../../input/src/win.rs")),
+            ("insert/src/win.rs", include_str!("../../insert/src/win.rs")),
+            ("meetings/src/win.rs", include_str!("../../meetings/src/win.rs")),
+        ];
+        for (file, src) in sources {
+            for api in ["MessageBox", "MessageBeep", "PlaySound", "Beep(", "sndPlaySound"] {
+                assert!(!src.contains(api), "{file} uses {api}");
+            }
+        }
     }
 
     #[test]

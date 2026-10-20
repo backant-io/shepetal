@@ -14,8 +14,8 @@ One Cargo workspace (`windows/Cargo.toml`, `members = ["crates/*"]`), one crate 
 | `crates/input` | `input` | The low-level keyboard hook, the 🤫 overlay (bottom-left, click-through, topmost) and the tray icon, on one thread with its own message loop |
 | `crates/audio` | `audio` | Mic capture at 16 kHz mono with a pre-roll, the kept-audio store (owner-only folder), the model download (SHA-256 checked) and whisper.cpp |
 | `crates/insert` | `insert` | Pastes into the window that stayed in front, or leaves the text on the clipboard with a Ctrl+V hint (goal rule 8) |
-| `crates/meetings` | `meetings` | Detects calls by who holds the mic and records them as Me.wav and Others.wav |
-| `crates/app` | `app`, binary `shepetal.exe` | Wires the five together; single instance, start at login, onboarding |
+| `crates/meetings` | `meetings` | Detects calls by who holds the mic, offers to record them, and after the click records Me.wav and Others.wav |
+| `crates/app` | `app`, binary `shepetal.exe` | Wires the five together; single instance, start at login, onboarding, the meeting card |
 
 `shepetal.exe` is a GUI-subsystem exe, so Windows opens no console window for it (CI checks the PE header). Its threads:
 
@@ -34,6 +34,10 @@ STT thread (model fetch + load, whisper) --Text----+        |  Mic.start/stop, S
 - A press while the last clip is still transcribing is ignored. If saving the clip fails, the text is still inserted and the error shows after.
 
 `flow.rs` talks to the mic, store, insert and overlay through four small traits, so its tests run with fakes on any OS. `win.rs` implements them with the real crates.
+
+**Meetings.** A meeting is never recorded on its own. When `meetings::watch` reports one, a small card shows just above the 🤫: "Meeting detected · Zoom", Record and Not now (as on the Mac). Record starts the recording and the hint says so; Not now hides the card; the card goes away by itself if the call ends first. The card never takes focus, so clicking it leaves the call in front. `meeting.rs` (pure, tested) decides what each meetings event shows and where the card sits; `dialog.rs` draws it.
+
+**No sounds.** Shepetal plays no sound. The system message box plays its icon's sound, so the questions at start use `dialog.rs`'s own silent dialog (standard buttons, so Tab, Enter and Esc work).
 
 **Data.** Everything lives in `%LOCALAPPDATA%\Shepetal`: `audio\` holds every dictation clip, `meetings\<time>\` the meeting recordings, `models\` the speech model. The install itself is in `%LOCALAPPDATA%\Programs\Shepetal`.
 
@@ -83,7 +87,7 @@ The exe and the installer are not code-signed, so SmartScreen warns on first run
 These need a real keyboard, a voice and a mic, so CI can't run them. Use a Windows 11 PC with a mic and Notepad. Download `shepetal-windows-setup` from the CI run's artifacts and unzip it.
 
 1. **Install.** Run `shepetal-setup-<version>.exe`. Expected: no UAC prompt. The wizard installs to `%LOCALAPPDATA%\Programs\Shepetal` with "Start Shepetal when I sign in" checked, and finishes with "Start Shepetal now".
-2. **Mic privacy.** Before starting Shepetal, turn off Settings > Privacy & security > Microphone > "Let desktop apps access your microphone". Start Shepetal. Expected: a dialog says Windows keeps desktop apps away from the mic. Yes opens that Settings page. Turn the switch back on.
+2. **Mic privacy.** Before starting Shepetal, turn off Settings > Privacy & security > Microphone > "Let desktop apps access your microphone". Start Shepetal. Expected: a dialog, with no sound, says Windows keeps desktop apps away from the mic. Yes (or Enter) opens that Settings page; Esc closes the dialog. Turn the switch back on.
 3. **Model.** On first start, Shepetal asks to download the speech model, with its size. Click Yes. Expected: within a minute or two (60 MB) the model is in `%LOCALAPPDATA%\Shepetal\models`. Click No instead on another run: Shepetal says it is closing and asks again at the next start.
 4. **🤫.** Expected: a small 🤫 (about 18 px at 100 % scaling) 8 px from the bottom-left corner of the main display, above the taskbar. It stays on top of a full-screen browser and on every virtual desktop. Clicking it reaches the window under it. The tray has the Shepetal icon with Open, Pause, Start at login, Donate (Buy Me a Coffee, GitHub Sponsors) and Quit.
 5. **Hold to talk.** In Notepad, hold Ctrl+Win, say "Testing one two three, this is a hold to talk check.", and release. Expected: a red ring while you hold, blue after release, then the text appears at the cursor. The Start menu does not open. What you had on the clipboard before is back.
@@ -94,9 +98,9 @@ These need a real keyboard, a voice and a mic, so CI can't run them. Use a Windo
 10. **Elevated window.** Open Notepad with "Run as administrator" and dictate into it. Expected: the text is left on the clipboard, and the hint says the window runs as administrator.
 11. **Recordings.** Tray > Open. Expected: Explorer opens `%LOCALAPPDATA%\Shepetal`. `audio\` has one WAV per dictation from the steps above, cancelled and too short ones included. Each plays as the clip you spoke.
 12. **Start at login.** Tray > Start at login: the check mark goes away, and the `Shepetal` value is gone from `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` (regedit). Click it again: the check is back. Sign out and in: Shepetal starts.
-13. **Single instance.** Start Shepetal again from the Start menu. Expected: a dialog says it is already running, and there is still one tray icon.
+13. **Single instance.** Start Shepetal again from the Start menu. Expected: a dialog says it is already running, with no sound, and there is still one tray icon.
 14. **Pause.** Tray > Pause, then hold Ctrl+Win and speak. Expected: nothing happens. Unpause, and dictation works again.
-15. **Meeting.** Join a Zoom, Teams or Google Meet call (in Chrome or Edge, in front) for a minute, then leave. Expected: about 5 s after joining, the hint says the meeting is being recorded. After leaving, it says where the meeting was saved. That folder has Me.wav (your mic) and Others.wav (the call audio).
+15. **Meeting.** Join a Zoom, Teams or Google Meet call (in Chrome or Edge, in front). Expected: about 5 s after joining, a card above the 🤫 says "Meeting detected · <app>" with Record and Not now, and nothing is recorded yet (no new folder in `%LOCALAPPDATA%\Shepetal\meetings`). Click Record: the call window keeps the focus (its title bar stays active), the card goes away and the hint says "Recording the meeting". Talk for a minute, then leave. Expected: the hint says where the meeting was saved, and that folder has Me.wav (your mic) and Others.wav (the call audio). Join again and click Not now: the card goes away and nothing is recorded. Join once more and leave without clicking: the card goes away by itself.
 16. **Quit and uninstall.** Tray > Quit: the 🤫 and the tray icon go away. Uninstall from Settings > Apps. Expected: no UAC prompt. `%LOCALAPPDATA%\Programs\Shepetal`, the Start menu entry, the Run value and `%LOCALAPPDATA%\Shepetal\models` are gone, and `%LOCALAPPDATA%\Shepetal\audio` and `meetings` are still there.
 
 ## Known limits
@@ -108,5 +112,6 @@ These need a real keyboard, a voice and a mic, so CI can't run them. Use a Windo
 - **The mic shows as in use while Shepetal runs.** `audio::Mic` keeps the default mic open for its pre-roll, so the taskbar mic icon stays on. A change of the default mic needs a restart.
 - **Task Manager's startup switch.** If you disable Shepetal under Task Manager > Startup apps, Windows records that separately (`StartupApproved`), and the tray's check mark does not show it.
 - **Text around the cursor is not read**, so `shepetal_core::text::fit` (spacing and casing against the text before the cursor) is not applied. Only the cleanup runs.
+- **The meeting card is mouse only.** It never takes focus, so the keyboard and screen readers can't reach it.
 - **Quitting during a meeting** cuts its recording at that point. The WAV headers are rewritten after every batch, so both files stay playable up to there.
 - Single instance is per Windows session: two users who are signed in at once each get their own Shepetal.

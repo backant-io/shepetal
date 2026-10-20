@@ -3,7 +3,10 @@
 // The pure modules are tested everywhere but only wired up on Windows.
 #![cfg_attr(not(windows), allow(dead_code))]
 
+#[cfg(windows)]
+mod dialog;
 mod flow;
+mod meeting;
 mod system;
 #[cfg(windows)]
 mod win;
