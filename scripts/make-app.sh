@@ -59,6 +59,7 @@ if [ ! -f "$ICON" ] || [ scripts/make-icon.swift -nt "$ICON" ]; then
   iconutil -c icns .cache/AppIcon.iconset -o "$ICON"
 fi
 cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
+cp scripts/uninstall-mac.sh "$APP/Contents/Resources/uninstall.sh"  # removes the app, keeps recordings
 # Dynamic frameworks the binary links (for example llama.cpp for the cleanup model) go in Frameworks.
 for f in "$BIN"/*.framework; do
   [ -e "$f" ] || continue
