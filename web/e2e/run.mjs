@@ -2,20 +2,21 @@
 // End-to-end login test for the account service (API.md), on the real Worker runtime.
 //
 // It builds the Worker (opennextjs-cloudflare build), applies migrations/ to a fresh local D1,
-// starts `wrangler dev` on 127.0.0.1 and a fake Stripe API, then signs in the way the Mac app
-// does (Sources/ShepetalCore/Account.swift): device start, approve on /device as a signed-in user,
-// poll the token at `interval`, license = trial, checkout = a Stripe Checkout URL, a signed
-// checkout.session.completed webhook, license = active.
+// starts `wrangler dev` on 127.0.0.1 and a fake Stripe API, then signs in the way the apps do
+// (OAuth for native apps with PKCE): GET /app/login signed out goes to Google and comes back,
+// signed in it redirects to shepetal://auth with a one-time code, POST /api/app/token trades it
+// for a token, license = trial, checkout = a Stripe Checkout URL, a signed
+// checkout.session.completed webhook, license = active. Then the redirect_uri and PKCE rules.
 //
 // Google is faked with a next-auth session cookie signed with the run's AUTH_SECRET, so the run
 // needs no Google account and no network except Google's OIDC discovery (for the sign-in redirect).
 // No real secret is read: every value is generated per run.
 //
-//   npm run e2e                 # from web/
+//   npm run e2e                   # from web/
 //   E2E_SKIP_BUILD=1 npm run e2e  # reuse .open-next/ from the last build
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHash, createHmac, randomBytes } from 'node:crypto';
 import { createWriteStream, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -24,16 +25,30 @@ import { fileURLToPath } from 'node:url';
 import { encode } from 'next-auth/jwt';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
-const WRANGLER = join(WEB, 'node_modules', '.bin', 'wrangler');
+const BIN = join(WEB, 'node_modules', '.bin');
+const DB_ID = 'bd45470f-27b2-4564-aa94-850856413b3e'; // wrangler.toml
+const MAC = 'shepetal://auth'; // the Mac and iPhone redirect_uri
 const DAY = 86_400_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = mkdtempSync(join(tmpdir(), 'shepetal-e2e-'));
 const t0 = Date.now();
 let step = 0;
+const failed = [];
 const ok = (msg) => console.log(`ok ${++step} - ${msg}`);
+/** A check the rest of the run does not depend on: report it and go on. */
+async function check(name, fn) {
+  try {
+    await fn();
+    ok(name);
+  } catch (e) {
+    failed.push(name);
+    console.log(`not ok ${++step} - ${name}\n    ${e.message.split('\n').join('\n    ')}`);
+  }
+}
 // Stripe form params `metadata[app]=x` -> {app: 'x'}.
 const metadataOf = (params) =>
   Object.fromEntries(Object.entries(params).flatMap(([k, v]) => (k.startsWith('metadata[') ? [[k.slice(9, -1), v]] : [])));
+const b64url = (buf) => buf.toString('base64url');
 
 const freePort = () =>
   new Promise((resolve) => {
@@ -95,158 +110,138 @@ writeFileSync(envFile, Object.entries(env).map(([k, v]) => `${k}=${v}`).join('\n
 
 let worker;
 const logFile = join(tmp, 'wrangler.log');
-function teardown() {
-  if (worker && worker.exitCode === null) {
-    try {
-      process.kill(-worker.pid, 'SIGTERM');
-    } catch {}
+
+// ---- What an app does (RFC 8252 + RFC 7636): a verifier, its S256 challenge, a random state.
+function pkce(redirect_uri = MAC, state = `${b64url(randomBytes(12))} &=+/é%`) {
+  const verifier = b64url(randomBytes(32));
+  const challenge = b64url(createHash('sha256').update(verifier).digest());
+  const q = new URLSearchParams({ redirect_uri, state, code_challenge: challenge, code_challenge_method: 'S256' });
+  return { verifier, state, redirect_uri, url: `${BASE}/app/login?${q}` };
+}
+/** The browser (ASWebAuthenticationSession) on /app/login: it stops at the first redirect. */
+const browse = (url, cookie) => fetch(url, { redirect: 'manual', headers: cookie ? { cookie } : {} });
+/** The redirect to the app: its code and state. */
+function landing(res, redirect_uri) {
+  const to = res.headers.get('location') ?? '';
+  assert.equal(res.status, 302, `/app/login signed in: ${res.status} ${to}`);
+  assert.ok(to.startsWith(`${redirect_uri}?`), `redirects to ${redirect_uri}, got ${to}`);
+  const q = new URL(to).searchParams;
+  return { code: q.get('code'), state: q.get('state') };
+}
+/** POST /api/app/token as the app sends it. */
+async function token(body) {
+  const r = await fetch(`${BASE}/api/app/token`, {
+    method: 'POST',
+    headers: { accept: 'application/json', 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return { status: r.status, body: await r.json().catch(() => null) };
+}
+
+// ---- The app's account requests (AccountClient.send): JSON in and out, Bearer token when signed in.
+async function app(method, path, { token, json } = {}) {
+  const headers = { accept: 'application/json' };
+  if (token) headers.authorization = `Bearer ${token}`;
+  if (json) headers['content-type'] = 'application/json';
+  const r = await fetch(BASE + path, { method, headers, body: json && JSON.stringify(json) });
+  const text = await r.text();
+  try {
+    return { status: r.status, body: JSON.parse(text) };
+  } catch {
+    return { status: r.status, body: text };
   }
-  fakeStripe.close();
+}
+const sessionFor = async (email) => {
+  const name = 'authjs.session-token'; // http: no __Secure- prefix
+  return `${name}=${await encode({ token: { email, name: 'E2E', sub: email }, secret: env.AUTH_SECRET, salt: name })}`;
+};
+
+/** SQL on the local D1 of the running worker (wrangler's local explorer). */
+async function d1(sql) {
+  const r = await fetch(`${BASE}/cdn-cgi/local/explorer/api/d1/database/${DB_ID}/raw`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ sql }),
+  });
+  const j = await r.json();
+  assert.ok(j.success && j.result.every((x) => x.success), `d1: ${JSON.stringify(j.errors ?? j)}`);
+  return j.result.at(-1).results.rows;
 }
 
 async function main() {
-  const run = (args) => execFileSync(WRANGLER, args, { cwd: WEB, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CI: '1' } });
+  const wrangler = (args) => execFileSync(join(BIN, 'wrangler'), args, { cwd: WEB, stdio: ['ignore', 'pipe', 'pipe'] });
   if (!process.env.E2E_SKIP_BUILD) {
-    execFileSync(join(WEB, 'node_modules', '.bin', 'opennextjs-cloudflare'), ['build'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
+    execFileSync(join(BIN, 'opennextjs-cloudflare'), ['build'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
     ok('opennextjs-cloudflare build');
   }
   const state = join(tmp, 'state');
-  run(['d1', 'migrations', 'apply', 'DB', '--local', '--persist-to', state]);
+  wrangler(['d1', 'migrations', 'apply', 'DB', '--local', '--persist-to', state]);
   ok('migrations applied to a fresh local D1');
 
-  const inspector = await freePort();
   const log = createWriteStream(logFile);
   worker = spawn(
-    WRANGLER,
-    ['dev', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(inspector),
+    join(BIN, 'wrangler'),
+    ['dev', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(await freePort()),
       '--persist-to', state, '--env-file', envFile, '--show-interactive-dev-session=false'],
-    { cwd: WEB, detached: true, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, CI: '1' } },
+    { cwd: WEB, detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   worker.stdout.pipe(log);
   worker.stderr.pipe(log);
   for (let i = 0; ; i++) {
     if (worker.exitCode !== null) throw new Error(`wrangler dev exited with ${worker.exitCode}`);
-    const r = await fetch(`${BASE}/api/auth/providers`).catch(() => null);
-    if (r?.ok) break;
+    if ((await fetch(`${BASE}/api/auth/providers`).catch(() => null))?.ok) break;
     if (i > 120) throw new Error('wrangler dev did not answer within 60 s');
     await sleep(500);
   }
   ok(`wrangler dev answers on ${BASE}`);
 
-  // ---- The Mac app's requests (AccountClient.send): JSON in and out, Bearer token when signed in.
-  const app = async (method, path, { token, json } = {}) => {
-    const headers = { accept: 'application/json' };
-    if (token) headers.authorization = `Bearer ${token}`;
-    if (json) headers['content-type'] = 'application/json';
-    const r = await fetch(BASE + path, { method, headers, body: json && JSON.stringify(json) });
-    const text = await r.text();
-    let body;
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = text;
-    }
-    return { status: r.status, body };
-  };
-
-  // ---- 1. Device start.
-  const start = await app('POST', '/api/device/start', { json: {} });
-  assert.equal(start.status, 200, JSON.stringify(start.body));
-  const { device_code, user_code, verification_uri_complete, expires_in, interval } = start.body;
-  assert.ok(typeof device_code === 'string' && device_code.length >= 32, 'device_code is a long random string');
-  assert.ok(typeof user_code === 'string' && user_code.length > 0, 'user_code');
-  assert.equal(verification_uri_complete, `${BASE}/device?code=${user_code}`, 'verification_uri_complete is <AUTH_URL>/device?code=USER_CODE');
-  assert.ok(Number.isInteger(expires_in) && expires_in > 0, 'expires_in');
-  assert.ok(Number.isInteger(interval) && interval >= 1, 'interval');
-  ok(`device/start: user_code ${user_code}, interval ${interval} s, expires_in ${expires_in} s`);
-
-  // ---- 2. Before approval: pending, and a poll faster than `interval` is slow_down (RFC 8628).
-  let poll = await app('POST', '/api/device/token', { json: { device_code } });
-  assert.deepEqual([poll.status, poll.body.error], [400, 'authorization_pending']);
-  poll = await app('POST', '/api/device/token', { json: { device_code } });
-  assert.deepEqual([poll.status, poll.body.error], [400, 'slow_down']);
-  ok('device/token before approval: 400 authorization_pending, then 400 slow_down when polled too fast');
-
-  // ---- 3. The browser opens verification_uri_complete signed out and presses "Sign in with Google".
-  // The button is a server-action form: post its fields as a browser without JS would.
-  const page = await fetch(verification_uri_complete, { redirect: 'manual' });
-  assert.equal(page.status, 200, `/device signed out: ${page.status}`);
-  const form = [...(await page.text()).matchAll(/<form[^>]*>([\s\S]*?)<\/form>/g)].find((m) => /sign in/i.test(m[1]))?.[1];
-  assert.ok(form, '/device signed out shows a sign-in form');
-  const unescape = (s) => s.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-  const fields = new FormData();
-  for (const [, attrs] of form.matchAll(/<input([^>]*)>/g)) {
-    const name = attrs.match(/name="([^"]*)"/)?.[1];
-    if (name) fields.append(unescape(name), unescape(attrs.match(/value="([^"]*)"/)?.[1] ?? ''));
-  }
-  const signin = await fetch(verification_uri_complete, { method: 'POST', redirect: 'manual', headers: { origin: BASE }, body: fields });
-  const google = new URL(signin.headers.get('location') ?? 'about:blank');
-  assert.equal(google.origin, 'https://accounts.google.com', `sign-in redirects to Google, got ${signin.status} ${google}`);
+  // ---- 1. Signed out, /app/login runs the Google sign-in and comes back to the same URL.
+  const login = pkce();
+  const out = await browse(login.url);
+  const google = new URL(out.headers.get('location') ?? 'about:blank');
+  assert.equal(google.origin, 'https://accounts.google.com', `signed out goes to Google, got ${out.status} ${google}`);
   assert.equal(google.searchParams.get('redirect_uri'), `${BASE}/api/auth/callback/google`);
-  const back = signin.headers.getSetCookie().find((c) => c.startsWith('authjs.callback-url='));
-  assert.equal(decodeURIComponent(back?.split(';')[0].split('=')[1] ?? ''), verification_uri_complete, 'after Google, next-auth returns to /device?code=');
-  ok('/device signed out: "Sign in with Google" goes to Google with redirect_uri <AUTH_URL>/api/auth/callback/google and comes back to /device?code=');
+  const back = out.headers.getSetCookie().find((c) => c.startsWith('authjs.callback-url='));
+  assert.equal(decodeURIComponent(back?.split(';')[0].split('=')[1] ?? ''), login.url, 'after Google, next-auth returns to /app/login with the same query');
+  ok(`/app/login signed out: ${out.status} to Google with redirect_uri <AUTH_URL>/api/auth/callback/google, back to the same /app/login after`);
 
-  // ---- 4. Fake the Google sign-in: a next-auth JWT session cookie, as the callback would set it.
+  // ---- 2. Fake the Google sign-in: a next-auth JWT session cookie, as the callback would set it.
   const email = `e2e-${randomBytes(4).toString('hex')}@example.com`;
-  const cookieName = 'authjs.session-token'; // http: no __Secure- prefix
-  const session = `${cookieName}=${await encode({ token: { email, name: 'E2E', sub: email }, secret: env.AUTH_SECRET, salt: cookieName })}`;
+  const session = await sessionFor(email);
   const me = await (await fetch(`${BASE}/api/auth/session`, { headers: { cookie: session } })).json();
   assert.equal(me?.user?.email, email, 'the test session is accepted');
-  const signedIn = await fetch(verification_uri_complete, { headers: { cookie: session }, redirect: 'manual' });
-  assert.equal(signedIn.status, 200, `/device signed in: ${signedIn.status}`);
-  assert.ok((await signedIn.text()).includes(user_code), '/device shows the code to confirm');
-  ok(`test session for ${email}; /device shows ${user_code}`);
+  ok(`test session for ${email}`);
 
-  // ---- 5. Approve, the way the /device page does.
-  const approve = (headers, approve = true) =>
-    fetch(`${BASE}/api/device/approve`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...headers },
-      body: JSON.stringify({ user_code, approve }),
-    });
-  assert.equal((await approve({ origin: BASE })).status, 401, 'approve without a session');
-  assert.equal((await approve({ origin: 'https://evil.example', cookie: session })).status, 403, 'approve cross-site');
-  const approved = await approve({ origin: BASE, cookie: session });
-  assert.equal(approved.status, 200, await approved.clone().text());
-  assert.equal((await approve({ origin: BASE, cookie: session })).status, 404, 'a code is approved once');
-  ok('device/approve: 401 signed out, 403 cross-site, 200 approved, 404 the second time');
+  // ---- 3. Signed in, /app/login redirects to the app with a one-time code and the state unchanged.
+  const got = landing(await browse(login.url, session), MAC);
+  assert.equal(got.state, login.state, 'state comes back unchanged');
+  assert.match(got.code ?? '', /^[A-Za-z0-9_-]{43}$/, 'code');
+  ok(`/app/login signed in: 302 to ${MAC}?code=…&state=… (state ${JSON.stringify(got.state)} unchanged)`);
 
-  // ---- 6. Poll like DeviceFlow.signIn: sleep `interval`, slow_down adds 5 s, until granted or expired.
-  let wait = interval;
-  let grant;
-  const deadline = Date.now() + expires_in * 1000;
-  while (!grant) {
-    await sleep(wait * 1000);
-    assert.ok(Date.now() < deadline, 'the code expired while polling');
-    poll = await app('POST', '/api/device/token', { json: { device_code } });
-    if (poll.status === 200) grant = poll.body;
-    else if (poll.status === 400 && poll.body.error === 'authorization_pending') continue;
-    else if (poll.status === 400 && poll.body.error === 'slow_down') wait += 5;
-    else assert.fail(`device/token: ${poll.status} ${JSON.stringify(poll.body)}`);
-  }
-  assert.ok(typeof grant.access_token === 'string' && grant.access_token.length >= 32, 'access_token');
-  assert.equal(grant.email, email);
-  await sleep(interval * 1000);
-  poll = await app('POST', '/api/device/token', { json: { device_code } });
-  assert.deepEqual([poll.status, poll.body.error], [400, 'expired_token'], 'a device code yields one token');
-  ok('device/token: 200 {access_token, email} at the interval, then 400 expired_token');
-  const token = grant.access_token;
+  // ---- 4. The app trades the code for a token, once.
+  const grant = await token({ code: got.code, code_verifier: login.verifier, redirect_uri: MAC });
+  assert.equal(grant.status, 200, JSON.stringify(grant.body));
+  assert.match(grant.body.access_token ?? '', /^[A-Za-z0-9_-]{43}$/, 'access_token');
+  assert.equal(grant.body.email, email);
+  assert.deepEqual(await token({ code: got.code, code_verifier: login.verifier, redirect_uri: MAC }), { status: 400, body: { error: 'invalid_grant' } }, 'a code is single use');
+  ok('app/token: 200 {access_token, email}, then 400 invalid_grant for the same code');
+  const accessToken = grant.body.access_token;
 
-  // ---- 7. License: trial for 30 days from the first sign-in.
-  let lic = await app('GET', '/api/license', { token });
+  // ---- 5. License: trial for 30 days from the first sign-in.
+  let lic = await app('GET', '/api/license', { token: accessToken });
   assert.equal(lic.status, 200, JSON.stringify(lic.body));
   assert.equal(lic.body.status, 'trial');
   assert.equal(lic.body.email, email);
-  const ends = Date.parse(lic.body.trial_ends_at);
-  assert.ok(ends >= t0 + 30 * DAY && ends <= Date.now() + 30 * DAY, `trial_ends_at ${lic.body.trial_ends_at} is 30 days from the first sign-in`);
+  const [[started]] = await d1(`SELECT trial_started_at FROM users WHERE email = '${email}'`);
+  assert.equal(lic.body.trial_ends_at, new Date(Date.parse(started) + 30 * DAY).toISOString(), 'trial_ends_at = first sign-in + 30 days');
+  assert.ok(Date.parse(started) >= t0 - 1000 && Date.parse(started) <= Date.now(), 'the trial started at this sign-in');
   assert.equal((await app('GET', '/api/license', { token: 'not-a-token' })).status, 401);
   assert.equal((await app('GET', '/api/license')).status, 401);
-  ok(`license: trial until ${lic.body.trial_ends_at}; 401 for a bad or missing token`);
+  ok(`license: trial until ${lic.body.trial_ends_at} (first sign-in ${started} + 30 days); 401 for a bad or missing token`);
 
-  // ---- 8. Checkout: a Stripe Checkout URL for the one-time price, tagged with the user id.
+  // ---- 6. Checkout: a Stripe Checkout URL for the one-time price, tagged with the user id.
   assert.equal((await app('POST', '/api/checkout', { json: {} })).status, 401, 'checkout signed out');
-  const co = await app('POST', '/api/checkout', { token, json: {} });
+  const co = await app('POST', '/api/checkout', { token: accessToken, json: {} });
   assert.equal(co.status, 200, JSON.stringify(co.body));
   assert.match(co.body.url, /^https:\/\/checkout\.stripe\.com\//);
   assert.equal(stripeCalls.length, 1, 'one Stripe call');
@@ -258,7 +253,7 @@ async function main() {
   assert.match(sent.client_reference_id ?? '', /^\d+$/, 'client_reference_id is the user id');
   ok(`checkout: ${co.body.url} (mode payment, ${env.STRIPE_PRICE_ID}, client_reference_id ${sent.client_reference_id})`);
 
-  // ---- 9. Stripe's webhook. backant.io uses the same Stripe account, so this endpoint also gets
+  // ---- 7. Stripe's webhook. backant.io uses the same Stripe account, so this endpoint also gets
   // backant's checkouts: only a paid shepetal session may activate, everything else is a 200 no-op.
   const event = (type, session = {}) =>
     JSON.stringify({
@@ -287,42 +282,101 @@ async function main() {
     const v1 = createHmac('sha256', secret).update(`${t}.${body}`).digest('hex');
     return fetch(`${BASE}/api/stripe/webhook`, { method: 'POST', headers: { 'content-type': 'application/json', 'stripe-signature': `t=${t},v1=${v1}` }, body });
   };
-  const stillTrial = async (why, body, status) => {
-    const r = await hook(body, ...(status === 400 ? ['whsec_wrong'] : []));
+  const noLicense = async (why, body, status = 200, secret) => {
+    const r = await hook(body, secret);
     assert.equal(r.status, status, `${why}: ${await r.text()}`);
-    assert.equal((await app('GET', '/api/license', { token })).body.status, 'trial', `${why} must not grant a license`);
+    assert.equal((await app('GET', '/api/license', { token: accessToken })).body.status, 'trial', `${why} must not grant a license`);
   };
-  await stillTrial('a bad signature', event('checkout.session.completed'), 400);
+  await noLicense('a bad signature', event('checkout.session.completed'), 400, 'whsec_wrong');
   // backant's own subscription checkout (backant-mcp web/src/app/api/checkout), paid, whose
   // client_reference_id happens to equal this shepetal user's id.
-  await stillTrial(
+  await noLicense(
     "backant's subscription checkout",
     event('checkout.session.completed', { mode: 'subscription', metadata: {}, subscription: 'sub_e2e', success_url: 'https://backant.io/dashboard/billing?success=1' }),
-    200,
   );
-  await stillTrial('an unpaid shepetal checkout (delayed payment method)', event('checkout.session.completed', { payment_status: 'unpaid' }), 200);
+  await noLicense('an unpaid shepetal checkout (delayed payment method)', event('checkout.session.completed', { payment_status: 'unpaid' }));
   const paid = await hook(event('checkout.session.completed'));
   assert.equal(paid.status, 200, await paid.clone().text());
-  lic = await app('GET', '/api/license', { token });
+  lic = await app('GET', '/api/license', { token: accessToken });
   assert.deepEqual(lic.body, { status: 'active', trial_ends_at: null, email });
   ok("webhook: bad signature 400, backant's subscription checkout and an unpaid one 200 with no license; a paid shepetal checkout makes it active, trial_ends_at null");
+
+  // ---- 8. The redirect_uri allowlist and PKCE on the running Worker (more cases in app-login.test.ts).
+  await check('/app/login: only shepetal://auth and http://127.0.0.1:<port>/callback, exactly; anything else 400 and no code', async () => {
+    const loopback = pkce('http://127.0.0.1:53682/callback');
+    assert.equal(landing(await browse(loopback.url, session), loopback.redirect_uri).state, loopback.state);
+    for (const uri of [
+      'shepetal://auth.evil',
+      'shepetal://auth/',
+      'shepetal://auth#x',
+      'http://127.0.0.1.evil.com/callback',
+      'http://127.0.0.1.evil.com:53682/callback',
+      'http://localhost:53682/callback',
+      'http://user@127.0.0.1:53682/callback',
+      'http://127.0.0.1:53682@evil.com/callback',
+      'http://127.0.0.1:53682/callback#x',
+      'http://127.0.0.1:53682/callback?x=1',
+      'https://evil.com/callback',
+    ]) {
+      for (const cookie of [session, undefined]) {
+        const r = await browse(pkce(uri).url, cookie);
+        assert.equal(r.status, 400, `${uri} ${cookie ? 'signed in' : 'signed out'}: ${r.status} ${r.headers.get('location')}`);
+        assert.equal(r.headers.get('location'), null);
+      }
+    }
+  });
+  await check('/app/login: S256 only, a 43-character challenge and a state are required', async () => {
+    const l = pkce();
+    for (const [k, v] of [['code_challenge_method', 'plain'], ['code_challenge_method', ''], ['code_challenge', 'short'], ['state', '']]) {
+      const u = new URL(l.url);
+      u.searchParams.set(k, v);
+      assert.equal((await browse(u.href, session)).status, 400, `${k}=${v}`);
+    }
+  });
+  await check('app/token: a wrong verifier is invalid_grant and spends the code', async () => {
+    const l = pkce();
+    const { code } = landing(await browse(l.url, session), MAC);
+    assert.deepEqual(await token({ code, code_verifier: b64url(randomBytes(32)), redirect_uri: MAC }), { status: 400, body: { error: 'invalid_grant' } });
+    assert.equal((await token({ code, code_verifier: l.verifier, redirect_uri: MAC })).status, 400, 'no retry after a wrong verifier');
+  });
+  await check('app/token: a redirect_uri other than the one given to /app/login is invalid_grant', async () => {
+    const l = pkce();
+    const { code } = landing(await browse(l.url, session), MAC);
+    assert.deepEqual(await token({ code, code_verifier: l.verifier, redirect_uri: 'http://127.0.0.1:53682/callback' }), { status: 400, body: { error: 'invalid_grant' } });
+  });
+  await check('app/token: a code lives 60 s; an expired one is invalid_grant', async () => {
+    const l = pkce();
+    const { code } = landing(await browse(l.url, session), MAC);
+    const [[ttl]] = await d1("SELECT (julianday(expires_at) - julianday('now')) * 86400 FROM app_codes ORDER BY expires_at DESC LIMIT 1");
+    assert.ok(ttl > 55 && ttl <= 60, `the newest code lives ${ttl} s`);
+    await d1("UPDATE app_codes SET expires_at = '2000-01-01T00:00:00.000Z'");
+    assert.deepEqual(await token({ code, code_verifier: l.verifier, redirect_uri: MAC }), { status: 400, body: { error: 'invalid_grant' } });
+  });
+  await check('app/token: a missing field is invalid_request; D1 holds only the hash of a code', async () => {
+    assert.deepEqual(await token({ code: 'x', redirect_uri: MAC }), { status: 400, body: { error: 'invalid_request' } });
+    const { code } = landing(await browse(pkce().url, session), MAC);
+    assert.ok(!JSON.stringify(await d1('SELECT * FROM app_codes')).includes(code), 'the raw code is not in D1');
+  });
 }
 
-let failed = false;
 try {
   await main();
-  console.log(`e2e: OK (${step} steps, ${Math.round((Date.now() - t0) / 1000)} s)`);
 } catch (e) {
-  failed = true;
-  console.error(`not ok ${step + 1} - ${e.message}`);
-  if (e.stack) console.error(e.stack.split('\n').slice(1, 4).join('\n'));
+  failed.push('main');
+  console.log(`not ok ${++step} - ${e.message.split('\n').join('\n    ')}`);
   try {
     const lines = readFileSync(logFile, 'utf8').trim().split('\n');
-    console.error(`--- last lines of wrangler dev:\n${lines.slice(-40).join('\n')}`);
+    console.log(`--- last lines of wrangler dev:\n${lines.slice(-40).join('\n')}`);
   } catch {}
 } finally {
-  teardown();
+  if (worker?.exitCode === null) {
+    try {
+      process.kill(-worker.pid, 'SIGTERM');
+    } catch {}
+  }
+  fakeStripe.close();
   await sleep(300);
   rmSync(tmp, { recursive: true, force: true });
 }
-process.exit(failed ? 1 : 0);
+console.log(failed.length ? `e2e: FAILED (${failed.length} of ${step})` : `e2e: OK (${step} steps, ${Math.round((Date.now() - t0) / 1000)} s)`);
+process.exit(failed.length ? 1 : 0);

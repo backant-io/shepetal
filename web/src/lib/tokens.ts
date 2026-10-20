@@ -1,13 +1,13 @@
 import type { User } from './account';
 import { db } from './db';
 
-/** SHA-256 hex. Tokens and device codes are only ever stored as this hash. */
+/** SHA-256 hex. Tokens and app login codes are only ever stored as this hash. */
 export async function sha256(s: string): Promise<string> {
   const d = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** 32 random bytes, base64url. Used for access tokens and device codes. */
+/** 32 random bytes, base64url. Used for access tokens and app login codes. */
 export function randomSecret(): string {
   const b = crypto.getRandomValues(new Uint8Array(32));
   return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
