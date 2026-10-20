@@ -70,10 +70,19 @@ final class FnTapTests: XCTestCase {
         XCTAssertEqual(changes, [true], "another key does not end the fn hold here; FnGesture decides")
     }
 
-    func testGlobeKeyIsFn() {
+    // macOS also sends the Globe key as keycode 179 key events. Wispr calls them "doubleFn" and drops them before any
+    // shortcut handling. Read as fn, the 179 pair after a release was a second tap: one short tap started hands-free
+    // and a double-tap stopped itself (Pavel's M-FN-3 and M-FN-2, 2026-10-21). Only keycode 63 is fn, and 179 is not
+    // another key either, so it never cancels a hold as a shortcut.
+    func testGlobeKeyEventsAreIgnored() {
+        fnDown()
+        tap.handle(.keyDown, key(179, fn: true))
+        tap.handle(.keyUp, key(179, fn: true))
+        fnUp()
         tap.handle(.keyDown, key(179))
         tap.handle(.keyDown, key(179))  // key repeat
         tap.handle(.keyUp, key(179))
-        XCTAssertEqual(changes, [true, false])
+        XCTAssertEqual(changes, [true, false], "one tap is one press, wherever the 179 events fall")
+        XCTAssertEqual(otherKeys, 0, "179 while fn is held is not a shortcut")
     }
 }

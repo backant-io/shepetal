@@ -173,7 +173,7 @@ Generic keybind gesture engine for extensions (`main@5174401`, module `96635`):
 ## 4. What shepetal must build
 
 Hotkeys and lifecycle
-- [Mac] Hotkey capture via a CGEventTap at the session level, inserted at the head, listening for keyDown, keyUp, flagsChanged, otherMouseDown and otherMouseUp. Detect fn as keycode 63 with the secondary-fn flag on flagsChanged. Treat 179 (Globe) as fn as well. Needs the Input Monitoring / Accessibility permission. Preflight with `CGPreflightListenEventAccess`.
+- [Mac] Hotkey capture via a CGEventTap at the session level, inserted at the head, listening for keyDown, keyUp, flagsChanged, otherMouseDown and otherMouseUp. Detect fn as keycode 63 with the secondary-fn flag on flagsChanged. Ignore keycode 179 (`doubleFn`) entirely: Wispr's keypress handler returns early for it before any shortcut handling (`main@5191183`, the list exported next to the keycode table). Read as fn, the extra 179 events turn one tap into a double-tap. Needs the Input Monitoring / Accessibility permission. Preflight with `CGPreflightListenEventAccess`.
 - [Mac] Re-enable the tap on `tapDisabledByTimeout` and `tapDisabledByUserInput`. Run a watchdog that polls `CGEventTapIsEnabled`. After any period with the tap off, reconcile held keys with `CGEventSourceKeyState` so dictation never gets stuck on.
 - [Mac] Detect whether the keyboard has an Apple fn key. If it does not, default to Ctrl+Opt. IOHID is optional and only needed if Caps Lock binding is supported.
 - [Mac] Watch `IsSecureEventInputEnabled` and tell the user when a password field is blocking shortcuts.
@@ -210,7 +210,7 @@ Media, sounds, UI
 
 ## 5. Open questions
 - Esc and matched shortcut events are swallowed (from strings). It is still unknown whether a bare fn press is also swallowed, which would stop the macOS emoji picker or the "Press fn to start Dictation" action, or whether users have to change that macOS setting. To check, trace the tap callback in `helper-disasm.txt` near line 645039.
-- The exact fn detection inside the callback: does it read the keycode alone, or `kCGEventFlagMaskSecondaryFn`? Wispr also has a `doubleFn` (179) pseudo-key, and it is unclear whether that is the Globe key or a synthesized double-press.
+- The exact fn detection inside the callback: does it read the keycode alone, or `kCGEventFlagMaskSecondaryFn`? Wispr also has a `doubleFn` (179) pseudo-key. Its keypress handler drops 179 before any shortcut handling (`main@5191183`). It is still not traced whether macOS sends 179 at the press or after the release.
 - Does the helper apply any timing of its own before it emits `KeypressEvent`, or is all of the 500 ms logic in main? It looks like everything is in main.
 - Whether Wispr reads or changes the macOS "Press fn key to" setting (`AppleFnUsageType`). No string for it was found.
 - How `usedWhisperMode` gets set: by a server-side whisper classifier, or by the quiet-volume heuristic?

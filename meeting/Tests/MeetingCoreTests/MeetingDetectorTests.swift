@@ -187,3 +187,52 @@ func run(_ d: inout MeetingDetector, _ s: Snapshot, from: Int, to: Int) -> [Meet
     let retro = CalendarEvent(title: "Retro", start: 1900, end: 2800)
     #expect(CalendarEvent.current(in: [standup, retro], now: 1850) == "Retro")
 }
+
+// Mic holders as macOS reports them: Core Audio's kAudioProcessPropertyBundleID, the proc_pidpath
+// name, and NSRunningApplication for window owners. Zoom 7.1.9 and Chrome 155 IDs are from their
+// Info.plists. Chromium browsers capture in "<app>.helper"; Safari in the WebKit GPU process;
+// Firefox in the parent process (cubeb runs behind AudioIPC there, dom/media/CubebUtils.cpp).
+
+@Test func zoomMeetingHelpersAreZoom() {
+    let cptHost = MicClient(bundleID: "us.zoom.CptHost", name: "CptHost")
+    let aomHost = MicClient(bundleID: "us.zoom.aomhost", name: "aomhost")
+    let capHost = MicClient(bundleID: "us.zoom.caphost", name: "caphost")
+    let d = MeetingDetector()
+    for c in [zoom, cptHost, aomHost, capHost] {
+        #expect(d.meetingApps(in: Snapshot(micClients: [c])) == ["Zoom"], "\(c.bundleID)")
+    }
+    // Not every Zoom process is a call: Clips records a video message.
+    #expect(d.meetingApps(in: Snapshot(micClients: [MicClient(bundleID: "us.zoom.ZoomClips", name: "ZoomClips")])).isEmpty)
+
+    // The mic moving between zoom.us and its helpers mid-call is one meeting, ended by the release.
+    var d2 = MeetingDetector()
+    #expect(run(&d2, Snapshot(micClients: [zoom, cptHost]), from: 0, to: 30) == [.started(app: "Zoom")])
+    #expect(run(&d2, Snapshot(micClients: [aomHost]), from: 31, to: 60).isEmpty)
+    #expect(run(&d2, released, from: 61, to: 65) == [.ended(app: "Zoom")])
+}
+
+@Test func meetIsFoundInEachBrowserFromItsMicHelper() {
+    // (mic holder, window owner, front window title, browser)
+    let cases: [(MicClient, String, String, String)] = [
+        (chromeHelper, "com.google.Chrome", "Meet - abc-defg-hij - Google Chrome", "Chrome"),
+        (MicClient(bundleID: "com.apple.WebKit.GPU", name: "com.apple.WebKit.GPU"),
+         "com.apple.Safari", "Meet - abc-defg-hij", "Safari"),
+        (MicClient(bundleID: "company.thebrowser.browser.helper", name: "Browser Helper"),
+         "company.thebrowser.Browser", "Meet - abc-defg-hij", "Arc"),
+        (MicClient(bundleID: "com.microsoft.edgemac.helper", name: "Microsoft Edge Helper"),
+         "com.microsoft.edgemac", "Meet - abc-defg-hij - Work - Microsoft Edge", "Edge"),
+        (MicClient(bundleID: "org.mozilla.firefox", name: "firefox"),
+         "org.mozilla.firefox", "Meet – abc-defg-hij — Mozilla Firefox", "Firefox"),
+    ]
+    for (holder, owner, title, browser) in cases {
+        var d = MeetingDetector()
+        // Other mic use in the same browser (a voice note in Gmail) is not a meeting...
+        #expect(run(&d, Snapshot(micClients: [holder], windowTitles: [owner: ["Inbox - Gmail"]]), from: 0, to: 30).isEmpty, "\(browser)")
+        // ...the Meet tab is, about 5 s after it shows.
+        #expect(run(&d, Snapshot(micClients: [holder], windowTitles: [owner: [title]]), from: 31, to: 36)
+            == [.started(app: "Google Meet (\(browser))")], "\(browser)")
+        // A Meet tab in another browser does not turn this browser's mic use into a meeting.
+        let other = cases.first { $0.1 != owner }!
+        #expect(MeetingDetector().meetingApps(in: Snapshot(micClients: [holder], windowTitles: [other.1: [other.2]])).isEmpty, "\(browser)")
+    }
+}
