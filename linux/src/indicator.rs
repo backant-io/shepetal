@@ -96,6 +96,12 @@ pub fn supervise(program: String, delay: Duration) -> std::thread::JoinHandle<()
                     return;
                 }
             };
+            // 127 is "not found" too: `env` exits with it when the script's interpreter (python3)
+            // is missing, and some systems report a missing program that way instead of an error.
+            if status.as_ref().is_ok_and(|s| s.code() == Some(127)) {
+                eprintln!("shepetal: 🤫 indicator not started: {program}: not found (see docs/linux.md)");
+                return;
+            }
             if started.elapsed() >= Duration::from_secs(30) {
                 wait = delay;
             }
@@ -218,13 +224,19 @@ mod tests {
         }
         assert!(runs() >= 3, "started {} times", runs());
 
-        // Not installed: reported once, and the supervisor ends instead of retrying forever.
-        let h = supervise(dir.join("missing").display().to_string(), Duration::from_millis(10));
-        let t = Instant::now();
-        while !h.is_finished() && t.elapsed() < Duration::from_secs(5) {
-            std::thread::sleep(Duration::from_millis(10));
+        // Not installed, or its interpreter is not (`env` exits 127): reported once, and the
+        // supervisor ends instead of retrying forever.
+        let no_python = dir.join("no-python");
+        std::fs::write(&no_python, "#!/usr/bin/env shepetal-no-such-python\n").unwrap();
+        std::fs::set_permissions(&no_python, std::fs::Permissions::from_mode(0o700)).unwrap();
+        for prog in [dir.join("missing"), no_python] {
+            let h = supervise(prog.display().to_string(), Duration::from_millis(10));
+            let t = Instant::now();
+            while !h.is_finished() && t.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(h.is_finished(), "{} is retried", prog.display());
         }
-        assert!(h.is_finished());
     }
 
     #[test]

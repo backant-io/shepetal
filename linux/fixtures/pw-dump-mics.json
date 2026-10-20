@@ -1,0 +1,72 @@
+[
+  {
+    "id": 0, "type": "PipeWire:Interface:Core", "version": 4,
+    "info": { "name": "pipewire-0", "version": "1.0.5", "props": { "core.name": "pipewire-0" } }
+  },
+  {
+    "id": 39, "type": "PipeWire:Interface:Metadata", "version": 3,
+    "props": { "metadata.name": "default" },
+    "metadata": [
+      { "subject": 0, "key": "default.audio.sink", "type": "Spa:String:JSON", "value": { "name": "alsa_output.pci-0000_00_1f.3.analog-stereo" } },
+      { "subject": 0, "key": "default.audio.source", "type": "Spa:String:JSON", "value": { "name": "alsa_input.usb-046d_HD_Webcam_C615-02.analog-stereo" } }
+    ]
+  },
+  {
+    "id": 44, "type": "PipeWire:Interface:Device", "version": 3,
+    "info": { "props": { "device.name": "alsa_card.pci-0000_00_1f.3", "device.bus": "pci", "device.form-factor": "internal", "device.api": "alsa" } }
+  },
+  {
+    "id": 45, "type": "PipeWire:Interface:Device", "version": 3,
+    "info": { "props": { "device.name": "alsa_card.usb-Blue_Yeti", "device.bus": "usb", "device.form-factor": "microphone", "device.api": "alsa" } }
+  },
+  {
+    "id": 46, "type": "PipeWire:Interface:Device", "version": 3,
+    "info": { "props": { "device.name": "alsa_card.usb-046d_HD_Webcam_C615-02", "device.bus": "usb", "device.form-factor": "webcam", "device.api": "alsa" } }
+  },
+  {
+    "id": 47, "type": "PipeWire:Interface:Device", "version": 3,
+    "info": { "props": { "device.name": "bluez_card.AC_80_0A_11_22_33", "device.bus": "bluetooth", "device.form-factor": "headset", "device.api": "bluez5" } }
+  },
+  {
+    "id": 52, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "suspended", "props": {
+      "media.class": "Audio/Sink", "node.name": "alsa_output.pci-0000_00_1f.3.analog-stereo",
+      "node.description": "Built-in Audio Analog Stereo", "device.id": 44 } }
+  },
+  {
+    "id": 53, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "suspended", "props": {
+      "media.class": "Audio/Source", "node.name": "alsa_input.pci-0000_00_1f.3.analog-stereo",
+      "node.description": "Built-in Audio Analog Stereo", "device.id": 44 } }
+  },
+  {
+    "id": 61, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "idle", "props": {
+      "media.class": "Audio/Source", "node.name": "alsa_input.usb-Blue_Microphones_Yeti_Stereo_Microphone-00.analog-stereo",
+      "node.description": "Yeti Stereo Microphone Analog Stereo", "device.id": 45 } }
+  },
+  {
+    "id": 62, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "suspended", "props": {
+      "media.class": "Audio/Source", "node.name": "alsa_input.usb-046d_HD_Webcam_C615-02.analog-stereo",
+      "node.description": "HD Webcam C615 Analog Stereo", "device.id": 46 } }
+  },
+  {
+    "id": 63, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "suspended", "props": {
+      "media.class": "Audio/Source", "node.name": "bluez_input.AC_80_0A_11_22_33.1",
+      "node.description": "Jabra Evolve2 65", "device.id": 47 } }
+  },
+  {
+    "id": 70, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "media.class": "Audio/Source/Virtual", "node.name": "echo-cancel-source",
+      "node.description": "Echo-Cancel Source" } }
+  },
+  {
+    "id": 81, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "media.class": "Stream/Input/Audio", "media.name": "pw-record",
+      "application.name": "shepetal", "application.process.binary": "pw-record" } }
+  }
+]
