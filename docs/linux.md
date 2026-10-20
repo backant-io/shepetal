@@ -44,6 +44,17 @@ The hotkey works the same in every session because evdev sits below the display 
 The clipboard fallback does not restore the old clipboard. In that case nothing can send the
 paste keystroke, so the user pastes by hand, and restoring the clipboard would delete the text first.
 
+## Security
+
+- Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`
+  and `xclip` over stdin. It never goes in argv, which every local user can read with `ps`.
+- Each recording is a new `shepetal-<pid>-<n>.wav` in `$XDG_RUNTIME_DIR`, created with
+  `O_CREAT|O_EXCL` and mode 0600, and deleted after transcription or cancel. The daemon refuses
+  to start if `XDG_RUNTIME_DIR` is unset or not a 0700 directory, and never falls back to `/tmp`,
+  where another user could swap the audio and so choose what gets typed.
+- Being in the `input` group lets a process read every keystroke. shepetal only acts on the
+  hotkey and does not store or log other keys.
+
 ## Packaging
 
 - **`.deb` / AppImage**: recommended. A plain process can read `/dev/input`, run `pw-record` and
