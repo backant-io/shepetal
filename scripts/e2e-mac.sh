@@ -1,6 +1,7 @@
 #!/bin/bash
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
-# cleanup -> audio store + history -> clipboard + Cmd+V into a text view the app owns.
+# cleanup -> audio store + history -> pasteboard + Cmd+V into a text view the app owns.
+# The test shows no window, never takes focus, and uses a private pasteboard, never the user's clipboard.
 # Asserts WER <= 8 %, text ready <= 700 ms after release, and an owner-only audio file per recording.
 # A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
 # Run it offline to prove transcription makes no network call:
@@ -62,6 +63,8 @@ for r in rows:
     errors += e; ref_words += len(ref)
     assert r["inserted_text"] == r["text"], (name, "field holds something else", r["inserted_text"])
     assert r["paste_landed"] and r["clipboard_restored"], (name, "paste", r)
+    assert r["pasteboard"].startswith("io.backant.shepetal.e2e."), (name, "not the private pasteboard", r["pasteboard"])
+    assert not r["window_visible"], (name, "the test put a window on screen")
     if not os.environ.get("ENGINE"):
         assert r["ready_ms"] <= 700, (name, "slow", r["ready_ms"])
     p = r["audio_path"]
@@ -82,6 +85,7 @@ assert wer <= 0.08, f"WER {wer:.1%} > 8%"
 (s,) = [json.loads(l) for l in open(sys.argv[3]) if l.strip()]
 assert s["error"] == "No speech heard" and s["history_outcome"] == "no_speech", s
 assert s["inserted_text"] == "" and not s["paste_landed"], ("silence pasted something", s)
+assert s["pasteboard_text"] == "" and not s["window_visible"], ("silence touched the clipboard or showed a window", s)
 assert stat.S_IMODE(os.stat(s["audio_path"]).st_mode) == 0o600, s["audio_mode"]
 assert stat.S_IMODE(os.stat(os.path.dirname(s["audio_path"])).st_mode) == 0o700, s["audio_dir_mode"]
 assert s["history_audio_path"] == s["audio_path"], s
@@ -89,5 +93,17 @@ data = open(s["audio_path"], "rb").read()
 assert abs(s["audio_seconds"] - 2) < 0.05 and abs((len(data) - 44) / 4 / 16000 - s["audio_seconds"]) < 1e-3, s
 assert set(data[44:]) == {0}, "the kept WAV must hold the silent samples the guard saw"
 print(f"silence.wav: outcome {s['history_outcome']}, inserted_text {s['inserted_text']!r}, audio {s['audio_mode']} in a {s['audio_dir_mode']} dir")
+PY
+
+# A paste that does not land (the target lost focus) must leave the text on the clipboard.
+"$BIN" --e2e "$FIX/e01.wav" --drop-paste ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" > "$WORK/dropped.jsonl" || true
+python3 - "$WORK/dropped.jsonl" <<'PY'
+import json, sys
+r = [json.loads(l) for l in open(sys.argv[1]) if l.strip()][0]
+assert not r["paste_landed"] and not r["clipboard_restored"], r
+assert r["pasteboard_text"] == r["text"] != "", ("text not on the clipboard", r["pasteboard_text"])
+assert "clipboard" in r["error"] and r["history_outcome"] == "paste_failed", r
+assert r["inserted_text"] == "" and not r["window_visible"], r
+print("paste not landed: text left on the clipboard")
 print("e2e-mac: OK")
 PY

@@ -1,9 +1,12 @@
 """Run shepetal's builder as a Claude Managed Agent whose tools execute on this Mac.
 
     agent/.venv/bin/python agent/run.py setup [cents]  # once: environment + agent + first session
-    agent/.venv/bin/python agent/run.py install        # run the worker permanently (login item via launchd)
-    agent/.venv/bin/python agent/run.py worker         # or run it in the foreground; executes the agent's tools here
+    agent/.venv/bin/python agent/run.py install [n]    # run n workers permanently (login item via launchd); reinstalling restarts them
+    agent/.venv/bin/python agent/run.py worker [n]     # or run them in the foreground; executes the agent's tools here
     agent/.venv/bin/python agent/run.py start [cents]  # another budgeted session, kicked off with the outcome
+    agent/.venv/bin/python agent/run.py configure      # push system.md, tools and parallel workflows to the agent
+    agent/.venv/bin/python agent/run.py status [sesn]  # status and spend of the last (or given) session
+    agent/.venv/bin/python agent/run.py interrupt sesn # stop a session's current work (nothing is deleted)
 
 Keys are asked for once and kept in the login Keychain (services shepetal-api-key, shepetal-environment-key).
 """
@@ -66,6 +69,21 @@ def ids():
     return json.loads(IDS.read_text())
 
 
+def agent_config():
+    return dict(
+        model={"id": "claude-opus-5-5", "effort": "high"},
+        system=(HERE / "system.md").read_text(),
+        tools=[{
+            "type": "agent_toolset_20260401",
+            "default_config": {"enabled": True, "permission_policy": {"type": "auto"}},
+            # web tools run on Anthropic's servers; needed to research current on-device speech models
+            "configs": [{"name": "web_search", "enabled": True}, {"name": "web_fetch", "enabled": True}],
+        }],
+        # workflow runs fan independent items out to parallel agents; the session budget caps their spend
+        multiagent={"type": "multiagent_20261001", "workflows": {"type": "enabled"}},
+    )
+
+
 def setup(cents="20000"):
     if IDS.exists():
         sys.exit(f"{IDS} exists, delete it to recreate the agent and environment")
@@ -75,17 +93,7 @@ def setup(cents="20000"):
     # reuse the environment if an earlier setup got that far before failing
     env = next((e for e in client.beta.environments.list() if e.name == "shepetal-mac" and e.config.type == "self_hosted"), None) \
         or client.beta.environments.create(name="shepetal-mac", config={"type": "self_hosted"})
-    agent = client.beta.agents.create(
-        name="shepetal-builder",
-        model={"id": "claude-opus-5-5", "effort": "high"},
-        system=(HERE / "system.md").read_text(),
-        tools=[{
-            "type": "agent_toolset_20260401",
-            "default_config": {"enabled": True, "permission_policy": {"type": "auto"}},
-            # web tools run on Anthropic's servers; needed to research current on-device speech models
-            "configs": [{"name": "web_search", "enabled": True}, {"name": "web_fetch", "enabled": True}],
-        }],
-    )
+    agent = client.beta.agents.create(name="shepetal-builder", **agent_config())
     IDS.write_text(json.dumps({"environment_id": env.id, "agent_id": agent.id, "workspace_id": ws}, indent=2) + "\n")
     print(f"environment {env.id}\nagent       {agent.id}")
     # Start the first session now so the API key is only needed once; it waits until a worker polls.
@@ -93,42 +101,43 @@ def setup(cents="20000"):
     print(f"Next: generate an environment key for {env.id} (shepetal-mac) in the Console, then run install.")
 
 
-async def worker():
+async def worker(n="1"):
     # The agent's bash runs as this user and can read this process's launch environment
     # (ps -E), so the key comes from the Keychain rather than an env var.
     os.environ.pop("ANTHROPIC_API_KEY", None)
     key = secret("environment-key", ENV_KEY_PROMPT)
     WORKDIR.mkdir(exist_ok=True)
     async with anthropic.AsyncAnthropic(auth_token=key) as client:
-        w = EnvironmentWorker(client, environment_id=ids()["environment_id"], environment_key=key,
-                              workdir=WORKDIR, max_idle=None)
-        task = asyncio.create_task(w.run())
+        # one EnvironmentWorker serves one session at a time, so n of them serve n sessions in parallel
+        task = asyncio.ensure_future(asyncio.gather(*(
+            EnvironmentWorker(client, environment_id=ids()["environment_id"], environment_key=key,
+                              workdir=WORKDIR, max_idle=None).run() for _ in range(int(n)))))
         loop = asyncio.get_running_loop()
         for signum in (signal.SIGINT, signal.SIGTERM):
             loop.add_signal_handler(signum, task.cancel)
-        print(f"worker polling, tools run in {WORKDIR}. Ctrl-C to stop.")
+        print(f"{n} worker(s) polling, tools run in {WORKDIR}. Ctrl-C to stop.", flush=True)
         with contextlib.suppress(asyncio.CancelledError):
             await task
 
 
-def install():
+def install(n="1"):
     secret("environment-key", ENV_KEY_PROMPT)  # launchd has no terminal to ask in
     PLIST.parent.mkdir(parents=True, exist_ok=True)
     with PLIST.open("wb") as f:
         plistlib.dump({
             "Label": LABEL,
             # caffeinate -i keeps the Mac from idle-sleeping while the worker runs
-            "ProgramArguments": ["/usr/bin/caffeinate", "-i", sys.executable, str(Path(__file__).resolve()), "worker"],
+            "ProgramArguments": ["/usr/bin/caffeinate", "-i", sys.executable, str(Path(__file__).resolve()), "worker", n],
             "RunAtLoad": True,
             "KeepAlive": True,
             "StandardOutPath": str(LOG),
             "StandardErrorPath": str(LOG),
         }, f)
     domain = f"gui/{os.getuid()}"
-    subprocess.run(["launchctl", "bootout", domain, str(PLIST)], capture_output=True)  # reload if already installed
+    subprocess.run(["launchctl", "bootout", f"{domain}/{LABEL}"], capture_output=True)  # reload if already installed
     subprocess.run(["launchctl", "bootstrap", domain, str(PLIST)], check=True)
-    print(f"worker installed and running, starts at every login. Log: {LOG}\n"
-          f"Stop for good: launchctl bootout {domain} {PLIST} && rm {PLIST}")
+    print(f"{n} worker(s) installed and running, start at every login. Log: {LOG}\n"
+          f"Stop for good: launchctl bootout {domain}/{LABEL} && rm {PLIST}")
 
 
 def check_cents(cents):
@@ -147,11 +156,31 @@ def start(cents="20000", client=None):
     )
     client.beta.sessions.events.send(session_id=session.id, events=[{
         "type": "user.define_outcome",
-        "description": "Build shepetal v1 and land it as a pull request on backant-io/shepetal",
+        "description": "Work toward the goal in agent/goal.md on origin/main, iteration by iteration: "
+                       "100% of Wispr Flow's features on Mac, iPhone and Linux with local models, "
+                       "each one verified and merged to main.",
         "rubric": {"type": "text", "content": (HERE / "rubric.md").read_text()},
-        "max_iterations": 5,
+        "max_iterations": 20,
     }])
+    IDS.write_text(json.dumps({**i, "session_id": session.id}, indent=2) + "\n")
     print(f"session {session.id} started with a ${int(cents) / 100:.2f} cap. Watch it in the Console under Managed Agents > Sessions.")
+
+
+def configure():
+    agent = api(workspace()).beta.agents.update(ids()["agent_id"], **agent_config())
+    print(f"agent {agent.id} is now version {agent.version}; new sessions use it")
+
+
+def status(session_id=None):
+    s = api(workspace()).beta.sessions.retrieve(session_id or ids()["session_id"])
+    dollars = lambda m: f"${int(m.amount) / 100:.2f}"  # amounts are in cents
+    spent = dollars(s.usage.list_cost) if s.usage.list_cost else "n/a"
+    print(f"{s.id} {s.status}, spent {spent}" + (f" of {dollars(s.budget.max_list_cost)}" if s.budget else ""))
+
+
+def interrupt(session_id):
+    api(workspace()).beta.sessions.events.send(session_id=session_id, events=[{"type": "user.interrupt"}])
+    print(f"interrupt sent to {session_id}; it goes idle and keeps its history")
 
 
 if __name__ == "__main__":
@@ -159,10 +188,16 @@ if __name__ == "__main__":
     if cmd == "setup":
         setup(*args)
     elif cmd == "install":
-        install()
+        install(*args)
     elif cmd == "worker":
-        asyncio.run(worker())
+        asyncio.run(worker(*args))
     elif cmd == "start":
         start(*args)
+    elif cmd == "configure":
+        configure()
+    elif cmd == "status":
+        status(*args)
+    elif cmd == "interrupt" and args:
+        interrupt(args[0])
     else:
         sys.exit(__doc__)

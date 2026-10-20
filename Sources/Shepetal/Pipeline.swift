@@ -25,12 +25,13 @@ final class Pipeline {
     let history: History
     let inserter: Inserter
 
+    /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
     /// Tests pass a temp `root` and a private named pasteboard.
-    init(root: URL = Paths.root, pasteboard: NSPasteboard = .general) throws {
+    init(root: URL = Paths.root, pasteboard: NSPasteboard) throws {
+        inserter = Inserter(pasteboard: pasteboard)
         try AudioStore.makeOwnerOnlyDirectory(root)
         store = try AudioStore(dir: root.appendingPathComponent("audio"))
         history = try History(path: root.appendingPathComponent("history.sqlite"))
-        inserter = Inserter(pasteboard: pasteboard)
     }
 
     func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
@@ -66,7 +67,7 @@ final class Pipeline {
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
-        return paste.landed ? nil : "Paste did not land. The text is in Recent."
+        return paste.landed ? nil : "Paste did not land. The text is on the clipboard: press ⌘V to paste it."
     }
 
     /// Silence, non-speech tags or fillers only: nothing is pasted and the clipboard is not touched.

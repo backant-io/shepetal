@@ -23,7 +23,8 @@ final class FakeEngine: SpeechEngine {
 }
 
 /// What happens after release. Every recording keeps its audio and a history row (goal rule 4), and nothing
-/// is pasted unless there is text (F51). A paste nobody reads is reported and the clipboard comes back (F20).
+/// is pasted unless there is text (F51). A paste nobody reads is reported and its text
+/// is left on the clipboard (goal rule 8); a paste that lands gets the old clipboard back (F20).
 /// Runs on a temp data dir and a private pasteboard, never on the user's clipboard or data.
 final class PipelineTests: XCTestCase {
     var root: URL!
@@ -113,9 +114,12 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(run.paste?.landed, false)
         XCTAssertEqual(row.outcome, .pasteFailed)
         XCTAssertEqual(row.text, "Send the report today.", "the text is kept for Recent")
-        XCTAssertEqual(run.error, "Paste did not land. The text is in Recent.")
-        XCTAssertEqual(pasteboard.string(forType: .string), "earlier", "the clipboard is put back")
-        XCTAssertEqual(run.paste?.restored, true)
+        XCTAssertEqual(run.error, "Paste did not land. The text is on the clipboard: press ⌘V to paste it.")
+        // Goal rule 8: the text stays on the clipboard as plain text and the old clipboard is not restored.
+        XCTAssertEqual(pasteboard.string(forType: .string), "Send the report today.", "the text is left on the clipboard")
+        let markers: Set<NSPasteboard.PasteboardType> = [.init("org.nspasteboard.ConcealedType"), .init("org.nspasteboard.TransientType")]
+        XCTAssertTrue(markers.isDisjoint(with: pasteboard.types ?? []), "plain text that clipboard managers keep, not the promised item")
+        XCTAssertEqual(run.paste?.restored, false)
     }
 
     @MainActor
