@@ -14,8 +14,8 @@ as_user() {
   if [ "$DRY" = 1 ]; then echo "dry-run as $USER_NAME: $*"; return 0; fi
   if [ "$(id -u)" = 0 ]; then launchctl asuser "$USER_ID" sudo -u "$USER_NAME" "$@"; else "$@"; fi
 }
-read_user() {  # reads are safe to run for real, also in a dry run
-  if [ "$(id -u)" = 0 ]; then sudo -u "$USER_NAME" "$@"; else "$@"; fi
+read_user() {  # reads are safe to run for real, also in a dry run; same user bootstrap as the writes
+  if [ "$(id -u)" = 0 ]; then launchctl asuser "$USER_ID" sudo -u "$USER_NAME" "$@"; else "$@"; fi
 }
 APP="$2/Shepetal.app"
 log() { echo "shepetal postinstall: $*"; logger -t shepetal-postinstall "$*" 2>/dev/null || true; }
@@ -34,6 +34,7 @@ else
     as_user defaults write io.backant.shepetal previousAppleFnUsageType -int "${CUR/unset/-1}"
   fi
   as_user defaults write com.apple.HIToolbox AppleFnUsageType -int 0
+  as_user defaults write io.backant.shepetal fnKeyNoticePending -bool true  # the app says so at its first launch
   as_user killall TextInputMenuAgent || true
   as_user killall -9 TextInputSwitcher || true
   NOW=$(read_user defaults read com.apple.HIToolbox AppleFnUsageType 2>/dev/null) || NOW=unset

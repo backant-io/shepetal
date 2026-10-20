@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+mod meeting_rec;
 
 const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon | shepetal indicator | shepetal dict|snippet add|remove|list | shepetal mics [--pw-dump FILE]\n\
 env: SHEPETAL_KEY (default fn), SHEPETAL_MODEL (path to the model `probe` names: a sherpa-onnx dir or a ggml .bin)";
@@ -283,6 +284,7 @@ fn daemon() -> Res {
     if let Some(note) = focus::Session::from_env().unreadable_note() {
         eprintln!("shepetal: {note}");
     }
+    meeting_rec::spawn(&choice)?;
 
     listen(&rx, key, &key_name, &data_home, &choice, typer, &ind, &keys)
 }
