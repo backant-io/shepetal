@@ -49,10 +49,15 @@ paste keystroke, so the user pastes by hand, and restoring the clipboard would d
 
 - Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`
   and `xclip` over stdin. It never goes in argv, which every local user can read with `ps`.
-- Each recording is a new `shepetal-<pid>-<n>.wav` in `$XDG_RUNTIME_DIR`, created with
-  `O_CREAT|O_EXCL` and mode 0600, and deleted after transcription or cancel. The daemon refuses
-  to start if `XDG_RUNTIME_DIR` is unset or not a 0700 directory, and never falls back to `/tmp`,
-  where another user could swap the audio and so choose what gets typed.
+- Every dictation's raw audio is kept, the exact 16 kHz mono WAV the model received, in
+  `$XDG_DATA_HOME/shepetal/audio/` (default `~/.local/share/shepetal/audio/`). The directory is
+  created 0700, and the daemon refuses to start if it is a symlink or open to other users. Each
+  file is a new `<unix-ms>.wav`, created with `O_CREAT|O_EXCL` (which also refuses a symlink) and
+  mode 0600. Nothing is deleted. A cancelled recording is renamed `<unix-ms>.cancelled.wav`.
+  There is no option to skip storage. Audio never goes to `/tmp`, where another user could swap
+  it and so choose what gets typed.
+- Because a Right Ctrl chord (Ctrl+C) also counts as a cancelled recording, the history fills
+  with short clips of whatever was said while the user pressed Right Ctrl. Users should know this.
 - Being in the `input` group lets a process read every keystroke. shepetal only acts on the
   hotkey and does not store or log other keys.
 
@@ -101,4 +106,5 @@ Not yet done. These are the steps:
 - No hotplug: keyboards plugged in after start are not seen.
 - Whether `pw-record -P '{ application.name = shepetal }'` really renames the stream is not
   verified. If it does not, `probe` lists shepetal's own recording as a mic user.
+- No retention limit or cleanup for the audio history yet.
 - Meeting detection only runs in `probe`. The daemon does not record meetings yet.

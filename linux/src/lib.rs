@@ -1,3 +1,5 @@
+use std::path::{Path, PathBuf};
+
 pub mod gesture;
 pub mod insert;
 pub mod meeting;
@@ -27,9 +29,48 @@ pub fn parse_key(s: &str) -> Option<u16> {
     }
 }
 
+/// Every dictation's audio is kept in `<data_home>/shepetal/audio/` (0700) as `<stamp>.wav` (0600).
+/// create_new is O_CREAT|O_EXCL, which also refuses an existing symlink at the path.
+pub fn new_recording(data_home: &Path, stamp: u128) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
+    let dir = data_home.join("shepetal").join("audio");
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+    let md = std::fs::symlink_metadata(&dir)?;
+    if !md.is_dir() || md.permissions().mode() & 0o077 != 0 {
+        return Err(std::io::Error::other(format!("{} must be a 0700 directory", dir.display())));
+    }
+    let path = dir.join(format!("{stamp}.wav"));
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+    Ok(path)
+}
+
+/// Every recording is kept. A cancelled one is renamed `<stamp>.cancelled.wav`, never deleted.
+pub fn mark_cancelled(wav: &Path) -> std::io::Result<PathBuf> {
+    let to = wav.with_extension("cancelled.wav");
+    std::fs::rename(wav, &to)?;
+    Ok(to)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recording_is_private_and_always_kept() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = std::env::temp_dir().join(format!("shepetal-test-{}", std::process::id()));
+        let wav = new_recording(&home, 1).unwrap();
+        let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&wav), 0o600);
+        assert_eq!(mode(wav.parent().unwrap()), 0o700);
+        assert!(new_recording(&home, 1).is_err(), "must never reuse an existing file");
+        std::fs::write(&wav, b"RIFF").unwrap();
+        let cancelled = mark_cancelled(&wav).unwrap();
+        assert_eq!(cancelled.file_name().unwrap(), "1.cancelled.wav");
+        assert_eq!(std::fs::read(&cancelled).unwrap(), b"RIFF", "cancelled audio must be kept");
+        assert_eq!(mode(&cancelled), 0o600);
+        std::fs::remove_dir_all(&home).unwrap();
+    }
 
     #[test]
     fn decodes_right_ctrl_press_and_skips_sync() {
