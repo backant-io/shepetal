@@ -20,6 +20,11 @@ AUTOMATED = {"done", "hand-test", "confirmed", "impossible", "n/a"}
 CONFIRMED = AUTOMATED - {"hand-test"}
 NA_CATEGORIES = {"billing", "subscriptions", "referrals", "telemetry", "remote-flags", "ab-tests", "account-admin"}
 ROW = re.compile(r"^\|\s*(F\d+)\s*\|(.*)\|\s*$", re.M)
+# A segment label is one platform or a list of them ("Mac and Linux", "Mac, Linux"), optionally followed by
+# a qualifier after a comma, space or parenthesis ("Mac, under rule 8 (...)", "Linux (X11)").
+LABEL = re.compile(r"(All|Mac|Linux|iPhone)((?:\s*,\s*|\s+and\s+|\s*&\s*)(?:Mac|Linux|iPhone)\b)*(?=$|[\s,(])")
+PLATFORM_WORD = re.compile(r"(all|mac|macos|linux|iphone|ios)\b", re.I)
+STEP = re.compile(r"\b[A-Z]-[A-Z0-9]+-\d+\b")  # docs/manual-test.md step IDs: M-FN-1, I-KB-2, L-SETUP-1
 
 
 def rows(text):
@@ -27,19 +32,33 @@ def rows(text):
         yield m.group(1), [c.strip() for c in m.group(2).split("|")]
 
 
-def evidence(notes):
-    """Map each platform to the text of its `Mac:` / `Linux:` / `iPhone:` / `All:` segments."""
+def evidence(notes, errors=None, fid=""):
+    """Map each platform to the text of its `Mac:` / `Linux:` / `iPhone:` / `All:` segments (see LABEL).
+    A label that starts with a platform-like word but does not parse is reported in `errors`."""
     out = dict.fromkeys(PLATFORMS, "")
     for segment in notes.split(";"):
-        label, _, body = segment.partition(":")
+        label, colon, body = segment.partition(":")
         label = label.strip()
-        for p in PLATFORMS if label == "All" else [label] if label in PLATFORMS else []:
+        m = LABEL.match(label) if colon else None
+        if not m:
+            if colon and PLATFORM_WORD.match(label) and errors is not None:
+                errors.append(f"{fid}: segment label {label[:40]!r} is not Mac, Linux, iPhone or All (or a list of them)")
+            continue
+        named = re.findall(r"All|Mac|Linux|iPhone", m.group(0))
+        for p in PLATFORMS if "All" in named else named:
             out[p] += " " + body
     return out
 
 
-def check(inventory, ledger):
-    """Return (errors, cell values) for a ledger against the inventory."""
+def has_test_and_pr(e):
+    """A non-blank `test name` in backticks, and a #N outside backticks that is not an issue reference."""
+    outside = re.sub(r"`[^`]*`", " ", e)
+    return bool(re.search(r"`\s*[^`\s][^`]*`", e) and re.search(r"(?<!issue )(?<!issues )#\d+", outside))
+
+
+def check(inventory, ledger, manual):
+    """Return (errors, cell values) for a ledger against the inventory and the docs/manual-test.md text."""
+    steps = set(re.findall(r"^#+\s+(" + STEP.pattern + ")", manual, re.M))
     errors, ledger_ids, cells = [], set(), []
     for fid, cols in rows(ledger):
         if fid in ledger_ids:
@@ -49,14 +68,18 @@ def check(inventory, ledger):
         if len(cols) != 5:
             errors.append(f"{fid}: expected | F-ID | Feature | Mac | Linux | iPhone | Evidence / notes |")
             continue
-        ev = evidence(cols[4])
+        ev = evidence(cols[4], errors, fid)
         for p, value in zip(PLATFORMS, cols[1:4]):
             cells.append(value)
             e = ev[p]
             if value not in VALUES:
                 errors.append(f"{fid} {p}: unknown value {value!r}")
-            elif value == "done" and not (re.search(r"`[^`]+`", e) and re.search(r"#\d+", e)):
+            elif value == "done" and not has_test_and_pr(e):
                 errors.append(f"{fid} {p}: done needs a `test name` and a PR number (#N)")
+            elif value == "hand-test" and not STEP.search(e):
+                errors.append(f"{fid} {p}: hand-test needs a docs/manual-test.md step (M-XX-1, I-XX-1, L-XX-1)")
+            elif value == "hand-test" and set(STEP.findall(e)) - steps:
+                errors.append(f"{fid} {p}: hand-test step(s) {sorted(set(STEP.findall(e)) - steps)} not in docs/manual-test.md")
             elif value == "impossible" and not re.search(r"https?://\S+", e):
                 errors.append(f"{fid} {p}: impossible needs a doc citation (URL)")
             elif value == "n/a":
@@ -108,13 +131,14 @@ def self_test():
     inv = "| F01 | a | M | n | x | P0 | y |\n| F02 | b | M | n | x | P0 | y |\n"
     good = ("| F01 | a | done | impossible | n/a | Mac: `HotkeyTests.testHold` #3; "
             "Linux: https://www.kernel.org/doc/x; iPhone: n/a billing: store only |\n"
-            "| F02 | b | hand-test | todo | confirmed | |\n")
-    errors, cells = check(inv, good)
+            "| F02 | b | hand-test | todo | confirmed | Mac, under rule 8 (never refocus): hand step M-FN-1 |\n")
+    manual = "## Mac\n### M-FN-1: hold to talk\n"
+    errors, cells = check(inv, good, manual)
     assert errors == [], errors
     assert coverage(cells) == (500 / 6, 400 / 6), coverage(cells)
 
     def fails(ledger, needle):
-        errors = check(inv, ledger)[0]
+        errors = check(inv, ledger, manual)[0]
         assert any(needle in e for e in errors), (needle, errors)
 
     fails(good.splitlines()[0], "F02: in the inventory but missing")
@@ -126,6 +150,19 @@ def self_test():
     fails(good.replace("Mac: `HotkeyTests", "Linux: `HotkeyTests"), "F01 Mac: done needs")  # no cross-platform evidence
     fails(good.replace("n/a billing: store only", "n/a billing"), "F01 iPhone: n/a needs")
     fails(good.replace("| todo |", "| wip |"), "unknown value 'wip'")
+    fails(good + good.splitlines()[1] + "\n", "F02: duplicate row")
+    fails(good.replace("| F02 | b | hand-test |", "| F02 | b |"), "F02: expected")
+    fails(good.replace("Mac: `HotkeyTests.testHold` #3", "`HotkeyTests.testHold` #3"), "F01 Mac: done needs")
+    assert check(inv, good.replace("Mac: `HotkeyTests.testHold` #3", "All: `HotkeyTests.testHold` #3"), manual)[0] == []
+    assert check(inv, good.replace("Mac: `HotkeyTests", "Mac and Linux: `HotkeyTests").replace("Linux: https", "https"), manual)[0] == \
+        ["F01 Linux: impossible needs a doc citation (URL)"]  # "Mac and Linux" feeds both columns
+    fails(good.replace("`HotkeyTests.testHold`", "` `"), "F01 Mac: done needs")
+    fails(good.replace("`HotkeyTests.testHold` #3", "`run #3`"), "F01 Mac: done needs")
+    fails(good.replace("#3", "see issue #3"), "F01 Mac: done needs")
+    fails(good.replace("hand step M-FN-1", "hand step pending"), "F02 Mac: hand-test needs")
+    fails(good.replace("M-FN-1 |", "M-NOPE-9 |"), "['M-NOPE-9'] not in docs/manual-test.md")
+    fails(good.replace("Mac, under rule 8 (never refocus):", "Linux:"), "F02 Mac: hand-test needs")  # the qualifier label counted
+    fails(good.replace("Mac: `Hotkey", "macOS: `Hotkey"), "F01: segment label 'macOS'")
 
     ids = {("flags", "x-flag"), ("events", "y_event")}
     full = "flags\tx-flag\tF01\nevents\ty_event\tinternal\tserver-side metric\n"
@@ -145,7 +182,8 @@ def main():
     if args.self_test:
         return self_test()
     ledger = (ROOT / "docs/parity.md").read_text()
-    errors, cells = check((ROOT / "docs/re/feature-inventory.md").read_text(), ledger)
+    errors, cells = check((ROOT / "docs/re/feature-inventory.md").read_text(), ledger,
+                          (ROOT / "docs/manual-test.md").read_text())
     if args.completeness:
         map_path, ids_dir = args.completeness
         ids = read_identifiers(ids_dir)
