@@ -257,6 +257,9 @@ fn daemon() -> Res {
     watch_keys(tx, &devs)?;
     let names: Vec<_> = devs.iter().map(|(p, n)| format!("{} ({n})", p.display())).collect();
     eprintln!("shepetal: hold {key_name} to talk, double-tap for hands-free. keyboards {}, model {}, insert {typer:?}", names.join(", "), choice.model);
+    if let Some(note) = focus::Session::from_env().unreadable_note() {
+        eprintln!("shepetal: {note}");
+    }
 
     listen(&rx, key, &key_name, &data_home, &choice, typer, &ind)
 }
@@ -584,6 +587,8 @@ mod tests {
             ("wtype", format!("cat > \"{d_}/typed\"\n")),
             ("xdotool", format!("if [ \"$1\" = getactivewindow ]; then cat \"{d_}/active\"; else cat > \"{d_}/typed\"; fi\n")),
             ("xclip", format!("cat > \"{d_}/clipboard\"\n")),
+            ("swaymsg", format!("echo \"$*\" > \"{d_}/focus.args\"\ncat \"{d_}/sway-tree\"\n")),
+            ("hyprctl", format!("echo \"$*\" > \"{d_}/focus.args\"\ncat \"{d_}/hypr-active\"\n")),
             ("wl-copy", format!("cat > \"{d_}/clipboard\"\n")),
         ];
         for (bin, body) in tools {
@@ -592,7 +597,7 @@ mod tests {
         }
         // Put PATH back and remove the tools also when `f` panics, or the next test would run
         // this test's tools.
-        const SESSION: [&str; 4] = ["XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE"];
+        const SESSION: [&str; 5] = ["XDG_SESSION_TYPE", "XDG_CURRENT_DESKTOP", "SWAYSOCK", "HYPRLAND_INSTANCE_SIGNATURE", "DISPLAY"];
         struct Restore(Vec<(&'static str, Option<std::ffi::OsString>)>, PathBuf);
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -831,6 +836,52 @@ mod tests {
             assert_eq!(lines, ["recording", "processing", "idle"]);
             assert!(!d.join("typed").exists(), "nothing typed into the other window");
             assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "Hello world.");
+        });
+    }
+
+    #[test]
+    fn focus_is_read_again_when_the_text_is_ready() {
+        // Goal rule 8: a switch during transcription counts. The fake model moves focus to
+        // another window while it runs, so the text must go to the clipboard.
+        with_fake_tools("latefocus", |d| {
+            let sherpa = std::fs::read_to_string(d.join("sherpa-onnx-offline")).unwrap();
+            let moving = sherpa.replacen("#!/bin/sh\n", &format!("#!/bin/sh\necho 54525959 > \"{}/active\"\n", d.display()), 1);
+            std::fs::write(d.join("sherpa-onnx-offline"), moving).unwrap();
+            let (hint, _) = dictate_on_x11(d, insert::Backend::Xdotool, Some("41943047"), Some("41943047"));
+            assert_eq!(hint.as_deref(), Some(FOCUS_MOVED));
+            assert!(!d.join("typed").exists());
+            assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "Hello world.");
+        });
+    }
+
+    #[test]
+    fn focus_is_read_from_sway_and_hyprland() {
+        with_fake_tools("wlfocus", |d| {
+            std::env::set_var("XDG_SESSION_TYPE", "wayland");
+            std::env::set_var("SWAYSOCK", "/run/user/1000/sway-ipc.sock");
+            std::fs::write(d.join("sway-tree"), r#"{"id": 1, "focused": false, "nodes": [{"id": 12, "focused": true, "nodes": []}]}"#).unwrap();
+            let s = focus::Session::from_env();
+            assert_eq!(s, focus::Session::Sway);
+            assert_eq!(s.focused().as_deref(), Some("12"));
+            assert_eq!(std::fs::read_to_string(d.join("focus.args")).unwrap(), "-t get_tree\n");
+
+            std::env::remove_var("SWAYSOCK");
+            std::env::set_var("HYPRLAND_INSTANCE_SIGNATURE", "abc");
+            std::fs::write(d.join("hypr-active"), r#"{"address": "0x55aa", "class": "kitty"}"#).unwrap();
+            let s = focus::Session::from_env();
+            assert_eq!(s, focus::Session::Hyprland);
+            assert_eq!(s.focused().as_deref(), Some("0x55aa"));
+            assert_eq!(std::fs::read_to_string(d.join("focus.args")).unwrap(), "activewindow -j\n");
+        });
+    }
+
+    #[test]
+    fn a_hung_focus_tool_is_cut_off() {
+        with_fake_tools("hung", |d| {
+            std::fs::write(d.join("xdotool"), "#!/bin/sh\nexec sleep 5\n").unwrap();
+            let t = Instant::now();
+            assert_eq!(focus::Session::X11.focused(), None);
+            assert!(t.elapsed() < Duration::from_millis(1500), "waited {:?}", t.elapsed());
         });
     }
 

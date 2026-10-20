@@ -169,7 +169,7 @@ text is ready (`linux/src/focus.rs`):
 
 | Session | How focus is read |
 | --- | --- |
-| X11 (any desktop) | `xdotool getactivewindow` (EWMH `_NET_ACTIVE_WINDOW`) |
+| X11 (any desktop; also a `startx` session, which reports `tty`, when `DISPLAY` is set) | `xdotool getactivewindow` (EWMH `_NET_ACTIVE_WINDOW`) |
 | Sway (`SWAYSOCK` set or `XDG_CURRENT_DESKTOP` has `sway`) | `swaymsg -t get_tree`, the node with `"focused": true` |
 | Hyprland (`HYPRLAND_INSTANCE_SIGNATURE` set) | `hyprctl activewindow -j`, its `address` |
 | GNOME and KDE on Wayland | not readable by an app: the text is typed |
@@ -181,7 +181,11 @@ text is ready (`linux/src/focus.rs`):
 - Focus unreadable at either end: there is nothing to compare, so the text is typed.
 - Typing fails (the tool exits non-zero): the text goes to the clipboard with the hint
   `Typing failed. ...`. With only a clipboard tool installed the hint is `No typing tool. ...`.
-- If the clipboard copy fails too, 🤫 turns yellow with `Could not type or copy the text`.
+- If the clipboard copy fails too, 🤫 turns yellow with `Could not type or copy the text`. The
+  text is then not anywhere the user can paste it from; only the kept audio remains.
+- Each focus read is cut off after 500 ms, so a hung `xdotool`, `swaymsg` or `hyprctl` cannot hold
+  up the fn press; a read that is cut off counts as unreadable.
+- On a desktop where focus cannot be read, `shepetal daemon` says so at start.
 - shepetal never moves focus back to the first window, and the old clipboard is not restored
   when the text is left there (the user has not pasted it yet).
 
