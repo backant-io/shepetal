@@ -21,9 +21,6 @@ public struct Handoff: Codable, Equatable {
     public private(set) var text: String?
     /// Shown by the keyboard: why the session failed, or a note on delivered text (for example a recording cut short).
     public private(set) var message: String?
-    /// Set by the keyboard when the user taps the mic to finish. The stop notification only wakes the app;
-    /// the app stops only when this is set for its own recording.
-    public private(set) var stopRequested = false
     public private(set) var updatedAt: Date = .distantPast
 
     public init() {}
@@ -62,13 +59,10 @@ public struct Handoff: Codable, Equatable {
         phase == .recording && sessionID == id && now.timeIntervalSince(updatedAt) < Self.maxRecording
     }
 
-    /// Keyboard: ask the app to finish the recording `id`, before posting the stop notification.
+    /// Keyboard: true when a mic tap should finish the recording `id` (see `SharedHandoff.requestStop`).
     /// False when `id` is not recording, so the keyboard starts a new dictation instead.
-    @discardableResult
-    public mutating func requestStop(_ id: UUID, now: Date = Date()) -> Bool {
-        guard phase == .recording, sessionID == id, !isExpired(now: now) else { return false }
-        stopRequested = true
-        return true
+    public func canStop(_ id: UUID, now: Date = Date()) -> Bool {
+        phase == .recording && sessionID == id && !isExpired(now: now)
     }
 
     /// App: the user stopped; transcription is running.
@@ -324,8 +318,8 @@ public enum SharedHandoff {
     }
 
     // ponytail: read-modify-write on UserDefaults is not atomic across processes. Each phase has a
-    // single writer (keyboard or app), except `recording`, where the keyboard's stop request can race the
-    // app ending the recording itself (cap, dead mic); switch to a file lock if that race shows up.
+    // single writer (keyboard or app); the keyboard's stop request lives in its own key (`requestStop`),
+    // so it never races the app ending the recording itself (#63). Switch to a file lock if a new writer needs it.
     @discardableResult
     public static func update<T>(in defaults: UserDefaults? = shared, _ body: (inout Handoff) throws -> T) rethrows -> T {
         var handoff = defaults?.data(forKey: key).flatMap { try? JSONDecoder().decode(Handoff.self, from: $0) } ?? Handoff()
@@ -349,6 +343,24 @@ public enum SharedHandoff {
     }
 
     private static let listeningKey = "appListeningAt"
+
+    /// Keyboard: ask the app to finish the recording `id`, before posting the stop notification. The stop
+    /// notification only wakes the app; the app stops only when this key names its own recording. Kept apart
+    /// from the handoff, so the keyboard never writes the record the app is ending at the same moment (#63).
+    /// False when `id` is not recording, so the keyboard starts a new dictation instead.
+    @discardableResult
+    public static func requestStop(_ id: UUID, now: Date = Date(), in defaults: UserDefaults? = shared) -> Bool {
+        guard read(in: defaults).canStop(id, now: now) else { return false }
+        defaults?.set(id.uuidString, forKey: stopKey)
+        return true
+    }
+
+    /// App: the keyboard asked to finish the recording `id`. A new session never inherits an old stop.
+    public static func isStopRequested(_ id: UUID, in defaults: UserDefaults? = shared) -> Bool {
+        defaults?.string(forKey: stopKey) == id.uuidString
+    }
+
+    private static let stopKey = "stopRequest"
 
     public static func post(_ name: String) {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(name as CFString), nil, nil, true)

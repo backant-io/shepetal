@@ -146,7 +146,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertTrue(session.isRecording)
         XCTAssertTrue(mic.running)
 
-        SharedHandoff.update(in: handoff) { _ = $0.requestStop(id) } // what the keyboard does first
+        SharedHandoff.requestStop(id, in: handoff) // what the keyboard does first
         SharedHandoff.post(SharedHandoff.stopNotification)
         for _ in 0..<50 where session.isRecording { try await Task.sleep(for: .milliseconds(100)) }
         XCTAssertFalse(session.isRecording) // the same notification is delivered, and now it stops
@@ -158,7 +158,7 @@ final class DictationSessionTests: XCTestCase {
     func testStopRequestForAnotherSessionDoesNotStopTheRecording() async {
         let session = makeSession()
         _ = await recording(session)
-        SharedHandoff.update(in: handoff) { _ = $0.requestStop(UUID()) }
+        handoff.set(UUID().uuidString, forKey: "stopRequest") // an older session's stop, still in the key
         let ended = await session.followKeyboard()
         await session.tick()
         XCTAssertFalse(ended)
@@ -183,10 +183,28 @@ final class DictationSessionTests: XCTestCase {
     func testStopRequestIsFollowedByTheTickWhenItsNotificationIsLost() async {
         let session = makeSession()
         let id = await recording(session)
-        SharedHandoff.update(in: handoff) { _ = $0.requestStop(id) }
+        SharedHandoff.requestStop(id, in: handoff)
         await session.tick()
         XCTAssertFalse(session.isRecording)
         XCTAssertEqual(entry(id)?.outcome, .transcribed)
+    }
+
+    // MARK: Issue #63: the keyboard's stop and the app ending the recording itself never write the same record.
+
+    @MainActor
+    func testStopTapInTheSameInstantAsTheCapStillDeliversTheText() async {
+        let session = makeSession()
+        let id = await recording(session)
+        // The keyboard checked the state while it was still recording...
+        XCTAssertTrue(state.canStop(id))
+        await session.stop(reason: "Stopped at the 5-minute limit.") // ...the app hits the cap and delivers...
+        XCTAssertEqual(state.phase, .ready)
+        handoff.set(id.uuidString, forKey: "stopRequest") // ...then the keyboard's stop write lands.
+        XCTAssertEqual(state.phase, .ready) // the late write cannot put back `recording`
+        let ended = await session.followKeyboard()
+        XCTAssertFalse(ended)
+        var copy = state
+        XCTAssertEqual(copy.consume(id, document: field), .insert("hello"))
     }
 
     @MainActor
