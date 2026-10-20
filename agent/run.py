@@ -1,8 +1,8 @@
 """Run shepetal's builder as a Claude Managed Agent whose tools execute on this Mac.
 
-    ANTHROPIC_API_KEY=... agent/.venv/bin/python agent/run.py setup          # once: environment + agent -> agent/ids.json
-    agent/.venv/bin/python agent/run.py worker                                # prompts for the environment key, keep running: executes the agent's tools here
-    ANTHROPIC_API_KEY=... agent/.venv/bin/python agent/run.py start [cents]   # new budgeted session, kicked off with the outcome
+    agent/.venv/bin/python agent/run.py setup          # once: environment + agent -> agent/ids.json (prompts for the API key)
+    agent/.venv/bin/python agent/run.py worker         # keep running: executes the agent's tools here (prompts for the environment key)
+    agent/.venv/bin/python agent/run.py start [cents]  # new budgeted session, kicked off with the outcome (prompts for the API key)
 """
 import asyncio
 import contextlib
@@ -21,6 +21,10 @@ IDS = HERE / "ids.json"
 WORKDIR = Path.home() / "shepetal-agent"
 
 
+def api():
+    return anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY") or getpass.getpass("Anthropic API key: "))
+
+
 def ids():
     return json.loads(IDS.read_text())
 
@@ -28,7 +32,7 @@ def ids():
 def setup():
     if IDS.exists():
         sys.exit(f"{IDS} exists, delete it to recreate the agent and environment")
-    client = anthropic.Anthropic()
+    client = api()
     env = client.beta.environments.create(name="shepetal-mac", config={"type": "self_hosted"})
     agent = client.beta.agents.create(
         name="shepetal-builder",
@@ -66,7 +70,7 @@ async def worker():
 def start(cents="20000"):
     if not cents.isdigit() or cents.startswith("0"):
         sys.exit("budget is in US cents, e.g. 20000 for $200")
-    client = anthropic.Anthropic()
+    client = api()
     i = ids()
     session = client.beta.sessions.create(
         agent=i["agent_id"],
