@@ -20,7 +20,9 @@ fn synthesized_speech_is_transcribed_on_the_device() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let tts = dir.join("tts.wav");
-    let spoke = Command::new("espeak-ng").args(["-v", "en-us", "-w"]).arg(&tts).arg(SENTENCE).status().unwrap();
+    // At espeak-ng's default 175 words a minute, the CPU model hears "fox dumps" even through
+    // sox's resampler; at 140 it hears the sentence.
+    let spoke = Command::new("espeak-ng").args(["-v", "en-us", "-s", "140", "-w"]).arg(&tts).arg(SENTENCE).status().unwrap();
     assert!(spoke.success());
     let (samples, rate) = audio::wav::read(&tts).unwrap();
     assert_ne!(rate, audio::RATE, "espeak-ng speaks at 22.05 kHz, so the resampler is on the path");

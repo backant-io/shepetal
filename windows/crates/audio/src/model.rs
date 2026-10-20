@@ -4,6 +4,8 @@
 //! are its whisper.cpp rows: with an NVIDIA GPU, large-v3-turbo q5_0 on CUDA (the table's
 //! Linux CUDA and Vulkan rows); otherwise base.en q5_1 on the CPU (the table's whisper.cpp
 //! fallback, measured at 3.6 % WER with 308 MB peak RAM).
+//! `shepetal-core::model` picks sherpa-onnx Parakeet tiers this crate cannot run yet; until it can,
+//! these tiers are a stopgap (issue #117).
 
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
