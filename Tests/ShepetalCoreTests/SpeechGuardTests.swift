@@ -41,8 +41,11 @@ final class SpeechGuardTests: XCTestCase {
     }
 
     func testFloorIsAUserDefaultsKnob() {
-        UserDefaults.standard.register(defaults: ["speechFloorDb": -20])  // registration domain: memory only
-        defer { UserDefaults.standard.register(defaults: ["speechFloorDb": -60]) }
+        // The registration domain lives in memory only; put it back so later tests see the code default.
+        let d = UserDefaults.standard
+        let saved = d.volatileDomain(forName: UserDefaults.registrationDomain)
+        d.register(defaults: ["speechFloorDb": -20])
+        defer { d.setVolatileDomain(saved, forName: UserDefaults.registrationDomain) }
         XCTAssertEqual(SpeechGuard.floorDb, -20)
         XCTAssertFalse(SpeechGuard.isSpeech(tone(db: -30)))
     }
