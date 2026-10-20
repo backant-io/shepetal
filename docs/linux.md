@@ -169,11 +169,13 @@ Not yet done. These are the steps:
   stamped when the loop takes it, so a hold that starts during a transcription is measured short.
 - If every keyboard closes (a Bluetooth keyboard sleeps), the daemon stops a running recorder
   with SIGINT, keeps the clip as `*.cancelled.wav` and exits. A daemon killed by a signal
-  (`kill`, SIGKILL) still leaves a running `pw-record` behind.
+  (`kill`, SIGKILL) still leaves a running `pw-record` behind (#45).
 - Vulkan counts as present when `/usr/share/vulkan/icd.d` has any file, which includes Mesa's
-  software renderer (lavapipe). Such a machine gets Whisper turbo on Vulkan, not Parakeet on CPU.
+  software renderer (lavapipe). Such a machine gets Whisper turbo on Vulkan, not Parakeet on CPU (#46).
 - Parakeet TDT-CTC 110M is English only. The 4 GB RAM line that picks it stands in for the
-  table's "low-end ARM" and is not measured.
+  table's "low-end ARM" and is not measured (#46).
+- The speech-to-text runner starts per dictation, so the model loads every time. Text-ready time
+  on a real Linux machine is not measured (#46).
 - No hotplug: keyboards plugged in after start are not seen.
 - Only ydotoold's virtual device is skipped. Any other uinput device that declares fn still
   counts as an fn keyboard, so with one running and fn invisible the daemon starts and fn does
