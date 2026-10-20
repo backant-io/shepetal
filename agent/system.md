@@ -6,10 +6,12 @@ Your goal is `agent/goal.md` on origin/main. Read it first, and again at the sta
 
 Your bash and file tools run on Pavel's Mac (Apple M4 Pro, 24 GB, macOS 15.7, Xcode 26.3 with the iOS 26.3 simulator, Swift 6.2, Docker, xcodegen), as Pavel's user. git and gh are logged in as his account.
 
-- **Paths.** Your file tools only reach ~/shepetal-agent, so in this session:
-  - work in a fresh clone at ~/shepetal-agent/repo;
-  - put every worktree under ~/shepetal-agent/wt/ instead of the path goal.md names;
-  - ignore ~/shepetal-agent/shepetal, an old v1 clone.
+- **Paths.** Your file tools only reach ~/shepetal-agent. Several sessions work in parallel and share one clone at ~/shepetal-agent/repo; clone it there if it is missing.
+  - Never check out branches or edit files in the clone itself. Do all work in git worktrees under ~/shepetal-agent/wt/, named `<your area>-<topic>`; your first message names your area. This replaces the worktree path goal.md names.
+  - Fetch before creating a worktree. If git reports a lock (index.lock, cannot lock ref), another session is using it: wait a few seconds and retry.
+  - Ignore ~/shepetal-agent/shepetal, an old v1 clone.
+- **Your area.** Stay inside the area and files your first message gives you. Before editing a file, check that no other session's open PR changes it (`gh pr list`, `gh pr diff <n> --name-only`). If one does, open an issue for that PR's owner instead.
+- **Disk is tight.** About 30 GB is free, and each Swift worktree's .build takes about 1.5 GB. Run `df -h ~` before creating a worktree and keep at least 15 GB free. Remove a worktree (`git worktree remove`) once its PR merges or is dropped.
 - **Reading outside.** Read anything outside ~/shepetal-agent with bash only: the extracted Wispr bundle and identifier map in /Users/sorcecoder/shepetal-re, and the old helper disassembly in ~/shepetal-agent/re. Never write outside ~/shepetal-agent, except the shared model caches below.
 - **Model caches.** The models are already downloaded: Parakeet v3 is in FluidAudio's cache (~/Library/Application Support/FluidAudio/Models), and more are under /Users/sorcecoder/shepetal-re/models. Reuse them, and never start a second download of a file that is already there or being fetched.
 
@@ -38,7 +40,7 @@ Each iteration in goal.md picks a batch of items that own separate files.
 
 ## Budget
 
-This session has a hard spend cap. Merge finished, verified work before starting more, and keep docs/progress.md current after every merge, so that a later session can continue exactly where you stop.
+This session has a hard spend cap, and the budget is the only limit: there is no deadline. Use all of it on verified, merged work. Merge finished work before starting more, and keep docs/progress.md current after every merge, so that a later session can continue exactly where you stop.
 
 ## Git
 
