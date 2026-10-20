@@ -120,7 +120,7 @@ fn canonical(vk: u16) -> u16 {
 }
 
 /// Turns raw key downs and ups (auto-repeat included) into hotkey and Esc events. Pure; the hook
-/// feeds it every key and passes every key on.
+/// feeds it every key and passes every key on, except the Space that `swallow` claims.
 #[derive(Debug, Default)]
 pub struct Chord {
     hotkey: Hotkey,
@@ -128,6 +128,8 @@ pub struct Chord {
     held: Vec<u16>,
     active: bool,
     esc: bool,
+    /// A Space down was swallowed, so its repeats and its release are too.
+    space: bool,
 }
 
 impl Chord {
@@ -186,6 +188,7 @@ impl Chord {
     /// hook was removed or the secure desktop took them (Ctrl+Alt+Del, Win+L); without this the
     /// hotkey would look held forever and never start again.
     pub fn release_stale(&mut self, is_down: impl Fn(u16) -> bool) -> Vec<KeyEvent> {
+        self.space &= is_down(VK_SPACE); // else the next Space typed anywhere would be eaten
         let mut stale: Vec<u16> = self
             .held
             .iter()
@@ -199,6 +202,26 @@ impl Chord {
             .into_iter()
             .filter_map(|vk| self.feed(vk, false))
             .collect()
+    }
+}
+
+impl Chord {
+    /// Whether the hook eats this key instead of passing it on. Only Space pressed while the
+    /// hotkey is held and a recording runs: that is the hands-free chord, and Windows would also
+    /// switch the input language on Ctrl+Win+Space. Its repeats and its release go with it, even
+    /// once the hotkey is up. Paused or idle, Space passes, so Windows' own shortcut still works.
+    pub fn swallow(&mut self, vk: u16, down: bool, recording: bool) -> bool {
+        if vk != VK_SPACE || self.hotkey.0.contains(&VK_SPACE) {
+            return false;
+        }
+        if down && self.active && recording {
+            self.space = true;
+        }
+        let eat = self.space;
+        if !down {
+            self.space = false;
+        }
+        eat
     }
 }
 
@@ -457,6 +480,53 @@ mod tests {
             vec![],
             "keys really down stay down"
         );
+    }
+
+    #[test]
+    fn space_is_eaten_only_as_the_hands_free_chord_while_recording() {
+        let mut c = Chord::new(Hotkey::default());
+        assert!(
+            !c.swallow(VK_SPACE, true, true),
+            "typing a space is never eaten"
+        );
+        assert!(!c.swallow(VK_SPACE, false, true));
+        c.feed(LCTRL, true);
+        c.feed(VK_LWIN, true);
+        assert!(
+            !c.swallow(VK_SPACE, true, false),
+            "paused: Windows' own Ctrl+Win+Space works"
+        );
+        assert!(!c.swallow(VK_SPACE, false, false));
+        assert!(!c.swallow(0x41, true, true), "only Space");
+        assert!(c.swallow(VK_SPACE, true, true), "the hands-free chord");
+        c.feed(VK_LWIN, false);
+        assert!(
+            c.swallow(VK_SPACE, true, true),
+            "its repeats, after the hotkey is up"
+        );
+        assert!(c.swallow(VK_SPACE, false, true), "and its release");
+        assert!(
+            !c.swallow(VK_SPACE, true, true),
+            "the next Space is typing again"
+        );
+    }
+
+    #[test]
+    fn a_lost_space_up_does_not_eat_the_next_space() {
+        let mut c = Chord::new(Hotkey::default());
+        c.feed(LCTRL, true);
+        c.feed(VK_LWIN, true);
+        assert!(c.swallow(VK_SPACE, true, true));
+        c.release_stale(|_| false);
+        assert!(!c.swallow(VK_SPACE, true, true));
+    }
+
+    #[test]
+    fn space_in_the_hotkey_itself_is_never_eaten() {
+        let mut c = Chord::new(Hotkey::parse("Ctrl+Space").unwrap());
+        c.feed(LCTRL, true);
+        c.feed(VK_SPACE, true);
+        assert!(!c.swallow(VK_SPACE, true, true));
     }
 
     #[test]
