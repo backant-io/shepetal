@@ -1,0 +1,1 @@
+Deploy the Kubernetes cluster with Terraform, then point the GraphQL gateway at the Postgres replica behind the load balancer.

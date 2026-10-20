@@ -1,2 +1,9 @@
 agent/.venv/
 agent/ids.json
+/.build/
+/.swiftpm/
+/.cache/
+/dist/
+bench/.cache/
+bench/.venv/
+bench/__pycache__/
