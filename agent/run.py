@@ -1,11 +1,12 @@
 """Run shepetal's builder as a Claude Managed Agent whose tools execute on this Mac.
 
     ANTHROPIC_API_KEY=... agent/.venv/bin/python agent/run.py setup          # once: environment + agent -> agent/ids.json
-    ANTHROPIC_ENVIRONMENT_KEY=... agent/.venv/bin/python agent/run.py worker  # keep running: executes the agent's tools here
+    agent/.venv/bin/python agent/run.py worker                                # prompts for the environment key, keep running: executes the agent's tools here
     ANTHROPIC_API_KEY=... agent/.venv/bin/python agent/run.py start [cents]   # new budgeted session, kicked off with the outcome
 """
 import asyncio
 import contextlib
+import getpass
 import json
 import os
 import signal
@@ -45,9 +46,10 @@ def setup():
 
 
 async def worker():
-    # The agent's bash inherits this process's environment: keep both keys out of it.
+    # The agent's bash runs as this user and can read this process's launch environment
+    # (ps -E), so the key is typed in rather than passed as an env var.
     os.environ.pop("ANTHROPIC_API_KEY", None)
-    key = os.environ.pop("ANTHROPIC_ENVIRONMENT_KEY")
+    key = getpass.getpass("environment key (sk-ant-oat01-...): ")
     WORKDIR.mkdir(exist_ok=True)
     async with anthropic.AsyncAnthropic(auth_token=key) as client:
         w = EnvironmentWorker(client, environment_id=ids()["environment_id"], environment_key=key,
