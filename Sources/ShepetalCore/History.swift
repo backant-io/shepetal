@@ -7,7 +7,7 @@ public enum Outcome: String {
     case tooShort = "too_short"
     case cancelled
     case failed                        // transcription error
-    case noSpeech = "no_speech"        // the model heard no words
+    case noSpeech = "no_speech"        // silence, non-speech tags or fillers only; nothing pasted
 }
 
 public struct HistoryEntry: Equatable {
