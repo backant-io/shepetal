@@ -2,6 +2,8 @@
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
 # cleanup -> audio store + history -> clipboard + Cmd+V into a text view the app owns.
 # Asserts WER <= 8 %, text ready <= 700 ms after release, and an owner-only audio file per recording.
+# A dictionary.txt in SHEPETAL_HOME replaces one word of e03; that clip is checked for the replacement and
+# left out of the WER. SHEPETAL_HOME defaults to .cache/e2e/home.
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -12,8 +14,13 @@ BIN=${SHEPETAL_BIN:-.build/release/shepetal}
 [ -x "$BIN" ] || swift build -c release
 WORK=$PWD/.cache/e2e
 FIX=$WORK/fixtures
-export SHEPETAL_HOME=$WORK/home
-mkdir -p "$FIX"
+export SHEPETAL_HOME=${SHEPETAL_HOME:-$WORK/home}
+mkdir -p "$FIX" "$SHEPETAL_HOME"
+DICT=$SHEPETAL_HOME/dictionary.txt
+if [ -e "$DICT" ] && ! head -1 "$DICT" | grep -q '^# e2e-mac'; then
+  echo "e2e-mac: $DICT is not ours, refusing to overwrite it" >&2; exit 1
+fi
+printf '# e2e-mac dictionary\ndentist => orthodontist\n' > "$DICT"
 
 while IFS='|' read -r id voice text; do
   [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "$text"
@@ -29,7 +36,7 @@ FIXTURES
 
 "$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl"
 
-python3 - "$WORK/results.jsonl" "$FIX" <<'PY'
+python3 - "$WORK/results.jsonl" "$FIX" "$DICT" <<'PY'
 import json, os, re, stat, struct, sys
 
 def words(s):
@@ -45,7 +52,9 @@ def edits(a, b):
 
 assert edits("a b c".split(), "a x c d".split()) == 2  # self-check of the WER math
 
-results, fix = sys.argv[1], sys.argv[2]
+results, fix, dictionary = sys.argv[1:4]
+replaced = {"e03.wav": ("dentist", "orthodontist")}  # clip -> what dictionary.txt replaces; kept out of the WER
+assert stat.S_IMODE(os.stat(dictionary).st_mode) == 0o600, "dictionary.txt is not owner-only"
 rows = [json.loads(l) for l in open(results) if l.strip()]
 assert rows and all("wav" in r for r in rows), f"no results: {rows}"
 errors = ref_words = 0
@@ -54,7 +63,12 @@ for r in rows:
     assert r["error"] == "", (name, r["error"])
     ref = words(open(os.path.join(fix, name[:-4] + ".txt")).read())
     e = edits(ref, words(r["inserted_text"]))
-    errors += e; ref_words += len(ref)
+    if name in replaced:
+        spoken, written = replaced[name]
+        got = words(r["inserted_text"])
+        assert written in got and spoken not in got, (name, "dictionary replacement missing", r["inserted_text"])
+    else:
+        errors += e; ref_words += len(ref)
     assert r["inserted_text"] == r["text"], (name, "field holds something else", r["inserted_text"])
     assert r["paste_landed"] and r["clipboard_restored"], (name, "paste", r)
     if not os.environ.get("ENGINE"):
@@ -71,7 +85,8 @@ for r in rows:
     assert abs((len(data) - 44) / 4 / 16000 - r["audio_seconds"]) < 1e-3, name
     print(f"{name}: {e}/{len(ref)} word errors, ready {r['ready_ms']} ms, {r['audio_seconds']:.1f} s audio")
 wer = errors / ref_words
-print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows)} clips ({ref_words} words)")
+print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows) - len(replaced)} clips ({ref_words} words), "
+      f"dictionary replacement in {', '.join(replaced)}")
 assert wer <= 0.08, f"WER {wer:.1%} > 8%"
 print("e2e-mac: OK")
 PY

@@ -55,7 +55,7 @@ final class Pipeline {
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Cleanup.apply(run.entry.rawText)
+        run.entry.text = Vocabulary.load(Paths.dictionary).apply(Cleanup.apply(run.entry.rawText))
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return "No speech heard" }
         let (before, after) = context()

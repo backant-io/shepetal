@@ -73,3 +73,36 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
+
+### M-MIC-1: choosing the mic
+1. Plug in a USB or Bluetooth mic you have never used with Shepetal. Expected: "New mic: <its name>" shows next to 🤫. Unplug and plug it in again: nothing shows.
+2. Open 🤫 > Microphone. Expected: "Automatic (<mic in use>)" is checked, every input device is listed, and a "Prefer <name>" item is listed for each.
+3. Choose the USB mic's name (this forces it). Dictate a sentence while tapping the USB mic, then play the newest WAV from Open recordings folder. Expected: the tap is loud, so the USB mic recorded.
+4. Choose Automatic, then "Prefer <USB mic>". Dictate again. Expected: the USB mic records. Unplug it. Expected: "Using <next mic>" shows next to 🤫, and the next dictation works.
+
+### M-MIC-2: closed lid
+1. On a MacBook with an external display, keyboard and a USB mic, close the lid. Dictate. Expected: the USB mic records, even when MacBook Pro Microphone is forced or ranked first (the menu shows it as "(lid closed)" and greyed out).
+2. Unplug the USB mic and dictate. Expected: no recording starts, and a yellow ring with "The lid is closed and no other mic is connected. Open the lid or plug in a mic."
+
+### M-MIC-3: mic disconnected mid-dictation
+1. Force a USB or Bluetooth mic. Double-tap fn for hands-free, say a sentence, then unplug the mic (or switch off the headset) while still recording.
+2. Expected: recording stops, "Mic disconnected" shows next to 🤫, what you said before the unplug is inserted, and its WAV is in Open recordings folder.
+
+### M-MIC-4: dead mic
+1. Force an input that sends only silence: a loopback driver with nothing playing (for example Microsoft Teams Audio when Teams is closed, or BlackHole). Double-tap fn for hands-free and wait.
+2. Expected: after about 5 s "No sound from <name>. Is it muted?", and after about 15 s "Still no sound from <name>. Pick another mic in the 🤫 menu." Tap fn: the WAV is kept and holds silence.
+
+### M-MIC-5: Bluetooth and quiet recordings
+1. With AirPods connected and preferred, dictate once. Expected: "Tip: the built-in mic records clearer than Bluetooth" shows once. Dictate again: it does not show again, not even after a relaunch.
+2. On the built-in mic, hold fn and say a sentence very quietly from about an arm's length away. Expected: after the text lands, "Speak closer or use a wired mic". A normal sentence at normal distance does not show it. If it shows too often or never, tune it with `defaults write io.backant.shepetal micQuietFloor -float 0.002` (RMS, default 0.003) and relaunch.
+
+### M-LANG-1: languages
+1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
+2. Check Deutsch and Français. Expected: the menu's model line stays "Model: parakeet-tdt-0.6b-v3" (no reload). Say a German sentence. Expected: German text.
+3. Check 日本語 (Japanese). Expected: the model line reads "Model: ggml-large-v3-turbo-q5_0" when that model and `whisper-cli` are in `~/Library/Application Support/Shepetal/models/`. Otherwise it says which file is missing and where it goes, and dictation shows "Speech model is not loaded" until you install it or choose Automatic.
+4. Choose Automatic. Expected: the model line goes back to Parakeet.
+
+### M-DICT-1: personal dictionary
+1. Choose 🤫 > Dictionary…. Expected: `dictionary.txt` opens in your default text editor, holding only comment lines that explain the format. `ls -l ~/Library/Application\ Support/Shepetal/dictionary.txt` shows `-rw-------`.
+2. Add the lines `GitHub` and `asap => as soon as possible`, save, and without restarting Shepetal dictate "push it to github asap".
+3. Expected: "Push it to GitHub as soon as possible." A word that only contains "asap" (for example "asaps") is left alone.
