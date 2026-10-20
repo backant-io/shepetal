@@ -4,7 +4,24 @@ Steps a person has to run: they need physical keys, a voice, or a permission gra
 
 ## Mac
 
-Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc signed, so every rebuild counts as a new app for macOS and the permissions have to be granted again. If the 🌐/fn key opens the emoji picker or starts macOS Dictation, set System Settings > Keyboard > "Press 🌐 key to" to "Do Nothing".
+Setup: install the app once, either from the release zip (README > Mac > Install) or with `scripts/make-app.sh --install`, which builds it and installs it to `/Applications/Shepetal.app`. Open it from Finder or with `open /Applications/Shepetal.app`. If the 🌐/fn key opens the emoji picker or starts macOS Dictation, set System Settings > Keyboard > "Press 🌐 key to" to "Do Nothing". If Wispr Flow is running with fn as its shortcut, both apps hear fn and both insert text: quit Wispr Flow (or move its shortcut off fn) before testing Shepetal.
+
+The app is signed with a certificate when the build machine has one (`scripts/make-app.sh` prints "Signed with: …"). Then macOS keeps the permissions across rebuilds and updates. If it prints "Signed ad-hoc", every rebuild counts as a new app for macOS and the permissions have to be granted again. To run the M-PERM tests from scratch, quit Shepetal and reset its grants with `tccutil reset All io.backant.shepetal`.
+
+### M-SETUP-1: first run from the release zip
+1. Download the zip from the release, double-click it, and drag `Shepetal.app` into Applications.
+2. Double-click `Shepetal.app`. If macOS blocks it, use System Settings > Privacy & Security > Open Anyway (README > Mac > Install, step 3).
+3. Expected: no Dock icon appears. 🤫 appears in the menu bar and, tiny, in the bottom-left corner of the screen. The Permissions window opens.
+4. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅ and the 🤫 menu's first line reads "Hold fn to talk, double-tap for hands-free".
+5. Click into any text field, hold fn, say a sentence, release. Expected: the sentence is typed there.
+
+### M-SETUP-2: permissions survive a rebuild
+1. With all three permissions granted, quit Shepetal, run `scripts/make-app.sh --install` (it must print "Signed with: Apple Development…" or "Developer ID…"), and open the app again.
+2. Expected: no Permissions window opens, nothing is asked again, and fn dictation works straight away.
+
+### M-SETUP-3: stays running in the background
+1. Open Shepetal and use other apps for an hour, including full-screen apps and Space switches.
+2. Expected: 🤫 is still in the bottom-left corner and in the menu bar, there was never a Dock icon, and fn still dictates. Quit Shepetal from the 🤫 menu: both 🤫 disappear.
 
 ### M-PERM-1: Microphone
 1. Quit Shepetal. Run `tccutil reset Microphone io.backant.shepetal`.
@@ -31,6 +48,8 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 2. Expected: a small 🤫 (about 18 pt) about 8 pt from the bottom and left edges, above the Dock.
 3. Switch to another Space, then put Safari in full screen. Expected: 🤫 stays in the same corner in both.
 4. Click on 🤫. Expected: the click goes to whatever is under it. Shepetal does not take focus.
+5. Tap fn once briefly. Expected: the hint shows to the right of 🤫, and 🤫 itself does not move. When the hint goes, 🤫 stays (idle has no ring).
+(The frame, the panel flags, the hint timing and the ring colours are covered by `IndicatorTests`. This step checks them on a real display, Space and full-screen app.)
 
 ### M-FN-1: hold to talk
 1. Click into a TextEdit document. Hold fn, say "Testing one two three, this is a hold to talk check.", then release.
@@ -69,6 +88,13 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 ### M-INS-4: paste that does not land
 1. Open Activity Monitor and click its process list, so no text field has focus. Hold fn, say a sentence, then release.
 2. Expected: a yellow ring and "Paste did not land. The text is in Recent." Clicking the entry in Recent copies the text.
+
+### M-NS-1: no speech
+1. Copy a word in TextEdit (Cmd+C), then click into the document. In a quiet room, hold fn for about 2 s without speaking, then release.
+2. Expected: nothing is inserted. A yellow ring and "No speech heard" show for about 4 s. Cmd+V still pastes the word you copied.
+3. Expected: Recent in the 🤫 menu has a "(no speech)" entry, and a new WAV is in Open recordings folder.
+4. Hold fn, say only "um, uh", then release. Expected: the same as steps 2 and 3.
+5. Hold fn and say a quiet "yes" from about an arm's length away. Expected: "yes" is inserted. If it shows "No speech heard" instead, or room noise in step 1 got transcribed, the -60 dBFS floor does not fit this mic: note the mic and the room in #15. You can try another floor with `defaults write io.backant.shepetal speechFloorDb -float -65` and relaunch.
 
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
