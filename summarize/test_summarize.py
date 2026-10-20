@@ -189,6 +189,39 @@ class OwnerRules(unittest.TestCase):
     def test_undiarized_transcript_has_no_owner(self):
         self.assertEqual(self.owner([("", "You will send it tomorrow.")]), "")
 
+    def test_label_without_letters_names_nobody(self):
+        # A label with no word characters used to become the empty alias, which "named" it in every sentence.
+        for third in ("—", "--", "?"):  # labels as a diarizer or a calendar may hand them over, not via parse()
+            sents = [("Ana", "Can you send the deck by Friday?"), ("Ben", "Sure, will do."), (third, "ok.")]
+            self.assertEqual(self.owner(sents), "Ben", third)
+
+    def test_non_latin_names_are_names(self):
+        sents = S.parse("Ana: Can you send the deck by Friday?\nBen: Sure, will do.\n张伟: 好.")
+        self.assertEqual(self.owner(sents), "Ben")
+        sents = S.parse("Ben: Олена will send the deck by Friday.\nAna: Fine.\nОлена: Okay.")
+        self.assertEqual(self.owner(sents), "Олена")  # named, so not the next speaker (Ana)
+
+
+class Parse(unittest.TestCase):
+    def test_labels_are_speakers(self):
+        self.assertEqual(S.parse("Maya: Hi. Go ahead.\nSpeaker 2: Okay.\n张伟: 好."),
+                         [("Maya", "Hi."), ("Maya", "Go ahead."), ("Speaker 2", "Okay."), ("张伟", "好.")])
+
+    def test_colon_in_undiarized_text_is_not_a_speaker(self):
+        # The iPhone mic path has no labels: a time, a URL or a "Note:" stays part of the sentence.
+        for line in ("We ship the beta at 10:30 on Friday and I will send the notes tomorrow.",
+                     "At 10:30 I will send the notes tomorrow.",
+                     "The build is at https://example.org/x and I will send the notes tomorrow."):
+            self.assertEqual(S.parse(line), [("", line)])
+            self.assertEqual(S.actions(S.parse(line))[0][0], "")
+        text = "We ship on Friday.\nNote: I will send the notes tomorrow.\nThe crash fix is merged."
+        self.assertEqual({spk for spk, _ in S.parse(text)}, {""})
+
+    def test_sentence_with_a_colon_is_no_label(self):
+        # More than four words before the colon is a sentence, not a speaker.
+        self.assertEqual(S.parse("Maya: Hi.\nHere is what I really think: ship it.\nTom: Fine.")[1],
+                         ("", "Here is what I really think: ship it."))
+
 
 class AmiLabels(unittest.TestCase):
     def test_owner_comes_from_the_subject_only(self):
