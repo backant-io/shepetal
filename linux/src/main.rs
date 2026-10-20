@@ -180,7 +180,9 @@ fn record(wav: &PathBuf) -> std::io::Result<Child> {
 
 /// SIGINT so the recorder finalizes the WAV header; SIGKILL would leave it broken.
 fn stop(mut child: Child) {
-    let _ = Command::new("kill").args(["-INT", &child.id().to_string()]).status();
+    // The shell's builtin kill: minimal images (Debian slim) have no /usr/bin/kill, and a failed
+    // SIGINT would leave the mic open.
+    let _ = Command::new("sh").args(["-c", "kill -INT \"$0\"", &child.id().to_string()]).status();
     let _ = child.wait();
 }
 
@@ -612,7 +614,7 @@ mod tests {
         }
         let saved = SESSION.iter().chain(&["PATH"]).map(|k| (*k, std::env::var_os(k))).collect();
         let _restore = Restore(saved, d.clone());
-        SESSION.iter().for_each(std::env::remove_var);
+        SESSION.iter().for_each(|k| std::env::remove_var(k));
         let path = std::env::var("PATH").unwrap_or_default();
         std::env::set_var("PATH", format!("{d_}:{path}"));
         f(&d);
