@@ -16,6 +16,7 @@ final class DictationSessionTests: XCTestCase {
         }
         func stop() { running = false }
         var isRunning: Bool { running }
+        var capturing = false
     }
 
     struct ModelError: LocalizedError { var errorDescription: String? { "model broke" } }
@@ -569,11 +570,11 @@ final class DictationSessionTests: XCTestCase {
     }
 
     @MainActor
-    func testMicKeptOpenUntilTurnedOffOutlastsADayAndTurnsOff() async {
-        let session = makeSession(keepOpen: .untilTurnedOff)
+    func testMicKeptOpenForAnHourStaysOpenAndTurnsOff() async {
+        let session = makeSession(keepOpen: .oneHour)
         _ = await recording(session)
         await session.stop()
-        await session.tick(now: Date().addingTimeInterval(24 * 60 * 60))
+        await session.tick(now: Date().addingTimeInterval(59 * 60))
         XCTAssertTrue(session.isOpen)
         XCTAssertTrue(mic.running)
         await session.turnOff()
@@ -581,6 +582,93 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertFalse(mic.running)
         XCTAssertNil(session.activity)
         XCTAssertFalse(SharedHandoff.isAppListening(in: handoff))
+    }
+
+    func testLongestKeepOpenStaysUnderTheLiveActivityLimit() {
+        // iOS ends a Live Activity after 8 hours; the mic must not outlive the 🤫 that shows it.
+        XCTAssertLessThan(KeepOpen.allCases.map(\.seconds).max() ?? 0, 8 * 60 * 60)
+    }
+
+    @MainActor
+    func testOnlyARecordingConvertsMicBuffers() async {
+        let session = makeSession(keepOpen: .fiveMinutes)
+        XCTAssertFalse(mic.capturing)
+        _ = await recording(session)
+        XCTAssertTrue(mic.capturing)
+        await session.stop()
+        XCTAssertTrue(mic.running)
+        XCTAssertFalse(mic.capturing) // the open, idle mic drops buffers before resampling them
+        let next = UUID()
+        keyboardRequests(next)
+        await session.startFromKeyboard()
+        XCTAssertTrue(mic.capturing)
+        session.cancel()
+        XCTAssertFalse(mic.capturing)
+    }
+
+    @MainActor
+    func testReadyIsSentAgainWhileTheMicStaysOpenSoItOnlyGoesStaleWhenTheAppDies() async {
+        let session = makeSession(keepOpen: .fiveMinutes)
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        _ = await recording(session)
+        await session.stop()
+        XCTAssertEqual(shown, [.recording, .processing, .idle])
+        await session.tick(now: Date().addingTimeInterval(30))
+        XCTAssertEqual(shown.count, 3)
+        await session.tick(now: Date().addingTimeInterval(DictationSession.activityRefresh + 1))
+        XCTAssertEqual(shown, [.recording, .processing, .idle, .idle])
+        XCTAssertLessThan(DictationSession.activityRefresh, Indicator.Mode.idle.staleAfter)
+    }
+
+    @MainActor
+    func testStartFromTheKeyboardAfterTheEngineDiedClosesAndLeavesTheRequestForTheApp() async {
+        let session = makeSession(keepOpen: .fiveMinutes)
+        _ = await recording(session)
+        await session.stop()
+        mic.running = false // stopped by the system less than a second ago, before the next tick
+        let next = UUID()
+        keyboardRequests(next)
+        await session.startFromKeyboard()
+        XCTAssertFalse(session.isRecording)
+        XCTAssertFalse(session.isOpen)
+        XCTAssertEqual(mic.starts, 1) // no start from the background
+        XCTAssertTrue(state.canStart(next)) // the keyboard's fallback opens the app with it
+        XCTAssertFalse(SharedHandoff.isAppListening(in: handoff))
+    }
+
+    @MainActor
+    func testCancelWithTheMicOpenKeepsTheAudioAndShowsReady() async throws {
+        let session = makeSession(keepOpen: .fiveMinutes)
+        let id = await recording(session)
+        session.cancel()
+        XCTAssertTrue(session.isOpen)
+        XCTAssertTrue(mic.running)
+        XCTAssertEqual(session.activity, .idle)
+        XCTAssertEqual(try savedSamples(id), speech)
+        XCTAssertEqual(entry(id)?.outcome, .cancelled)
+        XCTAssertEqual(state.phase, .cancelled)
+    }
+
+    @MainActor
+    func testSupersedingRequestWithTheMicOpenKeepsTheOldAudioAndRecordsTheNewOne() async throws {
+        let session = makeSession(keepOpen: .fiveMinutes)
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        let old = await recording(session)
+        let new = UUID()
+        keyboardRequests(new)
+        await session.startFromKeyboard() // the open mic takes the new request without a URL
+        XCTAssertTrue(session.isRecording)
+        XCTAssertEqual(mic.starts, 1)
+        XCTAssertEqual(try savedSamples(old), speech)
+        XCTAssertEqual(entry(old)?.text, "hello") // late text goes to history
+        XCTAssertEqual(state.sessionID, new)
+        XCTAssertEqual(state.phase, .recording)
+        XCTAssertEqual(shown, [.recording, .recording]) // never ended
+        session.append(Array(speech.reversed()))
+        await session.stop()
+        XCTAssertEqual(try savedSamples(new), Array(speech.reversed()))
     }
 
     @MainActor
@@ -635,7 +723,6 @@ final class DictationSessionTests: XCTestCase {
         let session = DictationSession(mic: mic, directory: dir, handoff: handoff, settings: UserDefaults(suiteName: settingsSuite)!) { true }
         XCTAssertEqual(session.keepOpen, .fiveMinutes)
         session.keepOpen = .oneHour
-        XCTAssertEqual(makeSession(keepOpen: .oneHour).keepOpen, .oneHour)
         let reloaded = DictationSession(mic: mic, directory: dir, handoff: handoff, settings: UserDefaults(suiteName: settingsSuite)!) { true }
         XCTAssertEqual(reloaded.keepOpen, .oneHour)
     }

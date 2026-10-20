@@ -18,8 +18,16 @@ struct ShepetalApp: App {
         }
         session.observeKeyboard()
         session.beginBackgroundWork = {
-            let task = UIApplication.shared.beginBackgroundTask(withName: "transcribe")
-            return { UIApplication.shared.endBackgroundTask(task) }
+            // Ended by the expiration handler too: an expired task that is still open gets the app killed,
+            // which would lose audio still held in memory (locked iPhone).
+            var task = UIBackgroundTaskIdentifier.invalid
+            let end = {
+                guard task != .invalid else { return }
+                UIApplication.shared.endBackgroundTask(task)
+                task = .invalid
+            }
+            task = UIApplication.shared.beginBackgroundTask(withName: "transcribe", expirationHandler: end)
+            return end
         }
         let live = LiveIndicator()
         session.onActivity = { [weak session] in live.show($0, micOpen: session?.isOpen ?? false) }
@@ -105,7 +113,7 @@ final class LiveIndicator {
     func show(_ mode: Indicator.Mode?, micOpen: Bool) {
         guard let mode else { return end(nil, .immediate) }
         // If the app dies mid-dictation, the widget shows the activity as stale once the state is past its timeout.
-        let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: mode.staleAfter.map { .now + $0 })
+        let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: .now + mode.staleAfter)
         if mode == .error, !micOpen { return end(content, .after(.now + DictationSession.errorShown)) }
         if let activity {
             Task { await activity.update(content) }
@@ -131,6 +139,13 @@ final class EngineMic: Microphone {
     var onInterruption: () -> Void = {}
     private let engine = AVAudioEngine()
     private var interruptions: NSObjectProtocol?
+    /// Set on the main actor, read on the audio thread.
+    private let capturingLock = NSLock()
+    private var isCapturing = false
+    var capturing: Bool {
+        get { capturingLock.withLock { isCapturing } }
+        set { capturingLock.withLock { isCapturing = newValue } }
+    }
 
     /// False once the engine stopped itself (interruption, route or hardware change); the session's
     /// once-a-second tick then stops the recording and keeps what it has.
@@ -138,13 +153,15 @@ final class EngineMic: Microphone {
 
     func start() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers]) // do not stop the user's music
+        // Do not stop the user's music, and keep it where it plays: on the loudspeaker rather than the earpiece,
+        // and on AirPods in full quality (A2DP) rather than the call profile. The mic may stay open for minutes.
+        try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers, .defaultToSpeaker, .allowBluetoothA2DP])
         try session.setActive(true)
         let converter = AudioConverter()
         let input = engine.inputNode
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 4096, format: input.outputFormat(forBus: 0)) { [weak self] buffer, _ in
-            guard let chunk = try? converter.resampleBuffer(buffer) else { return }
+            guard self?.capturing == true, let chunk = try? converter.resampleBuffer(buffer) else { return } // idle: dropped unconverted
             self?.onSamples(chunk)
         }
         try engine.start()

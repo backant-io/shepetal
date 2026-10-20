@@ -6,25 +6,27 @@ public protocol Microphone: AnyObject {
     func stop()
     /// False once the system stopped the mic under us: a call, Siri, an audio interruption or a route change.
     var isRunning: Bool { get }
+    /// True only while a dictation records. An open, idle mic drops its buffers before converting them.
+    var capturing: Bool { get set }
 }
 
 /// How long the mic stays open after a dictation, so the next one starts from the keyboard without
 /// opening the app (iOS lets an app start recording only in the foreground; once open, the `audio`
-/// background mode keeps it running). Frames are kept only between a start and a stop.
+/// background mode keeps it running). Frames are kept only between a start and a stop. The longest
+/// option stays well under the 8 hours after which iOS ends a Live Activity, so 🤫 is shown the whole time.
 public enum KeepOpen: Int, CaseIterable, Identifiable {
-    case afterEach = 0, fiveMinutes = 300, fifteenMinutes = 900, oneHour = 3600, untilTurnedOff = -1
+    case afterEach = 0, fiveMinutes = 300, fifteenMinutes = 900, oneHour = 3600
 
     public static let standard = KeepOpen.fiveMinutes
     public var id: Int { rawValue }
-    /// Seconds an idle mic stays open; nil for "until turned off".
-    public var seconds: TimeInterval? { self == .untilTurnedOff ? nil : TimeInterval(rawValue) }
+    /// Seconds an idle mic stays open.
+    public var seconds: TimeInterval { TimeInterval(rawValue) }
     public var label: String {
         switch self {
         case .afterEach: "Close after each dictation"
         case .fiveMinutes: "5 minutes"
         case .fifteenMinutes: "15 minutes"
         case .oneHour: "1 hour"
-        case .untilTurnedOff: "Until I turn it off"
         }
     }
 }
@@ -40,6 +42,9 @@ public final class DictationSession: ObservableObject {
     static let ready = "Ready. Tap the mic on the Shepetal keyboard."
     /// How long an error stays in the Live Activity before it goes back to "Ready" while the mic stays open.
     public static let errorShown: TimeInterval = 4
+    /// While the mic is open and idle, the Live Activity is sent again this often, so its stale date
+    /// (`Indicator.Mode.staleAfter`) only passes when the app stopped running.
+    public nonisolated static let activityRefresh: TimeInterval = 60
 
     @Published public private(set) var status = "Loading speech model..."
     /// Set while recordings are held in memory because they could not be written (the iPhone is locked).
@@ -59,8 +64,9 @@ public final class DictationSession: ObservableObject {
     /// What the Live Activity shows: recording, then processing, idle ("Ready") while the mic stays open,
     /// error when a dictation ended without text, nil once the mic is closed. Nil before the first dictation.
     public private(set) var activity: Indicator.Mode? {
-        didSet { if activity != oldValue { onActivity(activity) } }
+        didSet { if activity != oldValue { activitySentAt = Date(); onActivity(activity) } }
     }
+    private var activitySentAt = Date.distantPast
     public var onActivity: @MainActor (Indicator.Mode?) -> Void = { _ in }
     /// Called when a transcription starts; the returned closure is called when it ends. The app asks iOS for
     /// background time here, so it is not suspended mid-transcription once the mic and audio session are off.
@@ -130,6 +136,9 @@ public final class DictationSession: ObservableObject {
     public func startFromKeyboard() async {
         let state = SharedHandoff.read(in: handoff)
         guard isOpen, let id = state.sessionID, state.canStart(id) else { return }
+        // The system stopped the engine since the last tick: starting it now, in the background, would fail.
+        // Close instead; the request stays pending and the keyboard opens the app.
+        guard mic.isRunning else { return close() }
         await begin(id)
     }
 
@@ -155,6 +164,7 @@ public final class DictationSession: ObservableObject {
         }
         sessionID = id
         latestID = id
+        mic.capturing = true
         startedAt = Date()
         isRecording = true
         isOpen = true
@@ -226,6 +236,9 @@ public final class DictationSession: ObservableObject {
             if let at = errorAt, activity == .error, now.timeIntervalSince(at) >= Self.errorShown {
                 errorAt = nil
                 activity = .idle
+            } else if let activity, now.timeIntervalSince(activitySentAt) >= Self.activityRefresh {
+                activitySentAt = now
+                onActivity(activity)
             }
             await startFromKeyboard()
             return
@@ -348,8 +361,8 @@ public final class DictationSession: ObservableObject {
     }
 
     /// When an idle open mic closes, counted from now.
-    private func closingTime() -> Date? {
-        keepOpen.seconds.map { Date().addingTimeInterval($0) }
+    private func closingTime() -> Date {
+        Date().addingTimeInterval(keepOpen.seconds)
     }
 
     /// Turns the mic off, so the keyboard opens the app for the next dictation. Ends the Live Activity
@@ -370,6 +383,7 @@ public final class DictationSession: ObservableObject {
     private func endRecording(reason: String?) -> Ended? {
         guard let id = sessionID else { return nil }
         sessionID = nil
+        mic.capturing = false
         isRecording = false
         if keepOpen == .afterEach || !mic.isRunning {
             close(endActivity: false) // `finish` or `cancel` sets the last state

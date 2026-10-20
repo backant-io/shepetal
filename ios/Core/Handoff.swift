@@ -318,7 +318,10 @@ public enum SharedHandoff {
     public static let shared = UserDefaults(suiteName: appGroup)
     private static let key = "handoff"
 
-    public static func read(in defaults: UserDefaults? = shared) -> Handoff { update(in: defaults) { $0 } }
+    /// Read only: a read that wrote the state back could erase a request the keyboard wrote in between.
+    public static func read(in defaults: UserDefaults? = shared) -> Handoff {
+        defaults?.data(forKey: key).flatMap { try? JSONDecoder().decode(Handoff.self, from: $0) } ?? Handoff()
+    }
 
     // ponytail: read-modify-write on UserDefaults is not atomic across processes. Each phase has a
     // single writer (keyboard or app), except `recording`, where the keyboard's stop request can race the

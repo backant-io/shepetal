@@ -73,7 +73,8 @@ final class KeyboardViewController: UIInputViewController {
         indicator.show(.processing, "Starting...")
         // If the app has not taken the request (it was closed meanwhile), open it after all.
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.startGrace) { [weak self] in
-            guard let self, self.sessionID == id, SharedHandoff.read().canStart(id) else { return }
+            guard let self, self.sessionID == id else { return }
+            guard SharedHandoff.read().canStart(id) else { return self.refresh() } // show where it went instead of "Starting..."
             self.indicator.show(.processing, "Opening Shepetal...")
             self.openApp(url)
         }
