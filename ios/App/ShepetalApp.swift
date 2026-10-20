@@ -17,6 +17,10 @@ struct ShepetalApp: App {
             Task { @MainActor in await session?.stop(reason: "Recording stopped early: a call, Siri or another app took the microphone.") }
         }
         session.observeKeyboard()
+        session.beginBackgroundWork = {
+            let task = UIApplication.shared.beginBackgroundTask(withName: "transcribe")
+            return { UIApplication.shared.endBackgroundTask(task) }
+        }
         let live = LiveIndicator()
         session.onActivity = { [weak session] in live.show($0, micOpen: session?.isOpen ?? false) }
         // Audio saved while the iPhone was locked could not be written; write it now.
@@ -100,7 +104,8 @@ final class LiveIndicator {
     /// error goes back to "Ready" (the session does that). Once the mic is closed, an error stays a few seconds, then it ends.
     func show(_ mode: Indicator.Mode?, micOpen: Bool) {
         guard let mode else { return end(nil, .immediate) }
-        let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: nil)
+        // If the app dies mid-dictation, the widget shows the activity as stale once the state is past its timeout.
+        let content = ActivityContent(state: DictationActivity.ContentState(mode: mode), staleDate: mode.staleAfter.map { .now + $0 })
         if mode == .error, !micOpen { return end(content, .after(.now + DictationSession.errorShown)) }
         if let activity {
             Task { await activity.update(content) }

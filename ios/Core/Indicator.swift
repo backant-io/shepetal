@@ -20,6 +20,16 @@ public final class Indicator {
             }
         }
 
+        /// How long a Live Activity may show this state without an update before it is stale (the app died):
+        /// a recording runs up to its cap, transcription has the handoff timeout. Nil: never stale.
+        public var staleAfter: TimeInterval? {
+            switch self {
+            case .recording: Handoff.maxRecording + Handoff.timeout
+            case .processing: Handoff.timeout
+            case .idle, .error: nil
+            }
+        }
+
         /// The state word in the Live Activity and the Dynamic Island.
         public var title: String {
             switch self {

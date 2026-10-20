@@ -13,24 +13,30 @@ struct DictationLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: DictationActivity.self) { context in
             HStack {
-                Psst(mode: context.state.mode)
-                Text(context.state.mode.title).font(.headline)
+                Psst(mode: context.mode)
+                Text(context.title).font(.headline)
                 Spacer()
             }
             .padding()
         } dynamicIsland: { context in
             DynamicIsland {
-                DynamicIslandExpandedRegion(.leading) { Psst(mode: context.state.mode) }
-                DynamicIslandExpandedRegion(.trailing) { Text(context.state.mode.title) }
+                DynamicIslandExpandedRegion(.leading) { Psst(mode: context.mode) }
+                DynamicIslandExpandedRegion(.trailing) { Text(context.title) }
             } compactLeading: {
-                Psst(mode: context.state.mode)
+                Psst(mode: context.mode)
             } compactTrailing: {
-                Text(context.state.mode.title).font(.caption2)
+                Text(context.title).font(.caption2)
             } minimal: {
-                Psst(mode: context.state.mode)
+                Psst(mode: context.mode)
             }
         }
     }
+}
+
+extension ActivityViewContext<DictationActivity> {
+    /// A stale activity means the app stopped updating it (it died): no ring, and it says so.
+    var mode: Indicator.Mode { isStale ? .idle : state.mode }
+    var title: String { isStale ? "Stopped" : state.mode.title }
 }
 
 /// The emoji with the state ring, as in the keyboard corner and on the Mac.

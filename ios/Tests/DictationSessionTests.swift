@@ -241,6 +241,37 @@ final class DictationSessionTests: XCTestCase {
     }
 
     @MainActor
+    func testOlderRecordingFinishingLateDoesNotEndTheLiveActivityOfANewerOneThatStopped() async throws {
+        let session = DictationSession(mic: mic, directory: dir, handoff: handoff, settings: UserDefaults(suiteName: settingsSuite)!) { true }
+        session.keepOpen = .afterEach
+        let newer = Array(speech.reversed())
+        session.modelReady { samples in
+            // The superseded recording takes 0.3 s; the newer one takes 1.5 s, so the older finishes in between.
+            try await Task.sleep(for: .milliseconds(samples == newer ? 1500 : 300))
+            return samples == newer ? "newer" : "older"
+        }
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        let old = await recording(session)
+        let new = UUID()
+        keyboardRequests(new)
+        let opening = Task { await session.open(url(new)) } // ends the old recording, starts the new one, transcribes the old
+        for _ in 0..<200 where state.sessionID != new || state.phase != .recording { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertTrue(session.isRecording)
+        session.append(newer)
+        let stopping = Task { await session.stop() } // the user stops the new one while the old is still transcribing
+        await opening.value
+        XCTAssertEqual(entry(old)?.text, "older")
+        XCTAssertEqual(session.activity, .processing) // still "Transcribing" for the new recording
+        XCTAssertEqual(session.status, "Transcribing...")
+        await stopping.value
+        XCTAssertNil(session.activity)
+        XCTAssertEqual(shown, [.recording, .processing, nil])
+        var h = state
+        XCTAssertEqual(h.consume(new, document: field, canCopy: true), .insert("newer"))
+    }
+
+    @MainActor
     func testMicThatFailsToStartForANewRequestEndsTheLiveActivityAndTranscribesTheOldRecording() async {
         let session = makeSession()
         var shown: [Indicator.Mode?] = []
@@ -435,6 +466,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertFalse(session.isRecording)
         XCTAssertTrue(SharedHandoff.isAppListening(in: handoff))
         session.append(Array(repeating: 0.5, count: 8_000)) // heard between dictations: never kept
+        XCTAssertEqual(session.heldSampleCount, 0) // not even held in memory
         let second = UUID()
         keyboardRequests(second) // no URL: the keyboard posts the start notification instead
         await session.startFromKeyboard()
@@ -581,6 +613,26 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertEqual(makeSession(keepOpen: .oneHour).keepOpen, .oneHour)
         let reloaded = DictationSession(mic: mic, directory: dir, handoff: handoff, settings: UserDefaults(suiteName: settingsSuite)!) { true }
         XCTAssertEqual(reloaded.keepOpen, .oneHour)
+    }
+
+    @MainActor
+    func testTranscriptionRunsInsideBackgroundWorkThatEndsWhenTheTextIsDelivered() async {
+        let session = makeSession() // the mic closes when the recording stops, so only background time keeps the app up
+        var begun = 0, ended = 0
+        session.beginBackgroundWork = {
+            begun += 1
+            return { ended += 1 }
+        }
+        session.modelReady { _ in
+            XCTAssertEqual(begun, 1) // asked for before the model runs
+            XCTAssertEqual(ended, 0)
+            return "hello"
+        }
+        _ = await recording(session)
+        await session.stop()
+        XCTAssertEqual(begun, 1)
+        XCTAssertEqual(ended, 1)
+        XCTAssertEqual(state.phase, .ready)
     }
 
     // MARK: Goal rule 9: Donate.
