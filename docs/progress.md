@@ -1,5 +1,34 @@
 # Progress
 
+## Iteration 2 (2026-10-20 evening): six parallel sessions
+
+Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
+
+### release (Mac build, installer, GitHub release)
+
+**Shipped:** GitHub pre-release [v0.1.0-mac](https://github.com/backant-io/shepetal/releases/tag/v0.1.0-mac), built from main at 6298f40. Assets: `Shepetal-0.1.0.pkg` (the main download), `Shepetal-0.1.0-mac.zip`, and their `.sha256`. The notes give the click-by-click install and first run, the fn troubleshooting, the hand-test checklist and the known limits. Pavel's Mac runs this build from `/Applications/Shepetal.app`: the running copy was quit, the new one copied in, and the installer's postinstall run as his user. It printed "🌐 key already set to Do Nothing" and "login item: enabled", then opened the app (UIElement, 🤫 window at x=8, y=1143, 18×18). `SOAK=300 scripts/check-app.sh` on the release build (as the test bundle): alive with 🤫 after 296 s, then Quit from the menu, no crash report.
+
+| PR | State | What landed | Verified before merge |
+|---|---|---|---|
+| #112 | merged (independent review running after the merge, because of the midnight deadline) | `.pkg` installer (`scripts/make-pkg.sh`, `scripts/pkg/{pre,post}install`): installs to /Applications. Its postinstall, as the logged-in user, sets "Press 🌐 key to" to Do Nothing (`defaults write com.apple.HIToolbox AppleFnUsageType -int 0`, `killall TextInputMenuAgent`, `killall -9 TextInputSwitcher`, read back), turns on Start at login (`Shepetal --postinstall`) and opens the app. The app does the same 🌐 check at every launch (only as `io.backant.shepetal`), shows a hint only on change, and has "Restore 🌐 key setting". "fn not received: re-grant Input Monitoring" next to 🤫 and in Home (`FnHealth`). `scripts/uninstall-mac.sh` (also in the app's Resources) keeps recordings. The menu item is renamed "Start at login" | `swift test` 123 pass (15 new: `FnKeySettingTests`, `FnHealthTests`; break of the store-once guard and the agent restart gives 5 red). `scripts/test-pkg-scripts.sh` OK against stand-ins (break: `killall` without -9 is red). The `--test` package installed with `installer -target CurrentUserHomeDirectory`, and both scripts ran in dry-run. e2e OK, check-app OK |
+| #53 | merged | `make-app.sh` signs with the Apple Development identity (designated requirement = bundle ID + certificate, so permissions survive rebuilds), and `--install` puts the app in /Applications (quit with osascript, reopen). `--zip`. The 🤫 app icon is rendered by `scripts/make-icon.swift` at 16–1024 px. `scripts/check-app.sh` runs a separate test bundle `Shepetal Check.app` (`io.backant.shepetal.check`, ad-hoc) and checks UIElement, the 🤫 panel bottom-left, alive after `SOAK` s, and Quit from the real status menu (`--quit-from-menu-after`). README install steps; goal.md rule 1 (🌐 key), rule 3 (🤫 icon), M1 (installer) | partial independent review: blockers fixed (the check ran a permission-holding copy, false passes, lock path). `SOAK=300` passed; breaks of the Quit item, the status item title and the inset are each red. e2e OK |
+
+**Left for release:**
+- Act on the #112 review.
+- Rebuild the release when #47 (Esc, shortcuts), #44 (cleanup model) and #39 (mic, languages) land.
+- Notarization needs a Developer ID pair (#109).
+- The screenshot of 🤫 needs Screen Recording for the worker, so it stays a hand test (M-IND-1).
+- Hand tests M-SETUP-1..5 wait on Pavel.
+
+### merge-b (review, fix and merge #36, #34, #44)
+
+| PR | State | What landed | Verified before merge |
+|---|---|---|---|
+| #34 | merged | Insertion and system integration (Mac F06, F17, F27, F90, F92, F109 to `hand-test`). Rule 8 on the Mac (#42): the focused app and window are stored at fn-down, the text is pasted only if that window is still focused when it is ready, otherwise it stays on the clipboard (plain text with the Concealed/Transient markers, old clipboard not restored) with a ⌘V hint next to 🤫; FocusRestore removed, nothing refocuses another app. Also NBSP and selection rules, Secure Input notice and paste block, revoked-permission detection, Open at login (`SMAppService`, menu item), synthesized sounds | independent review PASS on a clean clone (4 deliberate breaks red); review fixes: an unreadable window still records the app (`PasteGateTests.testUnreadableWindowStillRecordsTheApp`, red when broken), 0.1 s AX timeout on the fn-down focus read, clipboard markers (red when dropped). After merging main: `swift test` 82 pass, sandboxed `scripts/e2e-mac.sh` OK, WER 0.0% |
+| #36 | merged | Hub window (Home, History, Settings), history search, copy, playback, re-transcribe, archive, and the app and page URL of each dictation (Mac F23, F52 to `hand-test`; F91 stays `todo`). Issue #37 fixed in the review: history keeps only scheme, host and path of a URL (no query, fragment, userinfo, port or `;` path parameters) | independent review PASS on a clean clone; after merging main: `swift test` 46 pass, sandboxed `scripts/e2e-mac.sh` OK, WER 0.0% |
+
+Left for merge-b: #44 (local cleanup model). #34 follow-ups are on #42 (same-app unreadable window pastes, tabs count as the same window, e2e activation-policy assert after #28) and #33 (background Secure Input owner blocks every paste, sound packs). #36 follow-ups are on #38 (one-way history upgrade, re-transcribe sharing the ASR actor, private windows, no hub UI test).
+
 ## Iteration 1 (2026-10-20), main at 60cc333
 
 `python3 scripts/parity.py` gives these numbers. Only Mac cells moved this iteration.
