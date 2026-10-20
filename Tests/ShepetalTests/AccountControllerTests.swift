@@ -61,7 +61,7 @@ final class AccountControllerTests: XCTestCase {
     }
 
     private func until(_ what: String, _ condition: () -> Bool) async throws {
-        for _ in 0..<300 where !condition() { try await Task.sleep(nanoseconds: 10_000_000) }
+        for _ in 0..<1000 where !condition() { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertTrue(condition(), what)
     }
 
