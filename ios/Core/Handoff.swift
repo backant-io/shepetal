@@ -1,4 +1,6 @@
 import Foundation
+import UIKit
+import UniformTypeIdentifiers
 
 /// The keyboard <-> app dictation handoff. Both processes load it from the App Group,
 /// apply one transition and save it back. Every transition names the session it is for,
@@ -19,6 +21,9 @@ public struct Handoff: Codable, Equatable {
     public private(set) var text: String?
     /// Shown by the keyboard: why the session failed, or a note on delivered text (for example a recording cut short).
     public private(set) var message: String?
+    /// Set by the keyboard when the user taps the mic to finish. The stop notification only wakes the app;
+    /// the app stops only when this is set for its own recording.
+    public private(set) var stopRequested = false
     public private(set) var updatedAt: Date = .distantPast
 
     public init() {}
@@ -57,6 +62,15 @@ public struct Handoff: Codable, Equatable {
         phase == .recording && sessionID == id && now.timeIntervalSince(updatedAt) < Self.maxRecording
     }
 
+    /// Keyboard: ask the app to finish the recording `id`, before posting the stop notification.
+    /// False when `id` is not recording, so the keyboard starts a new dictation instead.
+    @discardableResult
+    public mutating func requestStop(_ id: UUID, now: Date = Date()) -> Bool {
+        guard phase == .recording, sessionID == id, !isExpired(now: now) else { return false }
+        stopRequested = true
+        return true
+    }
+
     /// App: the user stopped; transcription is running.
     @discardableResult
     public mutating func finishRecording(_ id: UUID, now: Date = Date()) -> Bool {
@@ -72,20 +86,39 @@ public struct Handoff: Codable, Equatable {
         return true
     }
 
+    /// What the keyboard does with a ready result.
+    public enum Delivery: Equatable {
+        /// Insert into the field the dictation started in.
+        case insert(String)
+        /// Goal rule 8: the user is in a different field now, so the text goes to the clipboard as plain text
+        /// (the old clipboard is not restored) and the hint says to paste.
+        case copy(String)
+    }
+
     /// Keyboard: take the text for the session it requested, in the field it is showing now.
-    /// Returns nil for a stale, expired or already inserted result, so the same text is never
-    /// inserted twice. A ready result shown in a different field is never inserted: the session
-    /// fails and the keyboard says the text is in the app's history (the app keeps every result there).
-    public mutating func consume(_ id: UUID, document: UUID, now: Date = Date()) -> String? {
+    /// Returns nil for a stale, expired or already delivered result, so the same text is never
+    /// delivered twice. A ready result shown in a different field is never inserted there: it is copied
+    /// instead (goal rule 8), and the paste hint goes before any note delivered with the text.
+    public mutating func consume(_ id: UUID, document: UUID, now: Date = Date()) -> Delivery? {
         let result = text
-        guard advance(id, from: .ready, to: .inserted, now: now) else { return nil }
+        guard advance(id, from: .ready, to: .inserted, now: now), let result else { return nil }
         text = nil
-        guard document == documentID else {
-            phase = .failed
-            message = "Not inserted, because you are in a different field now. The text is in Shepetal's history."
-            return nil
-        }
-        return result
+        if document == documentID { return .insert(result) }
+        message = [Self.copiedHint, message].compactMap { $0 }.joined(separator: " ")
+        return .copy(result)
+    }
+
+    static let copiedHint = "You are in a different field now, so the text is on the clipboard. Tap the field and choose Paste."
+
+    /// Keyboard: the clipboard write for a `.copy` did not land, so the paste hint would be wrong.
+    /// The session fails and says where the text is instead.
+    @discardableResult
+    public mutating func copyFailed(_ id: UUID, now: Date = Date()) -> Bool {
+        guard sessionID == id, phase == .inserted else { return false }
+        phase = .failed
+        message = "Not inserted, because you are in a different field now. The text is in Shepetal's history."
+        updatedAt = now
+        return true
     }
 
     /// Either side: give up on the session. Only the session id is needed; the app keeps the audio.
@@ -114,6 +147,18 @@ public struct Handoff: Codable, Equatable {
         case .ready, .idle: return nil
         case .inserted, .failed: return message
         case .cancelled: return "Cancelled. Shepetal kept the audio."
+        }
+    }
+
+    /// Keyboard: the ring color of 🤫 for the keyboard's own session `id`, matching `keyboardStatus`.
+    public func indicatorMode(for id: UUID?, now: Date = Date()) -> Indicator.Mode {
+        guard let id else { return .idle }
+        guard sessionID == id, !isExpired(now: now) else { return .error }
+        switch phase {
+        case .recording: return .recording
+        case .requested, .transcribing, .ready: return .processing
+        case .failed: return .error
+        case .idle, .inserted, .cancelled: return .idle
         }
     }
 
@@ -247,6 +292,19 @@ public enum AudioArchive {
     }
 }
 
+/// Goal rule 8 on iPhone: a result for a different field is left on the clipboard.
+public enum Clipboard {
+    /// Replaces the clipboard with `text` as plain text. Local only: it is not sent to the user's other
+    /// devices by Universal Clipboard. Tests pass a private named pasteboard, never `.general`.
+    /// Returns false when the write did not land (the change count did not move or the text differs).
+    @discardableResult
+    public static func copy(_ text: String, to pasteboard: UIPasteboard = .general) -> Bool {
+        let before = pasteboard.changeCount
+        pasteboard.setItems([[UTType.utf8PlainText.identifier: text]], options: [.localOnly: true])
+        return pasteboard.changeCount != before && pasteboard.string == text
+    }
+}
+
 /// Shared App Group storage plus Darwin notifications between the app and the keyboard.
 public enum SharedHandoff {
     public static let appGroup = "group.io.backant.shepetal"
@@ -259,7 +317,8 @@ public enum SharedHandoff {
     public static func read(in defaults: UserDefaults? = shared) -> Handoff { update(in: defaults) { $0 } }
 
     // ponytail: read-modify-write on UserDefaults is not atomic across processes. Each phase has a
-    // single writer (keyboard or app), so it holds; switch to a file lock if both ever write at once.
+    // single writer (keyboard or app), except `recording`, where the keyboard's stop request can race the
+    // app ending the recording itself (cap, dead mic); switch to a file lock if that race shows up.
     @discardableResult
     public static func update<T>(in defaults: UserDefaults? = shared, _ body: (inout Handoff) throws -> T) rethrows -> T {
         var handoff = defaults?.data(forKey: key).flatMap { try? JSONDecoder().decode(Handoff.self, from: $0) } ?? Handoff()
