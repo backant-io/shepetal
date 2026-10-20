@@ -10,7 +10,7 @@ final class Indicator {
     static let inset: CGFloat = 8
 
     let panel: NSPanel
-    private let emoji = EmojiView(frame: NSRect(x: 0, y: 0, width: Indicator.size, height: Indicator.size))
+    let emoji: NSView = EmojiView(frame: NSRect(x: 0, y: 0, width: Indicator.size, height: Indicator.size))  // carries the ring
     private let label = NSTextField(labelWithString: "")
     private var labelUntil: DispatchWorkItem?
 
@@ -88,16 +88,25 @@ final class Indicator {
 
     var labelText: String? { label.isHidden ? nil : label.stringValue.trimmingCharacters(in: .whitespaces) }
 
+    /// The panel's frame on `screen`: the 18 pt emoji 8 pt in from the bottom-left corner, plus the label
+    /// to its right when one shows. The panel grows rightward only, so the emoji never moves.
+    static func frame(screen: NSRect, labelWidth: CGFloat?) -> NSRect {
+        NSRect(x: screen.minX + inset, y: screen.minY + inset,
+               width: labelWidth.map { size + labelGap + $0 } ?? size, height: size)
+    }
+
+    static let labelGap: CGFloat = 6
+
     private func layout() {
-        guard let screen = NSScreen.screens.first else { return }  // the main display holds the menu bar
-        var width = Self.size
+        // The main display holds the menu bar. With no display (headless), the frame still updates.
+        let screen = NSScreen.screens.first?.frame ?? .zero
+        var labelWidth: CGFloat?
         if !label.isHidden {
             label.sizeToFit()
-            label.frame.origin = NSPoint(x: Self.size + 6, y: (Self.size - label.frame.height) / 2)
-            width = label.frame.maxX
+            label.frame.origin = NSPoint(x: Self.size + Self.labelGap, y: (Self.size - label.frame.height) / 2)
+            labelWidth = label.frame.width
         }
-        panel.setFrame(NSRect(x: screen.frame.minX + Self.inset, y: screen.frame.minY + Self.inset,
-                              width: width, height: Self.size), display: true)
+        panel.setFrame(Self.frame(screen: screen, labelWidth: labelWidth), display: true)
     }
 }
 

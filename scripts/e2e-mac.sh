@@ -2,6 +2,7 @@
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
 # cleanup -> audio store + history -> clipboard + Cmd+V into a text view the app owns.
 # Asserts WER <= 8 %, text ready <= 700 ms after release, and an owner-only audio file per recording.
+# A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -12,7 +13,7 @@ BIN=${SHEPETAL_BIN:-.build/release/shepetal}
 [ -x "$BIN" ] || swift build -c release
 WORK=$PWD/.cache/e2e
 FIX=$WORK/fixtures
-export SHEPETAL_HOME=$WORK/home
+export SHEPETAL_HOME=${SHEPETAL_HOME:-$WORK/home}
 mkdir -p "$FIX"
 
 while IFS='|' read -r id voice text; do
@@ -29,7 +30,11 @@ FIXTURES
 
 "$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl"
 
-python3 - "$WORK/results.jsonl" "$FIX" <<'PY'
+# Silence exits 1 by design ("No speech heard"); the checks below read its JSON line.
+python3 -c 'import sys, wave; w = wave.open(sys.argv[1], "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close()' "$FIX/silence.wav"
+"$BIN" --e2e "$FIX/silence.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/silence.jsonl" || true
+
+python3 - "$WORK/results.jsonl" "$FIX" "$WORK/silence.jsonl" <<'PY'
 import json, os, re, stat, struct, sys
 
 def words(s):
@@ -73,5 +78,16 @@ for r in rows:
 wer = errors / ref_words
 print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows)} clips ({ref_words} words)")
 assert wer <= 0.08, f"WER {wer:.1%} > 8%"
+
+(s,) = [json.loads(l) for l in open(sys.argv[3]) if l.strip()]
+assert s["error"] == "No speech heard" and s["history_outcome"] == "no_speech", s
+assert s["inserted_text"] == "" and not s["paste_landed"], ("silence pasted something", s)
+assert stat.S_IMODE(os.stat(s["audio_path"]).st_mode) == 0o600, s["audio_mode"]
+assert stat.S_IMODE(os.stat(os.path.dirname(s["audio_path"])).st_mode) == 0o700, s["audio_dir_mode"]
+assert s["history_audio_path"] == s["audio_path"], s
+data = open(s["audio_path"], "rb").read()
+assert abs(s["audio_seconds"] - 2) < 0.05 and abs((len(data) - 44) / 4 / 16000 - s["audio_seconds"]) < 1e-3, s
+assert set(data[44:]) == {0}, "the kept WAV must hold the silent samples the guard saw"
+print(f"silence.wav: outcome {s['history_outcome']}, inserted_text {s['inserted_text']!r}, audio {s['audio_mode']} in a {s['audio_dir_mode']} dir")
 print("e2e-mac: OK")
 PY

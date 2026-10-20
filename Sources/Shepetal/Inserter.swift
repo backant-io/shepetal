@@ -8,7 +8,9 @@ import ShepetalCore
 final class Inserter: NSObject, NSPasteboardItemDataProvider {
     struct Result { let landed: Bool; let restored: Bool }
 
-    private let pasteboard = NSPasteboard.general
+    private let pasteboard: NSPasteboard
+
+    init(pasteboard: NSPasteboard = .general) { self.pasteboard = pasteboard }
     // Written by the pasteboard callback, which AppKit may call off the main thread.
     private let lock = NSLock()
     nonisolated(unsafe) private var text = ""
