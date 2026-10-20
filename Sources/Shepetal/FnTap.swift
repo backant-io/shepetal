@@ -46,6 +46,7 @@ final class FnTap {
         guard let tap else { return }
         CGEvent.tapEnable(tap: tap, enable: false)
         CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+        CFMachPortInvalidate(tap)
         watchdog?.invalidate()
         self.tap = nil
     }

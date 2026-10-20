@@ -62,7 +62,9 @@ public enum Key {
 
     /// Any event: true when `code` is a modifier and the event's flags say no key of it is down. Catches
     /// a key-up the tap never saw (secure input hides events), which would otherwise block every chord.
+    /// Globe can arrive as a key event, so only its own key-up releases it.
     public static func flagUp(_ code: Int, flags: UInt64) -> Bool {
+        guard code != globe else { return false }
         let bit: UInt64? = [shift: 0x2_0000, ctrl: 0x4_0000, opt: 0x8_0000, cmd: 0x10_0000, fn: 0x80_0000][normal(code)]
         return bit.map { flags & $0 == 0 } ?? false
     }
@@ -160,7 +162,7 @@ public struct Shortcuts: Equatable {
 /// What the key router tells the app.
 public enum KeyInput: Equatable {
     case pttDown, pttUp, toggle, dismiss, pasteLast, copyLast
-    case otherKey             // a key or button went down that completes no shortcut
+    case otherKey             // during a hold or a dictation, a key or button went down that completes no shortcut
     case recorded(Set<Int>)   // the chord the Shortcuts window asked for, as pressed
 }
 
@@ -207,7 +209,9 @@ public struct KeyRouter {
             if drop { dropped.insert(code) }
             return ([], drop)
         }
-        guard let action = shortcuts.action(held: held), action != .dismiss || active else { return ([.otherKey], false) }
+        guard let action = shortcuts.action(held: held), action != .dismiss || active else {
+            return (pttHeld || active ? [.otherKey] : [], false)  // only a running hold or dictation cares
+        }
         if drop { dropped.insert(code) }
         switch action {
         case .ptt:

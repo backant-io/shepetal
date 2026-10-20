@@ -19,6 +19,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var onboarding: Onboarding?
     private var shortcuts: ShortcutsWindow?
     private var transcription: Task<Void, Never>?
+    private var inserting = false  // the paste is under way, too late for Esc
     private var timers: [Timer] = []
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
@@ -83,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .recorded(let chord): shortcuts?.recorded(chord)
         case .dismiss where idle:
             // Esc while transcribing: Pipeline inserts nothing and keeps the row as cancelled.
-            guard let transcription else { return }
+            guard let transcription, !inserting else { return }
             transcription.cancel()
             indicator.show(Hint.cancelled, seconds: Hint.seconds)
         case .pttDown where busy && idle, .toggle where busy && idle:
@@ -141,9 +142,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busy = true
         indicator.set(.processing)
         transcription = Task {
-            let run = await pipeline.process(samples, engine: engine, context: FocusedText.context,
-                                             sendPaste: Inserter.postCmdV)
+            // Pipeline reads the context right after its last cancel check; a cancel during the paste
+            // would cut the paste's waits short.
+            let run = await pipeline.process(samples, engine: engine, context: { [weak self] in
+                self?.inserting = true
+                return FocusedText.context()
+            }, sendPaste: Inserter.postCmdV)
             busy = false
+            inserting = false
             transcription = nil
             if let error = run.error, !Task.isCancelled { fail(error) } else { indicator.set(.idle) }
         }
@@ -160,8 +166,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let pipeline, !busy, let text = lastHistoryText() else { return }
         busy = true
         Task {
-            _ = await pipeline.inserter.insert(text, sendPaste: Inserter.postCmdV)
+            let paste = await pipeline.inserter.insert(text, sendPaste: Inserter.postCmdV)
             busy = false
+            if !paste.landed { fail("Paste did not land. The text is on the clipboard: press ⌘V to paste it.") }
         }
     }
 

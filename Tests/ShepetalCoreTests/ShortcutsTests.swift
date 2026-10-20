@@ -90,8 +90,8 @@ final class ShortcutsTests: XCTestCase {
             defer { for k in keys.reversed() { _ = r.key(k, down: false, active: false, canSwallow: true) } }
             return keys.flatMap { r.key($0, down: true, active: false, canSwallow: true).inputs }
         }
-        XCTAssertEqual(press([ctrl, cmd, v]), [.otherKey, .otherKey, .pasteLast])
-        XCTAssertEqual(press([Key.rightCmd, Key.rightCtrl, c]), [.otherKey, .otherKey, .copyLast])
+        XCTAssertEqual(press([ctrl, cmd, v]), [.pasteLast])
+        XCTAssertEqual(press([Key.rightCmd, Key.rightCtrl, c]), [.copyLast])
         XCTAssertFalse(press([v]).contains(.pasteLast), "V alone")
         XCTAssertFalse(press([cmd, v]).contains(.pasteLast), "Cmd+V is the app's paste")
         XCTAssertFalse(press([shift, ctrl, cmd, v]).contains(.pasteLast), "an extra key is another chord")
@@ -124,11 +124,13 @@ final class ShortcutsTests: XCTestCase {
         routed(r.key(space, down: false, active: true, canSwallow: true), [], true)
         routed(r.key(fn, down: false, active: true, canSwallow: true), [.pttUp], false)
 
-        // A plain Space is typing.
+        // A plain Space is typing. During a dictation it is reported, so FnGesture can tell a chord from typing.
         out = r.key(space, down: true, active: true, canSwallow: true)
         XCTAssertEqual(out.inputs, [.otherKey])
         XCTAssertFalse(out.swallow)
         _ = r.key(space, down: false, active: true, canSwallow: true)
+        routed(r.key(space, down: true, active: false, canSwallow: true), [], false, "idle: not even reported")
+        _ = r.key(space, down: false, active: false, canSwallow: true)
 
         // Listen-only tap (no Accessibility): the actions still fire, nothing is dropped.
         routed(r.key(esc, down: true, active: true, canSwallow: false), [.dismiss], false)
@@ -176,13 +178,15 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertTrue(Key.flagUp(Key.rightCmd, flags: 0x80_0000), "no Command flag at all")
         XCTAssertFalse(Key.flagUp(cmd, flags: 0x10_0000))
         XCTAssertFalse(Key.flagUp(v, flags: 0), "not a modifier")
+        XCTAssertTrue(Key.flagUp(fn, flags: 0))
+        XCTAssertFalse(Key.flagUp(Key.globe, flags: 0), "Globe as a key event is released by its key-up")
     }
 
     // A modifier released where the tap could not see it (a password field) must not block every chord.
     func testStaleModifierIsDroppedByTheNextEventsFlags() {
         var r = KeyRouter()
         _ = r.key(cmd, down: true, active: false, canSwallow: true)
-        XCTAssertEqual(r.key(fn, down: true, active: false, canSwallow: true).inputs, [.otherKey], "Cmd+fn is no chord")
+        XCTAssertEqual(r.key(fn, down: true, active: false, canSwallow: true).inputs, [], "Cmd+fn is no chord")
         _ = r.key(fn, down: false, active: false, canSwallow: true)
         let flags: UInt64 = 0x80_0000  // the next fn press: fn down, no Command
         XCTAssertEqual(r.releaseStale { $0 != fn && Key.flagUp($0, flags: flags) }, [])
