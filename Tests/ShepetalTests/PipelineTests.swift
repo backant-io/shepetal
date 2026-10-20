@@ -118,7 +118,8 @@ final class PipelineTests: XCTestCase {
         // Goal rule 8: the text stays on the clipboard as plain text and the old clipboard is not restored.
         XCTAssertEqual(pasteboard.string(forType: .string), "Send the report today.", "the text is left on the clipboard")
         let markers: Set<NSPasteboard.PasteboardType> = [.init("org.nspasteboard.ConcealedType"), .init("org.nspasteboard.TransientType")]
-        XCTAssertTrue(markers.isDisjoint(with: pasteboard.types ?? []), "plain text that clipboard managers keep, not the promised item")
+        // #42: the Concealed and Transient markers stay on it (clipboard managers skip it; ⌘V still pastes it).
+        XCTAssertTrue(markers.isSubset(of: Set(pasteboard.types ?? [])), "the text left on the clipboard keeps its markers")
         XCTAssertEqual(run.paste?.restored, false)
     }
 

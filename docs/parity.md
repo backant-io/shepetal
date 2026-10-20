@@ -25,7 +25,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F03 | Cancel or dismiss dictation (Esc) | todo | todo | todo | Mac: Esc cancel is not built (left for M2 in #10); iPhone: the app has a Cancel button (#3), the keyboard has none (#13) |
 | F04 | Rebindable shortcuts, multi-key combos, mouse buttons | todo | todo | todo | |
 | F05 | Floating Flow Bar / status pill with live waveform | hand-test | todo | todo | Mac: `IndicatorTests.testFrameIs18ptAnd8ptFromBottomLeftOfMainScreen`, `IndicatorTests.testLivePanelSitsInTheBottomLeftCorner`, `IndicatorTests.testLabelGrowsRightwardAndKeepsTheCorner`, `IndicatorTests.testPanelFlags`, `IndicatorTests.testPresentedOnceAndNeverHidden`, `IndicatorTests.testHintShowsThenHides`, `IndicatorTests.testModeRings` #28 on the 🤫 NSPanel from #10, hand step M-IND-1. Under goal rule 3 the fixed 🤫 and its ring states replace Wispr's draggable bar, its hide option and its 10-bar waveform (docs/re/dictation-input.md 2.8, settings `statusDockEdge` and `hideFlowBarPermanently`), so those are not built; iPhone: keyboard-corner 🤫 is tested (`IndicatorTests.testIndicatorIsInTheBottomLeftCornerWithTheStateNextToIt` #3), the Live Activity is not built (#13) |
-| F06 | Start and stop sounds, haptics | todo | todo | todo | |
+| F06 | Start and stop sounds, haptics | hand-test | todo | todo | Mac: `ChimeTests.testEachSoundIsShortQuietAndFaded`, `ChimeTests.testSoundsDiffer`, `ChimeTests.testStartRisesStopFalls`, `ChimeTests.testTooShortTapIsSilent`, `ChimeTests.testFnShortcutIsSilent`, `ChimeTests.testCancelAfterAHeardStartPlaysCancel`, `ChimeTests.testDoubleTapPlaysLockThenStop` #34, hand step M-SND-1; one sound set with a toggle, packs and haptics deferred (#33) |
 | F07 | Microphone selection with ranked fallback devices | todo | todo | todo | |
 | F08 | Mic health alerts (no audio, disconnected, unreadable, AirPods or clamshell warnings) | todo | todo | todo | |
 | F09 | Mute or pause media while dictating | todo | todo | todo | |
@@ -36,7 +36,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F14 | Mouse Flow (dictate via a mouse button) | todo | todo | todo | |
 | F15 | BLE mic ring (hands-free over Bluetooth) | todo | todo | todo | |
 | F16 | Jabra headset button and wear detection | todo | todo | todo | |
-| F17 | Secure Input detection (warns when hotkeys are blocked) | todo | todo | todo | |
+| F17 | Secure Input detection (warns when hotkeys are blocked) | hand-test | todo | todo | Mac: `WatchersTests.testSecureInputNoticeOnRisingEdgeOnly`, `WatchersTests.testSecureInputIgnoresShepetalItself`, `WatchersTests.testUnknownOwnerHasGenericWording`, `PasteGatePipelineTests.testSecureInputLeavesTheTextOnTheClipboard` #34, hand step M-SEC-1 |
 | F18 | Slow-processing and degraded-network notices | todo | todo | todo | |
 | F19 | Insert text into any app at the cursor (clipboard paste, then restore) | hand-test | todo | todo | Mac: `PasteCheckTests.testDataRequestedAfterCmdVMeansLanded`, `scripts/e2e-mac.sh` (paste landed, clipboard restored) #10, hand steps M-INS-1, M-INS-2 and M-INS-3 (Cmd+V into other apps needs Accessibility, #15); iPhone: `textDocumentProxy` insertion is on main (#3), todo until its device steps are in docs/manual-test.md (#19) |
 | F20 | Paste verification and failed-paste fallback (copy, notify) | hand-test | todo | todo | Mac: `PasteCheckTests.testNoRequestWithinOneSecondMeansFailed`, `PasteCheckTests.testReadBeforeCmdVDoesNotCount` #10, `PipelineTests.testPasteNobodyReadsIsPasteFailed`, `PipelineTests.testPasteThatIsReadLands` #28, hand step M-INS-4 (Cmd+V into another app) |
@@ -46,7 +46,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F24 | Textbox and AX context sent to the formatter (text around the cursor) | todo | todo | todo | |
 | F25 | Screenshot / OCR context | todo | todo | todo | |
 | F26 | Auto-learn words from the user's edits after paste | todo | todo | todo | |
-| F27 | Focus restore before paste (store, then refocus the element) | todo | todo | todo | |
+| F27 | Focus restore before paste (store, then refocus the element) | hand-test | todo | todo | Mac, under rule 8 (paste only into the window that stayed in focus, never refocus, else the clipboard and a ⌘V hint): `PasteGateTests.testSameWindowPastes`, `PasteGateTests.testOtherAppOrWindowGoesToTheClipboard`, `PasteGateTests.testUnreadableFocusPastes`, `PasteGateTests.testUnreadableWindowStillRecordsTheApp`, `PasteGatePipelineTests.testFocusMovedWhileTranscribingLeavesTheTextOnTheClipboard`, `PasteGatePipelineTests.testUnknownFocusPastesAndRestoresTheClipboard` #34, hand step M-FOC-1 |
 | F28 | Link memory: insert recently copied links by voice | todo | todo | todo | |
 | F29 | IDE integration: file tagging (@file) in Cursor and other IDEs | todo | todo | todo | |
 | F30 | Coding-CLI detection in terminals (claude, codex, aider and others) | todo | todo | todo | |
@@ -109,9 +109,9 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F87 | Connectors / connect apps (e.g. Atlassian, Loom) for context | todo | todo | todo | |
 | F88 | Permission onboarding (mic, accessibility with drag guidance, screen, system audio) | todo | todo | todo | Mac: Microphone, Input Monitoring and Accessibility window on main (#10, hand steps M-PERM-1 to M-PERM-4), no screen or system-audio permission yet |
 | F89 | Onboarding: mic test, language, shortcut, try-it-yourself | todo | todo | todo | |
-| F90 | Permission-revoked detection and re-prompt | todo | todo | todo | |
+| F90 | Permission-revoked detection and re-prompt | hand-test | todo | todo | Mac: `WatchersTests.testFirstObservationIsNotARevocation`, `WatchersTests.testRevokedReportedOnce`, `WatchersTests.testRegrantClears`, `WatchersTests.testRegrantAfterRevocationIsReportedOnce`, `WatchersTests.testGrantAfterLaunchIsNotARestore` #34, hand step M-PERM-5; fn tap after an Input Monitoring re-grant is #32 |
 | F91 | Hub main window (home, history, dictionary, snippets, styles, notes, settings) | todo | todo | todo | Mac: Home, History and Settings tabs only (#36, hand steps M-HUB-1 and M-HUB-6), with no automated UI test (#38); dictionary, snippets, styles and notes tabs come with F39, F40, F37 and F55 |
-| F92 | Launch at login, hide the Dock icon, menu-bar presence | todo | todo | todo | Mac: menu-bar item and no Dock icon (LSUIElement) on main (#10), no launch at login |
+| F92 | Launch at login, hide the Dock icon, menu-bar presence | hand-test | todo | todo | Mac: menu-bar item and no Dock icon (LSUIElement) on main (#10), Open at login through `SMAppService.mainApp` with `WatchersTests.testLoginStatusMapping` #34, hand step M-LOGIN-1 |
 | F93 | Dark mode / theme | todo | todo | todo | |
 | F94 | UI localization | todo | todo | todo | |
 | F95 | Focus mode (block distracting apps and URLs) | todo | todo | todo | |
@@ -128,7 +128,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F106 | Product analytics, session telemetry, Sentry, Datadog logs | n/a | n/a | n/a | All: n/a telemetry: product analytics and crash/log upload only serve Wispr; shepetal keeps logs local. |
 | F107 | Remote feature flags and A/B experiments | n/a | n/a | n/a | All: n/a remote-flags: remote feature flags and A/B experiments only serve Wispr; shepetal uses compile-time features. |
 | F108 | Mobile keyboard dictation (iPhone keyboard extension + app) | todo | todo | todo | iPhone: keyboard extension and app handoff on main (#3, `HandoffTests` and `DictationSessionTests`, 44 tests on the simulator), not run on a device (#13), todo until its device steps are in docs/manual-test.md (#19); Mac and Linux: iOS-only row with no allowed value (#20) |
-| F109 | Smart spacing at insertion boundaries (leading or trailing space, nbsp, capitalization based on surrounding text) | todo | todo | todo | Mac: spacing and casing rules on main (`InsertionRulesTests` #10), the NBSP and selection rules are not built |
+| F109 | Smart spacing at insertion boundaries (leading or trailing space, nbsp, capitalization based on surrounding text) | hand-test | todo | todo | Mac: `InsertionRulesTests.testTrailingBoundarySpaceIsNBSP`, `InsertionRulesTests.testLeadingSpaceStaysASCII`, `InsertionRulesTests.testSelectionLowercaseIsMatched`, `InsertionRulesTests.testSelectionWithPeriodKeepsIt`, `InsertionRulesTests.testSelectionKeepsItsSpaces`, `InsertionRulesTests.testOnlyLastLineOfBeforeCounts` #34 (spacing and casing from #10), hand steps M-INS-5 and M-INS-6 |
 | F110 | Formality mismatch detection (notices when the tone does not fit the app) | todo | todo | todo | |
 | F111 | Feature tour / what's-new / changelog | todo | todo | todo | |
 | F112 | Double-trigger debounce (ignores accidental double presses, conflicting shortcuts) | hand-test | todo | todo | Mac: `FnGestureTests.testRepeatedDownWhileHoldingIsIgnored`, `FnGestureTests.testShortcutWithFnCancels`, `DictationTests.testShortcutWithFnKeepsItsAudioAsCancelled` #10, hand step M-FN-4 |
