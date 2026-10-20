@@ -1,2 +1,6 @@
 agent/.venv/
 agent/ids.json
+/.build/
+/.swiftpm/
+/.cache/
+/dist/
