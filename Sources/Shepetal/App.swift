@@ -23,6 +23,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var secureInput = SecureInput(indicator: indicator)
     private var permissions: PermissionMonitor!
     private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
+    private var hub: Hub?
+    private var appAtStart: Task<AppContext, Never>?
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -114,6 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .start:
             focusAtStart = FocusedText.window()
             indicator.set(.recording)
+            appAtStart = AppContext.capture()
             if let g = dictation?.gesture {  // the start sound waits until the press is a hold
                 DispatchQueue.main.asyncAfter(deadline: .now() + g.holdThreshold + 0.01) { [weak self] in
                     MainActor.assumeIsolated { if let g = self?.dictation?.gesture { self?.sounds.holdCheck(g) } }
@@ -140,9 +143,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let pipeline else { return }
         busy = true
         indicator.set(.processing)
+        let appAtStart = appAtStart
         Task {
             let start = focusAtStart
-            let run = await pipeline.process(samples, engine: engine, context: FocusedText.context,
+            let app = await appAtStart?.value ?? AppContext()
+            let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
                                              selection: FocusedText.selected,
                                              focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
                                              secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
@@ -191,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         menu.addItem(withTitle: tap.isRunning ? "Hold fn to talk, double-tap for hands-free" : "fn is not being watched yet", action: nil, keyEquivalent: "")
         menu.addItem(withTitle: engineStatus, action: nil, keyEquivalent: "")
+        menu.addItem(item("Open Shepetal…", #selector(openHub)))
         if engine == nil, !ParakeetEngine.isInstalled {
             menu.addItem(item("Download speech model (Parakeet v3, about 470 MB)", #selector(downloadModel)))
         }
@@ -246,6 +252,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setRetention(_ sender: NSMenuItem) {
         retention = Retention(rawValue: sender.representedObject as? String ?? "") ?? .keep
+    }
+
+    /// Opening the app again while it runs (Finder, Spotlight, `open`) shows the hub.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openHub()
+        return false
+    }
+
+    @objc private func openHub() {
+        guard let pipeline else { return fail("History is not available") }
+        hub = hub ?? Hub(pipeline: pipeline, engine: { [weak self] in self?.engine },
+                         status: { [weak self] in (self?.engineStatus ?? "", self?.tap.isRunning == true) },
+                         retention: { [weak self] in self?.retention ?? .keep },
+                         setRetention: { [weak self] in self?.retention = $0 },
+                         openPermissions: { [weak self] in self?.showOnboarding() })
+        hub?.show()
     }
 
     @objc private func openRecordings() { NSWorkspace.shared.open(Paths.audio) }

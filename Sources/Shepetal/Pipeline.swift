@@ -32,16 +32,17 @@ final class Pipeline {
         history = try History(path: root.appendingPathComponent("history.sqlite"))
     }
 
-    /// `selection` is the text the paste replaces. `focusKept` says whether the window focused when the dictation
-    /// started is still focused (nil: unknown), and `secureInput` names the app holding secure input. When focus
-    /// moved or secure input is on, nothing is pasted and the text is left on the clipboard (rule 8). Focus is
-    /// never moved back. The defaults skip all three.
-    func process(_ samples: [Float], engine: SpeechEngine?, context: () -> (before: String, after: String),
+    /// `app` is the frontmost app at dictation start (history only). `selection` is the text the paste replaces.
+    /// `focusKept` says whether the window focused when the dictation started is still focused (nil: unknown),
+    /// and `secureInput` names the app holding secure input. When focus moved or secure input is on, nothing is
+    /// pasted and the text is left on the clipboard (rule 8). Focus is never moved back. The defaults skip them.
+    func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
+                 context: () -> (before: String, after: String),
                  selection: () -> String = { "" }, focusKept: () -> Bool? = { nil }, secureInput: () -> String? = { nil },
                  sendPaste: (CGEvent) -> Void) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
-                                          durationMs: Self.ms(samples)))
+                                          durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
         save(samples, &run)  // first, so the audio survives anything below
         let saveError = run.error
         let error = await transcribeAndInsert(samples, engine, t0, context, selection, focusKept, secureInput, sendPaste, &run)
@@ -62,7 +63,7 @@ final class Pipeline {
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Cleanup.apply(run.entry.rawText)
+        run.entry.text = Self.finishText(run.entry.rawText)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return "No speech heard" }
         let (before, after) = context()
@@ -76,6 +77,11 @@ final class Pipeline {
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
         return paste.landed ? nil : PasteGate.notLanded
+    }
+
+    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
+    static func finishText(_ raw: String) -> String {
+        Cleanup.apply(raw)
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {

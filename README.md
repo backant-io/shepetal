@@ -12,7 +12,7 @@ Requirements: macOS 14 or later, Apple Silicon for the default model, Xcode or t
 swift build && swift test             # core: fn gestures, model tiers, audio store, history, text rules
 scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only, ad-hoc signed)
 open dist/Shepetal.app                # add --args --no-permission-prompts to never ask macOS for anything
-scripts/e2e-mac.sh                    # real pipeline on `say` speech: WER, latency, audio file checks
+scripts/e2e-mac.sh                    # real pipeline on `say` speech: WER, latency, audio file, app and re-transcribe checks
 sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh   # same, with the network blocked
 ```
 
@@ -24,6 +24,7 @@ sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh  
 - When another app has secure input on (a password field, Terminal's Secure Keyboard Entry), a note next to 🤫 says so. Nothing is pasted then: the text is left on the clipboard for ⌘V. A permission turned off while Shepetal runs shows a message and opens the Permissions window, and the yellow ring clears once it is back on.
 - The 🤫 menu has Sounds (short start, stop, hands-free and cancel sounds made in code, on by default) and Open at login. The start sound plays once fn has been held for 0.5 s, so a short tap or an fn shortcut makes no sound.
 - Every recording is kept as a 16 kHz mono WAV in `~/Library/Application Support/Shepetal/audio` (folder 0700, files 0600). That includes too-short and failed ones, which are flagged in the history. The history is `history.sqlite` in the same folder. Under Recordings in the menu you can keep everything (the default) or delete recordings after 24 hours. `SHEPETAL_HOME` moves the whole folder.
+- Open Shepetal… in the 🤫 menu, or opening the app again while it runs, shows the Shepetal window. Home has the speech model, whether `fn` is watched, missing permissions and the Donate links. History has search, copy, play, re-transcribe (with the current model or the other installed one) and archive. Settings has recordings retention, the recordings folder and permissions. Each dictation records the app it went to and, in Safari, Chrome, Arc, Edge, Brave, Firefox, Vivaldi or Opera, the page URL. Both stay in `history.sqlite`.
 - Permissions: Microphone, Input Monitoring (to see `fn`) and Accessibility (to paste). The Permissions window shows each one and opens its System Settings pane.
 - Manual checks are listed in [docs/manual-test.md](docs/manual-test.md#mac).
 
