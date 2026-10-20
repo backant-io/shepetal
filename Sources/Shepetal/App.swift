@@ -19,6 +19,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
+    private var focusAtStart: (app: Int32, window: AXUIElement?)?
+    private let sounds = Sounds()
+    private lazy var secureInput = SecureInput(indicator: indicator)
+    private var permissions: PermissionMonitor!
+    private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
 
@@ -59,10 +64,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.applyRetention() }
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.startTapIfAllowed() }
+            MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
 
+        permissions = PermissionMonitor(revoked: { [weak self] message in
+            self?.fail(message)
+            if self?.allowPrompts == true { self?.showOnboarding() }
+        }, restored: { [weak self] in
+            if self?.indicator.mode == .error { self?.indicator.set(.idle) }
+        })
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
         }
@@ -102,10 +113,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func show(_ action: GestureAction) {
+        sounds.play(action)
         switch action {
         case .start:
+            focusAtStart = FocusedText.window()
             indicator.set(.recording)
             appAtStart = AppContext.capture()
+            if let g = dictation?.gesture {  // the start sound waits until the press is a hold
+                DispatchQueue.main.asyncAfter(deadline: .now() + g.holdThreshold + 0.01) { [weak self] in
+                    MainActor.assumeIsolated { if let g = self?.dictation?.gesture { self?.sounds.holdCheck(g) } }
+                }
+            }
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
@@ -143,10 +161,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         busy = true
         indicator.set(.processing)
         let appAtStart = appAtStart
+        let start = focusAtStart
         Task {
             let app = await appAtStart?.value ?? AppContext()
             let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
-                                             sendPaste: Inserter.postCmdV)
+                                             selection: FocusedText.selected,
+                                             focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
+                                             secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false
             if let error = run.error { fail(error) } else { indicator.set(.idle) }
             if Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
@@ -225,6 +246,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keepItem.submenu = keep
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
+        menu.addItem(sounds.menuItem)
+        menu.addItem(loginItem.menuItem)
         menu.addItem(item(Permission.missing.isEmpty ? "Permissions…" : "Permissions… (\(Permission.missing.count) missing)", #selector(openPermissions)))
         menu.addItem(.separator())
         for (title, url) in Self.donate {
