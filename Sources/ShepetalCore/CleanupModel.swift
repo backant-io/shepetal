@@ -189,6 +189,9 @@ public enum SmartCleanup {
         func charAfter(_ loc: Int) -> Character? { char(loc, step: 1) }
         let punct: Set<Character> = [",", ".", ":", ";", "!", "?"]
         var out: [Int] = []
+        // A marker the speech model ran into the clause before it ("for the trip first, the tickets, second, ..."):
+        // it counts only when a later marker starts an item, so "do it first, then call" keeps its word.
+        var runOn: [[Int]] = []
         for m in listMarker.matches(in: input, range: NSRange(location: 0, length: ns.length)) {
             let ks = said.indices.filter { NSLocationInRange(said[$0].range.location, m.range) }
             guard let first = ks.first else { continue }
@@ -206,12 +209,14 @@ public enum SmartCleanup {
                 if !starts, !bare {
                     let b = charBefore(m.range.location)
                     starts = b == nil || punct.contains(b!)
+                    if !starts, after != nil { runOn.append(ks) }
                 }
                 guard starts else { continue }
                 if let and { out.append(and) }
             }
             out += ks
         }
+        for ks in runOn where out.contains(where: { $0 > ks[ks.count - 1] }) { out += ks }
         return out
     }
 

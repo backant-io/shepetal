@@ -170,6 +170,11 @@ final class SmartCleanupTests: XCTestCase {
                                            for: "My goals. First, finish the migration. Second, hire two engineers. And third, cut costs."))
         XCTAssertTrue(SmartCleanup.accepts("Agenda:\n1. Budget\n2. Hiring", for: "Agenda. One, budget. Two, hiring."))
         XCTAssertTrue(SmartCleanup.accepts("Buy milk\nCall mom", for: "buy milk new line call mom"))
+        // Parakeet often hears "trip. First, the tickets" as "trip first, the tickets" (scripts/e2e-mac.sh, c03):
+        // the list that follows makes "first" a marker, and without one it stays a word.
+        XCTAssertTrue(SmartCleanup.accepts("We need three things for the trip:\n1. The tickets\n2. The hotel booking\n3. The travel insurance",
+                                           for: "We need three things for the trip first, the tickets, second, the hotel booking, third, the travel insurance."))
+        XCTAssertFalse(SmartCleanup.accepts("I'll do it, then call you.", for: "I'll do it first, then call you."))
     }
 
     // List numbers count 1, 2, 3; a number the model puts at a line start out of order is an answer.
