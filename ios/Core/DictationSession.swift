@@ -28,6 +28,12 @@ public final class DictationSession: ObservableObject {
     @Published public var deleteAfter24h: Bool {
         didSet { settings.set(deleteAfter24h, forKey: "deleteAfter24h"); sweep() }
     }
+    /// What the Live Activity shows: recording, then processing, nil once the text is delivered or the
+    /// recording is cancelled, error when it ended without text. Nil before the first dictation.
+    public private(set) var activity: Indicator.Mode? {
+        didSet { if activity != oldValue { onActivity(activity) } }
+    }
+    public var onActivity: @MainActor (Indicator.Mode?) -> Void = { _ in }
     /// Transcribes 16 kHz mono samples. Nil until the speech model is loaded.
     public private(set) var transcribe: (([Float]) async throws -> String)?
 
@@ -98,10 +104,35 @@ public final class DictationSession: ObservableObject {
         startedAt = Date()
         isRecording = true
         status = "Listening. Go back to your app and tap the mic to finish."
+        activity = .recording
         watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in await self?.tick() }
         }
         if let superseded { await finish(superseded) }
+    }
+
+    /// Starts listening for the keyboard's stop notification.
+    public func observeKeyboard() {
+        SharedHandoff.observe(SharedHandoff.stopNotification) { [weak self] in
+            Task { @MainActor in await self?.followKeyboard() }
+        }
+    }
+
+    /// Any app can post a Darwin notification, so the stop notification only wakes the app. The recording
+    /// ends only when the App Group, which only the keyboard and the app can write, holds a stop or cancel
+    /// for this recording. Returns true when it ended the recording.
+    @discardableResult
+    public func followKeyboard() async -> Bool {
+        guard let id = sessionID else { return false }
+        let state = SharedHandoff.read(in: handoff)
+        guard state.sessionID == id else { return false }
+        if state.phase == .cancelled {
+            cancel()
+            return true
+        }
+        guard state.phase == .recording, state.stopRequested else { return false }
+        await stop()
+        return true
     }
 
     /// 16 kHz mono samples from the mic. Ignored when not recording.
@@ -110,13 +141,14 @@ public final class DictationSession: ObservableObject {
     }
 
     /// Runs once a second while recording. Stops when the mic died, at the 5-minute cap, and as soon as
-    /// the session was superseded or cancelled.
+    /// the session was superseded or cancelled. Also catches a stop request whose notification got lost.
     public func tick(now: Date = Date()) async {
         guard let id = sessionID else { return }
         guard mic.isRunning else {
             await stop(reason: "Recording stopped early: the microphone was interrupted.")
             return
         }
+        guard await !followKeyboard() else { return }
         let state = SharedHandoff.read(in: handoff)
         guard !state.shouldKeepRecording(id, now: now) else { return }
         await stop(reason: state.sessionID == id && state.phase == .recording ? "Stopped at the 5-minute limit." : nil)
@@ -135,7 +167,7 @@ public final class DictationSession: ObservableObject {
         entry.outcome = .cancelled
         keep(entry)
         tell { $0.cancel(entry.id) }
-        status = "Cancelled. The recording is kept."
+        setStatus("Cancelled. The recording is kept.", activity: nil)
     }
 
     /// Transcribes an ended recording into history and tells the keyboard how it went.
@@ -147,7 +179,7 @@ public final class DictationSession: ObservableObject {
             entry.note = message
             keep(entry)
             if ended.forKeyboard { tell { $0.fail(id, message) } }
-            setStatus(message)
+            setStatus(message, activity: .error)
         }
         guard samples.count >= Self.minimumSamples else {
             return fail(.tooShort, "Too short to transcribe. Tap the mic, speak, then tap it again.")
@@ -155,14 +187,14 @@ public final class DictationSession: ObservableObject {
         guard let transcribe else {
             return fail(.failed, "Not transcribed: the speech model is still loading. The audio is kept.")
         }
-        setStatus("Transcribing...")
+        setStatus("Transcribing...", activity: .processing)
         do {
             let text = try await transcribe(samples)
             entry.outcome = .transcribed
             entry.text = text
             keep(entry)
             if ended.forKeyboard { tell { $0.deliver(id, text: text, note: reason) } }
-            setStatus(reason ?? Self.ready)
+            setStatus(reason ?? Self.ready, activity: nil)
         } catch {
             fail(.failed, "Could not transcribe: \(error.localizedDescription). The audio is kept.")
         }
@@ -217,9 +249,11 @@ public final class DictationSession: ObservableObject {
         SharedHandoff.post(SharedHandoff.readyNotification)
     }
 
-    /// A finished transcription must not overwrite the status of a recording that started meanwhile.
-    private func setStatus(_ text: String) {
-        if sessionID == nil { status = text }
+    /// A finished transcription must not overwrite the status or Live Activity of a recording that started meanwhile.
+    private func setStatus(_ text: String, activity: Indicator.Mode?) {
+        guard sessionID == nil else { return }
+        status = text
+        self.activity = activity
     }
 
     /// Stops the mic, keeps the audio and moves the keyboard's session on. Synchronous, so nothing

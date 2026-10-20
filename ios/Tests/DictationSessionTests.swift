@@ -124,6 +124,99 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertEqual(state.keyboardStatus(for: id)?.hasPrefix("Microphone access is off"), true)
     }
 
+    // MARK: Issue #14: any app can post the stop notification; only a stop the keyboard wrote ends the recording.
+
+    @MainActor
+    func testBareStopNotificationDoesNotStopTheRecording() async throws {
+        let session = makeSession()
+        session.observeKeyboard()
+        let id = await recording(session)
+        SharedHandoff.post(SharedHandoff.stopNotification) // what any other app can do
+        try await Task.sleep(for: .milliseconds(500))
+        XCTAssertTrue(session.isRecording)
+        XCTAssertTrue(mic.running)
+
+        SharedHandoff.update(in: handoff) { _ = $0.requestStop(id) } // what the keyboard does first
+        SharedHandoff.post(SharedHandoff.stopNotification)
+        for _ in 0..<50 where session.isRecording { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(session.isRecording) // the same notification is delivered, and now it stops
+        XCTAssertEqual(state.phase, .ready)
+        XCTAssertEqual(try savedSamples(id), speech)
+    }
+
+    @MainActor
+    func testStopRequestForAnotherSessionDoesNotStopTheRecording() async {
+        let session = makeSession()
+        _ = await recording(session)
+        SharedHandoff.update(in: handoff) { _ = $0.requestStop(UUID()) }
+        let ended = await session.followKeyboard()
+        await session.tick()
+        XCTAssertFalse(ended)
+        XCTAssertTrue(session.isRecording)
+    }
+
+    @MainActor
+    func testStopRequestIsFollowedByTheTickWhenItsNotificationIsLost() async {
+        let session = makeSession()
+        let id = await recording(session)
+        SharedHandoff.update(in: handoff) { _ = $0.requestStop(id) }
+        await session.tick()
+        XCTAssertFalse(session.isRecording)
+        XCTAssertEqual(entry(id)?.outcome, .transcribed)
+    }
+
+    @MainActor
+    func testCancelWrittenToTheSharedStateKeepsTheAudioMarkedCancelled() async throws {
+        let session = makeSession()
+        let id = await recording(session)
+        SharedHandoff.update(in: handoff) { _ = $0.cancel(id) }
+        let ended = await session.followKeyboard()
+        XCTAssertTrue(ended)
+        XCTAssertFalse(session.isRecording)
+        XCTAssertTrue(heard.isEmpty)
+        XCTAssertEqual(try savedSamples(id), speech)
+        XCTAssertEqual(entry(id)?.outcome, .cancelled)
+    }
+
+    // MARK: Goal rule 3: the Live Activity shows 🤫 and the state while a dictation runs, and ends with it.
+
+    @MainActor
+    func testLiveActivityFollowsTheDictationAndEndsWhenTheTextIsDelivered() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        _ = await recording(session)
+        XCTAssertEqual(shown, [.recording])
+        await session.stop()
+        XCTAssertEqual(shown, [.recording, .processing, nil])
+    }
+
+    @MainActor
+    func testLiveActivityShowsAFailureAndACancelEndsIt() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        _ = await recording(session, Array(speech.prefix(DictationSession.minimumSamples - 1)))
+        await session.stop()
+        XCTAssertEqual(shown, [.recording, .error])
+        _ = await recording(session)
+        session.cancel()
+        XCTAssertEqual(shown, [.recording, .error, .recording, nil])
+    }
+
+    @MainActor
+    func testSupersededRecordingDoesNotEndTheNewRecordingsLiveActivity() async {
+        let session = makeSession()
+        var shown: [Indicator.Mode?] = []
+        session.onActivity = { shown.append($0) }
+        _ = await recording(session)
+        let new = UUID()
+        keyboardRequests(new)
+        await session.open(url(new)) // the old recording is transcribed into history meanwhile
+        XCTAssertTrue(session.isRecording)
+        XCTAssertEqual(shown, [.recording])
+    }
+
     // MARK: Product rule 4: every recording keeps the exact samples the model got, next to its history entry.
 
     @MainActor
