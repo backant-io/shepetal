@@ -42,7 +42,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F20 | Paste verification and failed-paste fallback (copy, notify) | hand-test | todo | todo | Mac: `PasteCheckTests.testNoRequestWithinOneSecondMeansFailed`, `PasteCheckTests.testReadBeforeCmdVDoesNotCount` #10, hand step M-INS-4 (the paste_failed path has no automated test, #15) |
 | F21 | Paste last / copy last transcript shortcuts | todo | todo | todo | |
 | F22 | Terminal and remote-desktop paste modes (Shift+Insert, typed paste) | todo | todo | todo | |
-| F23 | App and URL awareness (active app, browser URL) | todo | todo | todo | |
+| F23 | App and URL awareness (active app, browser URL) | hand-test | todo | todo | Mac: `HistoryTests.testAppBundleAndUrlRoundTrip`, `HistoryTests.testBrowserBundleIds`, `scripts/e2e-mac.sh` (`history_app`, `history_bundle_id`, `history_url`, `app_resolve_ms`) #36, hand step M-CTX-1 (browser URL) |
 | F24 | Textbox and AX context sent to the formatter (text around the cursor) | todo | todo | todo | |
 | F25 | Screenshot / OCR context | todo | todo | todo | |
 | F26 | Auto-learn words from the user's edits after paste | todo | todo | todo | |
@@ -71,7 +71,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F49 | Flow Lens: ask about the screen or context via a shortcut chat | todo | todo | todo | |
 | F50 | Stacked messages: in personal messaging apps, one dictation is split into several chat messages | todo | todo | todo | |
 | F51 | Nonsense or empty transcript guard | todo | todo | todo | Mac: an empty transcript shows "No speech heard" (#10) without a test (#15); iPhone: under 0.3 s never reaches the model (`DictationSessionTests.testTooShortRecordingIsKeptMarkedAndTheKeyboardIsTold` #3), no nonsense guard |
-| F52 | Dictation history with search, copy, retry, archive, audio playback | todo | todo | todo | Mac: SQLite history, kept audio and Recent (click to copy) on main (`StorageTests.testHistoryKeepsFlaggedRecordings` #10), no search, retry or playback; iPhone: history list on main (#3), no replay or re-transcription (#13) |
+| F52 | Dictation history with search, copy, retry, archive, audio playback | hand-test | todo | todo | Mac: `HistoryTests.testOldDatabaseUpgradesWithoutLosingRows`, `HistoryTests.testSearchMatchesTextAndRawTextCaseInsensitively`, `HistoryTests.testSearchEscapesWildcards`, `HistoryTests.testSearchIsNewestFirstAndLimited`, `HistoryTests.testArchivedHiddenUnlessAsked`, `HistoryTests.testUpdateKeepsAudioCreatedAtAndOutcome`, `StorageTests.testReadReturnsTheExactSavedSamples`, `StorageTests.testRetryNeedsTheAudio`, `scripts/e2e-mac.sh` (re-transcribe from the kept WAV, `retranscribed_model`) #36, hand steps M-HUB-2 to M-HUB-5; iPhone: history list on main (#3), no replay or re-transcription (#13) |
 | F53 | Local data policy (store normally, delete after 24h, never store) | hand-test | todo | todo | Mac: `StorageTests.testRetentionKeepDeletesNothing`, `StorageTests.testRetention24hDeletesOnTime`, `StorageTests.testAudioIsOwnerOnly`, `StorageTests.testWavHoldsExactSamples` #10, hand step M-RET-1; iPhone: keep or delete after 24 h on main (`DictationSessionTests.testRecordingsAreKeptByDefaultAndDeletedAfter24hWhenChosen` #3), the sweep runs only while the app runs (#13), todo until its device steps are in docs/manual-test.md (#19) |
 | F54 | Feedback on a transcript (thumbs, desired text) | todo | todo | todo | |
 | F55 | Scratchpad notes window (tabs, pinning, open from a shortcut) | todo | todo | todo | |
@@ -110,7 +110,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F88 | Permission onboarding (mic, accessibility with drag guidance, screen, system audio) | todo | todo | todo | Mac: Microphone, Input Monitoring and Accessibility window on main (#10, hand steps M-PERM-1 to M-PERM-4), no screen or system-audio permission yet |
 | F89 | Onboarding: mic test, language, shortcut, try-it-yourself | todo | todo | todo | |
 | F90 | Permission-revoked detection and re-prompt | todo | todo | todo | |
-| F91 | Hub main window (home, history, dictionary, snippets, styles, notes, settings) | todo | todo | todo | |
+| F91 | Hub main window (home, history, dictionary, snippets, styles, notes, settings) | todo | todo | todo | Mac: Home, History and Settings tabs only (#36, hand steps M-HUB-1 and M-HUB-6), with no automated UI test (#38); dictionary, snippets, styles and notes tabs come with F39, F40, F37 and F55 |
 | F92 | Launch at login, hide the Dock icon, menu-bar presence | todo | todo | todo | Mac: menu-bar item and no Dock icon (LSUIElement) on main (#10), no launch at login |
 | F93 | Dark mode / theme | todo | todo | todo | |
 | F94 | UI localization | todo | todo | todo | |

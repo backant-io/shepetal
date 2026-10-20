@@ -2,7 +2,10 @@
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
 # cleanup -> audio store + history -> pasteboard + Cmd+V into a text view the app owns.
 # The test shows no window, never takes focus, and uses a private pasteboard, never the user's clipboard.
-# Asserts WER <= 8 %, text ready <= 700 ms after release, and an owner-only audio file per recording.
+# Asserts WER <= 8 %, text ready <= 700 ms after release, an owner-only audio file per recording, and
+# that history kept the app, bundle id and page URL given for each dictation. The page-URL lookup must
+# return at once and do its work off the main thread. Each clip is then re-transcribed from its kept WAV,
+# as History's re-transcribe does, and must give the same text and the engine's model name on the same row.
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -68,6 +71,11 @@ for r in rows:
     assert stat.S_IMODE(os.stat(os.path.dirname(p)).st_mode) == 0o700, name
     assert not p.startswith(("/tmp", "/private/tmp")), p
     assert r["history_outcome"] == "inserted" and r["history_audio_path"] == p, (name, r["history_outcome"])
+    app = (r["history_app"], r["history_bundle_id"], r["history_url"])
+    assert app == ("E2E Browser", "com.apple.Safari", "https://example.com/e2e/page"), (name, "app at dictation start", app)
+    assert r["app_resolve_ms"] < 100, (name, "page-URL lookup held the main thread", r["app_resolve_ms"])
+    assert r["retranscribed_text"] == r["text"] and r["retranscribed_row_kept"], (name, "re-transcribe", r)
+    assert r["retranscribed_model"] == r["model"], (name, "re-transcribe model", r["retranscribed_model"])
     data = open(p, "rb").read()
     fmt, ch, rate = struct.unpack("<HHI", data[20:28])
     assert (fmt, ch, rate) == (3, 1, 16000), (name, fmt, ch, rate)
