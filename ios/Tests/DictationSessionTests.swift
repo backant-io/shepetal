@@ -289,7 +289,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertNil(session.activity)
         XCTAssertEqual(shown, [.recording, .recording, .processing, nil])
         var h = state
-        XCTAssertEqual(h.consume(new, document: field, canCopy: true), .insert("newer"))
+        XCTAssertEqual(h.consume(new, document: field), .insert("newer"))
     }
 
     @MainActor
@@ -324,7 +324,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertEqual(entry(id)?.text, "hello")
         XCTAssertEqual(entry(id)?.audio, AudioArchive.url(for: id, in: dir).lastPathComponent)
         var h = state
-        XCTAssertEqual(h.consume(id, document: field, canCopy: true), .insert("hello"))
+        XCTAssertEqual(h.consume(id, document: field), .insert("hello"))
     }
 
     @MainActor
@@ -428,7 +428,7 @@ final class DictationSessionTests: XCTestCase {
         XCTAssertFalse(session.isRecording)
         XCTAssertEqual(try savedSamples(id), speech)
         var h = state
-        XCTAssertEqual(h.consume(id, document: field, canCopy: true), .insert("hello"))
+        XCTAssertEqual(h.consume(id, document: field), .insert("hello"))
         XCTAssertEqual(h.keyboardStatus(for: id)?.hasPrefix("Recording stopped early"), true)
         XCTAssertEqual(entry(id)?.note?.hasPrefix("Recording stopped early"), true)
     }

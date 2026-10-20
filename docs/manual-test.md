@@ -258,6 +258,14 @@ The Dynamic Island steps need an iPhone 14 Pro or later (any iPhone 15, 16 or 17
 5. Tap note B and choose Paste. Expected: the sentence is pasted as plain text, and the word from step 1 is gone from the clipboard. Go back to note A: nothing is inserted there either.
 6. With a Mac signed in to the same Apple Account and Handoff on, press ⌘V in a Mac text field. Expected: the sentence does not arrive (the copy is local to the iPhone).
 
+### I-FIELD-2: two fields the keyboard might report as one
+The only field signal a keyboard gets is `documentIdentifier`. This step checks that two different fields never share one; if they did, text would go into the wrong field.
+1. In Safari, open a page with two text inputs on it (for example a sign-up form with name and email). Tap the first input, start a dictation, go back and say a sentence.
+2. Tap the second input on the same page, bring up the Shepetal keyboard and tap the mic.
+3. Expected: nothing is inserted in the second input, and the clipboard hint from I-FIELD-1 shows. Paste in the second input to clear the clipboard check.
+4. Repeat with Messages: start in one conversation, then open a different conversation and stop there. Expected: the same.
+5. If either case inserts the text into the second field, write it down and do not confirm iPhone F19: the identifier alone is not enough and a second field signal is needed.
+
 ### I-SHORT-1: too short
 1. Tap the mic, go back, and tap the mic again right away (under 0.3 s of audio).
 2. Expected: nothing is inserted. A yellow ring and "Too short to transcribe. Tap the mic, speak, then tap it again." show next to 🤫. History lists the recording as `tooShort`, and its `audio/<id>.wav` is in the container.
