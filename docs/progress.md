@@ -32,11 +32,11 @@ Pick from this list. It replaces the iteration 1 list under "Left".
 - **Mac** (13 of 29 P0 cells are `todo`):
   - In open PRs, so review and merge them: F03 Esc cancel, F04 shortcuts, F10 max length, F21 paste and copy last (#47); F07 mic selection, F08 mic health, F12 languages, F39 dictionary (#39); F32 local cleanup model (#44).
   - No PR yet: F89 first-run onboarding (mic test, language, shortcut, try it); F99 crash recovery and relaunch; F88 screen and system-audio permissions (with meetings, #113); F91 the remaining hub tabs (after F39, F40, F37 and F55).
-- **Linux** (25 of 29 P0 cells are `todo`):
+- **Linux** (24 of 29 P0 cells are `todo`):
   - Code on main, steps missing from `docs/manual-test.md`: F05 🤫 indicator (#56) and F27 rule 8 (#58) (#126).
   - In open PRs: F52 history and F53 24 h retention (#67); F03 Esc, F04 shortcuts, F10 cap, F21 paste last (#96, #67); F07 and F08 mic (#92); F32 cleanup and F109 insertion fit (#83); F39 dictionary (#86); F92 start at login (#114).
-  - No PR yet: F06, F12, F17, F20, F23, F51, F88, F89, F90, F91, F99.
-- **iPhone** (24 of 29 P0 cells are `todo`):
+  - No PR yet: F12, F17, F20, F23, F51, F88, F89, F90, F91, F99.
+- **iPhone** (23 of 29 P0 cells are `todo`):
   - Mark the desktop-only P0 rows `impossible` where iOS forbids them, each with an Apple doc URL and a built substitute: F04, F17, F92 and F99 are candidates.
   - Then build F03 keyboard cancel and F10 duration warning (#13), F02 hands-free and F112 from the keyboard, F51 nonsense guard, F12 languages, F32 cleanup and F39 dictionary.
 
