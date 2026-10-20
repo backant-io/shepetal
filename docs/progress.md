@@ -4,6 +4,14 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### account (Mac sign-in, free trial, lifetime license, no model names in the UI)
+
+| PR | State | What landed | Verified before merge |
+|---|---|---|---|
+| #70 | merged | Device-flow sign-in against `web/API.md` (token in the Keychain, service `io.backant.shepetal.account`), license check at launch and every 24 h (never during a dictation; a starting dictation cancels it), cache in `account.json` (0600) with a 7-day offline grace, trial days left / "Yours forever" / "Trial ended" in the 🤫 menu and Home, Buy (Stripe Checkout), Check license now, Sign out. Signed out or expired, fn shows a hint instead of recording, but only in builds with `ShepetalRequiresSignIn` = true in Info.plist (off until shepetal.backant.io is live). Model names removed from every UI string (`EngineLabel`: "on-device speech recognition", "standard" / "alternative" engine; FluidAudio and process errors are logged and replaced by our own text). README's network sentence made precise | independent review: FAIL on the first pass because of the missing service and 5 should-fixes. All fixed: re-check on a blocked fn press and after checkout, checkout 401 signs out, 5xx retried while polling, only web pages opened, plain speech errors, Keychain update-then-add, `App.swift` wiring pinned by `AccountWiringTests`. 19 deliberate breaks, all red. After merging main: `swift test` 142 pass, sandboxed `scripts/e2e-mac.sh` OK (WER 0.0%), `scripts/check-app.sh` (SOAK=20) OK |
+
+Left for account: turn on `ShepetalRequiresSignIn` in `scripts/make-app.sh` once shepetal.backant.io answers `POST /api/device/start` (release session, issue below). Hand tests M-ACC-1 and M-ACC-2 need the live service. No screenshot: this shell has no Screen Recording permission. The 7-day offline grace applies to lifetime licenses too, as specified. Pavel can say if lifetime should be exempt.
+
 ### merge-b (review, fix and merge #36, #34, #44)
 
 | PR | State | What landed | Verified before merge |
