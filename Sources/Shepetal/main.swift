@@ -1,10 +1,37 @@
 import AppKit
+import ServiceManagement
 
 // shepetal                           menu-bar app
 // shepetal --no-permission-prompts   never asks macOS for a permission (checks only)
 // shepetal --show-hint               shows the short-press hint once at launch (for screenshots)
 // shepetal --e2e <wav>... [--engine fallback] [--drop-paste]   real pipeline on audio files, JSON lines out
+// shepetal --e2e-meeting <me.wav> <others.wav>   meeting transcriber, store and summary on two files, JSON out
+// shepetal --quit-from-menu-after <s>   after <s> seconds, picks "Quit Shepetal" from the real status menu
+//                                       (the release check that Quit works; nothing is clicked on screen)
+// shepetal --postinstall              run by the installer as the user: turns on Start at login, then exits
+// shepetal --unregister-login-item    run by the uninstaller: turns Start at login off, then exits
 let args = CommandLine.arguments
+if let i = args.firstIndex(of: "--e2e-meeting") { MeetingE2E.main(Array(args[(i + 1)...])) }
+if args.contains("--postinstall") || args.contains("--unregister-login-item") {
+    let service = SMAppService.mainApp
+    do {
+        if args.contains("--postinstall") {
+            if service.status != .enabled { try service.register() }
+        } else if service.status == .enabled || service.status == .requiresApproval {
+            try service.unregister()
+        }
+    } catch {
+        print("login item: \(error.localizedDescription)")
+    }
+    let status = switch service.status {
+    case .enabled: "enabled"
+    case .requiresApproval: "requires approval in System Settings > General > Login Items"
+    case .notRegistered: "not registered"
+    default: "not found"
+    }
+    print("login item: \(status)")
+    exit(0)
+}
 MainActor.assumeIsolated {
     let delegate: NSApplicationDelegate
     if let i = args.firstIndex(of: "--e2e") {
@@ -17,6 +44,34 @@ MainActor.assumeIsolated {
     }
     let app = NSApplication.shared
     app.delegate = delegate
-    app.setActivationPolicy(delegate is E2E ? .prohibited : .accessory)  // the test never takes focus
+    if let app = delegate as? AppDelegate, let i = args.firstIndex(of: "--quit-from-menu-after"),
+       args.indices.contains(i + 1), let seconds = Double(args[i + 1]) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+            MainActor.assumeIsolated { quitFromStatusMenu(app) }
+        }
+    }
     withExtendedLifetime(delegate) { app.run() }
+}
+
+/// Opens the app's real status item menu the way AppKit does before showing it (its delegate's
+/// menuNeedsUpdate), checks the menu-bar 🤫 is there, and performs "Quit Shepetal". Exits 3 on a failure.
+@MainActor
+private func quitFromStatusMenu(_ app: AppDelegate) {
+    func fail(_ why: String) -> Never {
+        FileHandle.standardError.write(Data("quit-from-menu: \(why)\n".utf8))
+        exit(3)
+    }
+    let item = Mirror(reflecting: app).children.first { $0.label == "statusItem" }?.value as? NSStatusItem
+    guard let item else { fail("no status item") }
+    guard item.isVisible, item.button?.title == "🤫", item.button?.window != nil else {
+        fail("the menu-bar 🤫 is not shown (title \(item.button?.title ?? "nil"))")
+    }
+    guard let menu = item.menu else { fail("the status item has no menu") }
+    guard let delegate = menu.delegate else { fail("the status menu has no delegate") }
+    delegate.menuNeedsUpdate?(menu)
+    guard let quit = menu.items.firstIndex(where: { $0.title == "Quit Shepetal" }) else {
+        fail("no Quit Shepetal item in the menu")
+    }
+    FileHandle.standardError.write(Data("quit-from-menu: menu-bar 🤫 shown, \(menu.items.count) menu items, picking Quit Shepetal\n".utf8))
+    menu.performActionForItem(at: quit)
 }

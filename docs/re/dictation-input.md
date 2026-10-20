@@ -204,7 +204,7 @@ Media, sounds, UI
 - [Mac] Optional mute while dictating: zero the system output with CoreAudio, only if media is playing, and restore it per device. Optional pause of media through MediaRemote. Since macOS 15.4 this needs an adapter like the one Wispr bundles; the open-source mediaremote-adapter approach is one option. Resume only media the app paused itself.
 - [Linux] Pause with MPRIS (`org.mpris.MediaPlayer2.Player.Pause` over D-Bus) and resume only the players the app paused. Mute or duck with `wpctl set-mute` / `pactl`, or with PipeWire per-stream volume for a real duck.
 - [iPhone] An AVAudioSession category with `.duckOthers` or interruption gives ducking for free.
-- [All] Our own original start, stop, lock and cancel sounds, with a toggle. Play the start sound before muting.
+- [All] No sounds: Pavel ruled them out (2026-10-21).
 - [Mac/Linux] A floating overlay with a matching state set: hidden, resting, initializing, active-PTT, active-hands-free (with cancel and stop buttons), processing, error. Include a live level waveform and a draggable position. On Linux use a layer-shell overlay on Wayland (wlr-layer-shell; GNOME has no layer-shell, so a fallback is needed) or an override-redirect window on X11.
 - [All] Clear error states: mic permission missing or revoked (with a deep link to settings), no mic, mic busy or not readable, getUserMedia timeout, accessibility or input-monitoring permission missing, secure input active.
 

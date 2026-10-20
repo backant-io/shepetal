@@ -227,7 +227,9 @@ pub fn run() {
     let forward = tx.clone();
     thread::spawn(move || events.into_iter().try_for_each(|e| forward.send(Msg::Input(e))));
     let meeting = tx.clone();
-    thread::spawn(move || meetings::watch(meetings::Config::default(), move |n| drop(meeting.send(Msg::Meeting(n)))));
+    // Nothing sends a Record click yet, so meetings are detected but not recorded.
+    let (_record, clicks) = mpsc::channel();
+    thread::spawn(move || meetings::watch(meetings::Config::default(), clicks, move |n| drop(meeting.send(Msg::Meeting(n)))));
     let stt = spawn_stt(data.join("models"), model, tx);
 
     let mut flow = Flow::new(
@@ -278,7 +280,7 @@ pub fn run() {
             }
             Ok(Msg::Meeting(notice)) => {
                 match notice {
-                    meetings::Notice::Event(meetings::Event::Started(app)) => flow.show.show_hint(&format!("{app} meeting: recording it"), HINT),
+                    meetings::Notice::Event(meetings::Event::Started(app)) => flow.show.show_hint(&format!("{app} meeting detected"), HINT),
                     meetings::Notice::Saved(dir) => flow.show.show_hint(&format!("Meeting saved in {}", dir.display()), HINT),
                     meetings::Notice::Failed(e) => flow.error(&e, now),
                     meetings::Notice::Event(_) => {}

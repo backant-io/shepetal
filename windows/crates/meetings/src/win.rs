@@ -36,16 +36,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
 /// What [`watch`] reports.
 #[derive(Debug)]
 pub enum Notice {
-    /// A detector event; `StartRecording` is reported once the recording really runs.
+    /// A detector event. Show "Record?" on `OfferRecording` and hide it on `WithdrawOffer`;
+    /// `StartRecording` is reported once the recording really runs.
     Event(Event),
     /// The recording stopped; Me.wav and Others.wav are in this dir.
     Saved(PathBuf),
     Failed(String),
 }
 
-/// Polls once a second forever: detects meetings and records each one into
+/// Polls once a second forever: detects meetings, offers "Record?", and once the user clicks
+/// it (a `()` on `record`) records the meeting into
 /// `%LOCALAPPDATA%\Shepetal\meetings\<yyyyMMdd-HHmmss>\`. Run it on its own thread.
-pub fn watch(cfg: Config, mut on: impl FnMut(Notice)) -> ! {
+pub fn watch(cfg: Config, record: mpsc::Receiver<()>, mut on: impl FnMut(Notice)) -> ! {
     // An STA thread returns RPC_E_CHANGED_MODE here; these APIs work there too.
     let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     let mut detector = Detector::new(cfg);
@@ -53,6 +55,7 @@ pub fn watch(cfg: Config, mut on: impl FnMut(Notice)) -> ! {
     let mut recording: Option<Recording> = None;
     let mut probe_ok = true;
     loop {
+        let tick = Instant::now() + Duration::from_secs(1);
         match snapshot() {
             // Keep the last state; report once, not every second.
             Err(e) => {
@@ -63,35 +66,51 @@ pub fn watch(cfg: Config, mut on: impl FnMut(Notice)) -> ! {
             }
             Ok(s) => {
                 probe_ok = true;
-                for event in detector.update(&s, t0.elapsed().as_secs_f64()) {
-                    match event {
-                        Event::StartRecording => match Recording::start() {
-                            Ok(r) => {
-                                recording = Some(r);
-                                on(Notice::Event(event));
-                            }
-                            Err(e) => on(Notice::Failed(format!(
-                                "meeting recording did not start: {e}"
-                            ))),
-                        },
-                        Event::StopRecording => {
-                            if let Some(r) = recording.take() {
-                                let dir = r.dir.clone();
-                                match r.stop() {
-                                    Ok(()) => on(Notice::Saved(dir)),
-                                    Err(e) => on(Notice::Failed(format!(
-                                        "meeting recording in {} failed: {e}",
-                                        dir.display()
-                                    ))),
-                                }
-                            }
-                        }
-                        _ => on(Notice::Event(event)),
-                    }
+                let events = detector.update(&s, t0.elapsed().as_secs_f64());
+                handle(events, &mut recording, &mut on);
+            }
+        }
+        // Wait out the second; a click on "Record?" starts the recording at once.
+        loop {
+            match record.recv_timeout(tick.saturating_duration_since(Instant::now())) {
+                Ok(()) => handle(detector.accept(), &mut recording, &mut on),
+                Err(mpsc::RecvTimeoutError::Timeout) => break,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    thread::sleep(tick.saturating_duration_since(Instant::now()));
+                    break;
                 }
             }
         }
-        thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// Starts and stops the recording on the detector's word and reports everything else.
+fn handle(events: Vec<Event>, recording: &mut Option<Recording>, on: &mut impl FnMut(Notice)) {
+    for event in events {
+        match event {
+            Event::StartRecording => match Recording::start() {
+                Ok(r) => {
+                    *recording = Some(r);
+                    on(Notice::Event(event));
+                }
+                Err(e) => on(Notice::Failed(format!(
+                    "meeting recording did not start: {e}"
+                ))),
+            },
+            Event::StopRecording => {
+                if let Some(r) = recording.take() {
+                    let dir = r.dir.clone();
+                    match r.stop() {
+                        Ok(()) => on(Notice::Saved(dir)),
+                        Err(e) => on(Notice::Failed(format!(
+                            "meeting recording in {} failed: {e}",
+                            dir.display()
+                        ))),
+                    }
+                }
+            }
+            _ => on(Notice::Event(event)),
+        }
     }
 }
 
