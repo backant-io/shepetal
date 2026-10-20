@@ -12,6 +12,22 @@ Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shar
 
 Left for account: the web side must serve the same contract (`/app/login`, `POST /api/app/token`; on `feat/web` API.md still described the device flow when this merged). Turn on `ShepetalRequiresSignIn` in `scripts/make-app.sh` once shepetal.backant.io serves `/app/login` and `POST /api/app/token` (release session, issue below). Hand tests M-ACC-1 and M-ACC-2 need the live service (the ASWebAuthenticationSession sheet and its anchor in a menu-bar app can't run in a test without putting a window on screen). No screenshot: this shell has no Screen Recording permission. The 7-day offline grace applies to lifetime licenses too, as specified. Pavel can say if lifetime should be exempt.
 
+### release (Mac build, installer, GitHub release)
+
+**Shipped:** GitHub pre-release [v0.1.0-mac](https://github.com/backant-io/shepetal/releases/tag/v0.1.0-mac), built from main at 6298f40. Assets: `Shepetal-0.1.0.pkg` (the main download), `Shepetal-0.1.0-mac.zip`, and their `.sha256`. The notes give the click-by-click install and first run, the fn troubleshooting, the hand-test checklist and the known limits. Pavel's Mac runs this build from `/Applications/Shepetal.app`: the running copy was quit, the new one copied in, and the installer's postinstall run as his user. It printed "🌐 key already set to Do Nothing" and "login item: enabled", then opened the app (UIElement, 🤫 window at x=8, y=1143, 18×18). `SOAK=300 scripts/check-app.sh` on the release build (as the test bundle): alive with 🤫 after 296 s, then Quit from the menu, no crash report.
+
+| PR | State | What landed | Verified before merge |
+|---|---|---|---|
+| #112 | merged (independent review running after the merge, because of the midnight deadline) | `.pkg` installer (`scripts/make-pkg.sh`, `scripts/pkg/{pre,post}install`): installs to /Applications. Its postinstall, as the logged-in user, sets "Press 🌐 key to" to Do Nothing (`defaults write com.apple.HIToolbox AppleFnUsageType -int 0`, `killall TextInputMenuAgent`, `killall -9 TextInputSwitcher`, read back), turns on Start at login (`Shepetal --postinstall`) and opens the app. The app does the same 🌐 check at every launch (only as `io.backant.shepetal`), shows a hint only on change, and has "Restore 🌐 key setting". "fn not received: re-grant Input Monitoring" next to 🤫 and in Home (`FnHealth`). `scripts/uninstall-mac.sh` (also in the app's Resources) keeps recordings. The menu item is renamed "Start at login" | `swift test` 123 pass (15 new: `FnKeySettingTests`, `FnHealthTests`; break of the store-once guard and the agent restart gives 5 red). `scripts/test-pkg-scripts.sh` OK against stand-ins (break: `killall` without -9 is red). The `--test` package installed with `installer -target CurrentUserHomeDirectory`, and both scripts ran in dry-run. e2e OK, check-app OK |
+| #53 | merged | `make-app.sh` signs with the Apple Development identity (designated requirement = bundle ID + certificate, so permissions survive rebuilds), and `--install` puts the app in /Applications (quit with osascript, reopen). `--zip`. The 🤫 app icon is rendered by `scripts/make-icon.swift` at 16–1024 px. `scripts/check-app.sh` runs a separate test bundle `Shepetal Check.app` (`io.backant.shepetal.check`, ad-hoc) and checks UIElement, the 🤫 panel bottom-left, alive after `SOAK` s, and Quit from the real status menu (`--quit-from-menu-after`). README install steps; goal.md rule 1 (🌐 key), rule 3 (🤫 icon), M1 (installer) | partial independent review: blockers fixed (the check ran a permission-holding copy, false passes, lock path). `SOAK=300` passed; breaks of the Quit item, the status item title and the inset are each red. e2e OK |
+
+**Left for release:**
+- Act on the #112 review.
+- Rebuild the release when #47 (Esc, shortcuts), #44 (cleanup model) and #39 (mic, languages) land.
+- Notarization needs a Developer ID pair (#109).
+- The screenshot of 🤫 needs Screen Recording for the worker, so it stays a hand test (M-IND-1).
+- Hand tests M-SETUP-1..5 wait on Pavel.
+
 ### merge-b (review, fix and merge #36, #34, #44)
 
 | PR | State | What landed | Verified before merge |
