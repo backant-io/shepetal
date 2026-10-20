@@ -29,7 +29,7 @@ Requirements: macOS 14 or later on Apple Silicon. The speech model (Parakeet v3,
 Requirements: Xcode or the Swift 6 toolchain.
 
 ```bash
-swift build && swift test             # core: fn gestures, model tiers, audio store, history, text rules
+swift build && swift test             # core: fn gestures, model tiers, languages, mic choice and health, dictionary, audio store, history, text rules
 scripts/ci/run-checks.sh              # every suite in the repo, as CI runs them (--fast skips Docker and iOS; see docs/ci.md)
 scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only), signed (see below)
 scripts/make-app.sh --install         # same, then installed to /Applications/Shepetal.app
@@ -49,6 +49,9 @@ sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh  
 - Hold `fn` to talk and release to insert. Double-tap `fn` for hands-free, then tap `fn` once to stop. A press shorter than 0.5 s inserts nothing and shows a hint. Another key pressed in the first second of an fn hold (fn+Delete, fn+arrows) is a shortcut, so that recording is cancelled.
 - 🤫 sits 8 pt in from the bottom-left corner of the main display while Shepetal runs. A red ring means recording, orange hands-free, a pulsing blue ring processing, and yellow an error, with a short message next to it.
 - Speech-to-text runs locally: Parakeet TDT 0.6B v3 through FluidAudio, from FluidAudio's model cache (`~/Library/Application Support/FluidAudio/Models`). If it is missing, the 🤫 menu offers the download (about 470 MB). The fallback from `docs/models.md` is whisper.cpp: put `whisper-cli` in `~/Library/Application Support/Shepetal/models/whisper.cpp/` and the `ggml-*.bin` model next to it, or set `SHEPETAL_WHISPER_CLI` and `SHEPETAL_WHISPER_MODEL`.
+- 🤫 > Microphone: Automatic, a device to force, or "Prefer <name>" to move it to the top of your ranking. The choice runs on every dictation: forced device, then the first ranked device that is plugged in, then the system default, never the built-in mic while the lid is closed. A dead mic, an unplugged mic, a Bluetooth mic or a very quiet recording each get a short note next to 🤫; the audio is kept either way.
+- 🤫 > Languages: Automatic uses Parakeet, as does any set of its 25 European languages. Other languages use Whisper large-v3-turbo (see `docs/models.md`).
+- 🤫 > Dictionary… opens `dictionary.txt` (owner-only) in your editor: one word or phrase per line to fix its spelling and casing, `spoken => written` for a replacement, `*` to star, `#` for comments. It applies from the next dictation. No entries ship by default.
 - Text goes in through the clipboard and a synthesized Cmd+V. Shepetal checks that an app took the text, then puts your clipboard back about 0.5 s later.
 - The text is pasted only if the window you started in is still in focus, and Shepetal never moves focus back. If you clicked into another window, or the paste does not land, the text is left on the clipboard and the note next to 🤫 says to press ⌘V. The text fits the cursor's line: a space before it when needed, a non-breaking space before a following word, and lowercase mid-sentence, with no period of its own when the sentence goes on after the cursor. When the field cannot be read, the text goes in as dictated. Over a selection, it takes the selection's case, end punctuation and surrounding spaces.
 - When another app has secure input on (a password field, Terminal's Secure Keyboard Entry), a note next to 🤫 says so. Nothing is pasted then: the text is left on the clipboard for ⌘V. A permission turned off while Shepetal runs shows a message and opens the Permissions window, and the yellow ring clears once it is back on.
