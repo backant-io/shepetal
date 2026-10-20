@@ -144,7 +144,8 @@ def reload_job(domain, wait=30.0):
     """Stop the installed job if there is one, then load the plist.
 
     bootout returns before the old job has exited, and bootstrap fails with error 5 while launchd
-    still has it, so wait until `launchctl print` no longer finds it (launchd SIGKILLs after 20 s).
+    still has it, so wait until `launchctl print` stops finding it (launchd's default ExitTimeOut
+    before SIGKILL is system-defined, 20 s in practice), and retry a bootstrap that still fails.
     """
     target = f"{domain}/{LABEL}"
     subprocess.run(["launchctl", "bootout", target], capture_output=True)
