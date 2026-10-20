@@ -128,6 +128,8 @@ Electron main (JS) decides *what* to paste; a bundled Swift helper app (`swift-h
 ## 4. What shepetal must build
 
 ### Mac
+Goal product rule 8 overrides [M1] and [M2] below. shepetal stores the focused app and window at dictation start and pastes only if that same window is still focused when the text is ready; it never refocuses or reactivates the original app. When focus moved, Secure Input is on, or the paste does not land, the text stays on the clipboard as plain text (with the Concealed and Transient markers) and the old clipboard is not restored; the hint next to 🤫 says to press ⌘V.
+
 - [M1] Helper with Accessibility permission: store focused element + pid at PTT start; restore focus before insert.
 - [M2] Insert via pasteboard + CGEvent Cmd+V. Save all pasteboard items/types first (skip the clipboard path, or warn, when they cannot be restored, e.g. file promises). Write the text with `org.nspasteboard.ConcealedType` (what Flow uses) and `org.nspasteboard.TransientType` (our addition) as a lazy `NSPasteboardItemDataProvider` item; treat the provider callback as "paste landed". Declare failure if no read within ~1 s (Flow's value), keep the text in a "paste failed, copy it" notification, and restore the clipboard ~500 ms after the read (Flow's value).
 - [M3] Resolve the keycode for 'v' in the current layout (`UCKeyTranslate` reverse lookup), defaulting to 9; post key-down/up with only the Command flag set (so held PTT modifiers do not leak into the chord) via `kCGHIDEventTap`, a few ms apart; detect stuck modifiers first.

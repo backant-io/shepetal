@@ -17,6 +17,7 @@ let package = Package(
             .product(name: "FluidAudio", package: "FluidAudio"),
         ]),
         .testTarget(name: "ShepetalCoreTests", dependencies: ["ShepetalCore"]),
+        .testTarget(name: "ShepetalTests", dependencies: ["Shepetal"]),
     ],
     swiftLanguageModes: [.v5]
 )
