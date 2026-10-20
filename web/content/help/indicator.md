@@ -27,4 +27,4 @@ Short notes show to the right of 🤫 and then go away, for example:
 - A note that the text is on the clipboard, when it could not be pasted. See [When text goes to the clipboard](clipboard).
 - A note that a permission was turned off. See [Troubleshooting](troubleshooting).
 
-The 🤫 in the menu bar holds the menu: recent dictations, recordings, sounds, permissions and Quit.
+The 🤫 in the menu bar holds the menu: recent dictations, recordings, permissions and Quit.

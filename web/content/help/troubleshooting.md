@@ -30,7 +30,7 @@ If Wispr Flow or another dictation app also uses fn, both hear it and both type.
 ## Bluetooth mics and AirPods
 
 - Shepetal opens the mic only while you dictate. With Bluetooth headphones, macOS switches them to a lower-quality call mode while the mic is open, so music may sound worse for a moment. That is macOS, not a fault.
-- Some Bluetooth mics take a moment to wake up. If your first word goes missing, wait for the start sound before you speak.
+- Some Bluetooth mics take a moment to wake up. If your first word goes missing, pause for a moment after 🤫 turns red before you speak.
 - For better accuracy, pick your Mac's built-in mic in **System Settings > Sound > Input** and keep listening on your headphones.
 
 ## Still stuck

@@ -24,10 +24,6 @@ If you press another key in the first second of holding fn, such as fn+Delete or
 
 Once you have held fn for more than a second, other keys no longer cancel the dictation.
 
-## Sounds
-
-Shepetal plays a short sound when recording starts (after you have held fn for half a second), when it stops, and when hands-free begins. Taps and fn shortcuts make no sound. Turn sounds off with **Sounds** in the 🤫 menu.
-
 ## How the text fits in
 
 Shepetal adds a space before the text when needed and keeps it lowercase in the middle of a sentence. If you have text selected, the dictation replaces it and keeps its case, end punctuation and spacing.
