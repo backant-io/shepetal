@@ -19,7 +19,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
     private var focusAtStart: (app: Int32, window: AXUIElement?)?
-    private let sounds = Sounds()
     private lazy var secureInput = SecureInput(indicator: indicator)
     private var permissions: PermissionMonitor!
     private let fnWatch = FnWatch()
@@ -27,6 +26,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
+    private var meetingFlow: MeetingFlow?
+    private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
+                                                                 card: { [weak self] in self?.meetingCard.show($0) }) { [weak self] in self?.indicator.show($0, seconds: 4) }
+    /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
+    private lazy var meetingCard: MeetingCard = MeetingCard(onRecord: { [weak self] in self?.meetings.record() },
+                                                            onNotNow: { [weak self] in self?.meetings.notNow() })
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -55,12 +60,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   stopMic: { [recorder] in recorder.stop() },
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
-        applyRetention()
-        tap.onChange = { [weak self] down in self?.fnReceived(); self?.fn(down) }
+        tap.onChange = { [weak self] down, t in self?.fnReceived(); self?.fn(down, at: t) }
         fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
         fnWatch.active = { [weak self] in self?.tap.isRunning == true }
         fnWatch.start()
-        tap.onOtherKey = { [weak self] in self?.run { $0.otherKeyDown(at: ProcessInfo.processInfo.systemUptime) } }
+        tap.onOtherKey = { [weak self] t in self?.run { $0.otherKeyDown(at: t) } }
+        recorder.onError = { [weak self] in self?.fail($0) }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -70,6 +75,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
+        do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
+            meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
+            meetingFlow?.attach(meetings)
+            meetingFlow?.onRecording = { [weak self] in
+                self?.statusItem.button?.title = $0 ? "🤫●" : "🤫"
+                self?.indicator.meeting = $0  // the red ring, for the whole recording
+            }
+        } catch { fail("Meetings: \(error.localizedDescription)") }
+        meetings.watch()
+        applyRetention()
 
         // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
         Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
@@ -113,10 +128,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         indicator.show(message, seconds: 8)
     }
 
+    /// Closes the meeting files so their WAV headers are written (rule 4).
+    func applicationWillTerminate(_ notification: Notification) { meetings.stop() }
+
     // MARK: fn → gestures
 
-    private func fn(_ down: Bool) {
-        let t = ProcessInfo.processInfo.systemUptime
+    private func fn(_ down: Bool, at t: TimeInterval) {
         if down, busy, dictation?.gesture.state == .idle {
             indicator.show("Still transcribing the last one", seconds: Hint.seconds)
             return
@@ -147,17 +164,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func show(_ action: GestureAction) {
-        sounds.play(action)
         switch action {
         case .start:
             focusAtStart = FocusedText.window()
             indicator.set(.recording)
             appAtStart = AppContext.capture()
-            if let g = dictation?.gesture {  // the start sound waits until the press is a hold
-                DispatchQueue.main.asyncAfter(deadline: .now() + g.holdThreshold + 0.01) { [weak self] in
-                    MainActor.assumeIsolated { if let g = self?.dictation?.gesture { self?.sounds.holdCheck(g) } }
-                }
-            }
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
@@ -172,7 +183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if allowPrompts { Permission.microphone.request() }
             throw SpeechError("Microphone access is off")
         }
-        do { try recorder.start() } catch { throw SpeechError("Microphone: \(error.localizedDescription)") }
+        recorder.start()
     }
 
     private func transcribe(_ samples: [Float]) {
@@ -226,6 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyRetention() {
         do { try pipeline?.store.applyRetention(retention) } catch { fail("Retention: \(error.localizedDescription)") }
+        // Meeting audio follows the same choice; the meeting being recorded is never deleted.
+        do { try meetingFlow?.store.applyRetention(retention, dir: meetings.dir, recording: meetings.current?.id) }
+        catch { fail("Meeting retention: \(error.localizedDescription)") }
     }
 
     private func showOnboarding() {
@@ -272,7 +286,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keepItem.submenu = keep
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
-        menu.addItem(sounds.menuItem)
+        menu.addItem(meetings.menuItem)
         menu.addItem(loginItem.menuItem)
         if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
             menu.addItem(item("Restore 🌐 key setting (\(FnKeySetting.describe(previous)))", #selector(restoreFnKey)))
@@ -315,7 +329,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          status: { [weak self] in (self?.engineStatus ?? "", self?.tap.isRunning == true) },
                          retention: { [weak self] in self?.retention ?? .keep },
                          setRetention: { [weak self] in self?.retention = $0 },
-                         openPermissions: { [weak self] in self?.showOnboarding() })
+                         openPermissions: { [weak self] in self?.showOnboarding() },
+                         meetingStore: meetingFlow?.store ?? InMemoryMeetingStore())
         hub?.show()
     }
 

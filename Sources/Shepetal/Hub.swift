@@ -5,23 +5,25 @@ import SwiftUI
 
 /// The one Shepetal window: Home, History and Settings. It opens from the 🤫 menu and when the app is
 /// opened again while it runs, never at launch. Settings added by other parts (shortcuts, mic,
-/// languages, dictionary, sounds, login) stay in the 🤫 menu for now.
+/// languages, dictionary, login) stay in the 🤫 menu for now.
 @MainActor
 final class Hub {
     private let window: NSWindow
     private let model: HubModel
+    private let meetings: MeetingsModel
 
     init(pipeline: Pipeline, engine: @escaping () -> SpeechEngine?,
          status: @escaping () -> (model: String, fnWatched: Bool),
          retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void,
-         openPermissions: @escaping () -> Void) {
+         openPermissions: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore()) {
         model = HubModel(pipeline: pipeline, engine: engine, status: status, retention: retention,
                          setRetention: setRetention, openPermissions: openPermissions)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 760, height: 520),
+        meetings = MeetingsModel(store: meetingStore)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Shepetal"
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: HubView(model: model))
+        window.contentView = NSHostingView(rootView: HubView(model: model, meetings: meetings))
         window.center()
     }
 
@@ -129,12 +131,14 @@ final class HubModel: ObservableObject {
 
 private struct HubView: View {
     @ObservedObject var model: HubModel
+    let meetings: MeetingsModel
     @AppStorage("hubTab") private var tab = "home"  // `-hubTab history` at launch picks one (screenshots)
 
     var body: some View {
         TabView(selection: $tab) {
             HomeTab(model: model).tabItem { Text("Home") }.tag("home")
             HistoryTab(model: model).tabItem { Text("History") }.tag("history")
+            MeetingsView(model: meetings).tabItem { Text("Meetings") }.tag("meetings")
             SettingsTab(model: model).tabItem { Text("Settings") }.tag("settings")
         }
         .padding()
@@ -211,9 +215,14 @@ private struct HistoryTab: View {
 
 private struct SettingsTab: View {
     @ObservedObject var model: HubModel
+    @AppStorage(MeetingRecorder.autoRecordKey) private var autoRecordMeetings = false
 
     var body: some View {
         Form {
+            Toggle("Always record meetings automatically", isOn: $autoRecordMeetings)
+            Text(autoRecordMeetings ? "A detected meeting records right away, with the red ring next to 🤫 the whole time."
+                                    : "A detected meeting records only after you click Record next to 🤫.")
+                .font(.caption).foregroundStyle(.secondary)
             Picker("Recordings", selection: Binding(get: model.retention, set: model.changeRetention)) {
                 Text("Keep recordings").tag(Retention.keep)
                 Text("Delete recordings after 24 hours").tag(Retention.delete24h)

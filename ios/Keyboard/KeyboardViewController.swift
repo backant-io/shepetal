@@ -63,9 +63,25 @@ final class KeyboardViewController: UIInputViewController {
         // The result is inserted only into this same field.
         let document = textDocumentProxy.documentIdentifier
         SharedHandoff.update { $0.request(id, document: document) }
-        indicator.show(.processing, "Opening Shepetal...")
-        openApp(URL(string: "shepetal://dictate?id=\(id.uuidString)")!)
+        let url = URL(string: "shepetal://dictate?id=\(id.uuidString)")!
+        guard SharedHandoff.isAppListening() else {
+            indicator.show(.processing, "Opening Shepetal...")
+            return openApp(url)
+        }
+        // The app's mic is still open, so it starts recording without leaving this app.
+        SharedHandoff.post(SharedHandoff.startNotification)
+        indicator.show(.processing, "Starting...")
+        // If the app has not taken the request (it was closed meanwhile), open it after all.
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.startGrace) { [weak self] in
+            guard let self, self.sessionID == id else { return }
+            guard SharedHandoff.read().canStart(id) else { return self.refresh() } // show where it went instead of "Starting..."
+            self.indicator.show(.processing, "Opening Shepetal...")
+            self.openApp(url)
+        }
     }
+
+    /// How long the app gets to take a request from the start notification before the keyboard opens it.
+    private static let startGrace: TimeInterval = 1.5
 
     @objc private func deleteTapped() {
         textDocumentProxy.deleteBackward()

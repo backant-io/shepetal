@@ -173,7 +173,7 @@ Generic keybind gesture engine for extensions (`main@5174401`, module `96635`):
 ## 4. What shepetal must build
 
 Hotkeys and lifecycle
-- [Mac] Hotkey capture via a CGEventTap at the session level, inserted at the head, listening for keyDown, keyUp, flagsChanged, otherMouseDown and otherMouseUp. Detect fn as keycode 63 with the secondary-fn flag on flagsChanged. Treat 179 (Globe) as fn as well. Needs the Input Monitoring / Accessibility permission. Preflight with `CGPreflightListenEventAccess`.
+- [Mac] Hotkey capture via a CGEventTap at the session level, inserted at the head, listening for keyDown, keyUp, flagsChanged, otherMouseDown and otherMouseUp. Detect fn as keycode 63 with the secondary-fn flag on flagsChanged. Ignore keycode 179 (`doubleFn`) entirely: Wispr's keypress handler returns early for it before any shortcut handling (`main@5191183`, the list exported next to the keycode table). Read as fn, the extra 179 events turn one tap into a double-tap. Needs the Input Monitoring / Accessibility permission. Preflight with `CGPreflightListenEventAccess`.
 - [Mac] Re-enable the tap on `tapDisabledByTimeout` and `tapDisabledByUserInput`. Run a watchdog that polls `CGEventTapIsEnabled`. After any period with the tap off, reconcile held keys with `CGEventSourceKeyState` so dictation never gets stuck on.
 - [Mac] Detect whether the keyboard has an Apple fn key. If it does not, default to Ctrl+Opt. IOHID is optional and only needed if Caps Lock binding is supported.
 - [Mac] Watch `IsSecureEventInputEnabled` and tell the user when a password field is blocking shortcuts.
@@ -204,13 +204,13 @@ Media, sounds, UI
 - [Mac] Optional mute while dictating: zero the system output with CoreAudio, only if media is playing, and restore it per device. Optional pause of media through MediaRemote. Since macOS 15.4 this needs an adapter like the one Wispr bundles; the open-source mediaremote-adapter approach is one option. Resume only media the app paused itself.
 - [Linux] Pause with MPRIS (`org.mpris.MediaPlayer2.Player.Pause` over D-Bus) and resume only the players the app paused. Mute or duck with `wpctl set-mute` / `pactl`, or with PipeWire per-stream volume for a real duck.
 - [iPhone] An AVAudioSession category with `.duckOthers` or interruption gives ducking for free.
-- [All] Our own original start, stop, lock and cancel sounds, with a toggle. Play the start sound before muting.
+- [All] No sounds: Pavel ruled them out (2026-10-21).
 - [Mac/Linux] A floating overlay with a matching state set: hidden, resting, initializing, active-PTT, active-hands-free (with cancel and stop buttons), processing, error. Include a live level waveform and a draggable position. On Linux use a layer-shell overlay on Wayland (wlr-layer-shell; GNOME has no layer-shell, so a fallback is needed) or an override-redirect window on X11.
 - [All] Clear error states: mic permission missing or revoked (with a deep link to settings), no mic, mic busy or not readable, getUserMedia timeout, accessibility or input-monitoring permission missing, secure input active.
 
 ## 5. Open questions
 - Esc and matched shortcut events are swallowed (from strings). It is still unknown whether a bare fn press is also swallowed, which would stop the macOS emoji picker or the "Press fn to start Dictation" action, or whether users have to change that macOS setting. To check, trace the tap callback in `helper-disasm.txt` near line 645039.
-- The exact fn detection inside the callback: does it read the keycode alone, or `kCGEventFlagMaskSecondaryFn`? Wispr also has a `doubleFn` (179) pseudo-key, and it is unclear whether that is the Globe key or a synthesized double-press.
+- The exact fn detection inside the callback: does it read the keycode alone, or `kCGEventFlagMaskSecondaryFn`? Wispr also has a `doubleFn` (179) pseudo-key. Its keypress handler drops 179 before any shortcut handling (`main@5191183`). It is still not traced whether macOS sends 179 at the press or after the release.
 - Does the helper apply any timing of its own before it emits `KeypressEvent`, or is all of the 500 ms logic in main? It looks like everything is in main.
 - Whether Wispr reads or changes the macOS "Press fn key to" setting (`AppleFnUsageType`). No string for it was found.
 - How `usedWhisperMode` gets set: by a server-side whisper classifier, or by the quiet-volume heuristic?

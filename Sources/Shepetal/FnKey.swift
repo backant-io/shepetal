@@ -56,9 +56,10 @@ enum FnDiagnostics {
     static var problem: String?
 }
 
-/// Polls the HID state of the fn key itself (keycode 63, or Globe 179; not the fn flag, which macOS also
-/// sets for arrows, F-keys and Home/End) and reports a press the event tap never delivered. It only
-/// polls while `active()` (the tap is running): without Input Monitoring the permission prompt speaks.
+/// Polls the HID state of the fn key itself (keycode 63; not the fn flag, which macOS also sets for arrows,
+/// F-keys and Home/End, and not the Globe key's 179, which the tap ignores too) and reports a press the event
+/// tap never delivered. It only polls while `active()` (the tap is running): without Input Monitoring the
+/// permission prompt speaks.
 @MainActor
 final class FnWatch {
     private var health = FnHealth()
@@ -70,8 +71,7 @@ final class FnWatch {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let down = self.active() && (CGEventSource.keyState(.hidSystemState, key: 63)
-                                             || CGEventSource.keyState(.hidSystemState, key: 179))
+                let down = self.active() && CGEventSource.keyState(.hidSystemState, key: CGKeyCode(FnKey.keycode))
                 if self.health.poll(hidFnDown: down, at: ProcessInfo.processInfo.systemUptime) { self.onUnreported?() }
             }
         }
