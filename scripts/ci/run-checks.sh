@@ -3,6 +3,7 @@
 #   scripts/ci/run-checks.sh              all suites, in the order below
 #   scripts/ci/run-checks.sh --fast       skip the Docker suites (linux, meeting-linux) and ios
 #   scripts/ci/run-checks.sh --only NAME  one suite
+#   scripts/ci/run-checks.sh --self-test  check this runner (the scripts suite runs it)
 # .github/workflows/ci.yml runs the same suites one by one with --only.
 # Not run here or in CI: scripts/e2e-mac.sh, which needs the 470 MB Parakeet model. Run it by hand.
 set -uo pipefail
@@ -50,6 +51,7 @@ suite_scripts() {
   else
     echo "SKIP parity.py --completeness: $RE/identifier-map.tsv is only on Pavel's Mac"
   fi
+  scripts/ci/run-checks.sh --self-test   # last, so it fails the suite even if set -e is lost
 }
 
 suite_linux() {   # the command from linux/README.md, plus cache mounts
@@ -65,24 +67,46 @@ suite_meeting-linux() {   # MeetingCore only: MeetingMac and the CLI are behind 
   docker run --rm -v "$ROOT/meeting":/w -w /w -v "$CACHE/meeting-linux":/build swift:6.2 swift test --scratch-path /build
 }
 
+run_suites() {   # stops at the first failing suite with exit 1
+  local start=$SECONDS s t rc
+  for s in "$@"; do
+    if [ -n "$fast" ] && [[ " $SLOW " == *" $s "* ]]; then echo "== $s: SKIP (--fast)"; continue; fi
+    echo "== $s"
+    t=$SECONDS
+    ( set -ex; "suite_$s" ); rc=$?
+    if [ $rc -ne 0 ]; then echo "== FAIL: $s (exit $rc). Fix it, then rerun: $0 --only $s"; exit 1; fi
+    echo "== $s: ok ($((SECONDS - t)) s)"
+  done
+  echo "== passed: ${only:-all suites}${fast:+ except $SLOW} ($((SECONDS - start)) s). Not run: scripts/e2e-mac.sh (needs the Parakeet model)"
+}
+
+self_test() {   # CI can only go red if a failing command inside a suite fails the run
+  suite_selftest_fail() { true; false; true; }
+  suite_selftest_pass() { echo selftest_pass ran; }
+  local out rc s bad=
+  out=$(run_suites selftest_fail selftest_pass 2>&1); rc=$?
+  [ $rc -eq 1 ] || { echo "self-test: a suite whose middle command fails exited $rc, want 1"; bad=1; }
+  [[ $out != *"selftest_pass ran"* ]] || { echo "self-test: the suite after a failing one still ran"; bad=1; }
+  out=$(run_suites selftest_pass 2>&1); rc=$?
+  [ $rc -eq 0 ] || { echo "self-test: a passing suite exited $rc, want 0"; bad=1; }
+  for s in $SUITES; do   # every suite must have its own CI step
+    grep -qE "run-checks\.sh --only $s\$" "$ROOT/.github/workflows/ci.yml" ||
+      { echo "self-test: .github/workflows/ci.yml has no 'run-checks.sh --only $s' step"; bad=1; }
+  done
+  [ -z "$bad" ] || exit 1
+  echo "self-test ok"
+}
+
 fast= only=
 while [ $# -gt 0 ]; do
   case $1 in
     --fast) fast=1 ;;
     --only) only=${2:?--only needs a suite name}; shift ;;
-    *) echo "usage: $0 [--fast] [--only SUITE]  (suites: $SUITES)"; exit 2 ;;
+    --self-test) self_test; exit 0 ;;
+    *) echo "usage: $0 [--fast] [--only SUITE] [--self-test]  (suites: $SUITES)"; exit 2 ;;
   esac
   shift
 done
 if [ -n "$only" ] && [[ " $SUITES " != *" $only "* ]]; then echo "unknown suite '$only' (suites: $SUITES)"; exit 2; fi
 
-start=$SECONDS
-for s in ${only:-$SUITES}; do
-  if [ -n "$fast" ] && [[ " $SLOW " == *" $s "* ]]; then echo "== $s: SKIP (--fast)"; continue; fi
-  echo "== $s"
-  t=$SECONDS
-  ( set -ex; "suite_$s" ); rc=$?
-  if [ $rc -ne 0 ]; then echo "== FAIL: $s (exit $rc). Fix it, then rerun: $0 --only $s"; exit 1; fi
-  echo "== $s: ok ($((SECONDS - t)) s)"
-done
-echo "== passed: ${only:-all suites}${fast:+ except $SLOW} ($((SECONDS - start)) s). Not run: scripts/e2e-mac.sh (needs the Parakeet model)"
+run_suites ${only:-$SUITES}

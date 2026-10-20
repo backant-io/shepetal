@@ -87,7 +87,7 @@ The HelperAPI messages (102 requests, 28 responses) and the windows (9) match.
 
 ## CI (#21)
 
-`scripts/ci/run-checks.sh` runs every suite and stops at the first failure: `swift`, `meeting`, `ios`, `summarize`, `bench`, `scripts`, `linux`, `meeting-linux`. `--fast` skips `ios` and the two Docker suites, and `--only SUITE` runs one suite. `.github/workflows/ci.yml` runs the same suites on every pull request and on every push to main, in a macos-26 job (Xcode 26.3, Swift 6.2) and an ubuntu-24.04 job (Docker: ubuntu:24.04 for `linux/`, swift:6.2 for MeetingCore).
+`scripts/ci/run-checks.sh` runs every suite and stops at the first failure: `swift`, `meeting`, `ios`, `summarize`, `bench`, `scripts`, `linux`, `meeting-linux`. `--fast` skips `ios` and the two Docker suites, and `--only SUITE` runs one suite. `--self-test`, the last command of the `scripts` suite, checks that a suite whose middle command fails stops the run with exit 1, and that every suite has a `--only` step in the workflow. `.github/workflows/ci.yml` runs the same suites on every pull request and on every push to main, in a macos-26 job (Xcode 26.3, Swift 6.2) and an ubuntu-24.04 job (Docker: ubuntu:24.04 for `linux/`, swift:6.2 for MeetingCore).
 
 Not run in CI:
 - `scripts/e2e-mac.sh` needs the 470 MB Parakeet v3 model. Run it by hand before a change to the Mac pipeline lands.
