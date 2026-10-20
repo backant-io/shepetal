@@ -84,3 +84,12 @@ The extracted bundle disagrees with the counts in the goal:
 - Analytics events: 1064, where the goal says 1065.
 
 The HelperAPI messages (102 requests, 28 responses) and the windows (9) match.
+
+## CI (#21)
+
+`scripts/ci/run-checks.sh` runs every suite and stops at the first failure: `swift`, `meeting`, `ios`, `summarize`, `bench`, `scripts`, `linux`, `meeting-linux`. `--fast` skips `ios` and the two Docker suites, and `--only SUITE` runs one suite. `.github/workflows/ci.yml` runs the same suites on every pull request and on every push to main, in a macos-26 job (Xcode 26.3, Swift 6.2) and an ubuntu-24.04 job (Docker: ubuntu:24.04 for `linux/`, swift:6.2 for MeetingCore).
+
+Not run in CI:
+- `scripts/e2e-mac.sh` needs the 470 MB Parakeet v3 model. Run it by hand before a change to the Mac pipeline lands.
+- The copied-Wispr-string check in `check_re_docs.py` and `parity.py --completeness` need `/Users/sorcecoder/shepetal-re/`, so CI runs `check_re_docs.py --no-bundle`. `run-checks.sh` runs both checks in full when that folder exists.
+- `linux/` is not on main yet (#2). Until it is, the `linux` suite prints `linux/: not on this branch`.

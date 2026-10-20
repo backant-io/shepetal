@@ -10,6 +10,7 @@ Requirements: macOS 14 or later, Apple Silicon for the default model, Xcode or t
 
 ```bash
 swift build && swift test             # core: fn gestures, model tiers, audio store, history, text rules
+scripts/ci/run-checks.sh              # every suite in the repo, as CI runs them (--fast skips Docker and iOS)
 scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only, ad-hoc signed)
 open dist/Shepetal.app                # add --args --no-permission-prompts to never ask macOS for anything
 scripts/e2e-mac.sh                    # real pipeline on `say` speech: WER, latency, audio file checks
