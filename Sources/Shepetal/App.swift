@@ -18,6 +18,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
+    private var focusAtStart: (app: Int32, window: AXUIElement?)?
+    private let sounds = Sounds()
+    private lazy var secureInput = SecureInput(indicator: indicator)
+    private var permissions: PermissionMonitor!
+    private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
+    private var hub: Hub?
+    private var appAtStart: Task<AppContext, Never>?
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -55,10 +62,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.applyRetention() }
         })
         timers.append(Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.startTapIfAllowed() }
+            MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
 
+        permissions = PermissionMonitor(revoked: { [weak self] message in
+            self?.fail(message)
+            if self?.allowPrompts == true { self?.showOnboarding() }
+        }, restored: { [weak self] in
+            if self?.indicator.mode == .error { self?.indicator.set(.idle) }
+        })
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
         }
@@ -98,8 +111,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func show(_ action: GestureAction) {
+        sounds.play(action)
         switch action {
-        case .start: indicator.set(.recording)
+        case .start:
+            focusAtStart = FocusedText.window()
+            indicator.set(.recording)
+            appAtStart = AppContext.capture()
+            if let g = dictation?.gesture {  // the start sound waits until the press is a hold
+                DispatchQueue.main.asyncAfter(deadline: .now() + g.holdThreshold + 0.01) { [weak self] in
+                    MainActor.assumeIsolated { if let g = self?.dictation?.gesture { self?.sounds.holdCheck(g) } }
+                }
+            }
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
@@ -121,9 +143,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let pipeline else { return }
         busy = true
         indicator.set(.processing)
+        let appAtStart = appAtStart
+        let start = focusAtStart
         Task {
-            let run = await pipeline.process(samples, engine: engine, context: FocusedText.context,
-                                             sendPaste: Inserter.postCmdV)
+            let app = await appAtStart?.value ?? AppContext()
+            let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
+                                             selection: FocusedText.selected,
+                                             focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
+                                             secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false
             if let error = run.error { fail(error) } else { indicator.set(.idle) }
         }
@@ -169,6 +196,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.removeAllItems()
         menu.addItem(withTitle: tap.isRunning ? "Hold fn to talk, double-tap for hands-free" : "fn is not being watched yet", action: nil, keyEquivalent: "")
         menu.addItem(withTitle: engineStatus, action: nil, keyEquivalent: "")
+        menu.addItem(item("Open Shepetal…", #selector(openHub)))
         if engine == nil, !ParakeetEngine.isInstalled {
             menu.addItem(item("Download speech model (Parakeet v3, about 470 MB)", #selector(downloadModel)))
         }
@@ -198,6 +226,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keepItem.submenu = keep
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
+        menu.addItem(sounds.menuItem)
+        menu.addItem(loginItem.menuItem)
         menu.addItem(item(Permission.missing.isEmpty ? "Permissions…" : "Permissions… (\(Permission.missing.count) missing)", #selector(openPermissions)))
         menu.addItem(.separator())
         for (title, url) in Self.donate {
@@ -222,6 +252,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setRetention(_ sender: NSMenuItem) {
         retention = Retention(rawValue: sender.representedObject as? String ?? "") ?? .keep
+    }
+
+    /// Opening the app again while it runs (Finder, Spotlight, `open`) shows the hub.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        openHub()
+        return false
+    }
+
+    @objc private func openHub() {
+        guard let pipeline else { return fail("History is not available") }
+        hub = hub ?? Hub(pipeline: pipeline, engine: { [weak self] in self?.engine },
+                         status: { [weak self] in (self?.engineStatus ?? "", self?.tap.isRunning == true) },
+                         retention: { [weak self] in self?.retention ?? .keep },
+                         setRetention: { [weak self] in self?.retention = $0 },
+                         openPermissions: { [weak self] in self?.showOnboarding() })
+        hub?.show()
     }
 
     @objc private func openRecordings() { NSWorkspace.shared.open(Paths.audio) }

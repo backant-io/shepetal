@@ -1,5 +1,18 @@
 # Progress
 
+## Iteration 2 (2026-10-20 evening): six parallel sessions
+
+Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
+
+### merge-b (review, fix and merge #36, #34, #44)
+
+| PR | State | What landed | Verified before merge |
+|---|---|---|---|
+| #34 | merged | Insertion and system integration (Mac F06, F17, F27, F90, F92, F109 to `hand-test`). Rule 8 on the Mac (#42): the focused app and window are stored at fn-down, the text is pasted only if that window is still focused when it is ready, otherwise it stays on the clipboard (plain text with the Concealed/Transient markers, old clipboard not restored) with a ⌘V hint next to 🤫; FocusRestore removed, nothing refocuses another app. Also NBSP and selection rules, Secure Input notice and paste block, revoked-permission detection, Open at login (`SMAppService`, menu item), synthesized sounds | independent review PASS on a clean clone (4 deliberate breaks red); review fixes: an unreadable window still records the app (`PasteGateTests.testUnreadableWindowStillRecordsTheApp`, red when broken), 0.1 s AX timeout on the fn-down focus read, clipboard markers (red when dropped). After merging main: `swift test` 82 pass, sandboxed `scripts/e2e-mac.sh` OK, WER 0.0% |
+| #36 | merged | Hub window (Home, History, Settings), history search, copy, playback, re-transcribe, archive, and the app and page URL of each dictation (Mac F23, F52 to `hand-test`; F91 stays `todo`). Issue #37 fixed in the review: history keeps only scheme, host and path of a URL (no query, fragment, userinfo, port or `;` path parameters) | independent review PASS on a clean clone; after merging main: `swift test` 46 pass, sandboxed `scripts/e2e-mac.sh` OK, WER 0.0% |
+
+Left for merge-b: #44 (local cleanup model). #34 follow-ups are on #42 (same-app unreadable window pastes, tabs count as the same window, e2e activation-policy assert after #28) and #33 (background Secure Input owner blocks every paste, sound packs). #36 follow-ups are on #38 (one-way history upgrade, re-transcribe sharing the ASR actor, private windows, no hub UI test).
+
 ## Iteration 1 (2026-10-20), main at 60cc333
 
 `python3 scripts/parity.py` gives these numbers. Only Mac cells moved this iteration.
