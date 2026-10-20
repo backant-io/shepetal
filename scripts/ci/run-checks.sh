@@ -85,4 +85,4 @@ for s in ${only:-$SUITES}; do
   if [ $rc -ne 0 ]; then echo "== FAIL: $s (exit $rc). Fix it, then rerun: $0 --only $s"; exit 1; fi
   echo "== $s: ok ($((SECONDS - t)) s)"
 done
-echo "== all checks passed ($((SECONDS - start)) s). Not run: scripts/e2e-mac.sh (needs the Parakeet model)"
+echo "== passed: ${only:-all suites}${fast:+ except $SLOW} ($((SECONDS - start)) s). Not run: scripts/e2e-mac.sh (needs the Parakeet model)"
