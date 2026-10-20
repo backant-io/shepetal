@@ -75,13 +75,16 @@ final class Pipeline {
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
-        let (before, after) = context()
-        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selection())
+        // Rule 8 first: when the text is not pasted, the field that has focus now is not read. Its AX reads
+        // run on the main thread and a busy app holds them until AX times out (M-NS-1).
         if let message = PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) {
+            run.inserted = InsertionRules.fit(run.entry.text, before: "", after: "")
             inserter.leaveOnClipboard(run.inserted)
             run.entry.outcome = .pasteFailed
             return message
         }
+        let (before, after) = context()
+        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selection())
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed

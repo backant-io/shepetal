@@ -52,6 +52,56 @@ final class ShepetalSummaryTests: XCTestCase {
         XCTAssertEqual(owner(sents, 1, aliases(sents)), "Cleo")
     }
 
+    // The tests below mirror summarize/test_summarize.py case for case: same input, same expected output.
+
+    func tiny(_ word: String) -> MeetingSummarizer {
+        MeetingSummarizer(model: .init(bias: -2, threshold: 0.5, weights: ["u:" + word: 4]))
+    }
+
+    func sents(_ pairs: [(String, String)]) -> [Sent] { pairs.map { Sent(spk: $0.0, text: $0.1) } }
+
+    /// "You have to work on X", "you have to work on Y": compared on all words, Y used to replace X and a hand-out of
+    /// several tasks lost all but the last. Only content words decide that a task was repeated.
+    func testTwoTasksSaidTheSameWayAreBothKept() {
+        let s = sents([("Ana", "You have to work on the components concept."), ("Ana", "You have to work on the user interface."),
+                       ("Ben", "Okay.")])
+        XCTAssertEqual(tiny("work").actionItems(s).map(\.i), [0, 1])
+        XCTAssertTrue(sameTask("ask Leo to send the revised copy", "follow up with Leo today and get the revised copy"))
+    }
+
+    func testARequestAskedAsAQuestionIsAnActionItem() {
+        let got = tiny("slides").actionItems(sents([("Ana", "Could you e-mail me the slides?"), ("Ben", "Sure.")]))
+        XCTAssertEqual(got.map { [$0.who, $0.task, $0.due] }, [["Ben", "Could you e-mail me the slides?", ""]])
+        XCTAssertTrue(tiny("slides").actionItems(sents([("Ana", "Did you see the slides?"), ("Ben", "Yes.")])).isEmpty)
+    }
+
+    /// "you'll", "I'm going to", "Kate will": hand-off cues the shipped weights rely on.
+    func testModalCuesAreFeaturesTheShippedModelReliesOn() throws {
+        func cues(_ t: String) -> Set<String> { Set(CUES.filter { $0.1.has(t) }.map(\.0)) }
+        XCTAssertTrue(cues("So Kate will draft it and you'll check it.").isSuperset(of: ["a:name", "a:you"]))
+        XCTAssertFalse(cues("This will take a week.").contains("a:name"))  // a capital that only opens the sentence is no name
+        XCTAssertTrue(cues("I'm going to send it after the next meeting.").isSuperset(of: ["a:i", "a:next"]))
+        let w = try MeetingSummarizer().model.weights
+        for k in ["a:you", "a:i", "a:name"] { XCTAssertGreaterThan(w[k] ?? 0, 0.3, k) }
+    }
+
+    /// The chair often talks on for a while before the addressee says "okay"; a 3-sentence window handed it to Ben.
+    func testYouGoesToWhoeverAnswersAfterALongHandOut() {
+        let s = sents([("Ben", "Fine."), ("Ana", "You'll look at the costs.")] + Array(repeating: ("Ana", "And more on that."), count: 5)
+                      + [("Cy", "Will do.")])
+        XCTAssertEqual(owner(s, 1, aliases(s)), "Cy")
+    }
+
+    /// Without calendar names the labels say nothing; "I'm the Industrial Designer" ties the title to a voice.
+    func testJobTitleSaidAboutOneselfNamesTheSpeaker() {
+        let s = sents([("Speaker 1", "I'm the uh Industrial Designer on this project."), ("Speaker 2", "And I'm the User Interface Designer."),
+                       ("Speaker 3", "So the Industrial Designer will build the case."), ("Speaker 2", "Okay.")])
+        XCTAssertEqual(owner(s, 2, aliases(s)), "Speaker 1")
+        let al = aliases(s)
+        XCTAssertEqual([al["ID"], al["UID"], al["Interface"]], ["Speaker 1", "Speaker 2", "Speaker 2"])
+        XCTAssertNil(al["Designer"])  // both are designers, so the bare word names neither
+    }
+
     /// In the app the speakers are the two channels, so owners come out as "Me" and "Others".
     func testOwnersAreTheChannelLabels() throws {
         let got = try MeetingSummarizer().summarize([
