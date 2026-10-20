@@ -4,13 +4,13 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
-### Parity audit (main at 3460ec6)
+### Parity audit (main at 86bf3fa)
 
-`docs/parity.md` was checked against every PR merged to main since the 45e8bf4 audit, through #154: #66, #83, #86, #92, #94, #96, #113, #129, #131, #134, #135, #136, #139, #142, #146, #148, #151, #152 and #154 change cells or evidence. #25, #74, #80, #116, #120, #122, #147 and #153 do not (CI, docs, the Windows app, tooling or summarizer quality). The Windows crates (#82, #87, #91, #108, #110) change no cell. Measured with `python3 scripts/parity.py`:
+`docs/parity.md` was checked against every PR merged to main since the 45e8bf4 audit, through #39 and #138: #66, #83, #86, #92, #94, #96, #113, #129, #131, #134, #135, #136, #139, #142, #146, #148, #151, #152, #154 and #138 change cells or evidence. #39 brought its own ledger rows (Mac F07 and F08 to `hand-test`). #25, #74, #80, #116, #120, #122, #147 and #153 do not (CI, docs, the Windows app, tooling or summarizer quality). The Windows crates (#82, #87, #91, #108, #110) change no cell. Measured with `python3 scripts/parity.py`:
 
 | | Before (main at 166e0f6) | After |
 |---|---|---|
-| Automated coverage | 13.4% (50 of 372) | 15.3% (57 of 372) |
+| Automated coverage | 13.4% (50 of 372) | 15.9% (59 of 372, two of them from #39) |
 | Confirmed coverage | 8.6% (32 of 372) | 8.6%, the same |
 
 Seven cells moved from `todo` to `hand-test`. Each has its tests on main and a step in `docs/manual-test.md`:
@@ -20,7 +20,7 @@ Seven cells moved from `todo` to `hand-test`. Each has its tests on main and a s
 New steps: M-INS-7 (#148), M-MTG-6 and M-MTG-7 (#113, #135, #146), and on Linux L-SETUP-5, L-SC-1 to L-SC-6, L-MIC-1 to L-MIC-6, L-VOC-1 to L-VOC-3, L-FOC-1 and L-FOC-2, L-IND-1 to L-IND-6 and L-MEET-4 to L-MEET-10, ported from `docs/linux*.md`. Stale step text was fixed in M-SETUP-1, M-INS-1, M-HUB-1, M-MTG-1, the Meetings intro, the Linux setup paragraph, L-FN-1, L-FN-4, L-INS-1, L-INS-2 and L-INS-5.
 
 Merged but still `todo`, with the reason in the row:
-- Mac meetings: F66 (#145 Screen Recording is never requested; #62 no Core Audio process-list fixture test), F67 (no end on silence), F68 (30 s passes with the dictation model, not a streaming model), F69 (no refined pass), F70 (no diarization or names), F71 (no notepad), F72 (the app's model predates #129, #133; cross-validation 54.5%), F81 (no transcript retention), F82, F120, F121.
+- Mac meetings: F66 (#145 Screen Recording is never requested; #62 no Core Audio process-list fixture test), F67 (no end on silence), F68 (30 s passes with the dictation model, not a streaming model), F69 (no refined pass), F70 (no diarization or names), F71 (no notepad), F72 (cross-validation 54.5% with role labels, #8), F81 (no transcript retention), F82, F120, F121.
 - Linux: F04 (no combo for the dictation key, no mouse buttons), F08 (no alert for a mic that sends no frames, no clamshell warning), F10 (the 20 min cap is not a setting), F32 (no local-model cleanup), F39 (Parakeet gets no word hint), F40 (no rich text), F109 (fit is never called, #81), F66 (the mic holder is the only evidence), F67 (no end on silence), F69 (no test of the final-pass model), F70, F71, F72, F81 (#141).
 
 Checks: every backticked test name in the ledger exists on main inside the class it names (Swift `func`, Rust `fn`), each one added here was traced to its PR with `git log -S`, and every cited step id has a heading in `docs/manual-test.md`. Renamed tests were fixed: `FnTapTests.testGlobeKeyIsFn` is `testGlobeKeyEventsAreIgnored` (#139), and `evdev_key_values_become_gesture_events` is `evdev_key_events_reach_the_shortcut_layer_as_is` (#96).
