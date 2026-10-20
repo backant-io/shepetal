@@ -55,9 +55,12 @@ The colors are Apple's system red, orange, blue and yellow, which the Mac indica
 | GNOME Wayland | `linux/gnome-extension/`, a GNOME Shell extension (GNOME 45 and later), because Mutter has no layer-shell and lets no app place an overlay. It adds 🤫 as top chrome (above all windows, also full-screen ones), not part of the input region and not reactive, so clicks go through. |
 
 `shepetal daemon` starts `shepetal-indicator` from PATH, except on GNOME Wayland, where it says
-that 🤫 comes from the extension. If the program is missing, the daemon says so on stderr; if it
-cannot run (no display, no GTK), it says why on the same stderr. Either way the daemon goes on:
-dictation works without 🤫, and hints still go to stderr. On a Wayland compositor without layer-shell (and not GNOME) the indicator exits with a
+that 🤫 comes from the extension. If the program is missing, the daemon says so once on stderr.
+Whenever the indicator exits while the daemon runs (a crash, an X server or compositor restart, a
+display that was not ready yet), the daemon reports it on stderr, reaps it and starts it again
+after 2 s, doubling the wait up to 64 s while it keeps exiting within 30 s (goal rule 3: 🤫 is
+always there). If the socket cannot be made (other than another daemon holding it), the daemon
+says why and goes on without 🤫. Either way dictation works, and hints still go to stderr. On a Wayland compositor without layer-shell (and not GNOME) the indicator exits with a
 message; `GDK_BACKEND=x11` runs it on XWayland as an X11 window.
 
 ### Toolkit: GTK 3 with gtk-layer-shell, from Python (PyGObject)
@@ -93,7 +96,8 @@ message; `GDK_BACKEND=x11` runs it on XWayland as an X11 window.
   left by a daemon that died is replaced.
 - `shepetal-indicator` exits when the daemon closes the socket, which the kernel also does when
   the daemon is killed (SIGKILL included), so 🤫 never outlives the daemon. The GNOME extension
-  hides 🤫 instead and tries to connect again every 2 s.
+  hides 🤫 instead and tries to connect again every 2 s. Without an absolute `XDG_RUNTIME_DIR`,
+  `shepetal-indicator` exits with a message instead of looking for the socket elsewhere.
 - `shepetal indicator` opens the socket and starts the indicator like the daemon does, without the
   hotkey, and sends each line it reads on stdin. The Docker check and the manual steps below use it.
 
@@ -129,7 +133,14 @@ GTK 3, gtk-layer-shell, Xvfb, Sway and grim, and runs:
    an empty region. The same screenshot checks run on `grim` shots, and the same exit check.
 5. GNOME extension: eslint 9 with its recommended rules (which include parse errors) on
    `extension.js`, with no warnings allowed, in `node:22.11.0-slim`, and a check that
-   `metadata.json` parses and has `uuid`, `name`, `description` and `shell-version`.
+   `metadata.json` parses and has `uuid`, `name`, `description` and `shell-version`. And a
+   lifecycle run under gjs (`linux/indicator/gnome-test/`): the real `extension.js` with St,
+   Clutter, Main and Extension replaced by stand-ins (an actor used after `destroy()` throws) and a
+   real socket. It checks placement, click-through, the ring and the hint, `disable()` while
+   connected and while connecting, a quick `disable(); enable()`, and 🤫 hiding when the daemon
+   stops and coming back when it starts again. Any `JS ERROR` on stderr fails the check.
+6. X11 restart: the indicator is killed; the daemon must report it, reap it (no zombie) and bring
+   🤫 back.
 
 Screenshots and the indicator's stderr (with the Wayland protocol log) go to OUT_DIR (default: a
 new temporary dir, printed at the end). What only a real desktop shows is in the manual steps below (I-1 to I-6).
@@ -331,8 +342,12 @@ and `mkdir -p ~/.local/bin && ln -s "$PWD/linux/indicator/shepetal-indicator" ~/
   menu) can cover it for up to a second. Watching the root window's restacking would close that.
 - On Wayland, wlr-layer-shell has no notion of a primary output. 🤫 goes to the monitor GTK
   reports as primary, or else its first monitor, which is not always the one KDE calls primary.
-- The GNOME extension has only passed eslint. It has not run in a real GNOME Shell yet (I-4),
-  and `shell-version` lists 45 to 51 without a run on any of them.
+- The GNOME extension has passed eslint and the gjs lifecycle run with stand-ins for the Shell
+  modules, but has not run in a real GNOME Shell yet (I-4), and `shell-version` lists 45 to 51
+  without a run on any of them. It does not move 🤫 when only the scale factor changes, and on
+  GNOME on Xorg it would show a second 🤫 next to `shepetal-indicator` if both are on.
+- Two daemons started at the same instant could both pass the "another daemon" check before
+  either binds the socket.
 - 🤫 needs a color emoji font (`fonts-noto-color-emoji`). Without one it draws whatever glyph
   fontconfig falls back to.
 - Another key while fn is held cancels at any point of the hold. The Mac cancels only in the

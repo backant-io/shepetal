@@ -15,10 +15,10 @@ if [ "${1:-}" != --in-docker ]; then
 FROM ubuntu:24.04
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
     ca-certificates cargo python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-gtklayershell-0.1 \
-    fonts-noto-color-emoji fonts-dejavu-core xvfb x11-utils xdotool imagemagick sway grim >/dev/null \
+    fonts-noto-color-emoji fonts-dejavu-core xvfb x11-utils xdotool imagemagick sway grim gjs >/dev/null \
  && rm -rf /var/lib/apt/lists/*
 EOF
-    docker run --rm -v "$PWD/linux":/src:ro -v "$out":/out -w /src -e CARGO_TARGET_DIR=/tmp/target \
+    docker run --rm -v "$PWD/linux":/src:ro -v "$out":/out -w /src -e CARGO_TARGET_DIR=/tmp/target -e CARGO_BUILD_JOBS=4 \
         shepetal-linux-indicator-test sh indicator/check.sh --in-docker
     echo "== GNOME Shell extension"
     docker run --rm -v "$PWD/linux/gnome-extension":/ext:ro node:22.11.0-slim sh -ec '
@@ -102,6 +102,18 @@ stop() {
     echo "ok $1: shepetal-indicator exited with the daemon"
 }
 
+echo "== GNOME Shell extension lifecycle (gjs, Shell modules stubbed)"
+g=/tmp/gnome-test && mkdir -p "$g" && cp indicator/gnome-test/*.js "$g/"
+sed -e "s|^import Clutter from 'gi://Clutter';|import {Clutter} from './stubs.js';|" \
+    -e "s|^import St from 'gi://St';|import {St} from './stubs.js';|" \
+    -e "s|^import \* as Main from 'resource:///org/gnome/shell/ui/main.js';|import {Main} from './stubs.js';|" \
+    -e "s|^import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';|import {Extension} from './stubs.js';|" \
+    gnome-extension/extension.js > "$g/extension.js"
+! grep -qE "gi://(St|Clutter)|resource:///" "$g/extension.js" || fail "gnome: an import was not stubbed"
+mkdir -m 700 /tmp/rt-gnome
+XDG_RUNTIME_DIR=/tmp/rt-gnome LANG=C.UTF-8 gjs -m "$g/test.js" 2> /out/gnome-stderr.log || { cat /out/gnome-stderr.log; fail "gnome extension test"; }
+! grep -E "JS ERROR|CRITICAL|WARNING" /out/gnome-stderr.log || fail "gnome: errors on stderr (above)"
+
 echo "== X11 (Xvfb 1280x720, no window manager, no compositor)"
 export XDG_RUNTIME_DIR=/tmp/rt-x11 DISPLAY=:99 XDG_SESSION_TYPE=x11
 mkdir -m 700 "$XDG_RUNTIME_DIR"
@@ -124,6 +136,15 @@ xdotool mousemove 17 703 click 1
 sleep 0.5
 grep -q click /tmp/clicks || fail "x11: a click on 🤫 did not reach the window below it"
 echo "ok x11: a click on 🤫 reached the window below it (empty input shape)"
+pkill -f 'python3 .*shepetal-indicator'  # a crash: the daemon must start it again (2 s later)
+sleep 0.5
+! xdotool search --name '^shepetal$' >/dev/null 2>&1 || fail "x11: 🤫 still there after the kill"
+for _ in $(seq 60); do win=$(xdotool search --name '^shepetal$' 2>/dev/null) && break; sleep 0.1; done
+[ -n "$win" ] || fail "x11: 🤫 did not come back after the indicator was killed"
+grep -q "indicator exited" /out/x11-stderr.log || fail "x11: the restart was not reported on stderr"
+! ps -eo stat,comm | grep -q '^Z' || fail "x11: a zombie was left: $(ps -eo stat,pid,comm | grep '^Z')"
+echo "ok x11: a killed indicator was started again, reported on stderr, and reaped"
+sleep 1.5  # the cover is under the new 🤫 again after its first 1 s raise
 grab="import -window root"
 steps x11
 stop x11

@@ -26,7 +26,10 @@ const TEXT_STYLE = 'font-size: 11px; font-weight: 500; color: white; background-
 
 export default class ShepetalIndicator extends Extension {
     enable() {
-        this._cancel = new Gio.Cancellable();
+        // Every async callback below holds the Cancellable of the enable() that started it and
+        // checks it first, so a callback that lands after disable(), or after a quick
+        // disable(); enable(), touches nothing (GNOME disables extensions on every screen lock).
+        const cancel = this._cancel = new Gio.Cancellable();
         this._box = new St.BoxLayout({reactive: false, can_focus: false, track_hover: false, visible: false, style: 'spacing: 6px;'});
         // The ring is the circle's border; the glyph is centered inside it.
         const glyph = new St.Label({text: '🤫', x_align: Clutter.ActorAlign.CENTER, y_align: Clutter.ActorAlign.CENTER});
@@ -38,17 +41,18 @@ export default class ShepetalIndicator extends Extension {
         Main.layoutManager.addTopChrome(this._box, {affectsInputRegion: false, trackFullscreen: false});
         this._monitors = Main.layoutManager.connect('monitors-changed', () => this._place());
         this._place();
-        this._connect();
+        this._connect(cancel);
     }
 
     disable() {
         this._cancel.cancel();
-        for (const id of [this._retry, this._textTimer])
+        for (const id of [this._retry, this._textTimer]) {
             if (id)
                 GLib.source_remove(id);
+        }
         this._retry = this._textTimer = 0;
         this._conn?.close(null);
-        this._conn = this._lines = null;
+        this._conn = null;
         Main.layoutManager.disconnect(this._monitors);
         this._box.destroy();
         this._box = this._emoji = this._text = this._cancel = null;
@@ -62,50 +66,56 @@ export default class ShepetalIndicator extends Extension {
         this._box.set_position(m.x + INSET * s, m.y + m.height - (INSET + SIZE) * s);
     }
 
-    _connect() {
+    _connect(cancel) {
         const path = GLib.build_filenamev([GLib.get_user_runtime_dir(), 'shepetal.sock']);
-        new Gio.SocketClient().connect_async(new Gio.UnixSocketAddress({path}), this._cancel, (client, res) => {
+        new Gio.SocketClient().connect_async(new Gio.UnixSocketAddress({path}), cancel, (client, res) => {
+            let conn;
             try {
-                this._conn = client.connect_finish(res);
+                conn = client.connect_finish(res);
             } catch {
-                if (!this._cancel.is_cancelled())
-                    this._retryLater();
+                if (!cancel.is_cancelled())
+                    this._retryLater(cancel);
                 return;
             }
-            this._lines = new Gio.DataInputStream({base_stream: this._conn.get_input_stream()});
+            if (cancel.is_cancelled()) {
+                conn.close(null);
+                return;
+            }
+            this._conn = conn;
             this._box.show();
-            this._read();
+            this._read(cancel, conn, new Gio.DataInputStream({base_stream: conn.get_input_stream()}));
         });
     }
 
-    _retryLater() {
+    _retryLater(cancel) {
         this._retry = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, RETRY_S, () => {
             this._retry = 0;
-            this._connect();
+            if (!cancel.is_cancelled())
+                this._connect(cancel);
             return GLib.SOURCE_REMOVE;
         });
     }
 
-    _read() {
-        this._lines.read_line_async(GLib.PRIORITY_DEFAULT, this._cancel, (stream, res) => {
+    _read(cancel, conn, lines) {
+        lines.read_line_async(GLib.PRIORITY_DEFAULT, cancel, (stream, res) => {
             let line = null;
             try {
                 [line] = stream.read_line_finish_utf8(res);
             } catch {
-                // A read error or invalid UTF-8: handled as a closed connection below.
+                // A read error, invalid UTF-8 or the cancel: handled below.
             }
-            if (this._cancel.is_cancelled())
+            if (cancel.is_cancelled())
                 return;
             if (line === null) {
                 // The daemon stopped: hide 🤫 and wait for the next one.
-                this._conn.close(null);
-                this._conn = this._lines = null;
+                conn.close(null);
+                this._conn = null;
                 this._box.hide();
-                this._retryLater();
+                this._retryLater(cancel);
                 return;
             }
             this._apply(line);
-            this._read();
+            this._read(cancel, conn, lines);
         });
     }
 
