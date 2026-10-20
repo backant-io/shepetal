@@ -8,7 +8,7 @@ import ShepetalCore
 final class Inserter: NSObject, NSPasteboardItemDataProvider {
     struct Result { let landed: Bool; let restored: Bool }
 
-    private let pasteboard = NSPasteboard.general
+    private let pasteboard: NSPasteboard
     // Written by the pasteboard callback, which AppKit may call off the main thread.
     private let lock = NSLock()
     nonisolated(unsafe) private var text = ""
@@ -16,6 +16,11 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     private var requestedAt: TimeInterval? { lock.withLock { requested } }
     private static let markers = [NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
                                   NSPasteboard.PasteboardType("org.nspasteboard.TransientType")]
+
+    /// `.general` in the app; the end-to-end test passes a private pasteboard so it never touches the user's clipboard.
+    init(pasteboard: NSPasteboard = .general) {
+        self.pasteboard = pasteboard
+    }
 
     /// `sendPaste` delivers the Cmd+V chord; the app posts it to the system (`postCmdV`).
     func insert(_ text: String, sendPaste: (CGEvent) -> Void) async -> Result {
@@ -36,6 +41,13 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
             try? await Task.sleep(for: .milliseconds(10))
         }
         let landed = PasteCheck.verdict(postedAt: posted, requestedAt: requestedAt, now: now) == .landed
+        if !landed {
+            // Nothing took the paste (focus moved, or the app ignores Cmd+V): leave the text on the
+            // clipboard as plain text so the user can paste it themselves.
+            pasteboard.clearContents()
+            pasteboard.setString(text, forType: .string)
+            return Result(landed: false, restored: false)
+        }
         let wait = PasteCheck.restoreAt(postedAt: posted, requestedAt: requestedAt) - now
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         restore(saved)

@@ -2,47 +2,53 @@ import AppKit
 import ShepetalCore
 
 /// `shepetal --e2e <wav>...`: the real pipeline on audio files. Each file goes through the capture
-/// resampler, the speech model, cleanup, the audio store, history, and the clipboard + Cmd+V insertion
+/// resampler, the speech model, cleanup, the audio store, history, and the pasteboard + Cmd+V insertion
 /// into a text view this process owns. Prints one JSON line per file.
+/// It runs while people and other tests use the Mac, so it shows no window, never takes focus, and pastes
+/// through a private pasteboard instead of the user's clipboard.
 @MainActor
 final class E2E: NSObject, NSApplicationDelegate {
     private let wavs: [String]
     private let prefer: SpeechModel?
     private var window: NSWindow!
-    private var textView: NSTextView!
+    private var textView: PrivatePasteView!
+    private let pasteboard = NSPasteboard(name: NSPasteboard.Name("io.backant.shepetal.e2e.\(UUID().uuidString)"))
 
-    init(wavs: [String], fallback: Bool) {
+    private let dropPaste: Bool
+
+    /// `dropPaste` swallows the Cmd+V, as when the target lost focus, to check the clipboard hand-off.
+    init(wavs: [String], fallback: Bool, dropPaste: Bool = false) {
         self.wavs = wavs
+        self.dropPaste = dropPaste
         prefer = fallback ? currentModelTier().fallback : nil
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Cmd+V reaches the text view through Edit > Paste, as in any Mac app.
+        // Cmd+V reaches the text view through an Edit > Paste key equivalent, as in any Mac app. The item
+        // targets the view, so the paste needs no key window and the window is never put on screen.
+        textView = PrivatePasteView(frame: NSRect(x: 0, y: 0, width: 520, height: 160))
+        textView.source = pasteboard
         let edit = NSMenu(title: "Edit")
-        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        edit.autoenablesItems = false
+        edit.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v").target = textView
         let editItem = NSMenuItem()
         editItem.submenu = edit
         NSApp.mainMenu = NSMenu()
         NSApp.mainMenu?.addItem(editItem)
 
-        window = NSWindow(contentRect: NSRect(x: 200, y: 200, width: 520, height: 160), styleMask: [.titled],
-                          backing: .buffered, defer: false)
-        window.title = "Shepetal end-to-end"
-        textView = NSTextView(frame: window.contentLayoutRect)
+        window = NSWindow(contentRect: textView.frame, styleMask: [.titled], backing: .buffered, defer: true)
         window.contentView = textView
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(textView)
         Task { exit(await run()) }
     }
 
     private func run() async -> Int32 {
         let t0 = ProcessInfo.processInfo.systemUptime
+        defer { pasteboard.releaseGlobally() }
         let engine: SpeechEngine
         let pipeline: Pipeline
         do {
             engine = try await Speech.load(prefer: prefer)
-            pipeline = try Pipeline()
+            pipeline = try Pipeline(pasteboard: pasteboard)
         } catch {
             print(json(["error": error.localizedDescription]))
             return 1
@@ -60,8 +66,9 @@ final class E2E: NSObject, NSApplicationDelegate {
             let run = await pipeline.process(samples, engine: engine, context: { [textView] in
                 FocusedText.split(textView!.string, textView!.selectedRange())
             }, sendPaste: { event in
-                // In-process delivery of the same Cmd+V event the app posts to the system.
-                if let e = NSEvent(cgEvent: event) { NSApp.sendEvent(e) }
+                // The same Cmd+V the app posts system-wide, delivered through this process's menu instead.
+                guard !dropPaste, event.type == .keyDown, let e = NSEvent(cgEvent: event) else { return }
+                _ = NSApp.mainMenu?.performKeyEquivalent(with: e)
             })
             let stored = (try? pipeline.history.recent(limit: 50))?.first { $0.id == run.entry.id }
             let dir = Paths.audio.path
@@ -80,6 +87,9 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["history_outcome"] = stored?.outcome.rawValue ?? "missing"
             out["history_audio_path"] = stored?.audioPath ?? ""
             out["error"] = run.error ?? ""
+            out["pasteboard"] = pasteboard.name.rawValue
+            out["pasteboard_text"] = pasteboard.string(forType: .string) ?? ""
+            out["window_visible"] = window.isVisible
             print(json(out))
         }
         return failed ? 1 : 0
@@ -93,5 +103,14 @@ final class E2E: NSObject, NSApplicationDelegate {
     private func json(_ object: [String: Any]) -> String {
         let data = try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
         return String(decoding: data, as: UTF8.self)
+    }
+}
+
+/// Pastes from the test's private pasteboard, so the user's clipboard is never read or written.
+final class PrivatePasteView: NSTextView {
+    var source: NSPasteboard?
+
+    override func paste(_ sender: Any?) {
+        if let source { _ = readSelection(from: source) }
     }
 }
