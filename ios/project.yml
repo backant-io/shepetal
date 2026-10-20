@@ -33,6 +33,7 @@ targets:
     dependencies:
       - target: ShepetalSessionCore
       - target: ShepetalKeyboard
+      - target: ShepetalWidget
       - package: FluidAudio
     info:
       path: App/Info.plist
@@ -40,6 +41,7 @@ targets:
         CFBundleDisplayName: Shepetal
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
+        NSSupportsLiveActivities: true
         NSMicrophoneUsageDescription: Shepetal records your voice and transcribes it on this iPhone. Audio never leaves the device.
         CFBundleURLTypes:
           - CFBundleURLName: io.backant.shepetal
@@ -74,6 +76,22 @@ targets:
       path: Keyboard/ShepetalKeyboard.entitlements
       properties:
         com.apple.security.application-groups: [group.io.backant.shepetal]
+
+  ShepetalWidget:
+    type: app-extension
+    platform: iOS
+    sources: [Widget]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.backant.shepetal.widget
+    dependencies:
+      - target: ShepetalSessionCore
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: Shepetal
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
 
   ShepetalSessionCoreTests:
     type: bundle.unit-test
