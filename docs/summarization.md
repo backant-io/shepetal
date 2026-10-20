@@ -75,6 +75,8 @@ these fixtures the two rankers are a tie: TF-IDF is slightly ahead on ROUGE-1, M
   "Tom, you will ..." is only caught when the owner confirms it in the first person.
 - Decisions: most were found, but sentences phrased as a plan ("So the plan is the fix goes into 2.4") fall into
   Key points, and recap sentences sometimes repeat a decision.
+- MiniLM picked a better Overview for fixture 1 ("This is the weekly release sync for version 2.4.") where TF-IDF
+  picked the agenda sentence, which is the one quality gain from embeddings that we saw.
 - The Overview is a sentence copied from the transcript, so it reads as speech ("We have about ten minutes, so
   I'd like to cover ..."). An abstractive model would help most here.
 - These rules were written against these same three fixtures, so the scores are optimistic. Validate them on
