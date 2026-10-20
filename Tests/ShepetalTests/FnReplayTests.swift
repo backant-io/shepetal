@@ -99,6 +99,20 @@ final class FnReplayTests: XCTestCase {
         assertOneCapture()
     }
 
+    // Pavel (2026-10-21, on a build from before this replay existed): "it does not do the transcript until I press
+    // fn again". A 40 ms tap read after the 0.6 s mic open was timed as a hold. With 40 ms taps and a 50 ms gap,
+    // hands-free must lock on the second press with nothing pending, and the ending tap must transcribe on its
+    // press, before its release and without a timer or another fn event.
+    func testQuickDoubleTapThenOneTapTranscribesOnThePress() throws {
+        try replay([(0, true), (40, false), (90, true), (130, false)])
+        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        XCTAssertNil(dictation.gesture.deadline, "nothing waits for a timer in hands-free")
+        try replay([(0, true)])
+        XCTAssertEqual(transcribed, [mic], "the ending tap's press transcribes")
+        try replay([(40, false)])
+        assertOneCapture()
+    }
+
     // Tap, then hold the second press: hands-free locks on the second press and its release keeps recording.
     func testTapThenHoldStaysHandsFree() throws {
         try replay([(0, true), (120, false), (270, true), (1200, false)])

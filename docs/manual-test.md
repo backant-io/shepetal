@@ -67,14 +67,15 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Expected: a red ring while you hold, a pulsing blue ring after release, then the text appears at the cursor. Your earlier clipboard is back (Cmd+V elsewhere pastes what you had copied before).
 
 ### M-FN-2: double-tap for hands-free
-1. In TextEdit, tap fn twice quickly (the second press within half a second of releasing the first).
-2. Expected: the ring turns orange and stays orange after you release.
+1. In TextEdit, tap fn twice as fast as you can (the second press within half a second of releasing the first).
+2. Expected: the ring turns orange on the second press and stays orange after you release.
 3. Speak two sentences without holding anything. Tap fn once.
-4. Expected: the text appears. Recent in the 🤫 menu shows it.
+4. Expected: the ring turns blue on that tap and the text appears, with no further fn press. Recent in the 🤫 menu shows it.
+5. Tap fn once, wait about 1 s, then tap again. Expected: not hands-free. Each tap shows the short-press hint (M-FN-3).
 
 ### M-FN-3: short press
 1. Tap fn once, briefly (under half a second), and don't tap again.
-2. Expected: nothing is inserted. "Hold fn to talk · double-tap for hands-free" shows next to 🤫 for about 2 s.
+2. Expected: nothing is inserted. "Hold fn to talk · double-tap for hands-free" shows next to 🤫 about half a second after the release, for about 3 s, without another fn press.
 3. Expected: Recent in the 🤫 menu has a "(too short)" entry, and a new WAV is in Open recordings folder.
 
 ### M-FN-4: fn as a modifier
