@@ -4,6 +4,40 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### Parity audit (main at 800cacc)
+
+`docs/parity.md` was checked cell by cell against main. Work in open PRs counts for nothing until it merges.
+
+| | Before | After |
+|---|---|---|
+| Automated coverage | 8.6% (32 of 372: 18 n/a + 14 Mac hand-test) | 8.6%, the same |
+| Confirmed coverage | 4.8% (18 n/a) | 4.8%, the same |
+
+No cell changed its value.
+- Every test name cited in the ledger exists on main, and `git log -S "func <name>("` shows it landed in the PR the row cites. Every M-* step cited exists in `docs/manual-test.md`.
+- Stale notes were fixed: F20 (the failed-paste path is now covered by `scripts/e2e-mac.sh --drop-paste`, #35), F72 (the #40 action-item numbers), F03, F04, F10, F21, F32 and F51 (they now name the open PR that builds them).
+- Linux #2 merged, and the ledger now names its tests on F01, F02, F19, F53, F66 and F112. Every Linux cell stays `todo`, because `docs/manual-test.md` has no Linux steps on main or in the open Linux PRs (#72).
+- `outside` is only in open PR #24, so `scripts/parity.py` on main rejects it. The Mac and Linux cells of F108 and F116 stay `todo` (#20).
+- M-INS-4 still expects the failed-paste wording from before rule 8 (#57).
+- No iPhone cell has been classified as `impossible` yet. That needs an Apple doc URL and a substitute that is built.
+
+### Next highest-value features (P0 still `todo`, per platform)
+
+Pick from this list. It replaces the iteration 1 list under "Left".
+
+- **Mac** (15 of 29 P0 cells are `todo`):
+  - Already in open PRs, so review and merge them: F03 Esc cancel, F04 shortcuts, F10 max length, F21 paste and copy last (#47); F07 mic selection, F08 mic health, F12 languages, F39 dictionary (#39); F05 panel tests, F51 empty-transcript guard (#28); F32 local cleanup model (#44).
+  - No PR yet: F89 first-run onboarding (mic test, language, shortcut, try it); F99 crash recovery and relaunch; F88 screen and system-audio permissions (with meetings, M3); F91 the remaining hub tabs (after F39, F40, F37 and F55).
+- **Linux** (29 of 29 P0 cells are `todo`):
+  - First, add Linux steps to `docs/manual-test.md` (#72). That unlocks F01, F02, F19 and F112, whose code is on main (#2).
+  - Already in open PRs: F05 🤫 indicator (#56); F27 rule 8 (#58); F52 and F53 history and 24 h retention, plus F21 paste last (#67).
+  - No PR yet: F03, F04, F06, F07, F08, F10, F12, F17, F20, F23, F32, F39, F51, F88, F89, F90, F91, F92, F99, F109.
+- **iPhone** (29 of 29 P0 cells are `todo`):
+  - First, land the device steps in `docs/manual-test.md` (#19; the open PRs #27, #54 and #66 add them). That unlocks F01, F19 and F53, whose code is on main (#3).
+  - Already in open PRs: the F05 Live Activity (#27); F27 rule 8 (#54).
+  - Next, mark the desktop-only P0 rows `impossible` where iOS forbids them, each with an Apple doc URL and a built substitute: F04, F17, F92 and F99 are candidates.
+  - Then build F03 keyboard cancel and F10 duration warning (#13), F51 nonsense guard, F12 languages, F32 cleanup and F39 dictionary.
+
 ### merge-b (review, fix and merge #36, #34, #44)
 
 | PR | State | What landed | Verified before merge |
