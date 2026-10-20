@@ -222,12 +222,17 @@ fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
 /// whisper.cpp writes non-speech as bracketed markers (`[BLANK_AUDIO]`, `[Music]`); they must
 /// not be typed at the cursor.
 fn without_markers(s: &str) -> String {
+    // An `[` that is never closed is not a marker: keep the text after it.
+    if s.matches('[').count() > s.matches(']').count() {
+        return s.to_string();
+    }
     let mut out = String::new();
     let mut depth = 0;
     for c in s.chars() {
         match c {
             '[' => depth += 1,
             ']' if depth > 0 => depth -= 1,
+            ']' => {}
             _ if depth == 0 => out.push(c),
             _ => {}
         }
@@ -364,6 +369,7 @@ mod tests {
     fn daemon_waits_for_fn_only_on_keyboards_that_can_send_it() {
         let laptop_kbd = ("event2", "AT Translated Set 2 keyboard", RCTRL);
         let ydotoold = ("event9", YDOTOOLD, BOTH);
+        let _lock = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner()); // SHEPETAL_KEY is process-wide
         let desk = fake_sys("desk", &[laptop_kbd, ("event5", "Apple keyboard", FN), ydotoold]);
         let laptop = fake_sys("laptop", &[laptop_kbd, ydotoold]);
         std::env::remove_var("SHEPETAL_KEY");
@@ -560,6 +566,25 @@ mod tests {
             assert!(kept[0].to_string_lossy().ends_with(".cancelled.wav"), "{kept:?}");
             assert_eq!(std::fs::read(&kept[0]).unwrap(), b"RIFF final", "the recorder got SIGINT before shepetal returned");
         });
+    }
+
+    #[test]
+    fn whisper_markers_are_dropped_and_other_text_kept() {
+        assert_eq!(without_markers(" [BLANK_AUDIO]\n Hello [Music] world."), " \n Hello  world.");
+        assert_eq!(without_markers("Hello [world"), "Hello [world", "an unclosed [ is text");
+        assert_eq!(without_markers("a ] b [x] c"), "a  b  c");
+    }
+
+    #[test]
+    fn a_numeric_key_is_named_key_n_in_the_hint() {
+        let _lock = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let sys = fake_sys("numkey", &[("event3", "kbd", "400000000000000\n")]); // KEY_CAPSLOCK (58)
+        std::env::set_var("SHEPETAL_KEY", "58");
+        let got = hotkey_keyboards(&sys);
+        std::env::remove_var("SHEPETAL_KEY");
+        std::fs::remove_dir_all(sys).unwrap();
+        let (key, name, _) = got.unwrap();
+        assert_eq!((key, shepetal::short_press_hint(&name).as_str()), (58, "Hold key 58 to talk · double-tap for hands-free"));
     }
 
     #[test]

@@ -103,9 +103,11 @@ mod tests {
         let home = std::env::temp_dir().join(format!("shepetal-open-{}", std::process::id()));
         let dir = home.join("shepetal/audio");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let err = new_recording(&home, 1).unwrap_err();
-        assert!(err.to_string().contains("must be a 0700 directory"), "{err}");
+        for mode in [0o755, 0o750, 0o705] {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap();
+            let err = new_recording(&home, 1).unwrap_err();
+            assert!(err.to_string().contains("must be a 0700 directory"), "{mode:o}: {err}");
+        }
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 0, "no file created in it");
         std::fs::remove_dir_all(&home).unwrap();
     }
