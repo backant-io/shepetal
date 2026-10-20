@@ -29,6 +29,10 @@ fn synthesized_speech_is_transcribed_on_the_device() {
     let kept = audio::Store::open(dir.join("audio")).unwrap().save(1, audio::Kind::Dictation, &clip).unwrap();
     let (heard, kept_rate) = audio::wav::read(&kept).unwrap();
     assert_eq!((kept_rate, heard.len()), (16_000, clip.len()));
+    // whisper still reads slowed-down speech, so check the speed here: the kept clip must play
+    // back as long as it was spoken.
+    let secs = |n: usize, rate: u32| n as f64 / rate as f64;
+    assert!((secs(heard.len(), kept_rate) - secs(samples.len(), rate)).abs() < 0.01, "kept clip changed speed");
 
     let mut stt = audio::Whisper::load(&model).unwrap();
     let t = std::time::Instant::now();

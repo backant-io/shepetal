@@ -126,9 +126,10 @@ mod tests {
     #[test]
     fn next_clip_never_repeats_the_last_one() {
         let mut r = Recorder::new(3);
+        push(&mut r, &[0.5]);
         r.start();
         push(&mut r, &[1.0, 2.0]);
-        r.stop();
+        assert_eq!(r.stop(), [0.5, 1.0, 2.0]);
         push(&mut r, &[3.0]);
         r.start();
         push(&mut r, &[4.0]);
