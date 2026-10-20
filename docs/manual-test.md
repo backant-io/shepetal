@@ -85,17 +85,18 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 3. Select "today." including its period. Hold fn and say "Tomorrow". Expected: "Send the final version tomorrow." with the period kept.
 4. Select " version " with the spaces on both sides. Say "copy". Expected: "Send the final copy tomorrow." with no double or missing spaces.
 
-### M-FOC-1: focus goes back to where you started (F27)
-1. Open a TextEdit document and Notes. Click into the TextEdit document. Double-tap fn and say a sentence.
+### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
+1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
 2. Click into a Notes note, then tap fn once to stop.
-3. Expected: TextEdit comes to the front and the sentence lands in the TextEdit document. Notes gets nothing.
-4. Repeat steps 1 and 2, but close the TextEdit document (Don't Save) before tapping fn. Expected: TextEdit comes to the front. With no text field, "Paste did not land. The text is in Recent." shows next to 🤫.
-5. Repeat steps 1 and 2, but quit TextEdit before tapping fn. Expected: the sentence lands in the Notes note.
+3. Expected: Notes stays in front and focused; TextEdit does not come back. Neither TextEdit nor Notes gets any text. "The window changed while you spoke. The text is on the clipboard: press ⌘V to paste it." shows next to 🤫.
+4. Press ⌘V in the Notes note. Expected: the sentence is pasted. Recent has it too, and "earlier" is not put back on the clipboard.
+5. Click into the TextEdit document. Double-tap fn, say a sentence, click into a different line of the same document, and tap fn to stop. Expected: the sentence lands at the new cursor position, because the window did not change.
+6. Repeat step 5, but open a second TextEdit document (Cmd+N) before tapping fn. Expected: as in step 3, nothing is pasted and the text is on the clipboard.
 
 ### M-SEC-1: Secure Input (F17)
 1. Open Terminal and turn on Terminal > Secure Keyboard Entry. Keep Terminal in front for about 3 s.
 2. Expected: "Secure input is on in Terminal, so fn can't be heard" shows next to 🤫 once. It does not come back every 2 s.
-3. Still in Terminal, hold fn, speak, then release. Expected: either nothing records (macOS hides fn from Shepetal), or "Secure input is on in Terminal. The text is in Recent." shows, nothing is pasted, the clipboard holds what you copied before, and Recent has the text. Write down which one happened.
+3. Still in Terminal, hold fn, speak, then release. Expected: either nothing records (macOS hides fn from Shepetal), or "Secure input is on in Terminal. The text is on the clipboard: press ⌘V to paste it." shows and nothing is pasted. Press ⌘V: the text is pasted into Terminal. Recent has the text too. Write down which one happened.
 4. Click into another app, so Terminal no longer holds secure input. Expected: the note is gone if it was still showing. Click back into Terminal. Expected: the note shows once more.
 5. Turn Secure Keyboard Entry off again.
 
@@ -113,8 +114,8 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 4. Choose Open at login again. Expected: unchecked, and Shepetal is gone from Login Items. Every `scripts/make-app.sh` build has a new ad-hoc signature, so turn it off and on again after a rebuild.
 
 ### M-SND-1: sounds (F06)
-1. Turn the volume up. Hold fn, speak, and release. Expected: a short rising blip when the ring turns red and a short falling blip on release. Neither is loud.
+1. Turn the volume up. Hold fn, speak, and release. Expected: a short rising blip about half a second after the ring turns red, and a short falling blip on release. Neither is loud.
 2. Double-tap fn. Expected: a quick double blip when the ring turns orange. Tap fn to stop: the falling blip.
-3. Press fn+Delete. Expected: a low tone. Tap fn briefly once. Expected: no sound, only the hint.
-4. Play the newest WAV in Open recordings folder. The start blip may be faint at the very start. Expected: the transcript in Recent has no extra word from it.
+3. Press fn+Delete quickly. Expected: no sound. Tap fn briefly once. Expected: no sound, only the hint. Hold fn until the rising blip, then press Delete within the first second. Expected: the rising blip, then a low tone.
+4. Play the newest WAV in Open recordings folder. The start blip may be faint about half a second in. Expected: the transcript in Recent has no extra word from it.
 5. Uncheck Sounds in the 🤫 menu. Expected: steps 1 to 3 make no sound. Quit and reopen Shepetal: Sounds is still unchecked.

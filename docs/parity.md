@@ -25,7 +25,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F03 | Cancel or dismiss dictation (Esc) | todo | todo | todo | Mac: Esc cancel is not built (left for M2 in #10); iPhone: the app has a Cancel button (#3), the keyboard has none (#13) |
 | F04 | Rebindable shortcuts, multi-key combos, mouse buttons | todo | todo | todo | |
 | F05 | Floating Flow Bar / status pill with live waveform | todo | todo | todo | Mac: the 🤫 NSPanel is on main (#10, hand step M-IND-1) but no test covers its frame or panel flags (#15); iPhone: keyboard-corner 🤫 is tested (`IndicatorTests.testIndicatorIsInTheBottomLeftCornerWithTheStateNextToIt` #3), the Live Activity is not built (#13) |
-| F06 | Start and stop sounds, haptics | hand-test | todo | todo | Mac: `ChimeTests.testEachSoundIsShortQuietAndFaded`, `ChimeTests.testSoundsDiffer`, `ChimeTests.testStartRisesStopFalls`, `ChimeTests.testActionToSoundMapping` #34, hand step M-SND-1; one sound set with a toggle, packs and haptics deferred (#33) |
+| F06 | Start and stop sounds, haptics | hand-test | todo | todo | Mac: `ChimeTests.testEachSoundIsShortQuietAndFaded`, `ChimeTests.testSoundsDiffer`, `ChimeTests.testStartRisesStopFalls`, `ChimeTests.testTooShortTapIsSilent`, `ChimeTests.testFnShortcutIsSilent`, `ChimeTests.testCancelAfterAHeardStartPlaysCancel`, `ChimeTests.testDoubleTapPlaysLockThenStop` #34, hand step M-SND-1; one sound set with a toggle, packs and haptics deferred (#33) |
 | F07 | Microphone selection with ranked fallback devices | todo | todo | todo | |
 | F08 | Mic health alerts (no audio, disconnected, unreadable, AirPods or clamshell warnings) | todo | todo | todo | |
 | F09 | Mute or pause media while dictating | todo | todo | todo | |
@@ -36,7 +36,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F14 | Mouse Flow (dictate via a mouse button) | todo | todo | todo | |
 | F15 | BLE mic ring (hands-free over Bluetooth) | todo | todo | todo | |
 | F16 | Jabra headset button and wear detection | todo | todo | todo | |
-| F17 | Secure Input detection (warns when hotkeys are blocked) | hand-test | todo | todo | Mac: `WatchersTests.testSecureInputNoticeOnRisingEdgeOnly`, `WatchersTests.testSecureInputIgnoresShepetalItself`, `WatchersTests.testUnknownOwnerHasGenericWording` #34, hand step M-SEC-1; the Pipeline-level paste test waits on Tests/ShepetalTests (#33) |
+| F17 | Secure Input detection (warns when hotkeys are blocked) | hand-test | todo | todo | Mac: `WatchersTests.testSecureInputNoticeOnRisingEdgeOnly`, `WatchersTests.testSecureInputIgnoresShepetalItself`, `WatchersTests.testUnknownOwnerHasGenericWording`, `PasteGatePipelineTests.testSecureInputLeavesTheTextOnTheClipboard` #34, hand step M-SEC-1 |
 | F18 | Slow-processing and degraded-network notices | todo | todo | todo | |
 | F19 | Insert text into any app at the cursor (clipboard paste, then restore) | hand-test | todo | todo | Mac: `PasteCheckTests.testDataRequestedAfterCmdVMeansLanded`, `scripts/e2e-mac.sh` (paste landed, clipboard restored) #10, hand steps M-INS-1, M-INS-2 and M-INS-3 (Cmd+V into other apps needs Accessibility, #15); iPhone: `textDocumentProxy` insertion is on main (#3), todo until its device steps are in docs/manual-test.md (#19) |
 | F20 | Paste verification and failed-paste fallback (copy, notify) | hand-test | todo | todo | Mac: `PasteCheckTests.testNoRequestWithinOneSecondMeansFailed`, `PasteCheckTests.testReadBeforeCmdVDoesNotCount` #10, hand step M-INS-4 (the paste_failed path has no automated test, #15) |
@@ -46,7 +46,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F24 | Textbox and AX context sent to the formatter (text around the cursor) | todo | todo | todo | |
 | F25 | Screenshot / OCR context | todo | todo | todo | |
 | F26 | Auto-learn words from the user's edits after paste | todo | todo | todo | |
-| F27 | Focus restore before paste (store, then refocus the element) | hand-test | todo | todo | Mac: `FocusPlanTests.testSameAppAndElementDoesNothing`, `FocusPlanTests.testOtherAppActivatesAndFocuses`, `FocusPlanTests.testElementGoneActivatesAppOnly`, `FocusPlanTests.testAppQuitPastesInPlace` #34, hand step M-FOC-1 |
+| F27 | Focus restore before paste (store, then refocus the element) | hand-test | todo | todo | Mac, under rule 8 (paste only into the window that stayed in focus, never refocus, else the clipboard and a ⌘V hint): `PasteGateTests.testSameWindowPastes`, `PasteGateTests.testOtherAppOrWindowGoesToTheClipboard`, `PasteGateTests.testUnreadableFocusPastes`, `PasteGatePipelineTests.testFocusMovedWhileTranscribingLeavesTheTextOnTheClipboard`, `PasteGatePipelineTests.testUnknownFocusPastesAndRestoresTheClipboard` #34, hand step M-FOC-1 |
 | F28 | Link memory: insert recently copied links by voice | todo | todo | todo | |
 | F29 | IDE integration: file tagging (@file) in Cursor and other IDEs | todo | todo | todo | |
 | F30 | Coding-CLI detection in terminals (claude, codex, aider and others) | todo | todo | todo | |
@@ -109,7 +109,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F87 | Connectors / connect apps (e.g. Atlassian, Loom) for context | todo | todo | todo | |
 | F88 | Permission onboarding (mic, accessibility with drag guidance, screen, system audio) | todo | todo | todo | Mac: Microphone, Input Monitoring and Accessibility window on main (#10, hand steps M-PERM-1 to M-PERM-4), no screen or system-audio permission yet |
 | F89 | Onboarding: mic test, language, shortcut, try-it-yourself | todo | todo | todo | |
-| F90 | Permission-revoked detection and re-prompt | hand-test | todo | todo | Mac: `WatchersTests.testFirstObservationIsNotARevocation`, `WatchersTests.testRevokedReportedOnce`, `WatchersTests.testRegrantClears` #34, hand step M-PERM-5; fn tap after an Input Monitoring re-grant is #32 |
+| F90 | Permission-revoked detection and re-prompt | hand-test | todo | todo | Mac: `WatchersTests.testFirstObservationIsNotARevocation`, `WatchersTests.testRevokedReportedOnce`, `WatchersTests.testRegrantClears`, `WatchersTests.testRegrantAfterRevocationIsReportedOnce`, `WatchersTests.testGrantAfterLaunchIsNotARestore` #34, hand step M-PERM-5; fn tap after an Input Monitoring re-grant is #32 |
 | F91 | Hub main window (home, history, dictionary, snippets, styles, notes, settings) | todo | todo | todo | |
 | F92 | Launch at login, hide the Dock icon, menu-bar presence | hand-test | todo | todo | Mac: menu-bar item and no Dock icon (LSUIElement) on main (#10), Open at login through `SMAppService.mainApp` with `WatchersTests.testLoginStatusMapping` #34, hand step M-LOGIN-1 |
 | F93 | Dark mode / theme | todo | todo | todo | |
