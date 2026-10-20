@@ -1,0 +1,39 @@
+Maya: Okay, let's get started. This is the weekly release sync for version 2.4. We have about ten minutes, so I'd like to cover the release date, the crash on older iPhones, and the onboarding copy.
+Tom: Sounds good. I can start with the crash because it's the scary one.
+Maya: Go ahead.
+Tom: So the crash happens on iPhone 11 and older when the microphone permission dialog is dismissed and the user opens the app again within a few seconds. We traced it to the audio session being activated twice. It is about two percent of sessions on those devices, but it is the top crash in the dashboard.
+Priya: Do we have a fix yet or just the diagnosis?
+Tom: We have a fix on a branch. It guards the activation with a single serial queue. I tested it on three devices this morning and could not reproduce the crash anymore.
+Maya: Great. Can that go into 2.4 or is it too risky?
+Tom: I think it is small enough. It is maybe forty lines.
+Priya: I'd still want QA to run the full audio regression suite on it. Last time we touched the audio session, Bluetooth headsets broke.
+Maya: Fair. So the plan is the fix goes into 2.4, but only after QA passes the audio regression suite. Is everyone fine with that?
+Tom: Yes.
+Priya: Yes, agreed.
+Maya: Okay, decision made. Tom, you will open the pull request for the audio session fix by Wednesday.
+Tom: I will open it by Wednesday.
+Maya: And Priya, can your team run the audio regression suite on Thursday?
+Priya: Yes. I will run the regression suite on Thursday and post the results in the release channel.
+Maya: Perfect. Next, the release date. We originally said Monday the 3rd. With the crash fix and QA on Thursday, does Monday still work?
+Priya: If the suite passes on Thursday, Friday is enough for the store submission. Review usually takes a day.
+Tom: I'd rather not release on a Monday morning, honestly. Support is thin early Monday.
+Maya: What about Tuesday the 4th?
+Priya: Tuesday works for me.
+Tom: Tuesday is better.
+Maya: Okay, we move the release from Monday the 3rd to Tuesday the 4th. I'll update the roadmap and tell the support team.
+Tom: Thanks.
+Maya: Last topic, the onboarding copy. Leo sent new text for the three intro screens. Did people read it?
+Priya: I read it. The second screen is great. The first one is still too long, it wraps to four lines on the small phones.
+Tom: I agree the first one is long. Also the third screen says "cloud sync", but the whole point of this release is that everything stays on the device. That is confusing.
+Maya: Good catch. We should not say cloud anywhere in onboarding. So the decision is we keep screen two as is, and Leo shortens screen one and removes the cloud wording from screen three.
+Priya: Should we A/B test the new copy?
+Maya: Not for this release. We don't have enough traffic on the new onboarding to get a result in time. Let's just ship the improved version and revisit in 2.5.
+Priya: Okay.
+Maya: I'll ask Leo to send the revised copy by Friday. Actually, let me make that an action item for me: I will follow up with Leo today and get the revised copy by Friday.
+Tom: One more thing. The release notes. Who writes them?
+Maya: Good question. Priya, you wrote them last time and they were good.
+Priya: I can do it again. I'll draft the release notes by Monday so they are ready for the Tuesday release.
+Maya: Thank you. Let me recap. The audio session crash fix goes into 2.4 after the regression suite passes. Tom opens the pull request by Wednesday. Priya runs the regression suite on Thursday and drafts release notes by Monday. The release moves to Tuesday the 4th. I update the roadmap, tell support, and get the revised onboarding copy from Leo by Friday. No A/B test this release.
+Tom: That's everything from me.
+Priya: All good.
+Maya: Great, thanks everyone.
