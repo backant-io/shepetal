@@ -133,15 +133,15 @@ An earlier run while other jobs shared the machine gave the same ROUGE and 355 /
 
 | Corpus | ROUGE-1 | ROUGE-2 | ROUGE-L | LEAD R-1 | LEAD R-2 | LEAD R-L | Output / reference words | Latency mean / max |
 |---|---|---|---|---|---|---|---|---|
-| AMI | 0.241 | 0.043 | 0.126 | 0.222 | 0.043 | 0.124 | 254 / 112 | 2.1 / 26.4 s |
-| ICSI | 0.185 | 0.015 | 0.100 | 0.161 | 0.015 | 0.087 | 316 / 97 | 6.7 / 20.0 s |
-| Committee | 0.234 | 0.051 | 0.132 | 0.236 | 0.073 | 0.151 | 440 / 135 | 4.1 / 12.5 s |
-| **All** | **0.226** | **0.037** | **0.120** | 0.208 | 0.040 | 0.119 | 299 / 112 | 3.6 / 26.4 s |
+| AMI | 0.242 | 0.044 | 0.126 | 0.222 | 0.043 | 0.124 | 253 / 112 | 1.4 / 4.1 s |
+| ICSI | 0.184 | 0.015 | 0.100 | 0.161 | 0.015 | 0.087 | 317 / 97 | 3.9 / 10.8 s |
+| Committee | 0.235 | 0.051 | 0.132 | 0.236 | 0.073 | 0.151 | 437 / 135 | 2.9 / 7.0 s |
+| **All** | **0.226** | **0.038** | **0.120** | 0.209 | 0.040 | 0.119 | 298 / 112 | 2.3 / 10.8 s |
 
-MiniLM picks shorter sentences, so its output is 299 words instead of 441 and its raw ROUGE is higher. Against
-LEAD at the same length the gain is about the same as TF-IDF's (+0.018 ROUGE-1 against +0.011), and both lose to
-LEAD on ROUGE-2. It is 10 to 20 times slower; this run's latency is inflated because the machine had a load average
-above 100 (iteration 1 measured 2.9 s mean, 12.2 s max). The harness peaks at 4.1 GB RSS because it embeds all of a
+MiniLM picks shorter sentences, so its output is 298 words instead of 441 and its raw ROUGE is higher. Against
+LEAD at the same length the gain is about the same as TF-IDF's (+0.017 ROUGE-1 against +0.011), and both lose to
+LEAD on ROUGE-2. It is 10 to 20 times slower (an earlier run with a load average above 100 took 3.6 s mean, 26.4 s
+max; iteration 1 measured 2.9 s mean, 12.2 s max). The harness peaks at 4.2 GB RSS because it embeds all of a
 meeting's sentences in one batch; a port would batch them. Decisions and action items are the same code in both
 rows, so they score the same.
 
@@ -307,7 +307,7 @@ The fixtures overstate quality badly. Treat them as a regression test for the ru
 | iPhone | TF-IDF TextRank + rules | MiniLM-L6 CoreML encoder on the ANE |
 | Linux CPU | TF-IDF TextRank + rules | MiniLM-L6 via ONNX Runtime |
 
-MiniLM did not clearly beat TF-IDF on the fixtures or on QMSum (about +0.007 ROUGE-1 more over LEAD, at 10 to 20
+MiniLM did not clearly beat TF-IDF on the fixtures or on QMSum (about +0.006 ROUGE-1 more over LEAD, at 10 to 20
 times the latency plus a 90 MB model and a runtime), so TF-IDF stays the default and MiniLM stays optional. Both paths are deterministic and
 hallucination-free. Action items come from the AMI-trained logistic regression plus owner rules on every platform:
 it is a 106 KB JSON file and a sum of weights, so it needs no runtime. It reaches 65% on the AMI test split with role labels and 40% with
