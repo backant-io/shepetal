@@ -8,7 +8,7 @@ import ShepetalCore
 final class Inserter: NSObject, NSPasteboardItemDataProvider {
     struct Result { let landed: Bool; let restored: Bool }
 
-    private let pasteboard: NSPasteboard
+    let pasteboard: NSPasteboard
     // Written by the pasteboard callback, which AppKit may call off the main thread.
     private let lock = NSLock()
     nonisolated(unsafe) private var text = ""
@@ -18,7 +18,7 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
                                   NSPasteboard.PasteboardType("org.nspasteboard.TransientType")]
 
     /// `.general` in the app; the end-to-end test passes a private pasteboard so it never touches the user's clipboard.
-    init(pasteboard: NSPasteboard = .general) {
+    init(pasteboard: NSPasteboard) {
         self.pasteboard = pasteboard
     }
 

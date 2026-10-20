@@ -25,7 +25,8 @@ final class Pipeline {
     let history: History
     let inserter: Inserter
 
-    init(pasteboard: NSPasteboard = .general) throws {
+    /// No default: a forgotten argument must not fall back to the user's clipboard.
+    init(pasteboard: NSPasteboard) throws {
         inserter = Inserter(pasteboard: pasteboard)
         try AudioStore.makeOwnerOnlyDirectory(Paths.root)
         store = try AudioStore(dir: Paths.audio)

@@ -53,6 +53,11 @@ final class E2E: NSObject, NSApplicationDelegate {
             print(json(["error": error.localizedDescription]))
             return 1
         }
+        // Names only, never contents: stop before the first insert unless it goes to this run's private pasteboard.
+        guard pipeline.inserter.pasteboard.name == pasteboard.name else {
+            print(json(["error": "not the private pasteboard: \(pipeline.inserter.pasteboard.name.rawValue)"]))
+            return 1
+        }
         let loadMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         var failed = false
         for wav in wavs {
@@ -87,7 +92,7 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["history_outcome"] = stored?.outcome.rawValue ?? "missing"
             out["history_audio_path"] = stored?.audioPath ?? ""
             out["error"] = run.error ?? ""
-            out["pasteboard"] = pasteboard.name.rawValue
+            out["pasteboard"] = pipeline.inserter.pasteboard.name.rawValue
             out["pasteboard_text"] = pasteboard.string(forType: .string) ?? ""
             out["window_visible"] = window.isVisible
             print(json(out))
