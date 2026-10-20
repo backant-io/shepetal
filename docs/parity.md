@@ -75,12 +75,12 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F55 | Scratchpad notes window (tabs, pinning, open from a shortcut) | todo | todo | todo | |
 | F56 | Note version history and AI transforms on notes | todo | todo | todo | |
 | F57 | Images in notes | todo | todo | todo | |
-| F58 | Shareable note links | todo | todo | todo | Inventory Skip, but share links are a user feature, not an n/a category: needs a local-first equivalent (share by exported file). |
+| F58 | Shareable note links | todo | todo | todo | |
 | F59 | Cloud sync across devices | todo | todo | todo | |
 | F60 | Stats: words dictated, WPM, time saved, per-app usage | todo | todo | todo | |
 | F61 | Daily streak and milestones | todo | todo | todo | |
 | F62 | Insights heatmap and "voice profile" persona card | todo | todo | todo | |
-| F63 | Team leaderboard | todo | todo | todo | Inventory Skip, but a team leaderboard is not one of the n/a categories: decide a local-first equivalent or argue n/a in review. |
+| F63 | Team leaderboard | todo | todo | todo | |
 | F64 | Data export (self-serve) | todo | todo | todo | |
 | F65 | Meeting recorder: mic + system audio capture | todo | todo | todo | |
 | F66 | Auto-detect meetings (Zoom, Meet, Teams, Slack huddles) and prompt to record | todo | todo | todo | |
@@ -94,7 +94,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F74 | Calendar integration (Google, Microsoft), upcoming-meeting reminders | todo | todo | todo | |
 | F75 | Pre-read briefs before a meeting | todo | todo | todo | |
 | F76 | Recording consent notice posted to the meeting chat | todo | todo | todo | |
-| F77 | Auto-share notes with participants | todo | todo | todo | Inventory Skip, but sharing notes with participants is a user feature, not an n/a category: needs a local-first equivalent (exported file). |
+| F77 | Auto-share notes with participants | todo | todo | todo | |
 | F78 | Folders for meetings | todo | todo | todo | |
 | F79 | Automations on meetings or notes | todo | todo | todo | |
 | F80 | Import from Granola / Otter | todo | todo | todo | |
@@ -112,7 +112,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F92 | Launch at login, hide the Dock icon, menu-bar presence | todo | todo | todo | |
 | F93 | Dark mode / theme | todo | todo | todo | |
 | F94 | UI localization | todo | todo | todo | |
-| F95 | Focus mode (block distracting apps and URLs) | todo | todo | todo | Inventory Skip, but focus mode is a user feature, not an n/a category: needs a local implementation. |
+| F95 | Focus mode (block distracting apps and URLs) | todo | todo | todo | |
 | F96 | Typing reminder (nudges you to use voice when you type a lot) | todo | todo | todo | |
 | F97 | Deep links (`wispr-flow://`) for login and actions | todo | todo | todo | |
 | F98 | Auto-updater (deferred while dictating) | todo | todo | todo | |
@@ -121,7 +121,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F101 | Extensions / agent tool bridge (spawns external agent CLIs) | todo | todo | todo | |
 | F102 | Admin app deny-list (dictation blocked in some apps) | todo | todo | todo | |
 | F103 | HIPAA mode / enterprise data controls | n/a | n/a | n/a | All: n/a account-admin: HIPAA BAA and enterprise data controls are org-account administration; shepetal sends no data anywhere. |
-| F104 | Accounts, SSO, teams, team dictionary / snippets | todo | todo | todo | Inventory Skip, but mixed: accounts, SSO and teams are account-admin (n/a), while team dictionary / snippets are a cloud-backed user feature that needs a local-first equivalent (shared folder). Split into separate F-IDs. |
+| F104 | Accounts, SSO, team administration | n/a | n/a | n/a | All: n/a account-admin: sign-in, SSO and team management exist only for Wispr accounts; shepetal is a single-user local app. Team dictionary and snippets are F113. |
 | F105 | Subscriptions, trials, weekly word limit, referrals, student plan, paywalls | n/a | n/a | n/a | All: n/a subscriptions: plans, trials, word limits, referrals and paywalls only serve Wispr's billing; shepetal is free and local. |
 | F106 | Product analytics, session telemetry, Sentry, Datadog logs | n/a | n/a | n/a | All: n/a telemetry: product analytics and crash/log upload only serve Wispr; shepetal keeps logs local. |
 | F107 | Remote feature flags and A/B experiments | n/a | n/a | n/a | All: n/a remote-flags: remote feature flags and A/B experiments only serve Wispr; shepetal uses compile-time features. |
@@ -130,3 +130,15 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F110 | Formality mismatch detection (notices when the tone does not fit the app) | todo | todo | todo | |
 | F111 | Feature tour / what's-new / changelog | todo | todo | todo | |
 | F112 | Double-trigger debounce (ignores accidental double presses, conflicting shortcuts) | todo | todo | todo | |
+| F113 | Team dictionary and snippets (shared with a team, scoped by department) | todo | todo | todo | |
+| F114 | Creator mode: an optional on-screen label while dictating, for screen recordings and streams | todo | todo | todo | |
+| F115 | Microphone advice quiz (environment and gear questions, a whisper try-out, a recommended mic setup) | todo | todo | todo | |
+| F116 | Start dictation from the iPhone Action Button, with a setup guide and keyboard tips | todo | todo | todo | |
+| F117 | Bulk import of dictionary words and snippets from a file, with a preview | todo | todo | todo | |
+| F118 | Share usage stats as an image card (copy, save, post) | todo | todo | todo | |
+| F119 | Meeting recorder from the keyboard (triple-tap of the dictation key, or a rebindable shortcut) | todo | todo | todo | |
+| F120 | Meeting notes library in the hub with tabs and search | todo | todo | todo | |
+| F121 | Keep or discard a very short or accidental meeting recording | todo | todo | todo | |
+| F122 | Warn when the call app's mic differs from the one the meeting recorder captures | todo | todo | todo | |
+| F123 | Latin-script view of non-Latin meeting transcripts | todo | todo | todo | |
+| F124 | Prompt to move the app into Applications when launched from elsewhere | todo | todo | todo | |

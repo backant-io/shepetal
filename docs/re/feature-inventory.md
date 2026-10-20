@@ -28,6 +28,9 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F16 | Jabra headset button and wear detection | M W | n | HID button as hotkey | P2 | S `jabraWearDetectionEnabled`; dep `@gnaudio/jabra-js` |
 | F17 | Secure Input detection (warns when hotkeys are blocked) | M | n | `IsSecureEventInputEnabled` poll | P0 | H `SecureInputStatus`; N `SecureInputBlockingShortcuts` |
 | F18 | Slow-processing and degraded-network notices | M W | y | local latency notice only | P2 | N `ProcessingDelayNotification`, `DegradedNetwork`; S `processingDelayNotificationEnabled` |
+| F114 | Creator mode: an optional on-screen label while dictating, for screen recordings and streams | M W | n | settings toggle, off by default: while recording, a short text in our own wording sits next to the 🤫 indicator, which stays tiny and click-through; iPhone shows it in the keyboard corner | P2 | S `creatorMode`; N `DictatingWithWisprFlow` |
+| F115 | Microphone advice quiz (environment and gear questions, a whisper try-out, a recommended mic setup) | M W | n | offline page under mic settings: a few questions plus a level and noise test on the local mic, then advice in our own words; can move a better mic to the top of the F07 ranked list; no shop links, email or network | P2 | S `microphoneQuizBannerDismissed`; event `mic_quiz_completed` |
+| F116 | Start dictation from the iPhone Action Button, with a setup guide and keyboard tips | i | y | App Intent (`AudioRecordingIntent`) the user assigns to the Action Button: starts or stops a local session, shows 🤫 in the Live Activity, puts the text on the clipboard and in history; a short setup screen explains the assignment | P2 | event `action_button_setup_complete`; `mobile-and-platforms.md` (starting without the keyboard) |
 
 ## Insertion and context
 
@@ -71,6 +74,7 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F49 | Flow Lens: ask about the screen or context via a shortcut chat | M W | y | local VLM, optional | P2 | K `lens`; T `FlowLensHistory` |
 | F50 | Stacked messages: in personal messaging apps, one dictation is split into several chat messages | M W | y | split on sentence or LLM boundaries, send each with Return | P2 | S `stackedMessagesEnabled` (only applies to the PERSONAL app type, in the `index.js` formatter path) |
 | F51 | Nonsense or empty transcript guard | M W | n | min speech duration + VAD | P0 | N `TranscriptionEmpty`, `VoidDictation`; F `nonsense-transcription-toast` |
+| F117 | Bulk import of dictionary words and snippets from a file, with a preview | M W | n | Import from file: parse local JSON or CSV, preview per-row errors and duplicates, then insert marked as imported; same format as the F64 export, so lists round-trip between devices | P2 | event `snippets_bulk_import_started`; dictionary source `BULK_IMPORT` (`text-pipeline.md`) |
 
 ## History, notes, stats
 
@@ -89,6 +93,7 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F62 | Insights heatmap and "voice profile" persona card | M W | y | local aggregates, no LLM persona | P2 | `config.json` `voiceProfile`; N `InsightsReady` |
 | F63 | Team leaderboard | M W | y | opt-in: each member's app writes a stats file to a folder the team shares (Syncthing, iCloud Drive); the leaderboard reads those files | P2 | F `pro-team-leaderboard` |
 | F64 | Data export (self-serve) | M W | y | local export (JSON/CSV/Markdown) | P1 | F `member-self-serve-data-export` |
+| F118 | Share usage stats as an image card (copy, save, post) | M W | n | render the stats card (words, WPM, streak) locally to PNG; copy or save it; a prefilled share URL opens in the browser only on click; nothing is uploaded | P2 | event `insights_share_modal_opened`, `insights_share_copy_clicked` |
 
 ## Meetings / notetaker (detail in `meetings.md`)
 
@@ -117,6 +122,11 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F85 | Org insights (team-level analytics over meetings) | M W | y | n/a account-admin: an analytics view for admins of Wispr org accounts; shepetal has no accounts or orgs | n/a | S `notetakerOrgInsightsDefault`; F `org-insights` |
 | F86 | MCP server exposing notes and meetings to AI clients | M W | y | local stdio MCP over SQLite | P1 | dep `@modelcontextprotocol/sdk`; S `notetakerMCPVisibilityState` |
 | F87 | Connectors / connect apps (e.g. Atlassian, Loom) for context | M W | y | none initially | P2 | `e2e:setConnectorCatalog`; P `connect-apps` |
+| F119 | Meeting recorder from the keyboard (triple-tap of the dictation key, or a rebindable shortcut) | M W | n | a fn triple-tap from idle (setting, on by default) and an optional rebindable shortcut open the recorder, start a detected meeting or stop the active one; a shortcut the user removed is never re-added; iPhone gets a start-meeting button instead | P1 | K `open_meeting_recorder`; S `notetakerTripleTapShortcutEnabled`, `meetingRecorderShortcutRemoved`, `stashedMeetingRecorderShortcuts` |
+| F120 | Meeting notes library in the hub with tabs and search | M W | n | hub meeting list with All and Folders tabs; SQLite FTS5 search over title, attendees, transcript, summary and notes, with snippets; debounced, on device only | P1 | event `notetaker_notes_search_performed`, `notetaker_notes_tab_changed`; `meetings.md` section 5 |
+| F121 | Keep or discard a very short or accidental meeting recording | M W | n | when a recording stops under a tunable threshold (about 60 s, or no speech on either channel), a small card next to 🤫 offers keep or discard; discard hides the meeting, and its raw audio stays, marked (product rule 4) | P2 | N `MeetingStartedByMistake`; event `notetaker_short_capture_decision` |
+| F122 | Warn when the call app's mic differs from the one the meeting recorder captures | M | n | during a recording, read the call app's input device (AX in Zoom, Meet and Teams, or the Core Audio process object; the PipeWire stream node on Linux) and, when it differs from the recorder's mic and the user is not muted, show a notice next to 🤫 with switch-mic and don't-show-again | P2 | H `ZoomMeetingAudioChanged`, `GoogleMeetAudioDeviceChanged`, `TeamsMeetingAudioChanged`; N `NotetakerMicMismatch` |
+| F123 | Latin-script view of non-Latin meeting transcripts | M W | y | deterministic local transliteration (Foundation's to-Latin string transform on Apple, ICU Any-Latin on Linux) stored next to the original, with a toggle; no model, no network | P2 | task enum `TranscriptRomanization`; event `notetaker_transcript_romanized` |
 
 ## App shell, onboarding, system
 
@@ -148,12 +158,13 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F110 | Formality mismatch detection (notices when the tone does not fit the app) | M W | y | none | P2 | N `FormalityMismatchDetected` |
 | F111 | Feature tour / what's-new / changelog | M W | n | release notes page | P2 | renderer `feature_tour`; event `changelog_opened` |
 | F112 | Double-trigger debounce (ignores accidental double presses, conflicting shortcuts) | M W | n | debounce in the hotkey state machine | P0 | N `Debounce`, `DictationCancelledOtherShortcut` |
+| F124 | Prompt to move the app into Applications when launched from elsewhere | M | n | Mac: at launch, if the bundle is outside /Applications and ~/Applications (a DMG or Downloads breaks permissions and launch at login), offer to move it; declining never blocks | P2 | event `app_not_in_applications_folder` |
 
 ## Counts
 - P0: F01, F02, F03, F04, F05, F06, F07, F08, F10, F12, F17, F19, F20, F21, F23, F27, F32, F39, F51, F52, F53, F88, F89, F90, F91, F92, F99, F109, F112 = **29**
-- P1: F09, F11, F13, F22, F24, F26, F33, F34, F35, F37, F40, F42, F43, F45, F48, F55, F60, F64, F65, F66, F67, F68, F69, F70, F71, F72, F73, F81, F86, F98, F102, F108 = **32**
-- P2: F14, F15, F16, F18, F25, F28, F29, F30, F31, F36, F38, F41, F44, F46, F47, F49, F50, F54, F56, F57, F58, F59, F61, F62, F63, F74, F75, F76, F77, F78, F79, F80, F82, F83, F84, F87, F93, F94, F95, F96, F97, F100, F101, F110, F111, F113 = **46**
+- P1: F09, F11, F13, F22, F24, F26, F33, F34, F35, F37, F40, F42, F43, F45, F48, F55, F60, F64, F65, F66, F67, F68, F69, F70, F71, F72, F73, F81, F86, F98, F102, F108, F119, F120 = **34**
+- P2: F14, F15, F16, F18, F25, F28, F29, F30, F31, F36, F38, F41, F44, F46, F47, F49, F50, F54, F56, F57, F58, F59, F61, F62, F63, F74, F75, F76, F77, F78, F79, F80, F82, F83, F84, F87, F93, F94, F95, F96, F97, F100, F101, F110, F111, F113, F114, F115, F116, F117, F118, F121, F122, F123, F124 = **55**
 - n/a: F85, F103, F104, F105, F106, F107 = **6**
-- Total: **113**
+- Total: **124**
 
 Open questions: helper flag `flow-fetch` (enabled-only payload, purpose unknown) was not resolved in the time available. Flags `canto-launch-modal` and `linkedin-apps` are unidentified product surfaces.
