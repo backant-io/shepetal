@@ -11,13 +11,13 @@ An open-source replacement for Wispr Flow. Status: in design.
 From a release (exact click-by-click steps are in each release's notes):
 
 1. Download `Shepetal-<version>-mac.zip` from the [Mac releases](https://github.com/backant-io/shepetal/releases) and double-click it. You get `Shepetal.app`.
-2. Drag `Shepetal.app` into Applications before opening it (`/Applications`, or `~/Applications` in your home folder).
+2. Drag `Shepetal.app` into Applications before opening it (`/Applications`).
 3. Double-click it. The app is not notarized by Apple yet, so macOS 15 says it cannot verify it. Click Done, open System Settings > Privacy & Security, scroll down to the Security section where it says Shepetal was blocked, click Open Anyway, and confirm with your password. Do this soon after the blocked launch, while the button is shown. You do this once per download.
 4. Shepetal runs in the menu bar (🤫) with no Dock icon, and a tiny 🤫 sits in the bottom-left corner of the screen. The permissions window asks for Microphone, Input Monitoring and Accessibility; grant all three.
 5. Hold `fn` and talk in any app.
 6. To start it with your Mac: turn on Start at login in the 🤫 menu if your build has that item. If it doesn't, open System Settings > General > Login Items & Extensions, click + under Open at Login, and pick Shepetal.
 
-From this checkout: `scripts/make-app.sh --install` builds the app and copies it to `~/Applications/Shepetal.app`. A locally built app is not quarantined, so step 3 does not apply; open it and continue at step 4.
+From this checkout: `scripts/make-app.sh --install` builds the app and copies it to `/Applications/Shepetal.app` (it quits a running Shepetal first, opens it again afterwards, and removes an old `~/Applications` copy). A locally built app is not quarantined, so step 3 does not apply; open it and continue at step 4.
 
 Requirements: macOS 14 or later on Apple Silicon. The speech model (Parakeet v3, about 470 MB) downloads from the 🤫 menu on first run if it is not on the Mac yet. After that nothing goes over the network.
 
@@ -28,7 +28,7 @@ Requirements: Xcode or the Swift 6 toolchain.
 ```bash
 swift build && swift test             # core: fn gestures, model tiers, audio store, history, text rules
 scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only), signed (see below)
-scripts/make-app.sh --install         # same, then copied to ~/Applications/Shepetal.app
+scripts/make-app.sh --install         # same, then installed to /Applications/Shepetal.app
 scripts/make-app.sh --zip             # same, plus dist/Shepetal-<version>-mac.zip for a release
 open dist/Shepetal.app                # add --args --no-permission-prompts to never ask macOS for anything
 scripts/check-app.sh                  # launches an ad-hoc copy of the bundle: menu-bar only, 🤫 bottom-left, alive for 5 min, Quit from the menu

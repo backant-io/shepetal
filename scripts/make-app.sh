@@ -12,8 +12,8 @@
 #   ad-hoc ("-")
 #
 #   scripts/make-app.sh            build and sign dist/Shepetal.app
-#   scripts/make-app.sh --install  also copy it to ~/Applications/Shepetal.app; a copy running from there
-#                                  is quit first and opened again afterwards
+#   scripts/make-app.sh --install  also copy it to /Applications/Shepetal.app (INSTALL_DIR overrides); a
+#                                  running Shepetal is quit first and opened again afterwards
 #   scripts/make-app.sh --zip      also write dist/Shepetal-<version>-mac.zip (+ .sha256) for a release
 #   VERSION=0.1.1 scripts/make-app.sh ...   the version shown in Finder and in the zip name (default 0.1.0)
 set -euo pipefail
@@ -51,6 +51,14 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN/shepetal" "$APP/Contents/MacOS/Shepetal"
 for b in "$BIN"/*.bundle; do [ -e "$b" ] && cp -R "$b" "$APP/Contents/Resources/"; done
+# The app icon is 🤫, rendered from the emoji font at every size (scripts/make-icon.swift).
+ICON=.cache/AppIcon.icns
+if [ ! -f "$ICON" ] || [ scripts/make-icon.swift -nt "$ICON" ]; then
+  mkdir -p .cache
+  swift scripts/make-icon.swift .cache/AppIcon.iconset
+  iconutil -c icns .cache/AppIcon.iconset -o "$ICON"
+fi
+cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 # Dynamic frameworks the binary links (for example llama.cpp for the cleanup model) go in Frameworks.
 for f in "$BIN"/*.framework; do
   [ -e "$f" ] || continue
@@ -69,6 +77,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key><string>Shepetal</string>
   <key>CFBundleDisplayName</key><string>Shepetal</string>
   <key>CFBundleExecutable</key><string>Shepetal</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleShortVersionString</key><string>$SHORT_VERSION</string>
@@ -107,18 +116,21 @@ if [ "$ZIP" = 1 ]; then
 fi
 
 if [ "$INSTALL" = 1 ]; then
-  DEST="$HOME/Applications/Shepetal.app"
-  EXE="$DEST/Contents/MacOS/Shepetal"
+  # /Applications is writable by admin users without sudo. A running Shepetal is asked to quit (the
+  # normal way, like its menu's Quit), replaced, and opened again. An older copy in ~/Applications is
+  # removed, so macOS sees one Shepetal and its permissions belong to the one in /Applications.
+  DEST=${INSTALL_DIR:-/Applications}/Shepetal.app
   WAS_RUNNING=0
-  if pgrep -qf "^$EXE"; then
+  if pgrep -qx Shepetal; then
     WAS_RUNNING=1
-    pkill -f "^$EXE" || true  # only the installed copy, never another Shepetal on this Mac
-    for _ in $(seq 1 40); do pgrep -qf "^$EXE" || break; sleep 0.25; done
-    if pgrep -qf "^$EXE"; then echo "the running $DEST did not quit; quit it from its 🤫 menu and retry" >&2; exit 1; fi
+    osascript -e 'quit app "Shepetal"' >/dev/null 2>&1 || true
+    for _ in $(seq 1 40); do pgrep -qx Shepetal || break; sleep 0.25; done
+    if pgrep -qx Shepetal; then echo "Shepetal did not quit; quit it from its 🤫 menu and retry" >&2; exit 1; fi
   fi
-  mkdir -p "$HOME/Applications"
   rm -rf "$DEST"
   ditto "$APP" "$DEST"
   echo "Installed $DEST"
+  OLD="$HOME/Applications/Shepetal.app"
+  if [ "$DEST" != "$OLD" ] && [ -d "$OLD" ]; then rm -rf "$OLD" && echo "Removed the old copy $OLD"; fi
   if [ "$WAS_RUNNING" = 1 ]; then open "$DEST" && echo "Opened it again"; fi
 fi

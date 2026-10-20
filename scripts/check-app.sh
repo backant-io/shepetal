@@ -8,10 +8,8 @@
 # It also tries a screenshot; without Screen Recording permission macOS leaves windows out of it,
 # so the window-list check above is the one that counts.
 #
-# The check runs a copy of the bundle re-signed ad-hoc. macOS ties permissions to the signature, so the
-# copy has none of the grants the installed app may have: it cannot hear fn, record, or paste, and it
-# never touches the clipboard, even if someone presses fn during the soak. The binary is the same.
-# It shows its 🤫 for the whole run, so it holds the UI lock, uses a scratch data dir, never asks for a
+# The check never launches the real app (io.backant.shepetal): it runs "Shepetal Check.app", a copy with
+# its own bundle ID and an ad-hoc signature (see below). It shows its 🤫 for the whole run, so it holds the UI lock, uses a scratch data dir, never asks for a
 # permission and never takes focus.
 #
 #   scripts/check-app.sh [path/to/Shepetal.app]
@@ -33,13 +31,23 @@ mkdir -p "$DIR" "$HOMEDIR" "$(dirname "$UI_LOCK")"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
-# The copy under test: same binary and resources, ad-hoc signature (no permissions).
-APP=$DIR/Shepetal.app
+# The bundle under test: same binary and resources, but its own identity: bundle ID
+# io.backant.shepetal.check, name "Shepetal Check", ad-hoc signature. macOS keeps permissions per app
+# identity, so it has none of the real app's grants (it cannot hear fn, record or paste, and never
+# touches the clipboard), it does not disturb the real app's grants, and quitting or installing the real
+# app never touches it. It lives in the scratch dir and is never installed to an Applications folder.
+APP="$DIR/Shepetal Check.app"
 rm -rf "$APP"
 ditto "$SRC" "$APP"
-codesign --force --deep --sign - "$APP" 2>/dev/null
-EXE=$APP/Contents/MacOS/Shepetal
-cmp -s "$SRC/Contents/Info.plist" "$APP/Contents/Info.plist" || fail "the copy's Info.plist differs"
+mv "$APP/Contents/MacOS/Shepetal" "$APP/Contents/MacOS/Shepetal Check"
+plutil -replace CFBundleIdentifier -string io.backant.shepetal.check "$APP/Contents/Info.plist"
+plutil -replace CFBundleExecutable -string "Shepetal Check" "$APP/Contents/Info.plist"
+plutil -replace CFBundleName -string "Shepetal Check" "$APP/Contents/Info.plist"
+plutil -replace CFBundleDisplayName -string "Shepetal Check" "$APP/Contents/Info.plist"
+codesign --force --deep --sign - --identifier io.backant.shepetal.check "$APP" 2>/dev/null
+EXE="$APP/Contents/MacOS/Shepetal Check"
+cmp -s "$SRC/Contents/MacOS/Shepetal" "$EXE" && fail "the check binary should carry its own signature"
+[ "$(defaults read "$APP/Contents/Info" CFBundleIdentifier)" = io.backant.shepetal.check ] || fail "check bundle ID not set"
 
 # Window-list probe: bounds and level of the app's on-screen windows (no Screen Recording needed).
 PROBE=$DIR/windows
@@ -64,7 +72,7 @@ PID=
 cleanup() {
   [ -n "$PID" ] && kill "$PID" 2>/dev/null || true
   rmdir "$UI_LOCK" 2>/dev/null || true
-  rm -rf "$APP"  # so LaunchServices does not keep a second Shepetal.app around
+  rm -rf "$APP"  # so LaunchServices does not keep the check bundle around
 }
 trap cleanup EXIT
 
@@ -111,7 +119,7 @@ wait "$PID" && CODE=0 || CODE=$?
 PID=
 [ "$CODE" = 0 ] || fail "the app ended with status $CODE, not 0: $(tail -3 "$DIR/stderr.log")"
 grep -q "quit-from-menu: menu-bar 🤫 shown" "$DIR/stderr.log" || fail "$(grep quit-from-menu "$DIR/stderr.log" || echo "the menu quit never ran")"
-CRASH=$(find "$HOME/Library/Logs/DiagnosticReports" -name 'Shepetal*' -newer "$DIR/started" 2>/dev/null | head -1)
+CRASH=$(find "$HOME/Library/Logs/DiagnosticReports" -name 'Shepetal Check*' -newer "$DIR/started" 2>/dev/null | head -1)
 [ -z "$CRASH" ] || fail "it crashed: $CRASH"
 echo "ok: $(grep -m1 'quit-from-menu:' "$DIR/stderr.log" | sed 's/^quit-from-menu: //'); the app ended, no crash report"
 echo "check-app: OK"
