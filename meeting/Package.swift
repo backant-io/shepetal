@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "shepetal-meeting",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS("14.4")],
     targets: [
         .target(name: "MeetingCore"),
         .target(name: "MeetingMac", dependencies: ["MeetingCore"]),
