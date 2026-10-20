@@ -57,6 +57,10 @@ def check(inventory, ledger):
             errors.append(f"{fid}: expected | F-ID | Feature | Mac | Linux | iPhone | Evidence / notes |")
             continue
         ev = evidence(cols[4])
+        # Note text outside a `Mac:` / `Linux:` / `iPhone:` / `All:` label ("Mac and Linux: ...", a bare note)
+        # still counts against a done cell that cites a hand step there.
+        loose = " ".join(seg for seg in cols[4].split(";")
+                         if seg.partition(":")[0].strip() not in PLATFORMS + ("All",))
         for p, value in zip(PLATFORMS, cols[1:4]):
             cells.append(value)
             e = ev[p]
@@ -64,9 +68,9 @@ def check(inventory, ledger):
                 errors.append(f"{fid} {p}: unknown value {value!r}")
             elif value == "done" and not (re.search(r"`[^`]+`", e) and re.search(r"#\d+", e)):
                 errors.append(f"{fid} {p}: done needs a `test name` and a PR number (#N)")
-            elif value == "done" and HAND_STEP.search(e):
-                errors.append(f"{fid} {p}: done cites hand step {HAND_STEP.search(e).group()}; a cell that waits on "
-                              "docs/manual-test.md is hand-test")
+            elif value == "done" and HAND_STEP.search(e + " " + loose):
+                errors.append(f"{fid} {p}: done cites hand step {HAND_STEP.search(e + ' ' + loose).group()}; a cell that "
+                              "waits on docs/manual-test.md is hand-test")
             elif value == "impossible" and not re.search(r"https?://\S+", e):
                 errors.append(f"{fid} {p}: impossible needs a doc citation (URL)")
             elif value == "n/a":
@@ -141,6 +145,8 @@ def self_test():
     fails(good.replace("| todo |", "| wip |"), "unknown value 'wip'")
     for step in ("M-NS-1", "I-DICT-1", "L-KEY-2", "MEET-3"):  # done may not wait on a hand step (#41)
         fails(good.replace("#3;", f"#3, see {step};"), f"F01 Mac: done cites hand step {step}")
+    fails(good.replace("#3;", "#3; waits on M-NS-1;"), "F01 Mac: done cites hand step M-NS-1")  # unlabelled note
+    fails(good.replace("#3;", "#3; Mac and Linux: hand step M-FN-1;"), "F01 Mac: done cites hand step M-FN-1")
     for text in ("UTF-8", "SHA-256", "F01-2"):  # look-alikes that are not step ids
         assert check(inv, good.replace("#3;", f"#3 {text};"))[0] == [], text
 
