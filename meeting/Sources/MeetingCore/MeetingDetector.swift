@@ -58,9 +58,13 @@ public enum MeetingEvent: Equatable, Sendable {
 
 public enum KnownApps {
     /// Native apps that only hold the mic during a call. Matched by case-insensitive bundle ID
-    /// prefix, so helpers (`us.zoom.xos.helper`, `com.microsoft.teams2.modulehost`) count too.
+    /// prefix, so helpers (`com.microsoft.teams2.modulehost`) count too.
     public static let native: [(prefix: String, name: String)] = [
         ("us.zoom.xos", "Zoom"),
+        // Zoom's meeting helpers have their own IDs (Zoom 7.1.9). Not `us.zoom.`: ZoomClips is no call.
+        ("us.zoom.CptHost", "Zoom"),
+        ("us.zoom.aomhost", "Zoom"),
+        ("us.zoom.caphost", "Zoom"),
         ("com.microsoft.teams", "Microsoft Teams"),  // also matches com.microsoft.teams2
         ("com.apple.FaceTime", "FaceTime"),
         ("com.apple.avconferenced", "FaceTime"),

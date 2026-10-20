@@ -1,0 +1,355 @@
+{
+ "01_release_planning.txt": {
+  "overview": "We have about ten minutes, so I'd like to cover the release date, the crash on older iPhones, and the onboarding copy.",
+  "overview_top3": [
+   "We have about ten minutes, so I'd like to cover the release date, the crash on older iPhones, and the onboarding copy.",
+   "This is the weekly release sync for version 2.4.",
+   "So the crash happens on iPhone 11 and older when the microphone permission dialog is dismissed and the user opens the app again within a few seconds."
+  ],
+  "key_points": [
+   "So the plan is the fix goes into 2.4, but only after QA passes the audio regression suite.",
+   "Tom, you will open the pull request for the audio session fix by Wednesday.",
+   "We don't have enough traffic on the new onboarding to get a result in time.",
+   "Priya runs the regression suite on Thursday and drafts release notes by Monday.",
+   "I update the roadmap, tell support, and get the revised onboarding copy from Leo by Friday."
+  ],
+  "decisions": [
+   "We move the release from Monday the 3rd to Tuesday the 4th.",
+   "We keep screen two as is, and Leo shortens screen one and removes the cloud wording from screen three."
+  ],
+  "actions": [
+   [
+    "Tom",
+    "open it",
+    "Wednesday"
+   ],
+   [
+    "Priya",
+    "run the regression suite and post the results in the release channel",
+    "Thursday"
+   ],
+   [
+    "Maya",
+    "follow up with Leo today and get the revised copy",
+    "Friday"
+   ],
+   [
+    "Priya",
+    "draft the release notes so they are ready for the Tuesday release",
+    "Monday"
+   ],
+   [
+    "Tom",
+    "The release moves to the 4th",
+    "Tuesday"
+   ]
+  ],
+  "action_scores": [
+   0.012579841369893973,
+   0.004731360014430707,
+   0.009132874118759713,
+   0.0012751697353644987,
+   0.003543819729477258,
+   0.00025617334693714915,
+   0.002380645798873156,
+   0.0052336445545310235,
+   0.0008616494669287411,
+   0.00019391436126036797,
+   0.0008410651623088807,
+   0.007514335294808853,
+   0.0011261767259708663,
+   0.001256585225743617,
+   0.0013909172109875583,
+   0.0009949724916156217,
+   0.0004043198030000198,
+   0.003194898331085686,
+   0.0032252961334902357,
+   0.0008168809295759688,
+   0.004563006971227679,
+   0.003061451444300117,
+   0.0008277262542857433,
+   0.0018901634879304277,
+   0.002166442640531377,
+   0.21472092541277935,
+   0.012802874820401279,
+   0.01649443897263258,
+   0.003018416324708424,
+   0.05333260205303055,
+   0.004087605296858033,
+   0.016815429127148493,
+   0.015410131417919224,
+   0.03812185626586381,
+   0.03612418075461785,
+   0.004438457659575167,
+   0.006893903722035061,
+   0.010633031265524052,
+   0.029877982990395593,
+   0.006515076073433745,
+   0.001135098618439056,
+   0.03355300589869872,
+   0.09202972655347098,
+   0.0017065048243763777,
+   0.039380788221778304,
+   0.05592996869407546,
+   0.0041433445623175556,
+   0.0002659330511100056,
+   0.0016920854467325423,
+   0.001534369781368121,
+   0.0009644381024464309,
+   0.00026635877114322676,
+   0.00027348233694543403,
+   0.0008948135243235932,
+   0.012693380652072378,
+   0.0005881736405028853,
+   0.001560791817579514,
+   0.014468602909203467,
+   0.16699162982407761,
+   0.300041552325489,
+   0.002554859291879657,
+   0.8437237689756892,
+   0.5986636338007878,
+   0.0025959588432206207,
+   0.0057482213300005,
+   0.002138094251832135,
+   0.015082837955189736,
+   0.15770554594103176,
+   0.028296846303085328,
+   0.028826780828395328,
+   0.015088781246293797,
+   0.010629875737837531,
+   0.1337964861509055,
+   0.2509597787013585,
+   0.4096046429964153,
+   0.7502975776953479,
+   0.42935088812719296,
+   0.08642409110133502,
+   0.0863767298746861,
+   0.016228894324811574,
+   0.07315539785165573
+  ]
+ },
+ "02_customer_escalation.txt": {
+  "overview": "In the last update we replaced the custom vocabulary loader, and the new one silently ignores entries longer than thirty-two characters.",
+  "overview_top3": [
+   "In the last update we replaced the custom vocabulary loader, and the new one silently ignores entries longer than thirty-two characters.",
+   "Their dictation accuracy dropped badly after last week's update, and they are threatening to pause the rollout to their remaining four sites.",
+   "Some of their drug names plus dosage strings are longer than that."
+  ],
+  "key_points": [
+   "We tell them we have identified a likely cause, we will confirm it within twenty-four hours, and we will ship a fix or a rollback by Friday.",
+   "We can switch their tenant back today if they want.",
+   "For the proper fix, I'd raise the limit to two hundred fifty-six characters and log a warning instead of dropping entries silently.",
+   "Okay, so to recap: likely cause is the new vocabulary loader dropping entries over thirty-two characters.",
+   "I contact Northwind today and other affected customers after that."
+  ],
+  "decisions": [
+   "We offer Northwind an immediate rollback to the old vocabulary loader for their tenant, and we fix the length limit properly for everyone.",
+   "Let's not decide the credit today.",
+   "Credit is postponed to next week.",
+   "We roll back Northwind today, fix the limit with a warning and a test by Thursday, review Thursday, ship Friday."
+  ],
+  "actions": [
+   [
+    "Aisha",
+    "talk to finance and we decide",
+    "next week"
+   ],
+   [
+    "Kenji",
+    "query all tenants for entries over thirty-two characters and send the list to Daniel",
+    "tomorrow"
+   ],
+   [
+    "Kenji",
+    "switch the Northwind tenant to the old loader, right after this call",
+    "today"
+   ],
+   [
+    "Kenji",
+    "have the fix with the new limit and the warning ready for review",
+    "Thursday"
+   ],
+   [
+    "Aisha",
+    "review it so it can ship Friday morning",
+    "Thursday afternoon"
+   ],
+   [
+    "Daniel",
+    "email Northwind with the explanation and the rollback offer, and I'll join their Friday call if they want us there",
+    "today"
+   ],
+   [
+    "Aisha",
+    "write the incident report",
+    "Monday"
+   ]
+  ],
+  "action_scores": [
+   0.002863051805560637,
+   0.0008655322632350338,
+   0.0012518252291026052,
+   0.0051469025416676275,
+   0.0016336557376603455,
+   0.0037587612032107393,
+   0.0004955730957345854,
+   0.007137709837336752,
+   0.0009698488537722994,
+   0.0007280591054420583,
+   0.004752124717684344,
+   0.0014653422926318347,
+   0.061826663848448336,
+   0.0008727397811512902,
+   0.0023915957448203858,
+   0.009241194202915425,
+   0.0021136986831156415,
+   0.0010417614418211027,
+   0.003085965400673185,
+   0.0008039252637948287,
+   0.002229824682211323,
+   0.0019783733093528097,
+   0.0005459156590665429,
+   0.010337355908266746,
+   0.0027742409622927063,
+   0.023230151186664574,
+   0.039608396233136264,
+   0.06483969323070994,
+   0.006391971764233502,
+   0.0018513261812060375,
+   0.002703502394451041,
+   0.02311922704133013,
+   0.007241205720234483,
+   0.0021888232196612054,
+   0.04232623807377848,
+   0.1995355030041439,
+   0.01910341352313821,
+   0.0009319490766013995,
+   0.004338407880095269,
+   0.005030964006146247,
+   0.0016454410810885075,
+   0.019481809761499668,
+   0.004084756658101183,
+   0.07106129121267374,
+   0.14147412275189591,
+   0.002125543370465518,
+   0.04873014263881181,
+   0.062228104449300825,
+   0.04949602408774316,
+   0.04965622628742659,
+   0.10812866676200357,
+   0.17255879991017684,
+   0.15176814730187946,
+   0.02263860171605257,
+   0.2427428939981554,
+   0.04095751756546451,
+   0.00184671218282066,
+   0.33272187660445185,
+   0.04875796348030379,
+   0.0266099414381291,
+   0.0955566851105526,
+   0.25220247796217476,
+   0.08744805898424164,
+   0.2240880486566994,
+   0.0445019378569202,
+   0.049251956323924796
+  ]
+ },
+ "03_design_review.txt": {
+  "overview": "Option A puts the summary in a right sidebar next to the transcript.",
+  "overview_top3": [
+   "Option A puts the summary in a right sidebar next to the transcript.",
+   "Before we start, I shared two mockups in the design folder, option A with a sidebar and option B with a bottom sheet.",
+   "Today I want to settle the layout of the summary panel and how we handle speaker names."
+  ],
+  "key_points": [
+   "Today I want to settle the layout of the summary panel and how we handle speaker names.",
+   "Before we start, I shared two mockups in the design folder, option A with a sidebar and option B with a bottom sheet.",
+   "On a laptop it's great because you see both at once.",
+   "Right now the transcript shows Speaker 1, Speaker 2 and so on.",
+   "Yes, that should be opt-in if we ever do it."
+  ],
+  "decisions": [
+   "We use the sidebar on wide windows and the bottom sheet on narrow windows and phones, with the breakpoint at nine hundred points.",
+   "We don't store voiceprints in version one.",
+   "Tap to rename speakers, per meeting only, no cross-meeting voice memory.",
+   "Let's ship Markdown and plain text, and skip PDF for now."
+  ],
+  "actions": [
+   [
+    "Omar",
+    "update the mockups",
+    "Tuesday"
+   ],
+   [
+    "Grace",
+    "write the testing summary and share it",
+    "Wednesday"
+   ],
+   [
+    "Lena",
+    "write the spec for speaker renaming and the export formats, and send it to engineering",
+    "Friday"
+   ],
+   [
+    "Lena",
+    "book a follow-up review",
+    "next Thursday"
+   ]
+  ],
+  "action_scores": [
+   0.06275538023607351,
+   0.04866991580882423,
+   0.037525025797537345,
+   0.0016056815479996234,
+   0.1341910199556126,
+   0.003982321762658277,
+   0.009867424223160873,
+   0.004168590527425736,
+   0.0014140250079748464,
+   0.0009778265016079123,
+   0.005012975726416566,
+   0.0027191855077200867,
+   0.010054794581566098,
+   0.0010008542882013187,
+   0.003689749999941122,
+   0.01511853230947898,
+   0.002251061044720298,
+   0.0038558519222252055,
+   0.000747521268096312,
+   0.001941405095446257,
+   0.028645364393827043,
+   0.05832661402268013,
+   0.01720162721643517,
+   0.005664252435616258,
+   0.0116630264544052,
+   0.029675752303997806,
+   0.01416660409816033,
+   0.0032304440539199938,
+   0.010406125582786786,
+   0.0028733476979915353,
+   0.0032449665311569845,
+   0.0023766117493090556,
+   0.00493428991632478,
+   0.0014767997090160633,
+   0.00484042776685006,
+   0.009684470364052252,
+   0.014225380773571506,
+   0.014130338558308038,
+   0.03806322987502337,
+   0.07173090346829501,
+   0.34377868718879717,
+   0.014277359310198925,
+   0.024984444841543763,
+   0.16369341729719628,
+   0.06418189282271144,
+   0.4744971504984696,
+   0.5110981768514072,
+   0.23676461881428815,
+   0.10404189495397588,
+   0.10926216202879173,
+   0.8214936451801496,
+   0.04732207495164374,
+   0.2130898779065001
+  ]
+ }
+}

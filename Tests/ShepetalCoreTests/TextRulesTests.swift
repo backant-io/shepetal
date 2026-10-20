@@ -97,6 +97,31 @@ final class InsertionRulesTests: XCTestCase {
     func testNoSpaceAfterOpeningBracket() {
         XCTAssertEqual(fit("Maybe.", "(", ")"), "maybe.")
     }
+
+    // M-INS-1: the model capitalises every utterance and ends it with a period. Clicked into the middle of a
+    // sentence, that period would split the user's sentence in two, whatever word comes next.
+    func testMidSentenceDropsPeriodBeforeAnyFollowingWord() {
+        XCTAssertEqual(fit("Yesterday.", "I met ", "John today."), "yesterday" + nbsp)
+        XCTAssertEqual(fit("Finally.", "Today ", "I went home."), "finally" + nbsp)
+        XCTAssertEqual(fit("About.", "It took ", "5 days."), "about" + nbsp)
+    }
+
+    // The sentence already has its end right after the cursor: a second period would double it.
+    func testBeforeSentenceEndDropsOurs() {
+        XCTAssertEqual(fit("Today.", "I went home", "."), " today")
+        XCTAssertEqual(fit("Right now!", "Do it", "!"), " right now")
+    }
+
+    // Between two sentences the dictation is a sentence of its own and keeps its capital and period.
+    func testBetweenSentencesKeepsCapitalAndPeriod() {
+        XCTAssertEqual(fit("Big news.", "Hello. ", "World."), "Big news." + nbsp)
+        XCTAssertEqual(fit("Big news.", "", "World."), "Big news." + nbsp)
+    }
+
+    // Only the first letter is ever changed: names and acronyms the model capitalised later in the text stay.
+    func testOnlyTheFirstLetterChanges() {
+        XCTAssertEqual(fit("Send it to John at NASA.", "Please", ""), " send it to John at NASA.")
+    }
 }
 
 final class PasteCheckTests: XCTestCase {

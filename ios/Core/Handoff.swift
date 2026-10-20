@@ -1,4 +1,6 @@
 import Foundation
+import UIKit
+import UniformTypeIdentifiers
 
 /// The keyboard <-> app dictation handoff. Both processes load it from the App Group,
 /// apply one transition and save it back. Every transition names the session it is for,
@@ -84,20 +86,39 @@ public struct Handoff: Codable, Equatable {
         return true
     }
 
+    /// What the keyboard does with a ready result.
+    public enum Delivery: Equatable {
+        /// Insert into the field the dictation started in.
+        case insert(String)
+        /// Goal rule 8: the user is in a different field now, so the text goes to the clipboard as plain text
+        /// (the old clipboard is not restored) and the hint says to paste.
+        case copy(String)
+    }
+
     /// Keyboard: take the text for the session it requested, in the field it is showing now.
-    /// Returns nil for a stale, expired or already inserted result, so the same text is never
-    /// inserted twice. A ready result shown in a different field is never inserted: the session
-    /// fails and the keyboard says the text is in the app's history (the app keeps every result there).
-    public mutating func consume(_ id: UUID, document: UUID, now: Date = Date()) -> String? {
+    /// Returns nil for a stale, expired or already delivered result, so the same text is never
+    /// delivered twice. A ready result shown in a different field is never inserted there: it is copied
+    /// instead (goal rule 8), and the paste hint goes before any note delivered with the text.
+    public mutating func consume(_ id: UUID, document: UUID, now: Date = Date()) -> Delivery? {
         let result = text
-        guard advance(id, from: .ready, to: .inserted, now: now) else { return nil }
+        guard advance(id, from: .ready, to: .inserted, now: now), let result else { return nil }
         text = nil
-        guard document == documentID else {
-            phase = .failed
-            message = "Not inserted, because you are in a different field now. The text is in Shepetal's history."
-            return nil
-        }
-        return result
+        if document == documentID { return .insert(result) }
+        message = [Self.copiedHint, message].compactMap { $0 }.joined(separator: " ")
+        return .copy(result)
+    }
+
+    static let copiedHint = "You are in a different field now, so the text is on the clipboard. Tap the field and choose Paste."
+
+    /// Keyboard: the clipboard write for a `.copy` did not land, so the paste hint would be wrong.
+    /// The session fails and says where the text is instead.
+    @discardableResult
+    public mutating func copyFailed(_ id: UUID, now: Date = Date()) -> Bool {
+        guard sessionID == id, phase == .inserted else { return false }
+        phase = .failed
+        message = "Not inserted, because you are in a different field now. The text is in Shepetal's history."
+        updatedAt = now
+        return true
     }
 
     /// Either side: give up on the session. Only the session id is needed; the app keeps the audio.
@@ -271,16 +292,36 @@ public enum AudioArchive {
     }
 }
 
+/// Goal rule 8 on iPhone: a result for a different field is left on the clipboard.
+public enum Clipboard {
+    /// Replaces the clipboard with `text` as plain text. Local only: it is not sent to the user's other
+    /// devices by Universal Clipboard. Tests pass a private named pasteboard, never `.general`.
+    /// Returns false when the write did not land (the change count did not move or the text differs).
+    @discardableResult
+    public static func copy(_ text: String, to pasteboard: UIPasteboard = .general) -> Bool {
+        let before = pasteboard.changeCount
+        pasteboard.setItems([[UTType.utf8PlainText.identifier: text]], options: [.localOnly: true])
+        return pasteboard.changeCount != before && pasteboard.string == text
+    }
+}
+
 /// Shared App Group storage plus Darwin notifications between the app and the keyboard.
 public enum SharedHandoff {
     public static let appGroup = "group.io.backant.shepetal"
     public static let stopNotification = "io.backant.shepetal.stop"
+    /// Posted by the keyboard after writing a request, instead of opening the app, while the app is listening.
+    public static let startNotification = "io.backant.shepetal.start"
+    /// The app's heartbeat is this recent while its mic is open (it writes one every second).
+    public static let listeningWindow: TimeInterval = 3
     /// Posted by the app whenever the keyboard's session moves on: ready, failed or cancelled.
     public static let readyNotification = "io.backant.shepetal.ready"
     public static let shared = UserDefaults(suiteName: appGroup)
     private static let key = "handoff"
 
-    public static func read(in defaults: UserDefaults? = shared) -> Handoff { update(in: defaults) { $0 } }
+    /// Read only: a read that wrote the state back could erase a request the keyboard wrote in between.
+    public static func read(in defaults: UserDefaults? = shared) -> Handoff {
+        defaults?.data(forKey: key).flatMap { try? JSONDecoder().decode(Handoff.self, from: $0) } ?? Handoff()
+    }
 
     // ponytail: read-modify-write on UserDefaults is not atomic across processes. Each phase has a
     // single writer (keyboard or app), except `recording`, where the keyboard's stop request can race the
@@ -292,6 +333,22 @@ public enum SharedHandoff {
         defaults?.set(try? JSONEncoder().encode(handoff), forKey: key)
         return result
     }
+
+    /// App: its mic is open and it starts dictations from the keyboard's start notification. Nil when it closes the mic.
+    /// Kept apart from the handoff, so the heartbeat never races the keyboard's writes.
+    public static func markListening(_ now: Date?, in defaults: UserDefaults? = shared) {
+        defaults?.set(now, forKey: listeningKey)
+    }
+
+    /// Keyboard: true when the app wrote a heartbeat within `listeningWindow`, so a dictation can start
+    /// without opening the app. A heartbeat from the future (clock change) does not count.
+    public static func isAppListening(now: Date = Date(), in defaults: UserDefaults? = shared) -> Bool {
+        guard let beat = defaults?.object(forKey: listeningKey) as? Date else { return false }
+        let age = now.timeIntervalSince(beat)
+        return age >= -1 && age < listeningWindow
+    }
+
+    private static let listeningKey = "appListeningAt"
 
     public static func post(_ name: String) {
         CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(name as CFString), nil, nil, true)

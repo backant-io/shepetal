@@ -15,7 +15,7 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F03 | Cancel or dismiss dictation (Esc) | M W | n | cancel the capture; keep the audio, marked cancelled in history | P0 | K `dismiss`; N `TranscriptCancelled` |
 | F04 | Rebindable shortcuts, multi-key combos, mouse buttons | M W | n | key-combo settings UI, chord parser | P0 | S `shortcuts`, `modifierShortcut`; F `MultiKeybindService` |
 | F05 | Floating Flow Bar / status pill with live waveform | M W | n | small always-on-top non-activating panel | P0 | renderer `status`; S `statusDockEdge`, `hideFlowBarPermanently`; F `can-drag-flow-bar` |
-| F06 | Start and stop sounds, haptics | M W | n | bundled own sounds, optional | P0 | H `PlayDictationStartSound`, `FireHaptic`; S `enableSounds`, `selectedSoundFolder` |
+| F06 | Start and stop sounds, haptics | M W | n | none: Pavel ruled out sounds (2026-10-21) | P0 | H `PlayDictationStartSound`, `FireHaptic`; S `enableSounds`, `selectedSoundFolder` |
 | F07 | Microphone selection with ranked fallback devices | M W | n | CoreAudio / PipeWire device list | P0 | S `overrideAudioDeviceId`, `rankedAudioDevices`; N `MicSwitched`, `NewMicDetected` |
 | F08 | Mic health alerts (no audio, disconnected, unreadable, AirPods or clamshell warnings) | M W | n | RMS check plus device events | P0 | N `NoAudio*`, `MicDisconnected`, `AirPodsWarning`, `NoClamshellBuiltInMic`, `SuggestWiredMic` |
 | F09 | Mute or pause media while dictating | M W | n | MediaRemote / MPRIS pause, then resume | P1 | S `shouldMuteAudio`, `shouldPauseAudio`; H `IsMediaPlayingUpdate` |

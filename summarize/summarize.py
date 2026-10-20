@@ -75,11 +75,31 @@ YOU = re.compile(r"\b(?:you|you'll|you're|your|you've|you'd)\b")
 ME = re.compile(r"\b(?:i|i'll|i'm|i've|i'd|me|my)\b")
 DELEGATE = re.compile(r"\s*(?:\w+\s+)?(?:ask|want|like|need|tell|get)\b")
 INTRO = re.compile(r"\b(?:I'm|I am|my name is|my name's|[Tt]his is)\s+([A-Z][a-z]+)\b(?!')")  # "This is Kate's laptop" is no intro
+# "I'm the Industrial Designer", "I am your project lead": a job title said about oneself names the speaker like a label.
+TITLE = re.compile(r"\b(?:I'm|I am)\s+(?:(?:uh|um)\s+)*(?:the|your|an?)\s+((?:[A-Za-z]+\s+){0,2}"
+                   r"(?:[Dd]esigner|[Mm]anager|[Ee]xpert|[Ee]ngineer|[Ll]ead|[Ss]pecialist|[Dd]eveloper|[Dd]irector|[Aa]nalyst))\b")
+REQUEST = re.compile(r"^(?:(?:can|could|would|will) (?:you|someone|somebody)\b|do you (?:want|wanna) to\b)", re.I)  # "Could you send it?"
+MODAL = r"(?:will|'ll|should|could|can|must|(?:have|has|need|needs) to|(?:are|'re|is|am|'m) (?:going to|gonna)|gonna|might want to)"
+CUES = [("a:you", re.compile(rf"\byou(?: two| guys| both| all)?\s*{MODAL}", re.I)),  # "you'll", "you two are going to"
+        ("a:i", re.compile(rf"\bI\s*{MODAL}")),
+        ("a:we", re.compile(rf"\bwe\s*{MODAL}", re.I)),
+        ("a:name", re.compile(rf"(?<=\s)[A-Z][a-z]{{2,}}(?: [A-Z][a-z]+)*\s+{MODAL}")),  # "so Kate will", "the Industrial Designer can"
+        ("a:next", re.compile(r"\b(?:next meeting|next time|for next|by next|before next|after lunch|after the break|meantime)\b", re.I))]
 FILLER = re.compile(r"^(?:(?:um|uh|so|and|okay|ok|well|yeah|right|but|then|also|now|alright)\b[,.]?\s*)+", re.I)
+FUNCTION = set("""i you we he she they it me my your our their his her them us i'll you'll we'll i'm you're we're they're it's
+that's i've you've we've i'd you'd will would shall should can could may might must have has had to be been being is are was
+were am do does did going gonna wanna got get a an the and or but so then on in at of for with by from about into up this that
+these those some any all um uh okay ok yeah yes well just like maybe also now right alright guys two both""".split())
+
+
+def same_task(a, b):
+    """similar() on content words: "you have to work on the components" and "you have to work on the interface" differ."""
+    ca, cb = set(words(a)) - FUNCTION, set(words(b)) - FUNCTION
+    return len(ca & cb) / min(len(ca), len(cb)) > 0.5 if ca and cb else similar(a, b)
 
 
 def action_features(sents):
-    """Binary features per sentence: words, word pairs, the words around it, position, length and the old rules."""
+    """Binary features per sentence: words, word pairs, the words around it, position, length, modal cues and the old rules."""
     n = len(sents)
     chair = Counter(s for s, _ in sents).most_common(1)[0][0] if sents else None  # the person who talks most runs the meeting
     W = [words(t) for _, t in sents]
@@ -89,6 +109,7 @@ def action_features(sents):
         f |= {"p:" + x for x in (W[i - 1] if i else [])} | {"n:" + x for x in (W[i + 1] if i + 1 < n else [])}
         f |= {f"pos{10 * i // n}", f"len{min(5, len(W[i]) // 4)}"}
         f |= {k for k, on in (("chair", spk == chair), ("q", t.endswith("?")), ("due", DUE.search(t)), ("commit", COMMIT.search(t))) if on}
+        f |= {k for k, rx in CUES if rx.search(t)}
         out.append(f)
     return out
 
@@ -112,16 +133,21 @@ def tokens(s):
 
 
 def aliases(sents):
-    """-> {spoken phrase: speaker label}: the label, its words, its initials, and names people introduce themselves with.
+    """-> {spoken phrase: speaker label}: each name of a speaker (the label and any job title they give themselves, "I'm
+    the Industrial Designer"), its words and its initials, plus first names people introduce themselves with.
     owner() matches them as written: a name only when capitalized, initials only in capitals. With calendar names,
     "you will", "it is" and "look at" must not hand the task to Will, Ian Smith or Amy Thompson."""
     labels = sorted({s for s, _ in sents if s})
+    names = {lab: [lab] for lab in labels}
+    for spk, t in sents:
+        for m in TITLE.finditer(t) if spk else ():
+            names[spk].append(" ".join(w for w in m.group(1).split() if w.lower() not in ("uh", "um")))
     out = {}
-    for lab in labels:
-        toks = [w[:1].upper() + w[1:] for w in tokens(lab)]  # a lowercase calendar name "will" must not match "will"
+    for lab, name in [(l, n) for l in labels for n in names[l][1:]] + [(l, l) for l in labels]:  # labels win over titles
+        others = {w for l in labels if l != lab for n in names[l] for w in words(n)}  # "Designer" names neither designer
+        toks = [w[:1].upper() + w[1:] for w in tokens(name)]  # a lowercase calendar name "will" must not match "will"
         if not toks:  # a label with no letters ("—") would become the empty phrase, which matches every sentence
             continue
-        others = {w for l in labels if l != lab for w in words(l)}
         out[" ".join(toks)] = lab
         out.update({w: lab for w in toks if len(w) >= 3 and w.lower() not in others and not w.isdigit()})  # "Speaker 1" gives nothing
         if len(toks) > 1:
@@ -147,8 +173,9 @@ def owner(sents, i, al):
     if named:
         return min(named)[1]
     if YOU.search(w) or not ME.search(w):
-        # ponytail: addressee = next other speaker within 3 sentences (they usually acknowledge), else the previous one.
-        for j in [*range(i + 1, min(len(sents), i + 4)), *range(i - 1, max(-1, i - 4), -1)]:
+        # ponytail: addressee = the next other speaker, however long the hand-out runs (they usually acknowledge), else
+        # the previous one within 3 sentences. Right about half the time on AMI: the rest is said with a look, not a word.
+        for j in [*range(i + 1, len(sents)), *range(i - 1, max(-1, i - 4), -1)]:
             if sents[j][0] and sents[j][0] != spk:
                 return sents[j][0]
     return spk
@@ -160,7 +187,8 @@ def action_items(sents, model=None):
     p, al, out = action_scores(sents, model), aliases(sents), []
     for i, (spk, s) in enumerate(sents):
         m = COMMIT.search(s)
-        if s.endswith("?") or not (p[i] >= model["threshold"] or (m and DUE.search(s))):
+        asks = s.endswith("?") and not REQUEST.search(FILLER.sub("", s))  # a question, unless it asks someone to do it
+        if asks or not (p[i] >= model["threshold"] or (m and DUE.search(s))):
             continue
         who = owner(sents, i, al)
         task = (m.group(1) if m and who == spk else FILLER.sub("", s)).rstrip(".,")
@@ -172,7 +200,7 @@ def action_items(sents, model=None):
         if d:
             task = re.sub(r"\s+,|\s+", lambda m: "," if "," in m.group() else " ", task[:d.start()] + task[d.end():]).strip(" ,")
         # The same task said twice by or to the same person: keep the later mention (the recap), drop the earlier one.
-        out = [k for k in out if not (k[1] == who and similar(k[2], task))] + [(i, who, task, due)]
+        out = [k for k in out if not (k[1] == who and same_task(k[2], task))] + [(i, who, task, due)]
     return out
 
 

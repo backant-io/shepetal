@@ -1,0 +1,66 @@
+# Runs the suites of scripts/ci/run-checks.sh, one step per suite, so a red step names the suite.
+# Not run here: scripts/e2e-mac.sh. It needs the 470 MB Parakeet v3 model, so it stays a local
+# check (see docs/progress.md). The copied-Wispr-string check and
+# parity.py --completeness need the extracted Wispr bundle, which is only on Pavel's Mac, so the
+# scripts suite runs check_re_docs.py --no-bundle here.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    # macos-26 (arm64) has Xcode 26.0.1 to 26.6. Pin 26.3 with Swift 6.2, the toolchain on Pavel's Mac.
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build/repositories
+            .build/checkouts
+            .build/artifacts
+            .cache/ci/ios/SourcePackages
+          key: swiftpm-${{ hashFiles('Package.resolved', 'ios/project.yml') }}
+          restore-keys: swiftpm-
+      - run: brew install xcodegen uv
+      - run: swift --version && xcodebuild -version && xcrun simctl list runtimes
+      - run: scripts/ci/run-checks.sh --only swift
+      - run: scripts/ci/run-checks.sh --only meeting
+      - run: scripts/ci/run-checks.sh --only ios
+      - run: scripts/ci/run-checks.sh --only summarize
+      - run: scripts/ci/run-checks.sh --only bench
+      - run: scripts/ci/run-checks.sh --only scripts
+
+  linux:
+    # linux/ in ubuntu:24.04 (prints "linux/: not on this branch" until PR #2 lands) and
+    # MeetingCore in swift:6.2, both through Docker as on the Mac.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/cache@v6
+        with:
+          path: |
+            .cache/ci/cargo-registry
+            .cache/ci/linux-target
+            .cache/ci/meeting-linux
+          key: docker-builds-${{ hashFiles('linux/Cargo.lock', 'linux/src/**', 'meeting/Package.swift', 'meeting/Sources/**', 'meeting/Tests/**') }}
+          restore-keys: docker-builds-
+      - run: scripts/ci/run-checks.sh --only linux
+      - run: scripts/ci/run-checks.sh --only meeting-linux
+      # The containers write root-owned 0700 dirs into .cache/ci, which actions/cache cannot tar.
+      - if: always()
+        run: "[ ! -d .cache/ci ] || sudo chown -R \"$(id -u):$(id -g)\" .cache/ci"

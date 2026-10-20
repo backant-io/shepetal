@@ -1,0 +1,8 @@
+[package]
+name = "shepetal-core"
+version = "0.0.1"
+edition = "2021"
+license = "MIT"
+description = "The platform-free part of shepetal for Windows: hotkey gestures, model tiers, text rules, the focus rule and audio retention."
+
+[dependencies]
