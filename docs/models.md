@@ -240,10 +240,10 @@ space to download them (#29).
 
 `scripts/e2e-mac.sh` speaks four cleanup clips with `say` (c01 to c04) on top of the six plain ones and runs
 the real app pipeline under `sandbox-exec` with the network denied. With Parakeet v3 and Qwen3.5 2B, the
-taken-back words were gone in all four, and text was ready 171 to 452 ms after the end of the audio. The 452
-ms is c04, a 10.0 s utterance with a "no wait" correction (470 ms in the run before), so speech-to-text plus
-cleanup meets the 700 ms bar on this Mac with about 230 ms to spare. The six plain clips skip the model and
-were ready in 59 to 263 ms.
+taken-back words were gone in all four, and text was ready 167 to 424 ms after the end of the audio. The 424
+ms is c04, a 10.0 s utterance with a "no wait" correction (452 and 470 ms in the two runs before), so
+speech-to-text plus cleanup meets the 700 ms bar on this Mac with about 230 ms to spare. The six plain clips
+skip the model and were ready in 52 to 76 ms (one run had a 263 ms outlier).
 
 ### Defaults by Mac tier (`cleanupModel(appleSilicon:ramGB:)`)
 
