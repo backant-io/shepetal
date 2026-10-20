@@ -6,6 +6,7 @@ pub mod indicator;
 pub mod insert;
 pub mod meeting;
 pub mod model;
+pub mod text_rules;
 pub mod vocab;
 
 pub const EV_KEY: u16 = 1;

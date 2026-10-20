@@ -225,7 +225,9 @@ fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
         let v: serde_json::Value = serde_json::from_str(stdout.trim()).map_err(|e| format!("{bin} output: {e}"))?;
         v["text"].as_str().ok_or(format!("{bin} output has no text"))?.to_string()
     };
-    Ok(vocab.apply(&text.split_whitespace().collect::<Vec<_>>().join(" ")))
+    // The Mac's rules (TextRules.swift Cleanup): fillers and stutters never reach the cursor or the history.
+    // The dictionary and snippets come after it (docs/re/text-pipeline.md §2.6), so a snippet's text is never cleaned up.
+    Ok(vocab.apply(&shepetal::text_rules::cleanup(&text.split_whitespace().collect::<Vec<_>>().join(" "))))
 }
 
 /// whisper.cpp writes non-speech as bracketed markers (`[BLANK_AUDIO]`, `[Music]`); they must
@@ -972,6 +974,15 @@ mod tests {
     }
 
     #[test]
+    fn fillers_and_stutters_never_reach_the_cursor() {
+        with_fake_tools("cleanup", |d| {
+            std::fs::write(d.join("whisper-cli"), "#!/bin/sh\nprintf ' Um, the the build is, uh, green.\\n'\n").unwrap();
+            let gpu = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: true });
+            assert_eq!(transcribe(&gpu, &d.join("clip.wav")).as_deref(), Ok("The build is, green."));
+        });
+    }
+
+    #[test]
     fn transcribe_runs_the_engine_the_tier_table_picked() {
         // Goal rule 5: each docs/models.md Linux tier runs its own engine, model files and backend.
         with_fake_tools("stt", |d| {
@@ -1000,9 +1011,9 @@ mod tests {
             std::fs::write(&wav, b"RIFF").unwrap();
             let conf = d.join("shepetal");
             vocab::save(&conf, vocab::DICTIONARY, "*hello => Hi\nWORLD\n").unwrap();
-            vocab::save(&conf, vocab::SNIPPETS, "\"hello world\" = \"expanded\"\n").unwrap();
+            vocab::save(&conf, vocab::SNIPPETS, "\"hello world\" = \"um, the the end\"\n").unwrap();
             let whisper = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: true });
-            assert_eq!(transcribe(&whisper, &wav).as_deref(), Ok("expanded"), "whole dictation is a snippet trigger");
+            assert_eq!(transcribe(&whisper, &wav).as_deref(), Ok("um, the the end"), "whole dictation is a snippet trigger, typed verbatim");
             let args = std::fs::read_to_string(d.join("stt.args")).unwrap();
             assert!(args.ends_with(" -l auto --prompt WORLD, hello\n"), "{args}");
             vocab::save(&conf, vocab::SNIPPETS, "").unwrap();
