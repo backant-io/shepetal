@@ -84,7 +84,7 @@ npx wrangler secret put STRIPE_WEBHOOK_SECRET   # paste the whsec_ value of shep
 
 Run `AUTH_SECRET` only once. A new value signs everyone out. Wrangler trims the trailing newline from piped values.
 
-At launch, add `routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]` to `wrangler.toml` and deploy again. The backant.io zone is in the same Cloudflare account.
+At launch, uncomment the `routes` line in `wrangler.toml` and deploy again: `sed -i '' 's/^# routes = /routes = /' wrangler.toml && npm run deploy`. The backant.io zone is in the same Cloudflare account.
 
 ## Notes for builders
 
@@ -93,8 +93,13 @@ At launch, add `routes = [{ pattern = "shepetal.backant.io", custom_domain = tru
 - **`/download`:** the GitHub API allows 60 unauthenticated calls an hour per IP, and Worker egress IPs are shared. Cache the latest-release lookup, for example with `fetch(url, { cf: { cacheTtl: 300 } })`.
 - **Copy:** never name the speech model or any AI model in site copy, metadata or alt text. Write "on-device speech recognition".
 
+## Preview
+
+https://shepetal-web.business-c0d.workers.dev (workers.dev only, no custom domain yet). The D1 database `shepetal` (`bd45470f-27b2-4564-aa94-850856413b3e`) has `0001_init.sql` applied. The secrets `AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `STRIPE_SECRET_KEY` are set. `STRIPE_WEBHOOK_SECRET` and `STRIPE_PRICE_ID` are not, because the Stripe objects do not exist yet, so `/api/checkout` and `/api/stripe/webhook` fail until action 2 is done. Google sign-in redirects to shepetal.backant.io (`AUTH_URL`), so it only completes after go-live.
+
 ## Pavel actions
 
 1. In Google Cloud Console, go to APIs & Services, then Credentials, and open backant's OAuth client (the one `GOOGLE_CLIENT_ID` names). Add the authorized redirect URI `https://shepetal.backant.io/api/auth/callback/google` and the JavaScript origin `https://shepetal.backant.io`. Add `http://localhost:3000/api/auth/callback/google` too if it is missing. The Google consent screen will show backant's app name.
 2. In the backant Stripe account (live), create a "Shepetal" product with a one-time $4.99 USD price and put its ID in `STRIPE_PRICE_ID` in `wrangler.toml`. Then create a webhook endpoint at `https://shepetal.backant.io/api/stripe/webhook` for `checkout.session.completed`, and set its signing secret as `STRIPE_WEBHOOK_SECRET`. The Stripe MCP can do both.
-3. Run the deploy steps above. They need wrangler logged in to Hegler Technologies and the AWS profile `backant`.
+3. After action 2: put the price ID in `STRIPE_PRICE_ID` in `wrangler.toml`, run `npx wrangler secret put STRIPE_WEBHOOK_SECRET` with the endpoint's signing secret, and `npm run deploy`. The other deploy steps above are done.
+4. Go live: `cd web && sed -i '' 's/^# routes = /routes = /' wrangler.toml && npm run deploy`.
