@@ -51,18 +51,35 @@ public struct AudioStore {
         return deleted
     }
 
+    /// The samples of a WAV that `save` wrote, bit for bit, for replay and re-transcription.
+    public static func read(_ url: URL) throws -> [Float] {
+        let d = try Data(contentsOf: url)
+        let count = max(0, d.count - 44) / 4
+        guard d.count == 44 + count * 4, d.prefix(44) == header(count) else {
+            throw CocoaError(.fileReadCorruptFile, userInfo: [NSFilePathErrorKey: url.path])
+        }
+        var samples = [Float](repeating: 0, count: count)
+        _ = samples.withUnsafeMutableBytes { d.copyBytes(to: $0, from: 44..<d.count) }
+        return samples
+    }
+
     /// 32-bit float, mono, 16 kHz WAV, so the file holds the samples bit for bit.
     public static func wav(_ samples: [Float]) -> Data {
+        var d = header(samples.count)
+        samples.withUnsafeBufferPointer { d.append(Data(buffer: $0)) }
+        return d
+    }
+
+    private static func header(_ count: Int) -> Data {
         var d = Data()
         func u32(_ v: UInt32) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
         func u16(_ v: UInt16) { withUnsafeBytes(of: v.littleEndian) { d.append(contentsOf: $0) } }
-        let bytes = UInt32(samples.count * 4)
+        let bytes = UInt32(count * 4)
         d.append(contentsOf: Array("RIFF".utf8)); u32(36 + bytes)
         d.append(contentsOf: Array("WAVEfmt ".utf8)); u32(16)
         u16(3); u16(1)                                   // IEEE float, mono
         u32(UInt32(sampleRate)); u32(UInt32(sampleRate * 4)); u16(4); u16(32)
         d.append(contentsOf: Array("data".utf8)); u32(bytes)
-        samples.withUnsafeBufferPointer { d.append(Data(buffer: $0)) }
         return d
     }
 }

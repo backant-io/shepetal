@@ -15,6 +15,6 @@ This is the weekly release sync for version 2.4.
 ## Action items
 - Tom: open it (due Wednesday)
 - Priya: run the regression suite and post the results in the release channel (due Thursday)
-- Maya: update the roadmap and tell the support team
-- Maya: ask Leo to send the revised copy (due Friday)
+- Maya: follow up with Leo today and get the revised copy (due Friday)
 - Priya: draft the release notes so they are ready for the Tuesday release (due Monday)
+- Tom: The release moves to the 4th (due Tuesday)
