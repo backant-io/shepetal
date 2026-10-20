@@ -1,9 +1,10 @@
 //! Win32: one thread owns the keyboard hook, the 🤫 overlay and the tray icon, and runs their
-//! message loop. The hook only observes: every key is passed on, so typing is never swallowed.
+//! message loop. The hook passes every key on, except the Space of the hands-free chord while
+//! recording (see `Chord::swallow`), so typing is never swallowed.
 
 use crate::*;
 use std::cell::RefCell;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{channel, sync_channel, Receiver, Sender};
 use std::time::{Duration, Instant};
 use windows::core::{w, Error, Result, HSTRING, PCWSTR};
@@ -35,6 +36,10 @@ const ID_QUIT: usize = 5;
 const ID_LOGIN: usize = 6;
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
+/// The last mode set was Recording or HandsFree. Set on the caller's thread so the hook sees it
+/// before the overlay redraws.
+// ponytail: one per process, like the hook; move into Ui if spawn ever runs twice.
+static RECORDING: AtomicBool = AtomicBool::new(false);
 
 enum Cmd {
     Mode(Mode),
@@ -52,6 +57,8 @@ pub struct Ui {
 
 impl Ui {
     pub fn set_mode(&self, mode: Mode) {
+        let on = matches!(mode, Mode::Recording | Mode::HandsFree);
+        RECORDING.store(on, Ordering::Relaxed);
         self.send(Cmd::Mode(mode));
     }
 
@@ -139,22 +146,25 @@ unsafe extern "system" fn hook_proc(code: i32, wp: WPARAM, lp: LPARAM) -> LRESUL
     if code == HC_ACTION as i32 {
         let kb = &*(lp.0 as *const KBDLLHOOKSTRUCT);
         let down = matches!(wp.0 as u32, WM_KEYDOWN | WM_SYSKEYDOWN);
-        HOOK.with(|h| {
+        let vk = kb.vkCode as u16;
+        let eat = HOOK.with(|h| {
             let Ok(mut h) = h.try_borrow_mut() else {
-                return;
+                return false;
             };
-            let Some(h) = h.as_mut() else { return };
-            let Some(ev) = h.chord.feed(kb.vkCode as u16, down) else {
-                return;
-            };
-            if ev.key == Key::Hotkey && ev.down && h.chord.hotkey().needs_mask() {
-                // Queued behind this key, while the hotkey is still down.
-                send_mask();
+            let Some(h) = h.as_mut() else { return false };
+            if let Some(ev) = h.chord.feed(vk, down) {
+                if ev.key == Key::Hotkey && ev.down && h.chord.hotkey().needs_mask() {
+                    // Queued behind this key, while the hotkey is still down.
+                    send_mask();
+                }
+                h.emit(ev);
             }
-            h.emit(ev);
+            h.chord.swallow(vk, down, RECORDING.load(Ordering::Relaxed))
         });
+        if eat {
+            return LRESULT(1);
+        }
     }
-    // Always pass the key on: the hook never swallows anything.
     CallNextHookEx(None, code, wp, lp)
 }
 
