@@ -54,15 +54,16 @@ public enum Browser {
 
     public static func contains(_ bundleId: String) -> Bool { bundleIds.contains(bundleId) }
 
-    /// The part of a page URL that history keeps: scheme, host and path. Query, fragment, user, password and
-    /// port are dropped, because they can carry sign-in codes, session ids and reset tokens the user never
+    /// The part of a page URL that history keeps: scheme, host and path. Query, fragment, path parameters,
+    /// user, password and port are dropped, because they can carry sign-in codes, session ids and reset tokens the user never
     /// dictated. A URL without a host (file:, about:, data:) is not kept at all.
     public static func historyURL(_ s: String) -> String {
         guard let c = URLComponents(string: s), let scheme = c.scheme, let host = c.host, !host.isEmpty else { return "" }
         var kept = URLComponents()
         kept.scheme = scheme
         kept.host = host
-        kept.percentEncodedPath = c.percentEncodedPath
+        // Path parameters (";jsessionid=...") are cut too.
+        kept.percentEncodedPath = String(c.percentEncodedPath.prefix { $0 != ";" })
         return kept.string ?? ""
     }
 }
@@ -97,16 +98,18 @@ public final class History {
             throw error("open")
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
+        sqlite3_busy_timeout(db, 2000)  // an old instance still writing during an upgrade waits instead of failing
         try migrate()
     }
 
     deinit { sqlite3_close(db) }
 
     private func migrate() throws {
+        // The statement is finalized before the migrations run: an open read locks tables a migration may drop.
         let stmt = try prepare("PRAGMA user_version")
-        defer { sqlite3_finalize(stmt) }
-        guard sqlite3_step(stmt) == SQLITE_ROW else { throw error("user_version") }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { sqlite3_finalize(stmt); throw error("user_version") }
         let version = Int(sqlite3_column_int64(stmt, 0))
+        sqlite3_finalize(stmt)
         for step in version..<max(version, Self.migrations.count) {
             try exec("BEGIN IMMEDIATE")
             do {

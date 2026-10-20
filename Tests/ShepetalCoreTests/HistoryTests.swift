@@ -70,6 +70,7 @@ final class HistoryTests: XCTestCase {
         for secret in ["alice", "hunter2", "8443", "SECRET", "state", "TOKEN", "?", "#", "@"] {
             XCTAssertFalse(stored.contains(secret), secret)
         }
+        XCTAssertEqual(Browser.historyURL("https://shop.example.com/cart;jsessionid=SECRET?x=1"), "https://shop.example.com/cart")
         XCTAssertEqual(Browser.historyURL("http://example.com"), "http://example.com")
         XCTAssertEqual(Browser.historyURL("file:///Users/me/private.html"), "")
         XCTAssertEqual(Browser.historyURL("about:blank"), "")
