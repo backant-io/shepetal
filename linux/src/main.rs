@@ -7,7 +7,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon\n\
-env: SHEPETAL_KEY (default rightctrl), SHEPETAL_MODEL (path to a ggml .bin)";
+env: SHEPETAL_KEY (default fn), SHEPETAL_MODEL (path to a ggml .bin)";
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -23,6 +23,11 @@ fn main() {
 }
 
 type Res = Result<(), String>;
+
+const NO_FN: &str = "fn is not visible to Linux on this keyboard: no /dev/input/event* device reports KEY_FN (464).\n\
+Many laptops handle fn in firmware and never send it to the system. Pick another key and start again:\n  \
+SHEPETAL_KEY=rightalt shepetal daemon\n\
+SHEPETAL_KEY takes rightalt, rightmeta, capslock, f13, rightctrl or an evdev key code number.";
 
 fn env(k: &str) -> String {
     std::env::var(k).unwrap_or_default()
@@ -51,6 +56,13 @@ fn probe(dump_file: Option<&String>) -> Res {
     println!("model:     {} on {} ({})", choice.model, choice.backend, model_path(&choice).display());
     println!("session:   {:?} desktop {:?}", env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
     println!("insert:    {:?}", backend());
+    let fns = keyboards_with(shepetal::KEY_FN);
+    if fns.is_empty() {
+        println!("fn key:    not visible to Linux (many laptops handle fn in firmware); set SHEPETAL_KEY, e.g. rightalt");
+    }
+    for (dev, name) in &fns {
+        println!("fn key:    visible on {} ({name})", dev.display());
+    }
     let json = match dump_file {
         Some(f) => std::fs::read_to_string(f).map_err(|e| format!("{f}: {e}"))?,
         None => match Command::new("pw-dump").output() {
@@ -69,16 +81,28 @@ fn probe(dump_file: Option<&String>) -> Res {
     Ok(())
 }
 
-/// One thread per /dev/input/event* node; each sends (code, value) of key events.
-fn watch_keys(tx: mpsc::Sender<(u16, i32)>) -> Res {
-    let dir = std::fs::read_dir("/dev/input").map_err(|e| format!("/dev/input: {e}"))?;
-    let mut opened = 0;
-    for e in dir.flatten() {
-        let path = e.path();
-        if !path.file_name().is_some_and(|n| n.to_string_lossy().starts_with("event")) {
-            continue;
+/// The /dev/input/event* nodes whose sysfs key capabilities include `key`, with their names.
+/// The kernel drops events for keys a device does not declare, so the others cannot send it.
+fn keyboards_with(key: u16) -> Vec<(PathBuf, String)> {
+    let Ok(dir) = std::fs::read_dir("/sys/class/input") else { return vec![] };
+    let mut out: Vec<_> = dir.flatten().filter_map(|e| {
+        let node = e.file_name().to_string_lossy().into_owned();
+        let caps = std::fs::read_to_string(e.path().join("device/capabilities/key")).ok()?;
+        if !node.starts_with("event") || !shepetal::has_key(&caps, key) {
+            return None;
         }
-        let Ok(mut f) = std::fs::File::open(&path) else { continue };
+        let name = std::fs::read_to_string(e.path().join("device/name")).unwrap_or_default();
+        Some((PathBuf::from("/dev/input").join(node), name.trim().to_string()))
+    }).collect();
+    out.sort();
+    out
+}
+
+/// One thread per keyboard; each sends (code, value) of key events.
+fn watch_keys(tx: mpsc::Sender<(u16, i32)>, devs: &[(PathBuf, String)]) -> Res {
+    let mut opened = 0;
+    for (path, _) in devs {
+        let Ok(mut f) = std::fs::File::open(path) else { continue };
         opened += 1;
         let tx = tx.clone();
         std::thread::spawn(move || {
@@ -132,8 +156,16 @@ fn transcribe(model: &PathBuf, wav: &PathBuf) -> Result<String, String> {
 }
 
 fn daemon() -> Res {
-    let key_name = std::env::var("SHEPETAL_KEY").unwrap_or_else(|_| "rightctrl".into());
-    let key = shepetal::parse_key(&key_name).ok_or(format!("unknown SHEPETAL_KEY {key_name:?}"))?;
+    let key_env = std::env::var("SHEPETAL_KEY").ok();
+    let key_name = key_env.as_deref().unwrap_or("fn");
+    let key = shepetal::hotkey(key_env.as_deref()).ok_or(format!("unknown SHEPETAL_KEY {key_name:?}"))?;
+    let devs = keyboards_with(key);
+    if devs.is_empty() {
+        return Err(match key {
+            shepetal::KEY_FN => NO_FN.into(),
+            _ => format!("no keyboard reports SHEPETAL_KEY {key_name:?} (evdev code {key})"),
+        });
+    }
     let choice = model::choose(&model::detect());
     let model = model_path(&choice);
     if !model.exists() {
@@ -143,8 +175,9 @@ fn daemon() -> Res {
     let data_home = PathBuf::from(data_home());
 
     let (tx, rx) = mpsc::channel();
-    watch_keys(tx)?;
-    eprintln!("shepetal: hold {key_name} to talk, double-tap for hands-free. model {}, insert {typer:?}", choice.model);
+    watch_keys(tx, &devs)?;
+    let names: Vec<_> = devs.iter().map(|(p, n)| format!("{} ({n})", p.display())).collect();
+    eprintln!("shepetal: hold {key_name} to talk, double-tap for hands-free. keyboards {}, model {}, insert {typer:?}", names.join(", "), choice.model);
 
     let t0 = Instant::now();
     let mut g = Gesture::default();

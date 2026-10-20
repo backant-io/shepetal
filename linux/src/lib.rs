@@ -6,7 +6,8 @@ pub mod meeting;
 pub mod model;
 
 pub const EV_KEY: u16 = 1;
-pub const KEY_RIGHTCTRL: u16 = 97;
+/// evdev KEY_FN (0x1d0), the default hotkey. Apple keyboards send it through hid-apple.
+pub const KEY_FN: u16 = 464;
 
 /// Decode one `struct input_event` (64-bit layout: timeval 16 bytes, type u16, code u16, value i32)
 /// into (code, value) if it is a key event. value: 1 down, 0 up, 2 autorepeat.
@@ -17,10 +18,27 @@ pub fn key_event(buf: &[u8; 24]) -> Option<(u16, i32)> {
     (ty == EV_KEY).then_some((code, value))
 }
 
+/// The dictation hotkey: `SHEPETAL_KEY` when set, else fn.
+pub fn hotkey(shepetal_key: Option<&str>) -> Option<u16> {
+    shepetal_key.map_or(Some(KEY_FN), parse_key)
+}
+
+/// Whether `code` is set in a sysfs `capabilities/key` bitmap. The kernel (input_print_bitmap)
+/// prints unsigned longs as unpadded hex, most significant word first, separated by spaces,
+/// drops leading zero words and prints a single "0" for an empty map. A 32-bit process on a
+/// 64-bit kernel gets 32-bit words (input_bits_to_string), so a word is this process's usize.
+pub fn has_key(bitmap: &str, code: u16) -> bool {
+    let (word, bit) = (code as usize / usize::BITS as usize, code as u32 % usize::BITS);
+    bitmap.split_whitespace().rev().nth(word)
+        .and_then(|w| usize::from_str_radix(w, 16).ok())
+        .is_some_and(|w| w >> bit & 1 == 1)
+}
+
 /// Hotkey from a name or a raw evdev code (see linux/input-event-codes.h).
 pub fn parse_key(s: &str) -> Option<u16> {
     match s.to_ascii_lowercase().as_str() {
-        "rightctrl" => Some(KEY_RIGHTCTRL),
+        "fn" => Some(KEY_FN),
+        "rightctrl" => Some(97),
         "rightalt" => Some(100),
         "rightmeta" => Some(126),
         "capslock" => Some(58),
@@ -73,20 +91,60 @@ mod tests {
     }
 
     #[test]
-    fn decodes_right_ctrl_press_and_skips_sync() {
+    fn decodes_fn_press_and_skips_sync() {
         let mut b = [0u8; 24];
         b[16..18].copy_from_slice(&EV_KEY.to_ne_bytes());
-        b[18..20].copy_from_slice(&KEY_RIGHTCTRL.to_ne_bytes());
+        b[18..20].copy_from_slice(&KEY_FN.to_ne_bytes());
         b[20..24].copy_from_slice(&1i32.to_ne_bytes());
-        assert_eq!(key_event(&b), Some((97, 1)));
+        assert_eq!(key_event(&b), Some((0x1d0, 1)));
         b[16..18].copy_from_slice(&0u16.to_ne_bytes()); // EV_SYN
         assert_eq!(key_event(&b), None);
     }
 
     #[test]
-    fn default_hotkey_is_right_ctrl() {
-        assert_eq!(parse_key("RightCtrl"), Some(97));
-        assert_eq!(parse_key("58"), Some(58));
-        assert_eq!(parse_key("fn"), None);
+    fn default_hotkey_is_fn() {
+        // Pavel's decision: dictation starts with fn on Linux too. 0x1d0 is KEY_FN in
+        // linux/input-event-codes.h; any other default breaks this test.
+        assert_eq!(hotkey(None), Some(0x1d0));
+        assert_eq!(parse_key("FN"), Some(0x1d0));
+        assert_eq!(hotkey(Some("rightalt")), Some(100), "SHEPETAL_KEY overrides the default");
+        assert_eq!(hotkey(Some("58")), Some(58));
+        assert_eq!(hotkey(Some("nope")), None, "a typo must not fall back to fn");
+    }
+
+    // `capabilities/key` text with 64-bit words. LAPTOP: a common AT Translated Set 2 keyboard,
+    // whose fn is handled by firmware. APPLE is computed, not captured: a generic USB keyboard
+    // plus the bits hid-apple v7.3 sets (KEY_FN, KEY_NUMLOCK and its fn translation targets).
+    const APPLE: &str = "10000 0 0 0 101007b02001007 ff9f207ac14057ff ffbeffdfffefffff fffffffffffffffe\n";
+    const LAPTOP: &str = "402000000 3803078f800d001 feffffdfffefffff fffffffffffffffe\n";
+    // Power Button, read from /sys/class/input/event0 in Docker Desktop's Linux VM.
+    const POWER_BUTTON: &str = "8000 10000000000000 0\n";
+
+    #[test]
+    fn fn_is_bit_464_of_the_sysfs_key_bitmap() {
+        assert!(has_key(APPLE, KEY_FN));
+        assert!(!has_key(APPLE, KEY_FN - 1), "off by one");
+        assert!(!has_key(APPLE, KEY_FN + 1), "off by one");
+        assert!(!has_key(LAPTOP, KEY_FN), "laptop firmware eats fn");
+    }
+
+    #[test]
+    fn last_word_holds_bit_0() {
+        // The kernel prints the highest word first. Read the other way round, ESC (1) would
+        // come from "10000" and be false.
+        assert!(has_key(APPLE, 1));
+        assert!(!has_key(APPLE, 0));
+        assert!(has_key(LAPTOP, 97)); // Right Ctrl, bit 33 of the second-to-last word
+        assert!(!has_key(LAPTOP, 101)); // KEY_LINEFEED is not on this map; reversed it is
+    }
+
+    #[test]
+    fn leading_zero_words_are_dropped() {
+        assert!(has_key(POWER_BUTTON, 116)); // KEY_POWER, word 1
+        assert!(has_key(POWER_BUTTON, 143)); // KEY_WAKEUP, word 2
+        assert!(!has_key(POWER_BUTTON, KEY_FN), "missing words are zero, not an error");
+        assert!(!has_key("0\n", 0));
+        assert!(!has_key("0", KEY_FN));
+        assert!(!has_key("", KEY_FN));
     }
 }

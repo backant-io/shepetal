@@ -3,7 +3,7 @@
 //! Recording starts on the first press so push-to-talk feels instant. A short tap keeps
 //! recording for `double_tap_ms`; a second press inside that window switches to hands-free,
 //! otherwise the tap is cancelled. Any other key while the hotkey is down cancels, because
-//! Right Ctrl is a modifier and Ctrl+C must not start a dictation.
+//! fn is a modifier and fn+F1 (brightness) must not start a dictation.
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Event {
@@ -20,7 +20,7 @@ pub enum Action {
     Start,
     /// Stop and transcribe.
     Stop,
-    /// Stop and throw the audio away.
+    /// Stop without transcribing. The audio is kept as `*.cancelled.wav`.
     Cancel,
 }
 
@@ -125,7 +125,7 @@ mod tests {
 
     #[test]
     fn chord_with_another_key_cancels() {
-        // Right Ctrl + C is a copy, not a dictation.
+        // fn + F1 is a brightness key, not a dictation.
         assert_eq!(run(&[Down(0), Other, Up(1000)]), vec![Start, Cancel]);
     }
 }

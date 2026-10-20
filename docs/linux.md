@@ -18,8 +18,8 @@ PipeWire bindings are less mature. Python would need a runtime and a virtualenv 
 
 | Part | v0 | Later |
 | --- | --- | --- |
-| Hotkey | Read `/dev/input/event*` directly. Every key event goes to one state machine. User must be in the `input` group. | GlobalShortcuts portal first (press and release, GNOME 48+, Plasma, Hyprland), evdev as the opt-in fallback, `evdev` crate for hotplug |
-| Gesture | Hold Right Ctrl at least 300 ms for push-to-talk. Two taps within 400 ms for hands-free, next press stops. A chord (Right Ctrl+C) cancels. Set the key with `SHEPETAL_KEY` (`rightctrl`, `rightalt`, `rightmeta`, `capslock`, `f13` or an evdev code). | Config file, tunable thresholds |
+| Hotkey | fn (evdev `KEY_FN`). Read only the `/dev/input/event*` keyboards whose sysfs key capabilities include the hotkey (see "fn hotkey" below). Their key events go to one state machine. User must be in the `input` group. | GlobalShortcuts portal first (press and release, GNOME 48+, Plasma, Hyprland), evdev as the opt-in fallback, `evdev` crate for hotplug |
+| Gesture | Recording starts on the fn press. Hold fn at least 300 ms for push-to-talk. Two taps within 400 ms for hands-free, next press stops. A chord (fn+F1) cancels, and the clip is kept as cancelled. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code). | Config file, tunable thresholds |
 | Mic | `pw-record` at 16 kHz mono s16, falling back to `parecord` (PulseAudio). Stopped with SIGINT so the WAV header is written. | `pipewire-rs` stream, no temp file |
 | STT | `whisper-cli` from whisper.cpp on a temp WAV | `whisper-rs` in-process, model kept warm, sherpa-onnx for streaming |
 | Model | `large-v3-turbo` on CUDA (`/dev/nvidia0`) or Vulkan (an ICD in `/usr/share/vulkan/icd.d`) when RAM is at least 8 GB. On CPU: `small` (16 GB and 8 cores or more), `base` (8 GB or more), else `tiny`. | Thresholds from measured latency, VRAM check |
@@ -56,10 +56,41 @@ paste keystroke, so the user pastes by hand, and restoring the clipboard would d
   mode 0600. Nothing is deleted. A cancelled recording is renamed `<unix-ms>.cancelled.wav`.
   There is no option to skip storage. Audio never goes to `/tmp`, where another user could swap
   it and so choose what gets typed.
-- Because a Right Ctrl chord (Ctrl+C) also counts as a cancelled recording, the history fills
-  with short clips of whatever was said while the user pressed Right Ctrl. Users should know this.
+- Because an fn chord (fn+F1, fn+arrow) also counts as a cancelled recording, the history fills
+  with short clips of whatever was said while the user pressed fn. Users should know this.
 - Being in the `input` group lets a process read every keystroke. shepetal only acts on the
   hotkey and does not store or log other keys.
+
+## fn hotkey
+
+The default hotkey is fn. Linux only sees fn when the keyboard driver reports it as a key.
+Apple keyboards do (hid-apple maps their fn usage to `KEY_FN`). Many laptops handle fn in
+the keyboard firmware and never send it, so fn is invisible there and cannot be used.
+
+- `KEY_FN` is `0x1d0` (464):
+  [include/uapi/linux/input-event-codes.h#L530](https://github.com/torvalds/linux/blob/v7.3/include/uapi/linux/input-event-codes.h#L530).
+- Apple's fn usage becomes `KEY_FN`:
+  [drivers/hid/hid-apple.c#L732-L738](https://github.com/torvalds/linux/blob/v7.3/drivers/hid/hid-apple.c#L732-L738).
+- A device cannot send a key its key bitmap does not declare. The input core drops it:
+  [drivers/input/input.c#L235-L236](https://github.com/torvalds/linux/blob/v7.3/drivers/input/input.c#L235-L236).
+- `/sys/class/input/eventN/device/capabilities/key` is written by `input_print_bitmap`
+  ([drivers/input/input.c#L1557-L1600](https://github.com/torvalds/linux/blob/v7.3/drivers/input/input.c#L1557-L1600))
+  with each word formatted by `input_bits_to_string`
+  ([drivers/input/input-compat.c#L100-L120](https://github.com/torvalds/linux/blob/v7.3/drivers/input/input-compat.c#L100-L120)
+  and [#L154-L159](https://github.com/torvalds/linux/blob/v7.3/drivers/input/input-compat.c#L154-L159)):
+  - A word is one `unsigned long` printed as hex with `%lx`, without zero padding. It is
+    64 bits on a 64-bit kernel. A 32-bit process on a 64-bit kernel gets each long as two
+    32-bit words, so the word width is always the reading process's pointer width.
+  - The most significant word comes first, separated by single spaces. Bit 0 is in the last word.
+  - Leading zero words are dropped. Zero words after the first non-zero one are printed as `0`.
+    An empty map is a single `0`.
+  - So `KEY_FN` is bit 16 of word 7 counted from the end: `10000 0 0 0 ...` with 7 words after it.
+
+At startup `shepetal daemon` reads that file for every `event*` node and listens only on the
+keyboards whose bitmap includes the hotkey. If no device reports `KEY_FN` and `SHEPETAL_KEY` is
+unset, it exits non-zero with a message saying fn is not visible to Linux and how to set
+`SHEPETAL_KEY`. It never falls back to another key on its own. `shepetal probe` prints whether fn
+is visible and on which devices (sysfs is world-readable, so this needs no `input` group).
 
 ## Packaging
 
@@ -90,20 +121,31 @@ Not yet done. These are the steps:
    (`./models/download-ggml-model.sh base`) into `~/.local/share/shepetal/ggml-base.bin`.
 3. `cargo build --release && ./target/release/shepetal probe`. Check that RAM, cores, the GPU
    and the insertion backend match the machine. On GNOME Wayland it must say `Ydotool`.
+   Check the `fn key:` line. With an Apple keyboard it must say `visible on /dev/input/eventN`
+   with the keyboard's name. If it says `not visible`, the keyboard handles fn in firmware:
+   step 5 must fail with the fn message, and steps 6 to 9 then run with
+   `SHEPETAL_KEY=rightalt ./target/release/shepetal daemon` and Right Alt in place of fn.
 4. Start a Zoom call or a Google Meet in Firefox and run `probe` again. It must list the app as
    a mic user with `meeting=Some(..)`. Close the call, and it must disappear.
 5. `ydotoold &` (GNOME Wayland only), then `./target/release/shepetal daemon`.
-6. Open gedit. Hold Right Ctrl, say "hello world", release: the text appears.
-7. Tap Right Ctrl once: nothing is typed. Press Right Ctrl+C in a terminal: nothing is typed.
-8. Double-tap Right Ctrl, talk for 20 seconds while typing elsewhere, then press Right Ctrl
+   It must print the keyboards it listens on. If fn is not visible, it must exit non-zero with
+   the message that fn is not visible to Linux and how to set `SHEPETAL_KEY`.
+6. Open gedit. Hold fn, say "hello world", release: the text appears. Recording starts on the
+   press, so the first word is not cut off.
+7. Tap fn once: nothing is typed. Press fn+F1 while talking: nothing is typed, and a
+   `<unix-ms>.cancelled.wav` appears in `~/.local/share/shepetal/audio/`.
+8. Double-tap fn, talk for 20 seconds while typing elsewhere, then press fn
    once: the whole passage is typed.
 9. Repeat steps 6 to 8 in an X11 session ("Ubuntu on Xorg" at login), where it must use `xdotool`.
-10. `SHEPETAL_KEY=rightalt ./target/release/shepetal daemon`: Right Alt now works and Right Ctrl does nothing.
+10. With fn visible: `SHEPETAL_KEY=rightalt ./target/release/shepetal daemon`. Right Alt now
+    works and fn does nothing.
 
 ## Known gaps
 
 - Transcription runs on the input thread, so keys pressed during it queue up.
 - No hotplug: keyboards plugged in after start are not seen.
+- Only keyboards that report the hotkey are read, so a key pressed on another keyboard while fn
+  is held does not cancel.
 - Whether `pw-record -P '{ application.name = shepetal }'` really renames the stream is not
   verified. If it does not, `probe` lists shepetal's own recording as a mic user.
 - No retention limit or cleanup for the audio history yet.
