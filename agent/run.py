@@ -73,7 +73,7 @@ def setup(cents="20000"):
     ws = workspace()
     client = api(ws)
     # reuse the environment if an earlier setup got that far before failing
-    env = next((e for e in client.beta.environments.list() if e.name == "shepetal-mac"), None) \
+    env = next((e for e in client.beta.environments.list() if e.name == "shepetal-mac" and e.config.type == "self_hosted"), None) \
         or client.beta.environments.create(name="shepetal-mac", config={"type": "self_hosted"})
     agent = client.beta.agents.create(
         name="shepetal-builder",
