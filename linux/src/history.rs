@@ -1,13 +1,18 @@
 //! Dictation history (F52) and the retention policy (F53, goal rule 4).
 //!
-//! One JSON object per line in `<data_home>/shepetal/history.jsonl` (0600, in the 0700 shepetal
-//! dir), next to the kept audio in `<data_home>/shepetal/audio/`. Every recording gets a line:
-//! inserted, left on the clipboard, too short, cancelled, failed, or no speech. The outcome names
-//! match the Mac's `ShepetalCore/History.swift`, so a later sync can merge both.
+//! One JSON object per line in `<data_home>/shepetal/history.jsonl` (0600), next to the kept audio
+//! in `<data_home>/shepetal/audio/`. Every recording gets a line: inserted, left on the clipboard,
+//! too short, cancelled, failed, or no speech. The outcome names match the Mac's
+//! `ShepetalCore/History.swift`, so a later sync can merge both. A re-transcription appends a new
+//! line with the same id; the last line of an id wins.
+//!
+//! The file is only ever appended to, one `write` per line, so the daemon and the
+//! `shepetal history` CLI can both write it without losing each other's lines.
 //!
 //! Retention is `keep` (the default) or `delete_after_24h`, read from
 //! `$XDG_CONFIG_HOME/shepetal/config.json` (`{"retention": "delete_after_24h"}`). With 24 h, the
-//! daemon deletes older recordings and their history lines at start and then every hour.
+//! daemon deletes older recordings' audio at start and then every minute. As on the Mac, only the
+//! audio goes: the history line and its text stay, and play and re-transcribe say the audio is gone.
 
 use serde_json::{json, Value};
 use std::io::Write;
@@ -60,16 +65,15 @@ impl Entry {
     }
 }
 
-/// Open the history file for writing, creating it 0600. Refuses one that is not a regular file
+/// Open the history file for appending, creating it 0600. Refuses one that is not a regular file
 /// owned by this user and closed to others (a symlink planted there, or a mode someone widened).
-fn open(path: &Path, append: bool) -> std::io::Result<std::fs::File> {
+fn open(path: &Path) -> std::io::Result<std::fs::File> {
     use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
     // The shepetal dir is 0700, so only this user could plant a link; refuse one anyway.
     if std::fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
         return Err(std::io::Error::other(format!("{} is a symlink", path.display())));
     }
-    let f = std::fs::OpenOptions::new().create(true).write(true).append(append).truncate(!append)
-        .mode(0o600).open(path)?;
+    let f = std::fs::OpenOptions::new().create(true).append(true).mode(0o600).open(path)?;
     let md = f.metadata()?;
     let me = std::fs::metadata(dir_of(path))?.uid();
     if !md.is_file() || md.uid() != me || md.permissions().mode() & 0o077 != 0 {
@@ -84,27 +88,27 @@ fn dir_of(path: &Path) -> &Path {
 
 /// Append one entry.
 pub fn append(data_home: &Path, e: &Entry) -> std::io::Result<()> {
-    let mut f = open(&file(data_home), true)?;
+    let mut f = open(&file(data_home))?;
     // One write per line, so a reader never sees half a line.
     f.write_all(format!("{}\n", e.to_json()).as_bytes())
 }
 
-/// Every entry, oldest first. Lines that do not parse are skipped.
+/// Every entry, oldest first. Lines that do not parse are skipped. For an id with several lines
+/// (re-transcribed), the last one wins, in the place of the first.
 pub fn load(data_home: &Path) -> Vec<Entry> {
     let Ok(s) = std::fs::read_to_string(file(data_home)) else { return vec![] };
-    s.lines().filter_map(|l| serde_json::from_str(l).ok()).filter_map(|v| Entry::from_json(&v)).collect()
-}
-
-/// Write `entries` as the whole history, through a temp file renamed over the old one.
-pub fn save(data_home: &Path, entries: &[Entry]) -> std::io::Result<()> {
-    let tmp = dir(data_home).join("history.jsonl.new");
-    let _ = std::fs::remove_file(&tmp);
-    let mut f = open(&tmp, false)?;
-    for e in entries {
-        f.write_all(format!("{}\n", e.to_json()).as_bytes())?;
+    let mut out: Vec<Entry> = vec![];
+    let mut at = std::collections::HashMap::new();
+    for e in s.lines().filter_map(|l| serde_json::from_str(l).ok()).filter_map(|v| Entry::from_json(&v)) {
+        match at.get(&e.id) {
+            Some(&i) => out[i] = e,
+            None => {
+                at.insert(e.id, out.len());
+                out.push(e);
+            }
+        }
     }
-    f.sync_all()?;
-    std::fs::rename(tmp, file(data_home))
+    out
 }
 
 /// Entries whose text contains every word of `query`, ignoring case, newest first.
@@ -137,14 +141,10 @@ pub fn retention(config_json: Option<&str>) -> Retention {
     }
 }
 
-pub fn config_file(config_home: &Path) -> PathBuf {
-    config_home.join("shepetal").join("config.json")
-}
-
 const DAY_MS: u128 = 24 * 3600 * 1000;
 
-/// With `Delete24h`, delete every recording that started 24 h or more before `now_ms`: its audio
-/// file (any outcome) and its history line. Returns the deleted audio files.
+/// With `Delete24h`, delete the audio file (any outcome) of every recording that started 24 h or
+/// more before `now_ms`. Returns the deleted files.
 pub fn apply_retention(data_home: &Path, r: Retention, now_ms: u128) -> std::io::Result<Vec<PathBuf>> {
     if r == Retention::Keep {
         return Ok(vec![]);
@@ -159,11 +159,6 @@ pub fn apply_retention(data_home: &Path, r: Retention, now_ms: u128) -> std::io:
                 deleted.push(p);
             }
         }
-    }
-    let entries = load(data_home);
-    if entries.iter().any(|e| old(e.id)) {
-        let kept: Vec<_> = entries.into_iter().filter(|e| !old(e.id)).collect();
-        save(data_home, &kept)?;
     }
     deleted.sort();
     Ok(deleted)
@@ -197,6 +192,19 @@ mod tests {
         assert_eq!(mode, 0o600);
         std::fs::set_permissions(h.join("shepetal/history.jsonl"), std::fs::Permissions::from_mode(0o644)).unwrap();
         assert!(append(&h, &entry(3, "inserted", "x", &h)).is_err(), "a history file others can read is refused");
+        std::fs::remove_dir_all(&h).unwrap();
+    }
+
+    #[test]
+    fn a_retranscription_replaces_its_line_in_place() {
+        let h = home("dedup");
+        crate::new_recording(&h, 1).unwrap();
+        append(&h, &entry(1, "inserted", "old", &h)).unwrap();
+        append(&h, &entry(2, "inserted", "two", &h)).unwrap();
+        append(&h, &Entry { model: "other".into(), ..entry(1, "inserted", "new", &h) }).unwrap();
+        let got: Vec<_> = load(&h).into_iter().map(|e| (e.id, e.text, e.model)).collect();
+        assert_eq!(got, [(1, "new".into(), "other".into()), (2, "two".into(), "parakeet".into())], "the last line of an id wins, in its first place");
+
         std::fs::remove_dir_all(&h).unwrap();
     }
 
@@ -236,7 +244,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_after_24h_removes_old_audio_and_lines_on_time() {
+    fn delete_after_24h_removes_old_audio_on_time_and_keeps_the_text() {
         let h = home("ret");
         let now: u128 = 1_800_000_000_000;
         let ids = [now - DAY_MS - 1, now - DAY_MS, now - DAY_MS + 1, now - 5];
@@ -255,9 +263,7 @@ mod tests {
         let mut want = vec![audio.join(format!("{}.cancelled.wav", ids[0])), audio.join(format!("{}.wav", ids[1])), orphan];
         want.sort();
         assert_eq!(gone, want, "24 h old and older, every outcome, also without a history line");
-        assert_eq!(load(&h).iter().map(|e| e.id).collect::<Vec<_>>(), &ids[2..], "their history lines are gone too");
-        let mode = std::fs::metadata(h.join("shepetal/history.jsonl")).unwrap().permissions().mode() & 0o777;
-        assert_eq!(mode, 0o600, "the rewritten history is still owner-only");
+        assert_eq!(load(&h).iter().map(|e| e.id).collect::<Vec<_>>(), ids, "as on the Mac, the history lines stay");
         std::fs::remove_dir_all(&h).unwrap();
     }
 

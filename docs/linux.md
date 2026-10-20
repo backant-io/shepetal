@@ -195,28 +195,38 @@ that the window ignores is not caught. The audio is kept either way.
 
 ## History, retention and paste last
 
-Every recording gets one line in `$XDG_DATA_HOME/shepetal/history.jsonl` (0600, in the 0700
-`shepetal` dir; `linux/src/history.rs`): its id (the unix ms it started, also the audio file's
-stem), the outcome, the kept WAV's path, its length, the model and the text. The outcomes are the
-Mac's: `inserted`, `paste_failed` (left on the clipboard, rule 8), `too_short`, `cancelled`,
-`no_speech` (the model heard no words: nothing is typed) and `failed` (speech-to-text failed, or
-neither typing nor the clipboard worked; the text is still in the line). A symlink or a file that
-others can read in place of the history is refused.
+Every recording gets one line in `$XDG_DATA_HOME/shepetal/history.jsonl` (0600;
+`linux/src/history.rs`): its id (the unix ms it started, also the audio file's stem), the
+outcome, the kept WAV's path, its length, the model that ran and the text. The outcomes are the
+Mac's: `inserted`, `paste_failed` (not typed: left on the clipboard (rule 8), or neither typing nor
+the clipboard worked; the text is in the line either way), `too_short`, `cancelled`, `no_speech`
+(the model heard no words: nothing is typed) and `failed` (speech-to-text failed). A symlink or a
+file that others can read in place of the history is refused. The file is only appended to, so
+the daemon and the commands below never lose each other's lines; a re-transcription appends a new
+line for the same id, and the last one wins.
 
 | Command | Does |
 | --- | --- |
 | `shepetal history [WORDS...]` | lists entries, newest first, whose text has every word (any case) |
 | `shepetal history play ID` | plays the kept audio with `pw-play` (or `paplay`) |
 | `shepetal history copy ID` | puts the entry's text on the clipboard |
-| `shepetal history retranscribe ID` | runs the model the tier table picks now (or `SHEPETAL_MODEL`) on the kept audio, prints the text and stores it in the entry |
-| `shepetal paste-last` | types the newest dictated text at the cursor (F21; bind it to a desktop shortcut) |
-| `shepetal copy-last` | copies it |
+| `shepetal history retranscribe ID` | runs the standard engine (the model the tier table picks, or `SHEPETAL_MODEL`) on the kept audio, prints the text and stores it in the entry with the model that ran |
+| `shepetal history retranscribe ID alternative` | the same with the alternative engine: the tier's fallback in docs/models.md (Parakeet 110M on CPU, Whisper turbo on CUDA, Parakeet v3 on CPU for Vulkan), from its own dir or file in `~/.local/share/shepetal/`. Refused while `SHEPETAL_MODEL` is set, since that names one model only |
+
+As on the Mac, nothing here shows a model name: the commands say "standard" and "alternative",
+and the name only goes into the history line and the daemon's stderr.
+
+Paste last and copy last (F21) are the daemon's Shift+Alt+Z and Shift+Alt+X keys
+(docs/linux-shortcuts.md). They take the newest history line with text, so they still work after
+a restart. When typing fails, paste last leaves the text on the clipboard with the
+`Typing failed. ...` hint, as a dictation does.
 
 Retention (goal rule 4) is `keep`, the default, or `delete_after_24h`, set in
 `$XDG_CONFIG_HOME/shepetal/config.json` as `{"retention": "delete_after_24h"}`. With 24 h the
-daemon deletes, at start and every hour, each recording that started 24 h ago or earlier: the
-audio file of any outcome (also one without a history line) and its history line. A missing,
-broken or unknown setting keeps everything. There is no "never store" setting.
+daemon deletes, at start and then every minute, the audio of each recording that started 24 h ago
+or earlier: the file of any outcome, also one without a history line. As on the Mac, only the
+audio goes; the history line and its text stay, and `play` and `retranscribe` then say the audio
+is gone. A missing, broken or unknown setting keeps everything. There is no "never store" setting.
 
 ## Security
 
@@ -228,7 +238,7 @@ broken or unknown setting keeps everything. There is no "never store" setting.
   symlink or open to other users, the recording is refused at the fn press and the daemon exits
   with the reason. Each
   file is a new `<unix-ms>.wav`, created with `O_CREAT|O_EXCL` (which also refuses a symlink) and
-  mode 0600. Nothing is deleted. A cancelled recording is renamed `<unix-ms>.cancelled.wav`, and
+  mode 0600. Nothing is deleted unless the 24 h retention is on. A cancelled recording is renamed `<unix-ms>.cancelled.wav`, and
   a too-short press `<unix-ms>.tooshort.wav`.
   There is no option to skip storage. Audio never goes to `/tmp`, where another user could swap
   it and so choose what gets typed.
@@ -348,13 +358,16 @@ Not yet done. These are the steps:
 13. **History**: after steps 6 to 8, `shepetal history` lists the dictations newest first with
     `inserted`, `too_short` and `cancelled`. `shepetal history play ID` plays the first one
     through the speakers. `shepetal history hello` lists only the entries with "hello".
-14. **Paste last**: bind `shepetal paste-last` to a desktop shortcut (GNOME Settings > Keyboard >
-    Custom Shortcuts). Dictate into gedit, click into another text field, press the shortcut: the
-    same text is typed there.
+14. **Paste last after a restart**: dictate into gedit, stop the daemon with Ctrl+C and start it
+    again, click into another text field and press Shift+Alt+Z: the same text is typed there once
+    the keys are up. `shepetal history retranscribe ID alternative` prints the text from the
+    other engine (its model must be in `~/.local/share/shepetal/` too, as in step 2; on CPU
+    `sherpa-onnx-nemo-parakeet_tdt_ctc_110m-en-36000-int8` from the same asr-models release).
 15. **24 h retention**: write `{"retention": "delete_after_24h"}` to
     `~/.config/shepetal/config.json` and start the daemon with a recording from
     more than 24 h ago in `~/.local/share/shepetal/audio/`: it prints
-    `retention: deleted N recordings older than 24 h`, and the file and its history line are gone.
+    `retention: deleted N recordings older than 24 h`, and the file is gone. `shepetal history`
+    still lists its text, and `shepetal history play ID` says the audio is gone.
 
 ### Manual test steps: 🤫 indicator
 
@@ -410,7 +423,6 @@ and `mkdir -p ~/.local/bin && ln -s "$PWD/linux/indicator/shepetal-indicator" ~/
   is held does not cancel.
 - Whether `pw-record -P '{ application.name = shepetal }'` really renames the stream is not
   verified. If it does not, `probe` lists shepetal's own recording as a mic user.
-- No retention limit or cleanup for the audio history yet.
 - Meeting detection only runs in `probe`. The daemon does not record meetings yet.
 - 🤫 on X11 re-raises itself once a second, so a window mapped above it (or an override-redirect
   menu) can cover it for up to a second. Watching the root window's restacking would close that.

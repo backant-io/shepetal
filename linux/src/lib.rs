@@ -6,7 +6,11 @@ pub mod history;
 pub mod indicator;
 pub mod insert;
 pub mod meeting;
+pub mod mic;
 pub mod model;
+pub mod shortcuts;
+pub mod text_rules;
+pub mod vocab;
 
 pub const EV_KEY: u16 = 1;
 /// evdev KEY_FN (0x1d0), the default hotkey. Apple keyboards send it through hid-apple.
