@@ -61,3 +61,6 @@ jobs:
           restore-keys: docker-builds-
       - run: scripts/ci/run-checks.sh --only linux
       - run: scripts/ci/run-checks.sh --only meeting-linux
+      # The containers write root-owned 0700 dirs into .cache/ci, which actions/cache cannot tar.
+      - if: always()
+        run: "[ ! -d .cache/ci ] || sudo chown -R \"$(id -u):$(id -g)\" .cache/ci"
