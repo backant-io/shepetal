@@ -148,6 +148,34 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertTrue(server.requests.isEmpty)
     }
 
+    func testAStuckSheetCanBeCancelledAndSignInStartedAgain() async throws {
+        answer = { _ in throw URLError(.unknown) }  // replaced below; the first sheet never answers
+        let a = account()
+        a.authenticate = { _, _ in
+            try await Task.sleep(nanoseconds: 60_000_000_000)  // a browser that never reports the close
+            return URL(string: "shepetal://auth?code=x&state=y")!
+        }
+        a.signIn()
+        try await until("sheet open") { a.signingIn }
+        XCTAssertEqual(titles(a), ["Signing in with Google…", "Cancel sign-in"])
+        a.cancelSignIn()
+        XCTAssertFalse(a.signingIn)
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
+        try await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(a.message, "", "cancelling is not an error")
+        XCTAssertTrue(server.requests.isEmpty)
+    }
+
+    func testANonLocalHTTPServiceIsNeverOpened() async throws {
+        let a = Account(client: AccountClient(base: URL(string: "http://evil.example")!), tokens: tokens, stateURL: stateURL)
+        var called = false
+        a.authenticate = { url, _ in called = true; return url }
+        a.signIn()
+        XCTAssertFalse(a.signingIn)
+        XCTAssertFalse(called)
+        XCTAssertTrue(a.message.contains("https"), a.message)
+    }
+
     func testActiveIsYoursForever() async throws {
         try tokens.write("tok-1")
         server.handler = { [unowned self] _ in license("active") }

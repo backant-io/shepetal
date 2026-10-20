@@ -134,6 +134,7 @@ final class Account: NSObject, ObservableObject {
             return
         }
         message = "Signing in with Google…"
+        objectWillChange.send()  // Home shows Cancel sign-in
         signInRun += 1
         let run = signInRun
         signInTask = Task { [client, authenticate] in
@@ -159,6 +160,14 @@ final class Account: NSObject, ObservableObject {
                 message = "Sign-in failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Closes the sign-in sheet (it may also be stuck in a browser that never reports a close).
+    @objc func cancelSignIn() {
+        signInTask?.cancel()
+        signInTask = nil
+        message = ""
+        refresh()
     }
 
     @objc func signOut() {
@@ -212,7 +221,8 @@ final class Account: NSObject, ObservableObject {
             items.append(i)
         }
         switch access {
-        case .signedOut: if !signingIn { add(AccountText.signIn + "…", #selector(signIn)) }
+        case .signedOut:
+            if signingIn { add("Cancel sign-in", #selector(cancelSignIn)) } else { add(AccountText.signIn + "…", #selector(signIn)) }
         case .trial: add(AccountText.buy + "…", #selector(buy))
         case .expired:
             add(AccountText.buy + "…", #selector(buy))

@@ -10,7 +10,11 @@ struct AccountSection: View {
             LabeledContent("License", value: account.summaryLine)
             switch account.access {
             case .signedOut:
-                Button(AccountText.signIn) { account.signIn() }.disabled(account.signingIn)
+                if account.signingIn {
+                    Button("Cancel sign-in") { account.cancelSignIn() }
+                } else {
+                    Button(AccountText.signIn) { account.signIn() }
+                }
             case .trial:
                 Button(AccountText.buy) { account.buy() }
             case .expired:
