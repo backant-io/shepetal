@@ -52,8 +52,8 @@ final class Resampler {
 
 /// Opens the mic for each dictation (so the macOS mic indicator is on only while dictating)
 /// and collects 16 kHz mono samples. Each open builds a fresh engine on the chosen device, so a device
-/// or format change never reuses a stale format.
-final class Recorder {
+/// or format change never reuses a stale format. Not final so tests can replace `open` (the hardware).
+class Recorder {
     private var engine: AVAudioEngine?
     private let queue = DispatchQueue(label: "io.backant.shepetal.mic")
     private let lock = NSLock()
@@ -67,12 +67,15 @@ final class Recorder {
     var onConfigurationChange: (() -> Void)?
 
     static var micAllowed: Bool { AVCaptureDevice.authorizationStatus(for: .audio) == .authorized }
-    var isRecording: Bool { engine != nil }
+    /// From a successful start until stop, also while a reopen has the engine down or failed, so a failed
+    /// reopen still ends the dictation instead of leaving it running on a closed mic.
+    private(set) var isRecording = false
 
     /// Starts recording from `device` (nil: the system default input).
     func start(_ device: MicDevice? = nil) throws {
         lock.withLock { samples = []; events = []; health = MicHealth(start: ProcessInfo.processInfo.systemUptime) }
         try open(device)
+        isRecording = true
     }
 
     /// Opens the same device again, keeping what was recorded so far.
@@ -83,6 +86,7 @@ final class Recorder {
     }
 
     func stop() -> [Float] {
+        isRecording = false
         close()
         return lock.withLock { samples }
     }
@@ -95,7 +99,7 @@ final class Recorder {
         }
     }
 
-    private func open(_ device: MicDevice?) throws {
+    func open(_ device: MicDevice?) throws {
         let engine = AVAudioEngine()
         let input = engine.inputNode
         if let device {
@@ -163,7 +167,7 @@ final class Recorder {
 /// watches hot-plug and the mic's health, and builds the Microphone menu.
 @MainActor
 final class Mic: NSObject {
-    let recorder = Recorder()
+    let recorder: Recorder
     /// Shows text next to 🤫.
     var notice: (String) -> Void = { _ in }
     /// The dictation has to end because of the mic: stop it (the audio is kept) and show `message`.
@@ -185,7 +189,8 @@ final class Mic: NSObject {
         set { defaults.set(newValue, forKey: "micRanking") }
     }
 
-    override init() {
+    init(recorder: Recorder = Recorder()) {
+        self.recorder = recorder
         notices = MicNotices(seen: defaults.stringArray(forKey: "micSeen").map(Set.init),
                              bluetoothHintShown: defaults.bool(forKey: "micBluetoothHintShown"))
         super.init()
@@ -231,7 +236,7 @@ final class Mic: NSObject {
 
     private var name: String { recorder.device?.name ?? "the mic" }
 
-    private func checkHealth() {
+    func checkHealth() {
         guard recorder.isRecording else { return }
         for event in recorder.healthEvents() {
             switch event {
