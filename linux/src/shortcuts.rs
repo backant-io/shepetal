@@ -235,6 +235,11 @@ impl Shortcuts {
         Shortcuts { hotkey, cfg, gesture: Gesture::default(), held: BTreeSet::new(), rec: None, warned: false, pending: None }
     }
 
+    /// A hands-free dictation runs: double-tapped, or started by the toggle (🤫 shows it).
+    pub fn hands_free(&self) -> bool {
+        self.gesture.hands_free() || matches!(self.rec, Some((_, true)))
+    }
+
     /// One evdev key event (value 1 down, 0 up, 2 autorepeat), or None when 50 ms passed
     /// without one. Every call is also a clock tick.
     pub fn feed(&mut self, key: Option<(u16, i32)>, now: u64) -> Vec<Cmd> {
@@ -406,6 +411,22 @@ mod tests {
         // A second press within 500 ms of the start cancels (Wispr's debounce); at 500 it stops.
         assert_eq!(run(&mut s, &[toggle(100_000), toggle(100_449)].concat()), [d(Start), d(Cancel)]);
         assert_eq!(run(&mut s, &[toggle(200_000), toggle(200_500)].concat()), [d(Start), d(Stop)]);
+    }
+
+    #[test]
+    fn hands_free_is_a_double_tap_or_the_toggle_not_a_hold() {
+        let mut s = Shortcuts::new(FN, defaults());
+        run(&mut s, &[(FN, 1, 0)]);
+        assert!(!s.hands_free(), "holding fn");
+        run(&mut s, &[(FN, 0, 100), (FN, 1, 300)]);
+        assert!(s.hands_free(), "double tap");
+        run(&mut s, &[(FN, 0, 400), (FN, 1, 5000)]);
+        assert!(!s.hands_free(), "stopped");
+        run(&mut s, &[(FN, 0, 5100)]);
+        run(&mut s, &press(&[LCTRL, LMETA, SPACE], 10_000));
+        assert!(s.hands_free(), "toggle");
+        run(&mut s, &[(KEY_ESC, 1, 20_000)]);
+        assert!(!s.hands_free(), "cancelled");
     }
 
     #[test]
