@@ -12,6 +12,8 @@ public enum FnKeySetting {
     /// Where the replaced value is kept, in Shepetal's own defaults. `unset` means the key was absent.
     public static let previousKey = "previousAppleFnUsageType"
     public static let unset = -1
+    /// Set by the installer's postinstall when it changed the value, so the app's next launch says so.
+    public static let noticePendingKey = "fnKeyNoticePending"
     public static let doNothing = 0
 
     public static let changedHint = "🌐 key set to Do Nothing so fn can dictate"
@@ -27,20 +29,26 @@ public enum FnKeySetting {
         public var restartInputAgents: () -> Void
         public var loadPrevious: () -> Int?
         public var storePrevious: (Int?) -> Void
+        /// Reads and clears the installer's "I changed it" flag.
+        public var takeNoticePending: () -> Bool
 
         public init(read: @escaping () -> Int?, write: @escaping (Int?) -> Void, restartInputAgents: @escaping () -> Void,
-                    loadPrevious: @escaping () -> Int?, storePrevious: @escaping (Int?) -> Void) {
+                    loadPrevious: @escaping () -> Int?, storePrevious: @escaping (Int?) -> Void,
+                    takeNoticePending: @escaping () -> Bool = { false }) {
             self.read = read
             self.write = write
             self.restartInputAgents = restartInputAgents
             self.loadPrevious = loadPrevious
             self.storePrevious = storePrevious
+            self.takeNoticePending = takeNoticePending
         }
     }
 
     public enum Outcome: Equatable {
         /// Already Do Nothing: nothing written, nothing said.
         case alreadySet
+        /// Already Do Nothing because the installer just changed it: nothing written, but said once.
+        case changedByInstaller
         /// Was `from` (nil: absent), is 0 now, read back.
         case changed(from: Int?)
         /// Wrote 0 but read back something else.
@@ -50,7 +58,7 @@ public enum FnKeySetting {
         public var hint: String? {
             switch self {
             case .alreadySet: nil
-            case .changed: FnKeySetting.changedHint
+            case .changed, .changedByInstaller: FnKeySetting.changedHint
             case .failed: FnKeySetting.failedHint
             }
         }
@@ -59,7 +67,8 @@ public enum FnKeySetting {
     /// Run at every launch (and by the installer).
     public static func apply(_ io: IO) -> Outcome {
         let current = io.read()
-        guard current != doNothing else { return .alreadySet }
+        let installerChanged = io.takeNoticePending()
+        guard current != doNothing else { return installerChanged ? .changedByInstaller : .alreadySet }
         if io.loadPrevious() == nil { io.storePrevious(current ?? unset) }  // the first replaced value only
         io.write(doNothing)
         io.restartInputAgents()
