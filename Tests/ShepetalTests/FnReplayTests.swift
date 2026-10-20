@@ -1,0 +1,162 @@
+import AppKit
+import XCTest
+import ShepetalCore
+@testable import Shepetal
+
+private func scratch(_ name: String) -> URL {
+    let base = ProcessInfo.processInfo.environment["SHEPETAL_HOME"].map { URL(fileURLWithPath: $0) }
+        ?? FileManager.default.temporaryDirectory
+    return base.appendingPathComponent("\(name)-\(UUID().uuidString)")
+}
+
+/// Pavel's history after double-tapping fn (2026-10-20): a "failed" row with 0 samples, then a "too short" row
+/// 0.7 s later, again and again. Opening the mic held the main thread past the 500 ms hold threshold, so the
+/// first tap's release, read late and timed by the clock at that moment, counted as a hold: the recording
+/// stopped before the mic gave one sample, and the second tap started a new recording.
+/// These replays send fn through the real FnTap into a Dictation whose mic takes 0.6 s to open on the thread
+/// that reads fn, as the old Recorder did. Each change carries the time the keyboard sent it.
+final class FnReplayTests: XCTestCase {
+    private var root: URL!
+    private var history: History!
+    private var dictation: Dictation!
+    private let tap = FnTap()
+    private var opens = 0
+    private var closes = 0
+    private var transcribed: [[Float]] = []
+    private var actions: [GestureAction] = []
+    private let mic: [Float] = [0.25, -0.5, 0.125]
+
+    override func setUpWithError() throws {
+        root = scratch("fn-replay")
+        try AudioStore.makeOwnerOnlyDirectory(root)
+        history = try History(path: root.appendingPathComponent("history.sqlite"))
+        dictation = Dictation(store: try AudioStore(dir: root.appendingPathComponent("audio")), history: history,
+                              startMic: { [unowned self] in opens += 1; Thread.sleep(forTimeInterval: 0.6) },
+                              stopMic: { [unowned self] in closes += 1; return mic },
+                              transcribe: { [unowned self] in transcribed.append($0) })
+        tap.onChange = { [unowned self] down, t in
+            actions += try! dictation.run { down ? $0.fnDown(at: t) : $0.fnUp(at: t) }
+        }
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    /// `changes` are (ms after the first press, fn down). A change is sent when its time comes and read as
+    /// soon as the reading thread is free. The short-press timer fires at its deadline unless a change came first.
+    private func replay(_ changes: [(ms: Double, down: Bool)]) throws {
+        let t0 = ProcessInfo.processInfo.systemUptime
+        for (ms, down) in changes {
+            let at = t0 + ms / 1000
+            if let deadline = dictation.gesture.deadline, deadline < at { try tick(at: deadline) }
+            wait(until: at)
+            tap.handle(.flagsChanged, fnEvent(down: down, at: at))
+        }
+        if let deadline = dictation.gesture.deadline { try tick(at: deadline) }
+    }
+
+    private func tick(at deadline: TimeInterval) throws {
+        wait(until: deadline)
+        actions += try dictation.run { $0.tick(at: ProcessInfo.processInfo.systemUptime) }
+    }
+
+    private func wait(until t: TimeInterval) {
+        let s = t - ProcessInfo.processInfo.systemUptime
+        if s > 0 { Thread.sleep(forTimeInterval: s) }
+    }
+
+    private func fnEvent(down: Bool, at t: TimeInterval) -> CGEvent {
+        let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(FnKey.keycode), keyDown: down)!
+        e.type = .flagsChanged
+        e.flags = down ? .maskSecondaryFn : []
+        e.timestamp = CGEventTimestamp(t * 1e9)
+        return e
+    }
+
+    /// Hands-free is one recording: the mic opened once at the first press, never restarted, and the samples
+    /// went to the transcriber once, when the ending tap came.
+    private func assertOneCapture(file: StaticString = #filePath, line: UInt = #line) {
+        XCTAssertEqual(actions, [.start, .lockHandsFree, .stop], file: file, line: line)
+        XCTAssertEqual(opens, 1, "the second tap must not restart the mic", file: file, line: line)
+        XCTAssertEqual(closes, 1, file: file, line: line)
+        XCTAssertEqual(transcribed, [mic], file: file, line: line)
+        XCTAssertEqual(try history.recent(), [], "no too-short row for a double-tap", file: file, line: line)
+    }
+
+    func testFastDoubleTapStartsHandsFree() throws {
+        try replay([(0, true), (120, false), (270, true), (390, false)])  // 120 ms press, 150 ms gap
+        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        XCTAssertEqual(transcribed, [], "the first tap was read as a hold")
+        try replay([(0, true), (100, false)])  // the tap that ends hands-free
+        assertOneCapture()
+    }
+
+    func testSlowDoubleTapStartsHandsFree() throws {
+        try replay([(0, true), (350, false), (750, true), (850, false)])  // 350 ms press, 400 ms gap
+        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        try replay([(0, true), (100, false)])
+        assertOneCapture()
+    }
+
+    // Tap, then hold the second press: hands-free locks on the second press and its release keeps recording.
+    func testTapThenHoldStaysHandsFree() throws {
+        try replay([(0, true), (120, false), (270, true), (1200, false)])
+        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        try replay([(0, true), (100, false)])
+        assertOneCapture()
+    }
+
+    func testHoldTranscribesOnRelease() throws {
+        try replay([(0, true), (1000, false)])
+        XCTAssertEqual(actions, [.start, .stop])
+        XCTAssertEqual(transcribed, [mic])
+    }
+
+    // A lone tap is "too short" only once the double-tap window has passed: no transcription, audio kept.
+    func testTapIsTooShortAfterTheWindow() throws {
+        try replay([(0, true), (120, false)])
+        XCTAssertEqual(actions, [.start, .tooShort])
+        XCTAssertEqual(transcribed, [])
+        XCTAssertEqual(try history.recent().map(\.outcome), [.tooShort])
+        XCTAssertEqual(opens, 1)
+    }
+}
+
+/// "No audio" is said only when the mic gave nothing, and then the model is not asked; anything else reaches
+/// the model, where a short clip used to fail as "Must be at least 300ms of 16kHz audio".
+@MainActor
+final class NoAudioPipelineTests: XCTestCase {
+    func testAllZeroSamplesSayNoAudioWithoutTheModel() async throws {
+        let root = scratch("no-audio")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let pasteboard = NSPasteboard(name: .init("io.backant.shepetal.test.\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally() }
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let engine = CountingEngine()
+
+        for samples in [[], [Float](repeating: 0, count: 8000)] {
+            let run = await pipeline.process(samples, engine: engine, context: { ("", "") }, sendPaste: { _ in
+                XCTFail("nothing may be pasted")
+            })
+            XCTAssertEqual(run.error, MicAudio.noAudio)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: run.entry.audioPath), "the audio is kept (rule 4)")
+        }
+        XCTAssertEqual(engine.calls, 0)
+
+        // Quiet audio after the mic's warm-up zeros is audio.
+        let quiet = [Float](repeating: 0, count: 2076) + (0..<5769).map { Float(sin(Double($0) * 0.2)) * 0.0004 }
+        let run = await pipeline.process(quiet, engine: engine, context: { ("", "") }, sendPaste: { _ in })
+        XCTAssertEqual(engine.calls, 1)
+        XCTAssertNotEqual(run.error, MicAudio.noAudio)
+    }
+}
+
+private final class CountingEngine: SpeechEngine {
+    let name = "stub"
+    private(set) var calls = 0
+    func transcribe(_ samples: [Float], wav: URL) async throws -> String {
+        calls += 1
+        return ""
+    }
+}

@@ -67,7 +67,9 @@ final class ParakeetEngine: SpeechEngine {
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         var state = TdtDecoderState.make(decoderLayers: decoderLayers)
-        return try await asr.transcribe(samples, decoderState: &state).text
+        // A hold can end with under 300 ms of audio while the mic was still opening; Parakeet refuses that.
+        let minimum = ASRConstants.minimumRequiredSamples(forSampleRate: AudioStore.sampleRate)
+        return try await asr.transcribe(MicAudio.padded(samples, to: minimum), decoderState: &state).text
     }
 }
 

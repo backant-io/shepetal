@@ -54,8 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
         applyRetention()
-        tap.onChange = { [weak self] down in self?.fn(down) }
-        tap.onOtherKey = { [weak self] in self?.run { $0.otherKeyDown(at: ProcessInfo.processInfo.systemUptime) } }
+        tap.onChange = { [weak self] down, t in self?.fn(down, at: t) }
+        tap.onOtherKey = { [weak self] t in self?.run { $0.otherKeyDown(at: t) } }
+        recorder.onError = { [weak self] in self?.fail($0) }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -80,8 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: fn → gestures
 
-    private func fn(_ down: Bool) {
-        let t = ProcessInfo.processInfo.systemUptime
+    private func fn(_ down: Bool, at t: TimeInterval) {
         if down, busy, dictation?.gesture.state == .idle {
             indicator.show("Still transcribing the last one", seconds: Hint.seconds)
             return
@@ -136,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if allowPrompts { Permission.microphone.request() }
             throw SpeechError("Microphone access is off")
         }
-        do { try recorder.start() } catch { throw SpeechError("Microphone: \(error.localizedDescription)") }
+        recorder.start()
     }
 
     private func transcribe(_ samples: [Float]) {

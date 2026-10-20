@@ -56,6 +56,7 @@ final class Pipeline {
                                      _ context: () -> (before: String, after: String), _ selection: () -> String,
                                      _ focusKept: () -> Bool?, _ secureInput: () -> String?,
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
+        if MicAudio.isSilent(samples) { return MicAudio.noAudio }  // the mic gave nothing; the model is not asked
         guard let engine else { return "Speech model is not loaded" }
         run.entry.model = engine.name
         do {
