@@ -95,6 +95,26 @@ fn watch_keys(tx: mpsc::Sender<(u16, i32)>) -> Res {
     Ok(())
 }
 
+/// The audio decides what gets typed, so it must live where no other user can swap it:
+/// $XDG_RUNTIME_DIR, which must be a real 0700 directory. Never /tmp.
+fn private_runtime_dir() -> Result<PathBuf, String> {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = PathBuf::from(std::env::var("XDG_RUNTIME_DIR").map_err(|_| "XDG_RUNTIME_DIR is not set")?);
+    let md = std::fs::symlink_metadata(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    if !md.is_dir() || md.permissions().mode() & 0o077 != 0 {
+        return Err(format!("{} must be a 0700 directory", dir.display()));
+    }
+    Ok(dir)
+}
+
+/// create_new is O_CREAT|O_EXCL, which also refuses an existing symlink at the path.
+fn new_wav(dir: &std::path::Path, n: u64) -> std::io::Result<PathBuf> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let path = dir.join(format!("shepetal-{}-{n}.wav", std::process::id()));
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&path)?;
+    Ok(path)
+}
+
 fn record(wav: &PathBuf) -> std::io::Result<Child> {
     if insert::on_path("pw-record") {
         Command::new("pw-record")
@@ -137,7 +157,7 @@ fn daemon() -> Res {
         return Err(format!("model missing: {} (see docs/linux.md)", model.display()));
     }
     let typer = backend().ok_or("no text insertion tool: install wtype, xdotool, ydotool, wl-clipboard or xclip")?;
-    let wav = PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into())).join("shepetal.wav");
+    let runtime = private_runtime_dir()?;
 
     let (tx, rx) = mpsc::channel();
     watch_keys(tx)?;
@@ -145,7 +165,8 @@ fn daemon() -> Res {
 
     let t0 = Instant::now();
     let mut g = Gesture::default();
-    let mut rec: Option<Child> = None;
+    let mut rec: Option<(Child, PathBuf)> = None;
+    let mut n = 0u64;
     loop {
         let now = t0.elapsed().as_millis() as u64;
         let ev = match rx.recv_timeout(Duration::from_millis(50)) {
@@ -158,14 +179,24 @@ fn daemon() -> Res {
         };
         for a in g.feed(ev) {
             match a {
-                Action::Start => rec = Some(record(&wav).map_err(|e| format!("recorder: {e}"))?),
-                Action::Cancel => rec.take().map(stop).unwrap_or(()),
-                Action::Stop => {
-                    if let Some(c) = rec.take() {
+                Action::Start => {
+                    n += 1;
+                    let wav = new_wav(&runtime, n).map_err(|e| format!("wav: {e}"))?;
+                    rec = Some((record(&wav).map_err(|e| format!("recorder: {e}"))?, wav));
+                }
+                Action::Cancel => {
+                    if let Some((c, wav)) = rec.take() {
                         stop(c);
+                        let _ = std::fs::remove_file(wav);
                     }
+                }
+                Action::Stop => {
+                    let Some((c, wav)) = rec.take() else { continue };
+                    stop(c);
                     // ponytail: transcribes on the input thread, so keys pressed meanwhile queue up.
-                    match transcribe(&model, &wav) {
+                    let res = transcribe(&model, &wav);
+                    let _ = std::fs::remove_file(&wav);
+                    match res {
                         Ok(t) if !t.is_empty() => {
                             if let Err(e) = typer.insert(&t) {
                                 eprintln!("shepetal: insert: {e}");

@@ -83,15 +83,23 @@ mod tests {
         evs.iter().flat_map(|e| g.feed(*e)).collect()
     }
 
+    // Literal numbers on purpose: a quick tap is under 200 ms and a deliberate double tap
+    // has a gap under 400 ms. Moving these changes how the key feels, so it must break a test.
     #[test]
-    fn hold_at_threshold_is_push_to_talk() {
-        assert_eq!(run(&[Down(0), Up(HOLD_MS)]), vec![Start, Stop]);
+    fn hold_of_300ms_is_push_to_talk() {
+        assert_eq!(run(&[Down(0), Up(300)]), vec![Start, Stop]);
     }
 
     #[test]
-    fn release_just_under_threshold_is_a_tap_not_a_stop() {
+    fn release_at_299ms_is_a_tap_not_a_stop() {
         // A tap must not transcribe: the user may be starting a double tap.
-        assert_eq!(run(&[Down(0), Up(HOLD_MS - 1)]), vec![Start]);
+        assert_eq!(run(&[Down(0), Up(299)]), vec![Start]);
+    }
+
+    #[test]
+    fn double_tap_gap_is_400ms() {
+        assert_eq!(run(&[Down(0), Up(100), Down(500), Down(900)]), vec![Start, Stop]);
+        assert_eq!(run(&[Down(0), Up(100), Down(501)]), vec![Start, Cancel, Start]);
     }
 
     #[test]

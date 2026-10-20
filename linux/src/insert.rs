@@ -1,6 +1,6 @@
 //! Choose how to put text at the cursor, and do it.
 
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Backend {
@@ -42,27 +42,27 @@ impl Backend {
         }
     }
 
+    /// Arguments only: the text always goes over stdin, never argv, because any local user
+    /// can read argv with `ps`. The `'static` type keeps dictated text out of here.
+    pub fn argv(self) -> &'static [&'static str] {
+        match self {
+            Backend::Wtype => &["-"],
+            Backend::Xdotool => &["type", "--clearmodifiers", "--file", "-"],
+            Backend::Ydotool => &["type", "--file", "-"],
+            Backend::WlCopy => &[],
+            Backend::Xclip => &["-selection", "clipboard"],
+        }
+    }
+
     pub fn insert(self, text: &str) -> std::io::Result<()> {
         // ponytail: the clipboard fallbacks do not restore the old clipboard, since nothing
         // sends the paste and restoring would erase the text before the user pastes it.
-        let args: Vec<&str> = match self {
-            Backend::Wtype => vec!["--", text],
-            Backend::Xdotool => vec!["type", "--clearmodifiers", "--", text],
-            Backend::Ydotool => vec!["type", "--", text],
-            Backend::WlCopy => vec!["--", text],
-            Backend::Xclip => return pipe("xclip", &["-selection", "clipboard"], text),
-        };
-        let st = Command::new(self.bin()).args(args).status()?;
+        use std::io::Write;
+        let mut child = Command::new(self.bin()).args(self.argv()).stdin(Stdio::piped()).spawn()?;
+        child.stdin.take().unwrap().write_all(text.as_bytes())?; // dropped here: EOF
+        let st = child.wait()?;
         if st.success() { Ok(()) } else { Err(std::io::Error::other(format!("{} failed: {st}", self.bin()))) }
     }
-}
-
-fn pipe(bin: &str, args: &[&str], text: &str) -> std::io::Result<()> {
-    use std::io::Write;
-    let mut child = Command::new(bin).args(args).stdin(std::process::Stdio::piped()).spawn()?;
-    child.stdin.take().unwrap().write_all(text.as_bytes())?;
-    child.wait()?;
-    Ok(())
 }
 
 /// Is `bin` an executable on PATH?
@@ -89,6 +89,16 @@ mod tests {
         assert_eq!(pick("x11", "XFCE", ALL), Some(Xdotool));
         // xdotool on Wayland only reaches XWayland windows, so never pick it there.
         assert_eq!(pick("wayland", "KDE", &["xdotool", "ydotool"]), Some(Ydotool));
+    }
+
+    #[test]
+    fn text_goes_over_stdin_not_argv() {
+        // Each tool must be told to read stdin; argv is visible to every user via ps.
+        assert_eq!(Wtype.argv(), ["-"]);
+        assert_eq!(Xdotool.argv(), ["type", "--clearmodifiers", "--file", "-"]);
+        assert_eq!(Ydotool.argv(), ["type", "--file", "-"]);
+        assert!(WlCopy.argv().is_empty());
+        assert_eq!(Xclip.argv(), ["-selection", "clipboard"]);
     }
 
     #[test]
