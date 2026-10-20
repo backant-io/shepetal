@@ -156,6 +156,9 @@ private struct HomeTab: View {
                 LabeledContent("Speech model", value: s.model)
                 LabeledContent("fn key", value: s.fnWatched ? "Watched: hold fn to talk, double-tap for hands-free"
                                                             : "Not watched yet (needs Input Monitoring)")
+                if let problem = FnDiagnostics.problem {
+                    LabeledContent("fn problem") { Text(problem).foregroundStyle(.orange) }
+                }
                 LabeledContent("Permissions", value: missing.isEmpty ? "All granted"
                                                      : "Missing: " + missing.map(\.title).joined(separator: ", "))
                 if !missing.isEmpty { Button("Open Permissions…", action: model.openPermissions) }
