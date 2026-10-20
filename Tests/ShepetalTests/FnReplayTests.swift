@@ -45,13 +45,21 @@ final class FnReplayTests: XCTestCase {
 
     /// `changes` are (ms after the first press, fn down). A change is sent when its time comes and read as
     /// soon as the reading thread is free. The short-press timer fires at its deadline unless a change came first.
-    private func replay(_ changes: [(ms: Double, down: Bool)]) throws {
+    /// `globe` also sends the Globe key's keycode 179 keyDown and keyUp right after each release, as macOS does.
+    private func replay(_ changes: [(ms: Double, down: Bool)], globe: Bool = false) throws {
         let t0 = ProcessInfo.processInfo.systemUptime
         for (ms, down) in changes {
             let at = t0 + ms / 1000
             if let deadline = dictation.gesture.deadline, deadline < at { try tick(at: deadline) }
             wait(until: at)
             tap.handle(.flagsChanged, fnEvent(down: down, at: at))
+            if globe, !down {
+                for type in [CGEventType.keyDown, .keyUp] {
+                    let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(FnKey.globe), keyDown: type == .keyDown)!
+                    e.timestamp = CGEventTimestamp(at * 1e9)
+                    tap.handle(type, e)
+                }
+            }
         }
         if let deadline = dictation.gesture.deadline { try tick(at: deadline) }
     }
@@ -97,6 +105,41 @@ final class FnReplayTests: XCTestCase {
         XCTAssertEqual(dictation.gesture.state, .handsFree)
         try replay([(0, true), (100, false)])
         assertOneCapture()
+    }
+
+    // Pavel (2026-10-21, on a build from before this replay existed): "it does not do the transcript until I press
+    // fn again". A 40 ms tap read after the 0.6 s mic open was timed as a hold. With 40 ms taps and a 50 ms gap,
+    // hands-free must lock on the second press with nothing pending, and the ending tap must transcribe on its
+    // press, before its release and without a timer or another fn event.
+    func testQuickDoubleTapThenOneTapTranscribesOnThePress() throws {
+        try replay([(0, true), (40, false), (90, true), (130, false)])
+        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        XCTAssertNil(dictation.gesture.deadline, "nothing waits for a timer in hands-free")
+        try replay([(0, true)])
+        XCTAssertEqual(transcribed, [mic], "the ending tap's press transcribes")
+        try replay([(40, false)])
+        assertOneCapture()
+    }
+
+    // Pavel's hand test (2026-10-21): "M-FN-3 starting the hands free mode instead" and "M-FN-2 not working at all".
+    // macOS also sends each Globe press as keycode 179 key events after the release, and they were read as a second
+    // tap. A short press must never enter hands-free: it is too short, the hint shows, and nothing is transcribed.
+    func testGlobeEventsNeverTurnAShortPressIntoHandsFree() throws {
+        try replay([(0, true), (40, false)], globe: true)
+        XCTAssertEqual(actions, [.start, .tooShort], "a short press is too short, never hands-free")
+        XCTAssertEqual(dictation.gesture.state, .idle)
+        XCTAssertEqual(transcribed, [])
+        XCTAssertEqual(try history.recent().map(\.outcome), [.tooShort])
+    }
+
+    // The same events around a quick double-tap and the ending tap: hands-free locks once, the ending tap
+    // transcribes on its press, and no new recording or too-short row follows it.
+    func testGlobeEventsKeepDoubleTapAndEndingTapIntact() throws {
+        try replay([(0, true), (40, false), (90, true), (130, false)], globe: true)
+        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        try replay([(0, true), (40, false)], globe: true)
+        assertOneCapture()
+        XCTAssertEqual(dictation.gesture.state, .idle)
     }
 
     // Tap, then hold the second press: hands-free locks on the second press and its release keeps recording.

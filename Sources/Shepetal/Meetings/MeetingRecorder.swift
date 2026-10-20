@@ -59,7 +59,7 @@ final class MeetingRecorder: NSObject {
     nonisolated static let autoRecordKey = "meeting.autoRecord"
 
     private(set) var detector: MeetingDetector
-    private let dir: URL
+    let dir: URL
     private let capture: MeetingCapturing
     private let hint: (String) -> Void
     private let autoRecord: () -> Bool
@@ -254,18 +254,17 @@ final class SystemMeetingCapture: MeetingCapturing {
 final class MicFile {
     private let engine = AVAudioEngine()
     private let lock = NSLock()
-    private var file: AVAudioFile?
+    private var file: WavWriter?
 
     func start(_ url: URL) throws {
         let input = engine.inputNode
         let format = input.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechError("No microphone") }
-        file = try AVAudioFile(forWriting: url, settings: format.settings, commonFormat: format.commonFormat,
-                               interleaved: format.isInterleaved)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        guard format.commonFormat == .pcmFormatFloat32 else { throw SpeechError("Unsupported microphone format") }
+        file = try WavWriter(url, rate: format.sampleRate, channels: Int(format.channelCount))  // crash-safe (#100)
         input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buf, _ in
             guard let self else { return }
-            self.lock.withLock { try? self.file?.write(from: buf) }
+            self.lock.withLock { try? self.file?.append(buf) }
         }
         engine.prepare()
         do { try engine.start() } catch {
@@ -274,7 +273,7 @@ final class MicFile {
         }
     }
 
-    /// Releasing the file finalises the WAV header before the meeting is handed over.
+    /// Closes the file before the meeting is handed over; its header is already up to date.
     func stop() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()

@@ -60,7 +60,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   stopMic: { [recorder] in recorder.stop() },
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
-        applyRetention()
         tap.onChange = { [weak self] down, t in self?.fnWatch.tapEvent(); self?.fn(down, at: t) }
         fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
         fnWatch.start()
@@ -84,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
+        applyRetention()
 
         // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
         Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
@@ -228,6 +228,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func applyRetention() {
         do { try pipeline?.store.applyRetention(retention) } catch { fail("Retention: \(error.localizedDescription)") }
+        // Meeting audio follows the same choice; the meeting being recorded is never deleted.
+        do { try meetingFlow?.store.applyRetention(retention, dir: meetings.dir, recording: meetings.current?.id) }
+        catch { fail("Meeting retention: \(error.localizedDescription)") }
     }
 
     private func showOnboarding() {

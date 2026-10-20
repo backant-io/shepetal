@@ -104,4 +104,80 @@ final class MeetingStoreTests: XCTestCase {
         let mode = try FileManager.default.attributesOfItem(atPath: dbURL.path)[.posixPermissions] as? NSNumber
         XCTAssertEqual(mode?.intValue, 0o600)
     }
+
+    // Meeting audio follows the dictation retention (Pavel's decision 2). With delete after 24 h, the audio folder
+    // of a meeting whose recording ended more than 24 h ago is deleted. Only the audio: as with dictation history,
+    // the row, transcript, summary and search entries stay, because the setting runs at once when it is picked and
+    // nothing asks first. A newer meeting keeps its audio, and so does the meeting being recorded, however old its
+    // files look. A meeting cut off by a crash (no end time) and a folder with no row count as ended when their
+    // audio was last written.
+    func testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording() throws {
+        let store = try MeetingStore(path: dbURL)
+        let fm = FileManager.default
+        let dir = root.appendingPathComponent("meetings")
+        let now = Date(timeIntervalSince1970: 10_000_000)
+        let day = 24.0 * 3600
+        func age(_ url: URL, _ ago: Double) throws {
+            try fm.setAttributes([.modificationDate: now.addingTimeInterval(-ago)], ofItemAtPath: url.path)
+        }
+        func add(_ id: String, endedAgo: Double?, writtenAgo: Double, row: Bool = true) throws {
+            let folder = dir.appendingPathComponent(id)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+            let files = ["Me.wav", "Others.wav"].map { folder.appendingPathComponent($0) }
+            for f in files { try Data([1]).write(to: f); try age(f, writtenAgo) }
+            try age(folder, writtenAgo)
+            guard row else { return }
+            try store.save(Meeting(id: id, app: "Zoom", startedAt: now.addingTimeInterval(-writtenAgo - 3600),
+                                   endedAt: endedAgo.map { now.addingTimeInterval(-$0) },
+                                   meAudioPath: files[0].path, othersAudioPath: files[1].path))
+            try store.append([Segment(speaker: .me, start: 0, end: 1, text: "budget \(id)")], to: id)
+            try store.setSummary(Summary(overview: "summary \(id)"), for: id)
+        }
+        try add("old", endedAgo: day + 1, writtenAgo: day + 1)
+        try add("fresh", endedAgo: day - 60, writtenAgo: day - 60)
+        try add("recording", endedAgo: nil, writtenAgo: 3 * day)  // old files, so only its id keeps it
+        try add("crashed", endedAgo: nil, writtenAgo: day + 1)
+        try add("crashed-recently", endedAgo: nil, writtenAgo: 60)
+        try add("no-row", endedAgo: nil, writtenAgo: day + 1, row: false)
+        // A stored id is never used as a path: this row must not take the dictation audio with it.
+        let audio = root.appendingPathComponent("audio")
+        try fm.createDirectory(at: audio, withIntermediateDirectories: true)
+        try store.save(Meeting(id: "../audio", app: "Zoom", startedAt: now.addingTimeInterval(-3 * day),
+                               endedAt: now.addingTimeInterval(-2 * day), meAudioPath: "", othersAudioPath: ""))
+        try Data().write(to: dir.appendingPathComponent(".DS_Store"))
+
+        XCTAssertEqual(try store.applyRetention(.keep, dir: dir, recording: nil, now: now.addingTimeInterval(365 * day)), [])
+        XCTAssertEqual(try store.list(limit: 10).count, 6)
+
+        XCTAssertEqual(try store.applyRetention(.delete24h, dir: dir, recording: "recording", now: now),
+                       ["crashed", "no-row", "old"])
+        XCTAssertEqual(try store.list(limit: 10).count, 6, "every meeting stays listed")
+        for gone in ["old", "crashed", "no-row"] {
+            XCTAssertFalse(fm.fileExists(atPath: dir.appendingPathComponent(gone).path), gone)
+        }
+        for kept in ["fresh", "recording", "crashed-recently"] {
+            XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(kept).appendingPathComponent("Me.wav").path), kept)
+        }
+        XCTAssertTrue(fm.fileExists(atPath: audio.path))
+        XCTAssertTrue(fm.fileExists(atPath: dir.appendingPathComponent(".DS_Store").path))
+        for id in ["old", "crashed"] {
+            let kept = try XCTUnwrap(try store.get(id), id)
+            XCTAssertEqual(kept.segments.map(\.text), ["budget \(id)"], "the transcript stays")
+            XCTAssertEqual(kept.summary?.overview, "summary \(id)", "the summary stays")
+            XCTAssertTrue(try store.search("budget \(id)", limit: 10).map(\.id).contains(id), "it is still found")
+        }
+        XCTAssertEqual(try store.search("budget", limit: 10).count, 5)
+
+        // A minute later the fresh one is past 24 h as well; the recording one is still kept.
+        XCTAssertEqual(try store.applyRetention(.delete24h, dir: dir, recording: "recording", now: now.addingTimeInterval(61)), ["fresh"])
+        // Once it is no longer recording (the app crashed during it), its old files let it go.
+        XCTAssertEqual(try store.applyRetention(.delete24h, dir: dir, recording: nil, now: now.addingTimeInterval(61)), ["recording"])
+        XCTAssertEqual(try store.list(limit: 10).count, 6, "no sweep deletes a meeting itself")
+    }
+
+    // No meeting was ever recorded: the sweep has nothing to do and does not fail.
+    func testRetentionWithoutAMeetingsFolderDeletesNothing() throws {
+        let store = try MeetingStore(path: dbURL)
+        XCTAssertEqual(try store.applyRetention(.delete24h, dir: root.appendingPathComponent("meetings"), recording: nil), [])
+    }
 }
