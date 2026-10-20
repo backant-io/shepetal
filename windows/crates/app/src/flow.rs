@@ -1,31 +1,12 @@
-//! One dictation, from the gesture's decision to the text at the cursor. Pure: the mic, the
+//! One dictation, from the core gesture's action to the text at the cursor. Pure: the mic, the
 //! audio store, the insert step and the 🤫 overlay come in as the small traits below, so the
-//! wiring is tested here with fakes and `win.rs` plugs in the real crates. Speech-to-text runs
-//! on its own thread: `action` hands back the samples to transcribe, and the caller passes the
-//! result to `transcribed`.
+//! wiring is tested here with fakes, and `win.rs` plugs in the audio, insert and input crates.
+//! Speech-to-text runs on its own thread: `action` hands back the samples to transcribe, and the
+//! caller passes the result to `transcribed`.
 
-/// What the core gesture decided about the hotkey (Ctrl+Win by default).
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Action {
-    Start,
-    /// A double tap locked the recording on (hands-free).
-    HandsFree,
-    Stop,
-    Cancel,
-    TooShort,
-}
-
-/// What shows at the 🤫 in the bottom-left corner (goal rule 3).
-#[derive(Debug, Clone, PartialEq)]
-pub enum Overlay {
-    Idle,
-    Recording,
-    HandsFree,
-    Processing,
-    /// Text next to the 🤫 for `HINT_MS`.
-    Hint(String),
-    Error(String),
-}
+use input::{Key, KeyEvent, Mode};
+use shepetal_core::gesture::Key::{Ctrl, Esc, Win};
+use shepetal_core::gesture::{Action, Gesture, Key as GestureKey, HINT_MS, SHORT_PRESS_HINT};
 
 /// Why a clip was kept. Every recording is kept (goal rule 4); cancelled and too-short ones are
 /// marked as such.
@@ -50,18 +31,30 @@ pub trait Store {
 /// otherwise leave the text on the clipboard.
 pub trait Insert {
     fn remember_focus(&mut self);
-    /// True if pasted. False means the text was left on the clipboard.
-    fn insert(&mut self, text: &str) -> bool;
+    /// Ok(None): pasted. Ok(Some(hint)): left on the clipboard, and `hint` says why and to press
+    /// Ctrl+V. Err: the clipboard could not be written.
+    fn insert(&mut self, text: &str) -> Result<Option<String>, String>;
 }
 
+/// The 🤫 overlay (input::Ui on Windows).
 pub trait Show {
-    fn show(&mut self, overlay: &Overlay);
+    fn mode(&mut self, mode: Mode);
+    /// Text next to the 🤫 for `HINT_MS`.
+    fn hint(&mut self, text: &str);
 }
 
-pub const HINT_MS: u64 = 2000;
-/// Our own wording (goal rule 2). Windows keyboards have no fn, so the hotkey is Ctrl+Win.
-pub const SHORT_PRESS_HINT: &str = "Hold Ctrl+Win to talk · double-tap for hands-free";
-pub const CLIPBOARD_HINT: &str = "Copied · press Ctrl+V to paste";
+/// Feeds one key event from the input hook into the core gesture. The hook reports the whole
+/// hotkey going down or up; the gesture tracks Ctrl and Win itself, so both go in, released in
+/// the order the core's own tests use.
+pub fn feed(g: &mut Gesture, ev: KeyEvent, t: u64) -> Vec<Action> {
+    match (ev.key, ev.down) {
+        (Key::Hotkey, true) => [g.key_down(Ctrl, t), g.key_down(Win, t)].concat(),
+        (Key::Hotkey, false) => [g.key_up(Win, t), g.key_up(Ctrl, t)].concat(),
+        (Key::Esc, true) => g.key_down(Esc, t),
+        (Key::Other(vk), true) => g.key_down(GestureKey::from_vk(vk.into()), t),
+        _ => vec![],
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum State {
@@ -78,15 +71,20 @@ pub struct Flow<M, S, I, O> {
     /// Text clean-up from the core crate, applied before insertion.
     pub rules: fn(&str) -> String,
     state: State,
-    hint_until: Option<u64>,
+    /// When the error ring goes back to idle.
+    error_until: Option<u64>,
     /// An error to show once the text is in, so a failed save never costs the dictation.
     pending: Option<String>,
 }
 
 impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
-    pub fn new(mic: M, store: S, insert: I, mut show: O, rules: fn(&str) -> String) -> Self {
-        show.show(&Overlay::Idle);
-        Flow { mic, store, insert, show, rules, state: State::Idle, hint_until: None, pending: None }
+    pub fn new(mic: M, store: S, insert: I, show: O, rules: fn(&str) -> String) -> Self {
+        Flow { mic, store, insert, show, rules, state: State::Idle, error_until: None, pending: None }
+    }
+
+    /// True while a clip is being recorded or transcribed.
+    pub fn busy(&self) -> bool {
+        self.state != State::Idle
     }
 
     /// Feed one gesture action at `now` (ms). Returns the samples to transcribe after a Stop.
@@ -98,17 +96,17 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
                 match self.mic.start() {
                     Ok(()) => {
                         self.state = State::Recording;
-                        self.set(Overlay::Recording, None);
+                        self.mode(Mode::Recording);
                     }
-                    Err(e) => self.set(Overlay::Error(e), Some(now)),
+                    Err(e) => self.error(&e, now),
                 }
             }
-            (State::Recording, HandsFree) => self.set(Overlay::HandsFree, None),
+            (State::Recording, LockHandsFree) => self.mode(Mode::HandsFree),
             (State::Recording, Stop) => {
                 let samples = self.mic.stop();
                 self.pending = self.store.keep(&samples, Kept::Dictation).err();
                 self.state = State::Processing;
-                self.set(Overlay::Processing, None);
+                self.mode(Mode::Processing);
                 return Some(samples);
             }
             (State::Recording, Cancel | TooShort) => {
@@ -116,9 +114,13 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
                 let why = if action == Cancel { Kept::Cancelled } else { Kept::TooShort };
                 self.state = State::Idle;
                 match self.store.keep(&samples, why) {
-                    Err(e) => self.set(Overlay::Error(e), Some(now)),
-                    Ok(()) if why == Kept::TooShort => self.set(Overlay::Hint(SHORT_PRESS_HINT.into()), Some(now)),
-                    Ok(()) => self.set(Overlay::Idle, None),
+                    Err(e) => self.error(&e, now),
+                    Ok(()) => {
+                        self.mode(Mode::Idle);
+                        if why == Kept::TooShort {
+                            self.show.hint(SHORT_PRESS_HINT);
+                        }
+                    }
                 }
             }
             // A press while the last dictation is still transcribing is ignored, as in Wispr
@@ -134,28 +136,41 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
             return;
         }
         self.state = State::Idle;
-        let text = text.map(|t| (self.rules)(&t));
-        let pasted = match &text {
-            Ok(t) if !t.is_empty() => self.insert.insert(t),
-            _ => true,
+        let inserted = match text.map(|t| (self.rules)(&t)) {
+            Ok(t) if t.is_empty() => Ok(None),
+            Ok(t) => self.insert.insert(&t),
+            Err(e) => Err(e),
         };
-        match (text, self.pending.take()) {
-            (Err(e), _) | (Ok(_), Some(e)) => self.set(Overlay::Error(e), Some(now)),
-            (Ok(_), None) if !pasted => self.set(Overlay::Hint(CLIPBOARD_HINT.into()), Some(now)),
-            (Ok(_), None) => self.set(Overlay::Idle, None),
+        match (inserted, self.pending.take()) {
+            (Err(e), _) | (Ok(_), Some(e)) => self.error(&e, now),
+            (Ok(hint), None) => {
+                self.mode(Mode::Idle);
+                if let Some(hint) = hint {
+                    self.show.hint(&hint);
+                }
+            }
         }
     }
 
-    /// Clock tick: a hint or error goes back to the idle 🤫 after `HINT_MS`.
+    /// Clock tick: the error ring goes back to idle after `HINT_MS`.
     pub fn tick(&mut self, now: u64) {
-        if self.hint_until.is_some_and(|t| now >= t) {
-            self.set(Overlay::Idle, None);
+        if self.error_until.is_some_and(|t| now >= t) {
+            self.mode(Mode::Idle);
         }
     }
 
-    fn set(&mut self, overlay: Overlay, since: Option<u64>) {
-        self.hint_until = since.map(|t| t + HINT_MS);
-        self.show.show(&overlay);
+    fn mode(&mut self, mode: Mode) {
+        self.error_until = None;
+        self.show.mode(mode);
+    }
+
+    /// `text` next to the 🤫 for `HINT_MS`, with the error ring unless a dictation is running.
+    pub fn error(&mut self, text: &str, now: u64) {
+        if self.state == State::Idle {
+            self.show.mode(Mode::Error);
+            self.error_until = Some(now + HINT_MS);
+        }
+        self.show.hint(text);
     }
 }
 
@@ -186,27 +201,38 @@ mod tests {
             self.1.clone()
         }
     }
-    struct FakeInsert(Log, bool);
+    /// Pastes, or leaves the text on the clipboard with this hint.
+    struct FakeInsert(Log, Option<&'static str>);
     impl Insert for FakeInsert {
         fn remember_focus(&mut self) {
             self.0.borrow_mut().push("remember focus".into());
         }
-        fn insert(&mut self, text: &str) -> bool {
+        fn insert(&mut self, text: &str) -> Result<Option<String>, String> {
             self.0.borrow_mut().push(format!("insert {text}"));
-            self.1
+            Ok(self.1.map(String::from))
         }
     }
     struct FakeShow(Log);
     impl Show for FakeShow {
-        fn show(&mut self, overlay: &Overlay) {
-            self.0.borrow_mut().push(format!("show {overlay:?}"));
+        fn mode(&mut self, mode: Mode) {
+            self.0.borrow_mut().push(format!("mode {mode:?}"));
+        }
+        fn hint(&mut self, text: &str) {
+            self.0.borrow_mut().push(format!("hint {text}"));
         }
     }
 
-    fn flow(mic: Result<(), String>, store: Result<(), String>, pastes: bool) -> (Flow<FakeMic, FakeStore, FakeInsert, FakeShow>, Log) {
+    type Fake = Flow<FakeMic, FakeStore, FakeInsert, FakeShow>;
+
+    fn flow(mic: Result<(), String>, store: Result<(), String>, clipboard: Option<&'static str>) -> (Fake, Log) {
         let log = Log::default();
-        let f = Flow::new(FakeMic(log.clone(), mic), FakeStore(log.clone(), store), FakeInsert(log.clone(), pastes), FakeShow(log.clone()), |t| t.trim().to_string());
-        log.borrow_mut().clear();
+        let f = Flow::new(
+            FakeMic(log.clone(), mic),
+            FakeStore(log.clone(), store),
+            FakeInsert(log.clone(), clipboard),
+            FakeShow(log.clone()),
+            shepetal_core::text::cleanup,
+        );
         (f, log)
     }
 
@@ -214,65 +240,84 @@ mod tests {
         std::mem::take(&mut *log.borrow_mut())
     }
 
+    fn key(key: Key, down: bool) -> KeyEvent {
+        KeyEvent { key, down }
+    }
+
+    #[test]
+    fn hook_events_drive_the_core_gesture() {
+        // input reports the hotkey as one key; the core gesture wants Ctrl and Win. If the glue
+        // drops either, Ctrl+Win never starts a dictation.
+        let mut g = Gesture::default();
+        assert_eq!(feed(&mut g, key(Key::Hotkey, true), 0), [Action::Start]);
+        assert_eq!(feed(&mut g, key(Key::Hotkey, false), 600), [Action::Stop], "a 600 ms hold talks");
+
+        assert_eq!(feed(&mut g, key(Key::Hotkey, true), 1000), [Action::Start]);
+        assert_eq!(feed(&mut g, key(Key::Other(0x20), true), 1100), [Action::LockHandsFree], "Ctrl+Win+Space");
+        assert_eq!(feed(&mut g, key(Key::Hotkey, false), 1200), []);
+        assert_eq!(feed(&mut g, key(Key::Hotkey, true), 9000), [Action::Stop], "a tap ends hands-free");
+        feed(&mut g, key(Key::Hotkey, false), 9050);
+
+        assert_eq!(feed(&mut g, key(Key::Hotkey, true), 10_000), [Action::Start]);
+        assert_eq!(feed(&mut g, key(Key::Other(0x44), true), 10_100), [Action::Cancel], "Ctrl+Win+D is a shortcut");
+        feed(&mut g, key(Key::Hotkey, false), 10_200);
+
+        assert_eq!(feed(&mut g, key(Key::Hotkey, true), 20_000), [Action::Start]);
+        assert_eq!(feed(&mut g, key(Key::Esc, true), 21_500), [Action::Cancel]);
+        assert_eq!(feed(&mut g, key(Key::Esc, false), 21_600), []);
+    }
+
     #[test]
     fn hold_records_keeps_the_audio_then_pastes_into_the_window_that_kept_focus() {
-        let (mut f, log) = flow(Ok(()), Ok(()), true);
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
         assert_eq!(f.action(Action::Start, 0), None);
         // Rule 8: the focused window is taken before the mic starts, not when the text is ready.
-        assert_eq!(take(&log), ["remember focus", "mic start", "show Recording"]);
+        assert_eq!(take(&log), ["remember focus", "mic start", "mode Recording"]);
         let samples = f.action(Action::Stop, 900).expect("a stop hands the samples to STT");
         assert_eq!(samples.len(), 16);
         // Rule 4: the clip is kept before it is transcribed, so a crash in STT still keeps it.
-        assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "show Processing"]);
-        f.transcribed(Ok("  hello world ".into()), 1100);
-        assert_eq!(take(&log), ["insert hello world", "show Idle"], "core rules run before insert");
+        assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "mode Processing"]);
+        f.transcribed(Ok("  um hello world ".into()), 1100);
+        assert_eq!(take(&log), ["insert hello world", "mode Idle"], "the core cleanup runs before insert");
     }
 
     #[test]
     fn focus_moved_leaves_the_text_on_the_clipboard_with_the_ctrl_v_hint() {
-        let (mut f, log) = flow(Ok(()), Ok(()), false);
+        let moved = "The window changed while you spoke. The text is on the clipboard: press Ctrl+V to paste it.";
+        let (mut f, log) = flow(Ok(()), Ok(()), Some(moved));
         f.action(Action::Start, 0);
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("hi".into()), 1000);
-        assert_eq!(take(&log), ["insert hi", format!("show Hint({CLIPBOARD_HINT:?})").as_str()]);
-        f.tick(2999);
-        assert!(take(&log).is_empty(), "the hint stays for 2 s");
-        f.tick(3000);
-        assert_eq!(take(&log), ["show Idle"]);
+        assert_eq!(take(&log), ["insert hi".to_string(), "mode Idle".into(), format!("hint {moved}")]);
     }
 
     #[test]
     fn too_short_and_cancelled_are_kept_but_never_transcribed() {
         // Rules 2 and 4: nothing is transcribed or inserted, the audio is still kept and marked.
-        let (mut f, log) = flow(Ok(()), Ok(()), true);
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
         f.action(Action::Start, 0);
         take(&log);
         assert_eq!(f.action(Action::TooShort, 600), None);
-        assert_eq!(take(&log), ["mic stop", "keep 16 TooShort", format!("show Hint({SHORT_PRESS_HINT:?})").as_str()]);
+        assert_eq!(take(&log), ["mic stop".to_string(), "keep 16 TooShort".into(), "mode Idle".into(), format!("hint {SHORT_PRESS_HINT}")]);
         f.action(Action::Start, 5000);
         take(&log);
         assert_eq!(f.action(Action::Cancel, 5200), None);
-        assert_eq!(take(&log), ["mic stop", "keep 16 Cancelled", "show Idle"]);
-    }
-
-    #[test]
-    fn short_press_hint_names_the_windows_hotkey() {
-        // Windows keyboards don't report fn, so the default is Ctrl+Win, as in Wispr's Windows app.
-        assert!(SHORT_PRESS_HINT.starts_with("Hold Ctrl+Win to talk"));
+        assert_eq!(take(&log), ["mic stop", "keep 16 Cancelled", "mode Idle"], "a cancel shows no hint");
     }
 
     #[test]
     fn hands_free_shows_its_own_state() {
-        let (mut f, log) = flow(Ok(()), Ok(()), true);
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
         f.action(Action::Start, 0);
-        f.action(Action::HandsFree, 300);
-        assert_eq!(take(&log).last().unwrap(), "show HandsFree");
+        f.action(Action::LockHandsFree, 300);
+        assert_eq!(take(&log).last().unwrap(), "mode HandsFree");
+        assert!(f.busy());
     }
 
     #[test]
     fn a_press_while_transcribing_is_ignored() {
-        let (mut f, log) = flow(Ok(()), Ok(()), true);
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
         f.action(Action::Start, 0);
         f.action(Action::Stop, 900);
         take(&log);
@@ -281,41 +326,70 @@ mod tests {
         assert!(take(&log).is_empty(), "the mic must not restart mid-transcription");
         f.transcribed(Ok("one".into()), 2000);
         f.transcribed(Ok("two".into()), 2100);
-        assert_eq!(take(&log), ["insert one", "show Idle"], "one transcript per stop");
+        assert_eq!(take(&log), ["insert one", "mode Idle"], "one transcript per stop");
+        assert!(!f.busy());
     }
 
     #[test]
-    fn mic_error_shows_and_clears() {
-        let (mut f, log) = flow(Err("No microphone".into()), Ok(()), true);
+    fn mic_error_shows_for_2_s_and_clears() {
+        let (mut f, log) = flow(Err("No microphone found".into()), Ok(()), None);
         f.action(Action::Start, 0);
-        assert_eq!(take(&log), ["remember focus", "mic start", "show Error(\"No microphone\")"]);
+        assert_eq!(take(&log), ["remember focus", "mic start", "mode Error", "hint No microphone found"]);
         assert_eq!(f.action(Action::Stop, 900), None, "nothing to stop");
-        f.tick(2000);
-        assert_eq!(take(&log), ["show Idle"]);
+        f.tick(HINT_MS - 1);
+        assert!(take(&log).is_empty());
+        f.tick(HINT_MS);
+        assert_eq!(take(&log), ["mode Idle"]);
+        f.tick(HINT_MS + 50);
+        assert!(take(&log).is_empty(), "settled once");
+    }
+
+    #[test]
+    fn a_new_dictation_is_not_cut_short_by_an_old_error() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        f.action(Action::Start, 0);
+        f.action(Action::Stop, 900);
+        f.transcribed(Err("Model missing".into()), 1000);
+        f.action(Action::Start, 1500);
+        take(&log);
+        f.tick(5000);
+        assert!(take(&log).is_empty(), "the recording ring must stay");
+    }
+
+    #[test]
+    fn an_outside_error_during_a_dictation_keeps_the_recording_ring() {
+        // A meeting or start-at-login error must not make the user think the dictation failed.
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        f.action(Action::Start, 0);
+        take(&log);
+        f.error("meeting probe failed", 100);
+        f.tick(5000);
+        assert_eq!(take(&log), ["hint meeting probe failed"]);
+        assert!(f.action(Action::Stop, 6000).is_some(), "still recording");
     }
 
     #[test]
     fn a_failed_save_still_inserts_the_text_then_says_so() {
-        let (mut f, log) = flow(Ok(()), Err("Disk full".into()), true);
+        let (mut f, log) = flow(Ok(()), Err("Disk full".into()), None);
         f.action(Action::Start, 0);
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("keep me".into()), 1000);
-        assert_eq!(take(&log), ["insert keep me", "show Error(\"Disk full\")"]);
+        assert_eq!(take(&log), ["insert keep me", "mode Error", "hint Disk full"]);
     }
 
     #[test]
     fn empty_or_failed_transcript_inserts_nothing() {
-        let (mut f, log) = flow(Ok(()), Ok(()), true);
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
         f.action(Action::Start, 0);
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("   ".into()), 1000);
-        assert_eq!(take(&log), ["show Idle"]);
+        assert_eq!(take(&log), ["mode Idle"]);
         f.action(Action::Start, 2000);
         f.action(Action::Stop, 2900);
         take(&log);
         f.transcribed(Err("Model missing".into()), 3000);
-        assert_eq!(take(&log), ["show Error(\"Model missing\")"]);
+        assert_eq!(take(&log), ["mode Error", "hint Model missing"]);
     }
 }

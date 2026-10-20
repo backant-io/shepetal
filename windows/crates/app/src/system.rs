@@ -1,7 +1,7 @@
 //! The names shepetal.exe shares with Windows and with the installer
 //! (windows/installer/shepetal.iss), and the pure decisions made on them.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Single instance. The installer's `AppMutex` names the same mutex, so setup and the uninstaller
 /// ask the user to quit a running shepetal first. No `Global\` prefix: one instance per session.
@@ -30,18 +30,6 @@ pub fn mic_allowed(values: [Option<&str>; 3]) -> bool {
     values.iter().all(|v| !v.is_some_and(|v| v.eq_ignore_ascii_case("Deny")))
 }
 
-/// Recordings, history and models: `%LOCALAPPDATA%\Shepetal`. Outside the install dir, so
-/// the uninstaller (which removes only what it installed) keeps the user's recordings.
-pub fn data_dir(local_app_data: &Path) -> PathBuf {
-    local_app_data.join("Shepetal")
-}
-
-/// Goal rule 9.
-pub const DONATE: [(&str, &str); 2] = [
-    ("Buy me a coffee", "https://buymeacoffee.com/sorcecoder"),
-    ("GitHub Sponsors", "https://github.com/sponsors/backant-io"),
-];
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,9 +50,10 @@ mod tests {
         // No admin rights: the install goes to %LOCALAPPDATA%\Programs\Shepetal.
         assert!(ISS.contains("PrivilegesRequired=lowest"));
         assert!(ISS.contains(r"DefaultDirName={localappdata}\Programs\Shepetal"));
-        // Goal rule 4: the uninstaller never deletes the data dir, where the recordings live.
-        assert!(!ISS.to_ascii_lowercase().contains(r"{localappdata}\shepetal"), "the uninstaller must not touch the data dir");
-        assert_eq!(data_dir(Path::new(r"C:\Users\p\AppData\Local")), Path::new(r"C:\Users\p\AppData\Local").join("Shepetal"));
+        // Goal rule 4: of the data dir (audio::data_dir, %LOCALAPPDATA%\Shepetal), the
+        // uninstaller deletes only the models, never the recordings next to them.
+        let data: Vec<&str> = ISS.lines().filter(|l| l.to_ascii_lowercase().contains(r"{localappdata}\shepetal")).collect();
+        assert_eq!(data, [r#"Type: filesandordirs; Name: "{localappdata}\Shepetal\models""#]);
     }
 
     #[test]

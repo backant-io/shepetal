@@ -17,9 +17,11 @@ Check (Test-Path "$app\shepetal.exe") "shepetal.exe in $app (per user, no admin)
 Check (Test-Path $lnk) "Start menu entry $lnk"
 Check ((RunValue) -eq "`"$app\shepetal.exe`"") "start at login: HKCU Run = $(RunValue)"
 
-# A recording where the app keeps them. The uninstaller must leave it (goal rule 4).
-New-Item -ItemType Directory -Force "$data\audio" | Out-Null
+# A recording and a model where the app keeps them. The uninstaller must leave the recording
+# (goal rule 4) and delete the model.
+New-Item -ItemType Directory -Force "$data\audio", "$data\models" | Out-Null
 Set-Content "$data\audio\installer-test.wav" 'RIFF'
+Set-Content "$data\models\installer-test.bin" 'ggml'
 
 $p = Start-Process "$app\unins000.exe" '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
 Check ($p.ExitCode -eq 0) "uninstaller exit code $($p.ExitCode)"
@@ -28,5 +30,6 @@ for ($i = 0; $i -lt 60 -and ((Test-Path $app) -or (RunValue)); $i++) { Start-Sle
 Check (-not (Test-Path "$app\shepetal.exe")) 'uninstall removed shepetal.exe'
 Check (-not (Test-Path $lnk)) 'uninstall removed the Start menu entry'
 Check ($null -eq (RunValue)) 'uninstall removed the Run value'
+Check (-not (Test-Path "$data\models")) 'uninstall removed the speech models'
 Check ((Get-Content "$data\audio\installer-test.wav") -eq 'RIFF') "recordings kept in $data"
 Remove-Item "$data\audio\installer-test.wav"

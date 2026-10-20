@@ -1,7 +1,7 @@
 ; Per-user installer for shepetal.exe (Inno Setup 6). No admin rights: it installs to
 ; %LOCALAPPDATA%\Programs\Shepetal, adds a Start menu entry and, as a task that is on by default,
-; starts Shepetal at sign-in. The uninstaller removes only what setup installed plus the Run value,
-; so the recordings in %LOCALAPPDATA%\Shepetal stay (goal rule 4).
+; starts Shepetal at sign-in. The uninstaller removes what setup installed, the Run value and the
+; downloaded speech models, and keeps the recordings in %LOCALAPPDATA%\Shepetal (goal rule 4).
 ;
 ; Build after `cargo build --release`, from windows/:
 ;   ISCC.exe /DAppVersion=0.1.0 installer\shepetal.iss   ->  target\installer\shepetal-setup-0.1.0.exe
@@ -49,6 +49,10 @@ Root: HKCU; Subkey: "{#RunKey}"; ValueType: string; ValueName: "{#RunValue}"; Va
 
 [Run]
 Filename: "{app}\shepetal.exe"; Description: "Start Shepetal now"; Flags: nowait postinstall skipifsilent
+
+; The speech models are downloaded, not the user's, and up to 574 MB. The recordings stay.
+[UninstallDelete]
+Type: filesandordirs; Name: "{localappdata}\Shepetal\models"
 
 [Code]
 // The tray's start-at-login toggle writes the same value, so remove it whether or not the task ran.

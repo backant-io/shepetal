@@ -9,7 +9,15 @@ description = "shepetal for Windows: hold Ctrl+Win, talk, and the text lands at 
 name = "shepetal"
 path = "src/main.rs"
 
+# core and the pure half of input build anywhere, so the flow tests run on Linux too.
+[dependencies]
+input = { path = "../input" }
+shepetal-core = { path = "../core" }
+
 [target.'cfg(windows)'.dependencies]
+audio = { path = "../audio" }
+insert = { path = "../insert" }
+meetings = { path = "../meetings" }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security",
