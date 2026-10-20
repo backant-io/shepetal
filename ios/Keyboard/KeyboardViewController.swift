@@ -52,7 +52,7 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         // The app acts on the stop notification only when the shared state asks it to stop this recording.
-        if let id = sessionID, SharedHandoff.update({ $0.requestStop(id) }) {
+        if let id = sessionID, SharedHandoff.requestStop(id) {
             SharedHandoff.post(SharedHandoff.stopNotification)
             indicator.show(.processing, "Transcribing...")
             return
