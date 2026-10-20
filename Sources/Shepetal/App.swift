@@ -41,7 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem.menu = NSMenu()
         statusItem.menu?.delegate = self
 
-        do { pipeline = try Pipeline() } catch { fail("Storage: \(error.localizedDescription)") }
+        do { pipeline = try Pipeline(pasteboard: .general) } catch { fail("Storage: \(error.localizedDescription)") }
         if let pipeline {
             dictation = Dictation(store: pipeline.store, history: pipeline.history,
                                   startMic: { [weak self] in try self?.openMic() },
