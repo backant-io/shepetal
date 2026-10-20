@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 pub mod gesture;
 pub mod insert;
 pub mod meeting;
+pub mod mic;
 pub mod model;
 
 pub const EV_KEY: u16 = 1;

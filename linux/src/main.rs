@@ -6,7 +6,7 @@ use std::process::{Child, Command};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon\n\
+const USAGE: &str = "usage: shepetal probe [--pw-dump FILE] | shepetal daemon | shepetal mics [--pw-dump FILE]\n\
 env: SHEPETAL_KEY (default fn), SHEPETAL_MODEL (path to the model `probe` names: a sherpa-onnx dir or a ggml .bin)";
 
 fn main() {
@@ -14,6 +14,7 @@ fn main() {
     let res = match args.first().map(String::as_str) {
         Some("probe") => probe(args.get(1).filter(|a| *a == "--pw-dump").and(args.get(2))),
         Some("daemon") => daemon(),
+        Some("mics") => shepetal::mic::mics(args.get(1).filter(|a| *a == "--pw-dump").and(args.get(2))),
         _ => Err(USAGE.into()),
     };
     if let Err(e) = res {
@@ -163,17 +164,23 @@ fn watch_keys(tx: mpsc::Sender<(u16, i32)>, devs: &[(PathBuf, String)]) -> Res {
 }
 
 fn record(wav: &PathBuf) -> std::io::Result<Child> {
-    if insert::on_path("pw-record") {
+    let src = shepetal::mic::pick_for_recording();
+    let tool = if insert::on_path("pw-record") { "pw-record" } else { "parecord" };
+    let child = if tool == "pw-record" {
         Command::new("pw-record")
             .args(["--rate", "16000", "--channels", "1", "--format", "s16", "-P", "{ application.name = shepetal }"])
+            .args(shepetal::mic::target_args(tool, src.as_ref()))
             .arg(wav)
-            .spawn()
+            .spawn()?
     } else {
         Command::new("parecord")
             .args(["--rate=16000", "--channels=1", "--format=s16le", "--file-format=wav"])
+            .args(shepetal::mic::target_args(tool, src.as_ref()))
             .arg(wav)
-            .spawn()
-    }
+            .spawn()?
+    };
+    shepetal::mic::watch(child.id(), tool, wav.clone(), src);
+    Ok(child)
 }
 
 /// SIGINT so the recorder finalizes the WAV header; SIGKILL would leave it broken.
