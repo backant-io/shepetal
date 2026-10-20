@@ -54,15 +54,18 @@ final class KeyboardViewController: UIInputViewController {
             label.text = "Turn on Allow Full Access for Shepetal in Settings."
             return
         }
-        let current = SharedHandoff.update { $0 }
+        let current = SharedHandoff.read()
+        // Stop first, so a recording from an earlier session never keeps the mic on.
+        SharedHandoff.post(SharedHandoff.stopNotification)
         if let id = sessionID, current.sessionID == id, current.phase == .recording {
-            SharedHandoff.post(SharedHandoff.stopNotification)
             label.text = "Transcribing..."
             return
         }
         let id = UUID()
         sessionID = id
-        SharedHandoff.update { $0.request(id) }
+        // The result is inserted only into this same field.
+        let document = textDocumentProxy.documentIdentifier
+        SharedHandoff.update { $0.request(id, document: document) }
         label.text = "Opening Shepetal..."
         openApp(URL(string: "shepetal://dictate?id=\(id.uuidString)")!)
     }
@@ -73,11 +76,12 @@ final class KeyboardViewController: UIInputViewController {
 
     private func insertIfReady() {
         guard let id = sessionID else { return }
-        let state = SharedHandoff.update { $0 }
+        let state = SharedHandoff.read()
         if state.sessionID == id, state.phase == .recording {
             label.text = "Listening. Tap the mic to finish."
         }
-        guard let text = SharedHandoff.update({ $0.consume(id) }) else { return }
+        let document = textDocumentProxy.documentIdentifier
+        guard let text = SharedHandoff.update({ $0.consume(id, document: document) }) else { return }
         sessionID = nil
         textDocumentProxy.insertText(text)
         label.text = nil
