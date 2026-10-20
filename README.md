@@ -31,7 +31,7 @@ scripts/make-app.sh                   # dist/Shepetal.app (menu-bar only), signe
 scripts/make-app.sh --install         # same, then installed to /Applications/Shepetal.app
 scripts/make-app.sh --zip             # same, plus dist/Shepetal-<version>-mac.zip for a release
 open dist/Shepetal.app                # add --args --no-permission-prompts to never ask macOS for anything
-scripts/check-app.sh                  # launches an ad-hoc copy of the bundle: menu-bar only, 🤫 bottom-left, alive for 5 min, Quit from the menu
+scripts/check-app.sh                  # launches "Shepetal Check.app" (separate bundle ID, no permissions): menu-bar only, 🤫 bottom-left, alive for 5 min, Quit from the menu
 scripts/e2e-mac.sh                    # real pipeline on `say` speech: WER, latency, audio file, app and re-transcribe checks
 sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh   # same, with the network blocked
 ```
