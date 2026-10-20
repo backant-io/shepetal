@@ -31,6 +31,8 @@ public struct MeetingSummarizer: MeetingSummarizing, Sendable {
         model = try JSONDecoder().decode(Model.self, from: Data(contentsOf: url))
     }
 
+    init(model: Model) { self.model = model }
+
     /// Pure: no network, no I/O. Owners are the channel labels ("Me", "Others") or names said in the meeting.
     public func summarize(_ segments: [Segment]) -> Summary {
         summarize(turns: segments.map { ($0.speaker.rawValue, $0.text) })
@@ -64,7 +66,8 @@ public struct MeetingSummarizer: MeetingSummarizing, Sendable {
         var out: [(i: Int, who: String, task: String, due: String)] = []
         for (i, s) in sents.enumerated() {
             let m = COMMIT.first(s.text)
-            if s.text.hasSuffix("?") || !(p[i] >= model.threshold || (m != nil && DUE.has(s.text))) { continue }
+            let asks = s.text.hasSuffix("?") && !REQUEST.has(FILLER.replace(s.text, ""))  // unless it asks someone to do it
+            if asks || !(p[i] >= model.threshold || (m != nil && DUE.has(s.text))) { continue }
             let who = owner(sents, i, al)
             var task = (m != nil && who == s.spk ? group(m!, 1, s.text) : FILLER.replace(s.text, "")).strip(trailing: ".,")
             if words(task).isEmpty { continue }  // "Okay, so." scored high from its neighbours; there is no task to show
@@ -82,7 +85,7 @@ public struct MeetingSummarizer: MeetingSummarizing, Sendable {
                 task = SPACES.replace(rest) { $0.contains(",") ? "," : " " }.strip(both: " ,")
             }
             // The same task said twice by or to the same person: keep the later mention (the recap).
-            out = out.filter { !($0.who == who && similar($0.task, task)) } + [(i, who, task, due)]
+            out = out.filter { !($0.who == who && sameTask($0.task, task)) } + [(i, who, task, due)]
         }
         return out
     }
@@ -107,6 +110,7 @@ public struct MeetingSummarizer: MeetingSummarizing, Sendable {
             for (k, on) in [("chair", sents[i].spk == chair), ("q", t.hasSuffix("?")), ("due", DUE.has(t)), ("commit", COMMIT.has(t))] where on {
                 f.insert(k)
             }
+            for (k, rx) in CUES where rx.has(t) { f.insert(k) }
             let z = model.bias + f.reduce(0) { $0 + (model.weights[$1] ?? 0) }
             return 1 / (1 + exp(-z))
         }
@@ -129,6 +133,17 @@ let YOU = Re("\\b(?:you|you'll|you're|your|you've|you'd)\\b")
 let ME = Re("\\b(?:i|i'll|i'm|i've|i'd|me|my)\\b")
 let DELEGATE = Re("\\s*(?:\\w+\\s+)?(?:ask|want|like|need|tell|get)\\b")
 let INTRO = Re("\\b(?:I'm|I am|my name is|my name's|[Tt]his is)\\s+([A-Z][a-z]+)\\b(?!')")  // "This is Kate's laptop" is no intro
+// "I'm the Industrial Designer", "I am your project lead": a job title said about oneself names the speaker like a label.
+let TITLE = Re("\\b(?:I'm|I am)\\s+(?:(?:uh|um)\\s+)*(?:the|your|an?)\\s+((?:[A-Za-z]+\\s+){0,2}"
+               + "(?:[Dd]esigner|[Mm]anager|[Ee]xpert|[Ee]ngineer|[Ll]ead|[Ss]pecialist|[Dd]eveloper|[Dd]irector|[Aa]nalyst))\\b")
+let REQUEST = Re("^(?:(?:can|could|would|will) (?:you|someone|somebody)\\b|do you (?:want|wanna) to\\b)", .caseInsensitive)  // "Could you send it?"
+let MODAL = "(?:will|'ll|should|could|can|must|(?:have|has|need|needs) to|(?:are|'re|is|am|'m) (?:going to|gonna)|gonna|might want to)"
+/// Hand-off cues, one feature each ("you'll", "I'm going to", "so Kate will", "by next meeting").
+let CUES = [("a:you", Re("\\byou(?: two| guys| both| all)?\\s*\(MODAL)", .caseInsensitive)),
+            ("a:i", Re("\\bI\\s*\(MODAL)")),
+            ("a:we", Re("\\bwe\\s*\(MODAL)", .caseInsensitive)),
+            ("a:name", Re("(?<=\\s)[A-Z][a-z]{2,}(?: [A-Z][a-z]+)*\\s+\(MODAL)")),  // a capital that only opens the sentence is no name
+            ("a:next", Re("\\b(?:next meeting|next time|for next|by next|before next|after lunch|after the break|meantime)\\b", .caseInsensitive))]
 let FILLER = Re("^(?:(?:um|uh|so|and|okay|ok|well|yeah|right|but|then|also|now|alright)\\b[,.]?\\s*)+", .caseInsensitive)
 let ONLY_DAY = Re("^\(DAYS)$", .caseInsensitive)
 let DECISION_LEAD = Re("decision(?: made)?\\s*(?::|is)\\s*", .caseInsensitive)
@@ -154,6 +169,20 @@ public func similar(_ a: String, _ b: String, _ t: Double = 0.5) -> Bool {
     return Double(a.intersection(b).count) / Double(max(1, min(a.count, b.count))) > t
 }
 
+let FUNCTION = Set("""
+    i you we he she they it me my your our their his her them us i'll you'll we'll i'm you're we're they're it's
+    that's i've you've we've i'd you'd will would shall should can could may might must have has had to be been being is are was
+    were am do does did going gonna wanna got get a an the and or but so then on in at of for with by from about into up this that
+    these those some any all um uh okay ok yeah yes well just like maybe also now right alright guys two both
+    """.split(whereSeparator: \.isWhitespace).map(String.init))
+
+/// similar() on content words: "you have to work on the components" and "you have to work on the interface" differ.
+func sameTask(_ a: String, _ b: String) -> Bool {
+    let ca = Set(words(a)).subtracting(FUNCTION), cb = Set(words(b)).subtracting(FUNCTION)
+    guard !ca.isEmpty, !cb.isEmpty else { return similar(a, b) }
+    return Double(ca.intersection(cb).count) / Double(min(ca.count, cb.count)) > 0.5
+}
+
 func dedupe<T>(_ items: [T], key: (T) -> String) -> [T] {
     var kept: [T] = []
     for it in items where !kept.contains(where: { similar(key(it), key($0)) }) { kept.append(it) }
@@ -173,14 +202,23 @@ func decisions(_ sents: [Sent]) -> [String] {
     return dedupe(out)
 }
 
-/// {spoken phrase: speaker label}: the label, its words, its initials, and names people introduce themselves with.
+/// {spoken phrase: speaker label}: each name of a speaker (the label and any job title they give themselves, "I'm the
+/// Industrial Designer"), its words and its initials, plus first names people introduce themselves with.
 /// owner() matches them as written: a name only when capitalized, initials only in capitals.
 func aliases(_ sents: [Sent]) -> [String: String] {
     let labels = Set(sents.map(\.spk).filter { !$0.isEmpty }).sorted()
+    var names = Dictionary(uniqueKeysWithValues: labels.map { ($0, [$0]) })
+    for s in sents where !s.spk.isEmpty {
+        for m in TITLE.all(s.text) {
+            names[s.spk]!.append(group(m, 1, s.text).split(whereSeparator: \.isWhitespace)
+                .filter { !["uh", "um"].contains($0.lowercased()) }.joined(separator: " "))
+        }
+    }
     var out: [String: String] = [:]
-    for lab in labels {
-        let toks = tokens(lab).map { $0.prefix(1).uppercased() + $0.dropFirst() }  // "will" must not match "will"
-        let others = Set(labels.filter { $0 != lab }.flatMap(words))
+    let pairs = labels.flatMap { l in names[l]!.dropFirst().map { (l, $0) } } + labels.map { ($0, $0) }  // labels win over titles
+    for (lab, name) in pairs {
+        let toks = tokens(name).map { $0.prefix(1).uppercased() + $0.dropFirst() }  // "will" must not match "will"
+        let others = Set(labels.filter { $0 != lab }.flatMap { names[$0]!.flatMap(words) })  // "Designer" names neither designer
         out[toks.joined(separator: " ")] = lab
         for w in toks where w.count >= 3 && !others.contains(w.lowercased()) && !w.allSatisfy(\.isNumber) { out[w] = lab }
         if toks.count > 1 { out[String(toks.map { $0.first! })] = lab }  // "Industrial Designer" is called "ID"
@@ -208,8 +246,9 @@ func owner(_ sents: [Sent], _ i: Int, _ al: [String: String]) -> String {
     }
     if let named { return named.1 }
     if YOU.has(w) || !ME.has(w) {
-        // ponytail: addressee = next other speaker within 3 sentences (they usually acknowledge), else the previous one.
-        for j in Array(i + 1 ..< min(sents.count, i + 4)) + Array(stride(from: i - 1, to: max(-1, i - 4), by: -1))
+        // ponytail: addressee = the next other speaker, however long the hand-out runs (they usually acknowledge), else
+        // the previous one within 3 sentences. Right about half the time on AMI: the rest is said with a look, not a word.
+        for j in Array(i + 1 ..< sents.count) + Array(stride(from: i - 1, to: max(-1, i - 4), by: -1))
         where !sents[j].spk.isEmpty && sents[j].spk != spk {
             return sents[j].spk
         }

@@ -136,6 +136,25 @@ network denied by `sandbox-exec`:
 | Linux NVIDIA CUDA | Parakeet TDT 0.6B v3 (sherpa-onnx CUDA provider or NeMo) | Whisper large-v3-turbo, whisper.cpp CUDA (99 languages) | Parakeet runs at thousands of times real time on a GPU, which is enough headroom for diarization next to it | research |
 | Linux AMD / Intel Vulkan | Whisper large-v3-turbo q5_0, whisper.cpp Vulkan | Parakeet TDT 0.6B v3 int8 on CPU (sherpa-onnx) | whisper.cpp is the only runtime here with mature Vulkan support (and HIP for AMD) | default: research; fallback: measured on the M4 Pro CPU |
 
+### Languages on the Mac
+
+The 🤫 menu's Languages setting picks the model (`speechRoute` in `Sources/ShepetalCore/ModelTier.swift`, tested in
+`LanguageTests`):
+
+| Selected languages | Apple Silicon | Without Apple Silicon |
+|---|---|---|
+| none (automatic) | Parakeet TDT 0.6B v3, which detects the language itself | Whisper base.en |
+| only Parakeet v3's 25 (bg hr cs da nl en et fi fr de el hu it lv lt mt pl pt ro sk sl es sv ru uk, from the model card) | Parakeet TDT 0.6B v3 | base.en for English only, else large-v3-turbo |
+| one other language | Whisper large-v3-turbo q5_0, `-l <code>` | the same |
+| several, at least one outside Parakeet's | Whisper large-v3-turbo q5_0, `-l auto` | the same |
+
+- When the selection needs Whisper and its files are missing, the app does not fall back to Parakeet (it would write the
+  wrong language). The 🤫 menu names the missing file and where it goes. The large-v3-turbo route has not been run on
+  this Mac, and `-l auto` is not limited to the selected languages yet (#31).
+- The personal dictionary reaches whisper.cpp as `--prompt` ("Glossary: …", starred entries last because whisper.cpp
+  keeps the end of a long prompt). With a bare lowercase word list as the prompt, base.en dropped casing and
+  punctuation on one e2e clip; the sentence form fixed it. Parakeet gets no hint yet (#30).
+
 ### Streaming model for live meeting transcripts
 
 - **Apple:** Nemotron Speech Streaming EN 0.6B through FluidAudio (has punctuation and casing, 560 to 1120 ms

@@ -407,7 +407,8 @@ exist; issue #12 tracks this.
   `pos9`, `len0` to `len5`, `chair`, `q`, `due`, `commit`, and the cue features `a:you`, `a:i`, `a:we`, `a:name`,
   `a:next`), and score `1 / (1 + exp(-(bias + sum)))`. Port the owner and due rules as regexes. The tests in
   `test_summarize.py` pin the behaviour a port has to match.
-- **What changed for the Swift port (Sources/ShepetalSummary) in `feat/summarize-actions-80`:**
+- **What changed for the Swift port (Sources/ShepetalSummary) in #129** (ported on `feat/summary-v2-port`; on all 138
+  AMI scenario meetings, with role and with Speaker 1..4 labels, Swift gives the same action items as Python):
   - The JSON keys are the same (`bias`, `threshold`, `weights`, `C`, `trained_on`). Scoring is unchanged. The
     threshold is now 0.575 (was 0.55); read it from the file, don't hard-code it.
   - Five new feature strings, each `1` when its regex in `CUES` matches the sentence. `MODAL` is

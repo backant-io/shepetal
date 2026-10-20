@@ -10,6 +10,8 @@ final class ModelNameTests: XCTestCase {
                                                         options: .caseInsensitive)
     /// An engine or model name put into a string at run time ("Model: \\(e.name)").
     private static let interpolated = try! NSRegularExpression(pattern: #"\\\([^()]*\.(name|model|rawValue)\)"#)
+    /// A microphone's own name (`device.name`, `d.name` for a MicDevice) is the user's hardware, not a model.
+    private static let micName = try! NSRegularExpression(pattern: #"\\\((device|d)\.name\)"#)
     private static let literal = try! NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*""#)
     /// Paths and variable names, never shown.
     private static let allowed: Set<String> = ["\"whisper.cpp/whisper-cli\"", "\"SHEPETAL_WHISPER_CLI\"", "\"SHEPETAL_WHISPER_MODEL\""]
@@ -23,8 +25,10 @@ final class ModelNameTests: XCTestCase {
             for m in literal.matches(in: code, range: NSRange(location: 0, length: ns.length)) {
                 let s = ns.substring(with: m.range)
                 if allowed.contains(s) { continue }
-                let all = NSRange(location: 0, length: (s as NSString).length)
-                if names.firstMatch(in: s, range: all) != nil || interpolated.firstMatch(in: s, range: all) != nil { hits.append(code) }
+                let shown = micName.stringByReplacingMatches(in: s, range: NSRange(location: 0, length: (s as NSString).length),
+                                                             withTemplate: "the mic")
+                let all = NSRange(location: 0, length: (shown as NSString).length)
+                if names.firstMatch(in: shown, range: all) != nil || interpolated.firstMatch(in: shown, range: all) != nil { hits.append(code) }
             }
         }
         return hits
@@ -39,6 +43,8 @@ final class ModelNameTests: XCTestCase {
         XCTAssertTrue(Self.offending(#"NSLog("shepetal: parakeet failed")"#).isEmpty)
         XCTAssertTrue(Self.offending(#"    // Parakeet v3 through FluidAudio"#).isEmpty)
         XCTAssertTrue(Self.offending(#"engineStatus = "On-device speech recognition (standard engine)""#).isEmpty)
+        XCTAssertTrue(Self.offending(#"throw SpeechError("Cannot open \(device.name)")"#).isEmpty, "a mic's name")
+        XCTAssertEqual(Self.offending(#"status = "\(device.name) with \(e.name)""#).count, 1, "a model next to a mic")
     }
 
     func testNoModelNameInAppStrings() throws {

@@ -27,6 +27,7 @@ final class Pipeline {
     let inserter: Inserter
     /// The local cleanup model (docs/models.md, Cleanup). nil: the rules run alone.
     var cleanup: CleanupModel?
+    let dictionary: URL  // dictionary.txt in this pipeline's data dir
 
     /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
     /// Tests pass a temp `root` and a private named pasteboard.
@@ -35,6 +36,7 @@ final class Pipeline {
         try AudioStore.makeOwnerOnlyDirectory(root)
         store = try AudioStore(dir: root.appendingPathComponent("audio"))
         history = try History(path: root.appendingPathComponent("history.sqlite"))
+        dictionary = root.appendingPathComponent("dictionary.txt")
     }
 
     /// `app` is the frontmost app at dictation start (history only). `selection` is the text the paste replaces.
@@ -100,10 +102,14 @@ final class Pipeline {
     }
 
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub): tags
-    /// stripped, the rules, then the local cleanup model when it is loaded. Runs off the main thread.
-    func finishText(_ raw: String) async -> SmartCleanup.Result {
-        let model = cleanup
-        return await Task.detached { SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model) }.value
+    /// stripped, the rules, the local cleanup model when it is loaded, then the personal dictionary (F39).
+    /// InsertionRules fits the result to the cursor afterwards. Runs off the main thread.
+    func finishText(_ raw: String) async -> (text: String, usedModel: Bool) {
+        let model = cleanup, dictionary = dictionary
+        return await Task.detached {
+            let cleaned = SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model)
+            return (Vocabulary.load(dictionary).apply(cleaned.text), cleaned.usedModel)
+        }.value
     }
 
     // MARK: cleanup model

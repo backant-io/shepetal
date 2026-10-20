@@ -7,6 +7,8 @@
 # that history kept the app, bundle id and page URL given for each dictation. The page-URL lookup must
 # return at once and do its work off the main thread. Each clip is then re-transcribed from its kept WAV,
 # as History's re-transcribe does, and must give the same text and the engine's model name on the same row.
+# A dictionary.txt in SHEPETAL_HOME replaces one word of e03; that clip is checked for the replacement and
+# left out of the WER. SHEPETAL_HOME defaults to .cache/e2e/home.
 # A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
 # short.wav is the loudest 200 ms of e01: Parakeet refuses under 300 ms, so the engine must pad it, and a
 # clip that short must never end as "Transcription failed" (a quick hold used to).
@@ -27,8 +29,13 @@ WORK=$PWD/.cache/e2e
 FIX=$WORK/fixtures
 # Never the user's data dir, even when SHEPETAL_HOME is exported: E2E_HOME moves the test's own.
 export SHEPETAL_HOME=${E2E_HOME:-$WORK/home}
-mkdir -p "$FIX"
+mkdir -p "$FIX" "$SHEPETAL_HOME"
 rm -f "$FIX"/c*.gone
+DICT=$SHEPETAL_HOME/dictionary.txt
+if [ -e "$DICT" ] && ! head -1 "$DICT" | grep -q '^# e2e-mac'; then
+  echo "e2e-mac: $DICT is not ours, refusing to overwrite it" >&2; exit 1
+fi
+printf '# e2e-mac dictionary\ndentist => orthodontist\n' > "$DICT"
 
 while IFS='|' read -r id voice text; do
   [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "$text"
@@ -101,7 +108,7 @@ o.writeframes(struct.pack(f"<{win}h", *x[start:start + win])); o.close()
 PY
 "$BIN" --e2e "$FIX/short.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/short.jsonl" || true
 
-python3 - "$WORK/results.jsonl" "$FIX" "$WORK/silence.jsonl" "$WORK/short.jsonl" <<'PY'
+python3 - "$WORK/results.jsonl" "$FIX" "$DICT" "$WORK/silence.jsonl" "$WORK/short.jsonl" <<'PY'
 import json, os, re, stat, struct, sys
 
 def words(s):
@@ -117,7 +124,9 @@ def edits(a, b):
 
 assert edits("a b c".split(), "a x c d".split()) == 2  # self-check of the WER math
 
-results, fix = sys.argv[1], sys.argv[2]
+results, fix, dictionary = sys.argv[1:4]
+replaced = {"e03.wav": ("dentist", "orthodontist")}  # clip -> what dictionary.txt replaces; kept out of the WER
+assert stat.S_IMODE(os.stat(dictionary).st_mode) == 0o600, "dictionary.txt is not owner-only"
 rows = [json.loads(l) for l in open(results) if l.strip()]
 assert rows and all("wav" in r for r in rows), f"no results: {rows}"
 # The batch exits 1 when a clip has an error, so its exit code is ignored above; every clip must have a row,
@@ -132,7 +141,12 @@ for r in rows:
     assert r["error"] == "", (name, r["error"])
     ref = words(open(os.path.join(fix, name[:-4] + ".txt")).read())
     e = edits(ref, words(r["inserted_text"]))
-    errors += e; ref_words += len(ref)
+    if name in replaced:
+        spoken, written = replaced[name]
+        got = words(r["inserted_text"])
+        assert written in got and spoken not in got, (name, "dictionary replacement missing", r["inserted_text"])
+    else:
+        errors += e; ref_words += len(ref)
     if name == "e01-quiet.wav":
         assert e == 0, (name, "quiet speech lost words", r["error"], r["inserted_text"])
     assert r["inserted_text"] == r["text"], (name, "field holds something else", r["inserted_text"])
@@ -164,10 +178,11 @@ for r in rows:
     print(f"{name}: {e}/{len(ref)} word errors, ready {r['ready_ms']} ms, {r['audio_seconds']:.1f} s audio, "
           f"cleanup {r.get('cleanup_model') or 'rules'}")
 wer = errors / ref_words
-print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows)} clips ({ref_words} words)")
+print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows) - len(replaced)} clips ({ref_words} words), "
+      f"dictionary replacement in {', '.join(replaced)}")
 assert wer <= 0.08, f"WER {wer:.1%} > 8%"
 
-(s,) = [json.loads(l) for l in open(sys.argv[3]) if l.strip()]
+(s,) = [json.loads(l) for l in open(sys.argv[4]) if l.strip()]
 assert s["error"] == "No speech heard" and s["history_outcome"] == "no_speech", s
 assert s["inserted_text"] == "" and not s["paste_landed"], ("silence pasted something", s)
 assert s["pasteboard_text"] == "" and not s["window_visible"], ("silence touched the clipboard or showed a window", s)
@@ -179,7 +194,7 @@ assert abs(s["audio_seconds"] - 2) < 0.05 and abs((len(data) - 44) / 4 / 16000 -
 assert set(data[44:]) == {0}, "the kept WAV must hold the silent samples the guard saw"
 print(f"silence.wav: outcome {s['history_outcome']}, inserted_text {s['inserted_text']!r}, audio {s['audio_mode']} in a {s['audio_dir_mode']} dir")
 
-(c,) = [json.loads(l) for l in open(sys.argv[4]) if l.strip()]
+(c,) = [json.loads(l) for l in open(sys.argv[5]) if l.strip()]
 assert c["audio_seconds"] < 0.3, ("short.wav is not under Parakeet's 300 ms minimum", c["audio_seconds"])
 assert not c["error"].startswith("Transcription failed"), ("a short clip reached the model unpadded", c["error"])
 assert c["history_outcome"] in ("inserted", "no_speech") and c["history_audio_path"] == c["audio_path"], c
