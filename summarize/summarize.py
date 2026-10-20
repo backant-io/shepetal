@@ -5,7 +5,7 @@ Usage:
 APPROACH: textrank-tfidf | textrank-minilm | seq2seq (MODEL_ID = HF encoder-decoder id)
 Summarizes fixtures/*.txt, writes out/APPROACH/*.md, prints ROUGE, latency, peak RSS.
 """
-import os, re, sys, time, glob, resource, math
+import os, re, sys, time, glob, json, resource, math
 from collections import Counter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,20 +57,105 @@ def decisions(sents):
     return dedupe(out)
 
 
-def actions(sents):
-    """First-person commitments: owner = speaker, task = clause after I'll, due = date phrase."""
+MODEL = os.path.join(HERE, "actions_model.json")  # trained by ami_actions.py on the AMI train split
+_model = {}
+SELF = re.compile(r"\b(?:i'll|i will|i'm going to|i'm gonna|i can|let me|i have to|i need to|i should)\b")
+YOU = re.compile(r"\b(?:you|you'll|you're|your|you've|you'd)\b")
+ME = re.compile(r"\b(?:i|i'll|i'm|i've|i'd|me|my)\b")
+DELEGATE = re.compile(r"\s*(?:\w+\s+)?(?:ask|want|like|need|tell|get)\b")
+INTRO = re.compile(r"\b(?:I'm|I am|my name is|my name's|[Tt]his is)\s+([A-Z][a-z]+)")
+FILLER = re.compile(r"^(?:(?:um|uh|so|and|okay|ok|well|yeah|right|but|then|also|now|alright)\b[,.]?\s*)+", re.I)
+
+
+def action_features(sents):
+    """Binary features per sentence: words, word pairs, the words around it, position, length and the old rules."""
+    n = len(sents)
+    chair = Counter(s for s, _ in sents).most_common(1)[0][0] if sents else None  # the person who talks most runs the meeting
+    W = [words(t) for _, t in sents]
     out = []
-    for spk, s in sents:
+    for i, (spk, t) in enumerate(sents):
+        f = {"u:" + x for x in W[i]} | {"b:" + a + "_" + b for a, b in zip(W[i], W[i][1:])}
+        f |= {"p:" + x for x in (W[i - 1] if i else [])} | {"n:" + x for x in (W[i + 1] if i + 1 < n else [])}
+        f |= {f"pos{10 * i // n}", f"len{min(5, len(W[i]) // 4)}"}
+        f |= {k for k, on in (("chair", spk == chair), ("q", t.endswith("?")), ("due", DUE.search(t)), ("commit", COMMIT.search(t))) if on}
+        out.append(f)
+    return out
+
+
+def load_model(path=MODEL):
+    if not _model:
+        with open(path) as f:  # no fallback: a missing model must fail loudly, not quietly return the old 4% rule
+            _model.update(json.load(f))
+    return _model
+
+
+def action_scores(sents, model):
+    """-> P(sentence is an action item) from the linear model: sigmoid(bias + sum of the weights of its features)."""
+    w, b = model["weights"], model["bias"]
+    return [1 / (1 + math.exp(-(b + sum(w.get(x, 0.0) for x in f)))) for f in action_features(sents)]
+
+
+def aliases(sents):
+    """-> {spoken phrase: speaker label}: the label, its words, its initials, and names people introduce themselves with."""
+    labels = sorted({s for s, _ in sents if s})
+    out = {}
+    for lab in labels:
+        toks = words(lab)
+        others = {w for l in labels if l != lab for w in words(l)}
+        out[" ".join(toks)] = lab
+        out.update({w: lab for w in toks if len(w) >= 3 and w not in others and not w.isdigit()})  # "Speaker 1" gives nothing
+        if len(toks) > 1:
+            out["".join(w[0] for w in toks)] = lab  # "Industrial Designer" is called "ID"
+    for spk, t in sents:
+        for m in INTRO.finditer(t):
+            if spk:
+                out.setdefault(m.group(1).lower(), spk)
+    return out
+
+
+def owner(sents, i, al):
+    """Who does it: a named participant, else "I" -> the speaker, "you" -> whoever answers, else the addressee."""
+    spk, t = sents[i]
+    w = " ".join(words(t))
+    named = [(m.start(), lab) for k, lab in al.items() if lab != spk for m in [re.search(rf"\b{re.escape(k)}\b", w)] if m]
+    me = SELF.search(w)
+    if me and not (named and (min(named)[0] < me.start() or DELEGATE.match(w, me.end()))):
+        return spk  # "I'll send the list to Daniel" is mine; "I'll ask Daniel to send it" is his
+    if named:
+        return min(named)[1]
+    if YOU.search(w) or not ME.search(w):
+        # ponytail: addressee = next other speaker within 3 sentences (they usually acknowledge), else the previous one.
+        for j in [*range(i + 1, min(len(sents), i + 4)), *range(i - 1, max(-1, i - 4), -1)]:
+            if sents[j][0] and sents[j][0] != spk:
+                return sents[j][0]
+    return spk
+
+
+def action_items(sents, model=None):
+    """-> [(sentence index, owner, task, due)]: classifier hits plus first-person commitments with a date."""
+    model = model or load_model()
+    p, al, out = action_scores(sents, model), aliases(sents), []
+    for i, (spk, s) in enumerate(sents):
         m = COMMIT.search(s)
-        if not m or s.endswith("?"):
+        if s.endswith("?") or not (p[i] >= model["threshold"] or (m and DUE.search(s))):
             continue
-        task = m.group(1).rstrip(".")
-        d = DUE.search(task)
+        who = owner(sents, i, al)
+        task = (m.group(1) if m and who == spk else FILLER.sub("", s)).rstrip(".,")
+        if not words(task):  # "Okay, so." scored high from its neighbours; there is no task to show
+            continue
+        ds = list(DUE.finditer(task))  # "follow up today and send it by Friday": the deadline is the "by" date
+        d = next((x for x in ds if x.group().strip().lower().startswith(("by ", "before "))), ds[0] if ds else None)
         due = d.group(1) if d else ""
         if d:
             task = re.sub(r"\s+,|\s+", lambda m: "," if "," in m.group() else " ", task[:d.start()] + task[d.end():]).strip(" ,")
-        out.append((spk, task, due))
-    return dedupe(out, key=lambda a: a[0] + " " + a[1])
+        # The same task said twice by or to the same person: keep the later mention (the recap), drop the earlier one.
+        out = [k for k in out if not (k[1] == who and similar(k[2], task))] + [(i, who, task, due)]
+    return out
+
+
+def actions(sents, model=None):
+    """-> [(owner, task, due)] for the Action items section."""
+    return [a[1:] for a in action_items(sents, model)]
 
 
 def textrank(vecs, iters=50, d=0.85):
@@ -102,7 +187,7 @@ def extractive(sents, embed, k=5):
         return "", []
     texts = [s for _, s in sents]
     rank = textrank(embed(texts))
-    used = {s for s in decisions(sents)} | {a[1] for a in actions(sents)}
+    used = set(decisions(sents)) | {sents[a[0]][1] for a in action_items(sents)}
     ok = [i for i, s in enumerate(texts) if len(words(s)) >= 8 and not s.endswith("?")
           and not COMMIT.search(s) and not DECIDE.search(s) and s not in used]
     # ponytail: overview = best-ranked sentence in the opening (hosts state the purpose first).
