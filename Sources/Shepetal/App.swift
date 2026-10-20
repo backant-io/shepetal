@@ -13,7 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var dictation: Dictation?
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
-    private var engineStatus = "Loading speech model…"
+    private var engineStatus = "Loading on-device speech recognition…"
     private var busy = false
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
@@ -71,6 +71,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         })
         Task { await loadEngine() }
 
+        // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
+        Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
+                             hint: { [weak self] in self?.indicator.show($0, seconds: 6) })
         permissions = PermissionMonitor(revoked: { [weak self] message in
             self?.fail(message)
             if self?.allowPrompts == true { self?.showOnboarding() }
@@ -118,6 +121,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             indicator.show("Still transcribing the last one", seconds: Hint.seconds)
             return
         }
+        if down, dictation?.gesture.state == .idle, !Account.shared.allowFnDown() { return }  // signed out or trial over
         run { down ? $0.fnDown(at: t) : $0.fnUp(at: t) }
     }
 
@@ -199,10 +203,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             let e = try await Speech.load()
             engine = e
-            engineStatus = "Model: \(e.name)"
+            engineStatus = EngineLabel.status(e.name)
         } catch {
-            engineStatus = error.localizedDescription
-            fail("No speech model. Open the 🤫 menu.")
+            NSLog("shepetal: speech: %@", error.localizedDescription)  // model names stay in the log
+            engineStatus = ParakeetEngine.isInstalled ? "On-device speech recognition could not start"
+                                                      : "On-device speech recognition is not downloaded yet"
+            fail("No speech recognition. Open the 🤫 menu.")
         }
     }
 
@@ -236,8 +242,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: tap.isRunning ? "Hold fn to talk, double-tap for hands-free" : "fn is not being watched yet", action: nil, keyEquivalent: "")
         menu.addItem(withTitle: engineStatus, action: nil, keyEquivalent: "")
         menu.addItem(item("Open Shepetal…", #selector(openHub)))
+        Account.shared.menuItems().forEach(menu.addItem)
         if engine == nil, !ParakeetEngine.isInstalled {
-            menu.addItem(item("Download speech model (Parakeet v3, about 470 MB)", #selector(downloadModel)))
+            menu.addItem(item("Download on-device speech recognition (about 470 MB)", #selector(downloadModel)))
         }
         menu.addItem(.separator())
 
@@ -326,9 +333,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func downloadModel() {
-        engineStatus = "Downloading Parakeet v3…"
+        engineStatus = "Downloading on-device speech recognition…"
         Task {
-            do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: \(error.localizedDescription)"; return }
+            do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""); return }
             await loadEngine()
         }
     }
