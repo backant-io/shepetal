@@ -4,7 +4,7 @@ import XCTest
 
 /// The app delegate cannot run in a test (it puts the 🤫 panel on screen), so these pin the account wiring in
 /// App.swift by its source: the fn gate before the gesture runs, the dictation check given to the license
-/// timer, and the menu items. Plus the speech error text the UI shows.
+/// timer, and the menu items. Plus the speech error text the UI shows, and the meeting consent wiring.
 final class AccountWiringTests: XCTestCase {
     private func source(_ file: String) throws -> String {
         try String(contentsOf: URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -46,6 +46,23 @@ final class AccountWiringTests: XCTestCase {
         XCTAssertFalse(hub.contains("failed: \\(error.localizedDescription)"))
         let app = try app()
         XCTAssertTrue(app.contains("engineStatus = \"Download failed: \" + (SpeechError(plain: error,"))
+    }
+
+    /// Decision (1): only the card's Record click starts a meeting recording, Not now never does, and the red
+    /// ring shows for the whole recording. MeetingOffer and Indicator are tested; this pins the glue between them.
+    func testMeetingCardButtonsAndRedRingAreWiredToTheRecorder() throws {
+        let src = try app()
+        XCTAssertTrue(src.contains("card: { [weak self] in self?.meetingCard.show($0) }"), "the recorder must show the card")
+        XCTAssertTrue(src.contains("MeetingCard(onRecord: { [weak self] in self?.meetings.record() },"),
+                      "Record must call meetings.record()")
+        XCTAssertTrue(src.contains("onNotNow: { [weak self] in self?.meetings.notNow() })"),
+                      "Not now must call meetings.notNow(), never record()")
+        XCTAssertEqual(src.components(separatedBy: "meetings.record()").count - 1, 1, "only the Record button starts a recording")
+
+        let start = try XCTUnwrap(src.range(of: "meetingFlow?.onRecording = { [weak self] in"))
+        let end = try XCTUnwrap(src[start.upperBound...].range(of: "} catch"))
+        XCTAssertTrue(src[start.upperBound..<end.lowerBound].contains("self?.indicator.meeting = $0"),
+                      "the red ring must follow the meeting recording")
     }
 
     func testOnlyOurOwnSpeechErrorTextReachesTheUI() {

@@ -19,7 +19,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var onboarding: Onboarding?
     private var timers: [Timer] = []
     private var focusAtStart: (app: Int32, window: AXUIElement?)?
-    private let sounds = Sounds()
     private lazy var secureInput = SecureInput(indicator: indicator)
     private var permissions: PermissionMonitor!
     private let fnWatch = FnWatch()
@@ -28,7 +27,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
-    private lazy var meetings = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts)) { [weak self] in self?.indicator.show($0, seconds: 4) }
+    private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
+                                                                 card: { [weak self] in self?.meetingCard.show($0) }) { [weak self] in self?.indicator.show($0, seconds: 4) }
+    /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
+    private lazy var meetingCard: MeetingCard = MeetingCard(onRecord: { [weak self] in self?.meetings.record() },
+                                                            onNotNow: { [weak self] in self?.meetings.notNow() })
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -75,7 +78,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
             meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
             meetingFlow?.attach(meetings)
-            meetingFlow?.onRecording = { [weak self] in self?.statusItem.button?.title = $0 ? "🤫●" : "🤫" }
+            meetingFlow?.onRecording = { [weak self] in
+                self?.statusItem.button?.title = $0 ? "🤫●" : "🤫"
+                self?.indicator.meeting = $0  // the red ring, for the whole recording
+            }
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
 
@@ -149,17 +155,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func show(_ action: GestureAction) {
-        sounds.play(action)
         switch action {
         case .start:
             focusAtStart = FocusedText.window()
             indicator.set(.recording)
             appAtStart = AppContext.capture()
-            if let g = dictation?.gesture {  // the start sound waits until the press is a hold
-                DispatchQueue.main.asyncAfter(deadline: .now() + g.holdThreshold + 0.01) { [weak self] in
-                    MainActor.assumeIsolated { if let g = self?.dictation?.gesture { self?.sounds.holdCheck(g) } }
-                }
-            }
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
@@ -275,7 +275,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
         menu.addItem(meetings.menuItem)
-        menu.addItem(sounds.menuItem)
         menu.addItem(loginItem.menuItem)
         if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
             menu.addItem(item("Restore 🌐 key setting (\(FnKeySetting.describe(previous)))", #selector(restoreFnKey)))
