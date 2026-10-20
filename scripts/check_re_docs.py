@@ -3,6 +3,7 @@
 
   python3 scripts/check_re_docs.py              run every check (the first one reads the extracted
                                                 Wispr bundle on Pavel's Mac, see WISPR below)
+  python3 scripts/check_re_docs.py --no-bundle  checks 2 and 3 only, for machines without the bundle (CI)
   python3 scripts/check_re_docs.py --self-test  assert-based self-check, needs nothing outside the repo
 
 1. No copied Wispr strings. A quoted span (`...`, "..." or curly quotes) of 20+ chars that holds a
@@ -134,10 +135,14 @@ def self_test():
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--self-test", action="store_true")
-    if ap.parse_args().self_test:
+    ap.add_argument("--no-bundle", action="store_true", help="skip check 1, which needs the extracted Wispr bundle")
+    args = ap.parse_args()
+    if args.self_test:
         return self_test()
     docs = sorted((ROOT / "docs/re").glob("*.md")) + [ROOT / "agent/goal.md"]
-    wispr, errors = load_wispr()
+    wispr, errors = (None, []) if args.no_bundle else load_wispr()
+    if args.no_bundle:
+        print("SKIP check 1 (copied Wispr strings): --no-bundle, the extracted Wispr bundle is not on this machine")
     spans = 0
     for doc in docs:
         text, name = doc.read_text(), doc.relative_to(ROOT)

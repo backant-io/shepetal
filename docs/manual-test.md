@@ -192,6 +192,30 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. If a Chrome row has no host, note it on the PR: Chrome had no accessibility tree for the page (see the `ponytail:` note in `Sources/Shepetal/AppContext.swift`).
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
 
+### M-MTG-1: Zoom call, detected and transcribed (rule 7)
+Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic).
+1. Start or join a Zoom meeting in the zoom.us app, with your mic unmuted.
+2. Expected about 5 s after Zoom opens the mic: "Meeting detected · recording" next to the 🤫 in the bottom-left corner, the menu bar shows "🤫●", and the 🤫 menu shows "Stop meeting recording". The first time, macOS asks whether Shepetal may record system audio: allow it. If the hint says "… mic only (turn on System Audio Recording)", add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, then leave and rejoin the call.
+3. Open 🤫 > Open Shepetal… > Meetings. Expected: a "Zoom" meeting at the top, still running. Within about a minute its transcript fills in, with your lines labelled Me and the other side's labelled Others.
+4. Say "I will send the slides by Friday." Have the other side say "I will review the budget tomorrow."
+5. Leave the meeting. Expected within about 5 s: "Meeting recording saved", then "Meeting notes ready · open Shepetal → Meetings", and the menu bar goes back to "🤫". The meeting's Summary lists the action items "Me: send the slides (Friday)" and "Others: review the budget (tomorrow)" (the wording may differ slightly).
+6. Type `budget` in the Meetings search. Expected: the meeting is found. Click Copy summary and paste in TextEdit: the summary is pasted, without the transcript. Export Markdown writes a `.md` file where you choose.
+7. Run `ls -la ~/Library/Application\ Support/Shepetal/meetings/*/`. Expected: the meeting's folder is `drwx------` and holds `Me.wav` and `Others.wav`, both `-rw-------`. Open them in QuickTime: Me is your mic, Others is the call audio.
+8. Do steps 1 to 5 again without headphones, with the call on the MacBook's own speakers at normal volume. The mic hears the other side here too, and Me.wav keeps that echo (the audio is kept as recorded). Expected: the transcript has no Others line a second time under Me, and the summary has "Others: review the budget (tomorrow)" once, with no second copy under Me. Short replies of yours said over the other side ("yes, that works") stay under Me.
+
+### M-MTG-2: Google Meet in a browser
+1. Meet in Chrome or Safari is found by the tab's window title, which macOS only shows to apps with screen recording access. Add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording (the upper list), then quit and reopen Shepetal.
+2. Join a Google Meet call in Chrome with the mic on. Expected: "Meeting detected · recording", and the meeting is listed as "Google Meet (Chrome)" (or "Google Meet (Safari)"). Repeat steps 3 to 7 of M-MTG-1.
+3. Without screen recording access, Meet is not detected. Use 🤫 > Start meeting recording before the call and Stop meeting recording after it. Expected: the same transcript and summary, listed as "Manual".
+
+### M-MTG-3: dictation during a meeting
+1. During a recorded Zoom call, click into TextEdit, hold fn, say a sentence, and release. Expected: the sentence is inserted as usual, and no second meeting starts.
+2. Expected afterwards: the meeting's transcript has the sentence under Me, since the meeting records the mic too.
+
+### M-MTG-4: quit during a meeting
+1. Start a meeting recording, talk for a minute, then quit Shepetal from the 🤫 menu.
+2. Expected: both WAVs are kept and play to the end. The meeting is listed as ended, with the transcript up to the last 30 s live pass. It gets no summary: a meeting cut off by quitting is not transcribed again at the next launch.
+
 ### M-ACC-1: first launch, sign-in and the free trial
 Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
 0. Without `ShepetalRequiresSignIn` or the variable, signed out: expected the menu still offers Sign in, but no sign-in hint shows at launch and fn dictates normally.
@@ -251,11 +275,22 @@ The Dynamic Island steps need an iPhone 14 Pro or later (any iPhone 15, 16 or 17
 1. Start a dictation (I-DICT-1 steps 1 and 2).
 2. Expected: once you are back in Notes, the Dynamic Island shows 🤫 with a red ring on the left and "Listening" on the right. Touch and hold the island: the expanded view shows the same.
 3. Lock the iPhone. Expected: the lock screen shows the Live Activity with 🤫, a red ring and "Listening". Unlock and go back to Notes.
-4. Tap the mic on the keyboard. Expected: the island shows a blue ring and "Transcribing", then the Live Activity ends when the text is inserted.
+4. Tap the mic on the keyboard. Expected: the island shows a blue ring and "Transcribing", then 🤫 with no ring and "Ready" once the text is inserted (the mic stays open, I-OPEN-1). With "Keep the microphone open" set to "Close after each dictation", the Live Activity ends instead.
 5. Start a Timer in the Clock app, then start a dictation. With two Live Activities, iOS shows one of them as a small circle at the edge of the island. Expected: when that circle is Shepetal's, it shows 🤫 with its ring.
-6. Tap the mic and stop it at once (I-SHORT-1). Expected: the island shows a yellow ring and "Not inserted" for about 4 s, then the Live Activity ends.
+6. Tap the mic and stop it at once (I-SHORT-1). Expected: the island shows a yellow ring and "Not inserted" for about 4 s, then "Ready" again. With "Close after each dictation", it ends after the 4 s instead.
 7. Turn off Settings > Shepetal > Live Activities and run I-DICT-1 again. Expected: no Live Activity, and dictation works the same.
 8. Start a dictation, go back, then force-quit Shepetal from the app switcher. Lock the iPhone. Expected: the Live Activity stays at most about 6 minutes on "Listening" with a red ring, then shows "Stopped" without a ring. Opening Shepetal removes it.
+
+### I-OPEN-1: the next dictation starts without opening Shepetal
+1. In Shepetal, check that "Keep the microphone open" is "5 minutes" (the default). Run I-DICT-1 once.
+2. Expected: after the text is inserted, the orange mic dot stays on, the Live Activity shows 🤫 and "Ready", and Shepetal (if you switch to it) says the microphone stays open and shows "Turn off the microphone".
+3. Back in Notes, play music in another app, then tap the mic within 5 minutes. Expected: Shepetal does NOT open. The keyboard shows "Starting...", then a red ring and "Listening. Tap the mic to finish." within about a second. Say a sentence, tap the mic. Expected: only that sentence is inserted, nothing said or played between the two dictations, and the music kept playing.
+4. Wait 5 minutes without dictating. Expected: the orange mic dot goes off and the Live Activity ends. Tap the mic: Shepetal opens again, as in I-DICT-1.
+5. Set "Keep the microphone open" to "1 hour" (the longest choice), dictate once, then tap "Turn off the microphone" in Shepetal. Expected: the mic dot goes off and the Live Activity ends at once.
+6. Set it to "Close after each dictation" and dictate. Expected: the mic dot goes off as soon as the text is inserted, and every dictation opens Shepetal.
+7. With the mic open (step 2), force-quit Shepetal from the app switcher and lock the iPhone. Expected: within about 1.5 minutes the Live Activity stops saying "Ready" and shows "Stopped" with no ring. Unlock, go back to Notes and tap the mic. Expected: after about 1.5 s the keyboard says "Opening Shepetal..." and Shepetal opens, as in I-DICT-1.
+8. With the mic open, take a phone call or ask Siri something. Expected: the mic dot goes off and the next tap opens Shepetal.
+9. Where your other audio plays while the mic is open: play music on the loudspeaker (no headphones), then dictate once so the mic stays open. Expected: the music keeps playing from the loudspeaker, not the earpiece, at the same volume and quality for the whole open window. Repeat with AirPods connected. Expected: the music stays on the AirPods in normal quality (not the thin call sound). If either moves or changes, report it: the audio session options in `EngineMic.start` need another look.
 
 ### I-CAP-1: 5-minute cap
 1. Start a dictation, go back to Notes and leave it running. Talk now and then.
