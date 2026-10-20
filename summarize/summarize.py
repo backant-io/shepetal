@@ -12,7 +12,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 os.environ.setdefault("HF_HOME", os.path.join(HERE, ".cache", "hf"))
 
 DAYS = r"(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)"
-DUE = re.compile(rf"\b(?:by|on|before)?\s*((?:next\s+)?(?:{DAYS}|week)(?:\s+(?:morning|afternoon))?|today|tomorrow|tonight|end of (?:day|week)|the \d+(?:st|nd|rd|th))\b", re.I)
+DUE = re.compile(rf"\b(?:by|on|before|for)?\s*((?:next\s+)?(?:{DAYS}|week)(?:\s+(?:morning|afternoon))?|today|tomorrow|tonight|end of (?:day|week)|the \d+(?:st|nd|rd|th))\b", re.I)
 COMMIT = re.compile(r"\bI(?:'ll| will)\s+(.+)", re.I)
 DECIDE = re.compile(r"\b(decision|decided|is postponed|we (?:move|keep|use|ship|offer|skip|roll back|don't store)|let's (?:ship|not|skip|use))\b", re.I)
 
@@ -68,7 +68,7 @@ def actions(sents):
         d = DUE.search(task)
         due = d.group(1) if d else ""
         if d:
-            task = re.sub(r"\s+", " ", task[:d.start()] + task[d.end():]).strip(" ,")
+            task = re.sub(r"\s+,|\s+", lambda m: "," if "," in m.group() else " ", task[:d.start()] + task[d.end():]).strip(" ,")
         out.append((spk, task, due))
     return dedupe(out, key=lambda a: a[0] + " " + a[1])
 

@@ -17,5 +17,5 @@ Option A puts the summary in a right sidebar next to the transcript.
 ## Action items
 - Omar: update the mockups (due Tuesday)
 - Grace: write the testing summary and share it (due Wednesday)
-- Lena: write the spec for speaker renaming and the export formats , and send it to engineering (due Friday)
-- Lena: book a follow-up review for (due next Thursday)
+- Lena: write the spec for speaker renaming and the export formats, and send it to engineering (due Friday)
+- Lena: book a follow-up review (due next Thursday)
