@@ -149,13 +149,11 @@ def render(overview, points, decs, acts):
     return md
 
 
-def main():
-    approach = sys.argv[1]
-    model_id = sys.argv[2] if len(sys.argv) > 2 else ""
-    t0 = time.perf_counter()
-    if approach == "textrank-tfidf":
-        summarize = lambda text, sents: extractive(sents, tfidf)
-    elif approach == "textrank-minilm":
+def load(approach, model_id=""):
+    """-> summarize(text, sents) -> (overview, key points)."""
+    if approach == "textrank-tfidf":  # numpy only: no torch, no model file
+        return lambda text, sents: extractive(sents, tfidf)
+    if approach == "textrank-minilm":
         import torch
         from transformers import AutoTokenizer, AutoModel
         src = model_id or os.path.join(HERE, ".cache", "minilm")  # sentence-transformers/all-MiniLM-L6-v2
@@ -167,8 +165,8 @@ def main():
                 h = enc(**b).last_hidden_state
                 m = b.attention_mask.unsqueeze(-1).float()
                 return ((h * m).sum(1) / m.sum(1)).numpy()
-        summarize = lambda text, sents: extractive(sents, embed)
-    elif approach == "seq2seq":
+        return lambda text, sents: extractive(sents, embed)
+    if approach == "seq2seq":
         from transformers import AutoTokenizer, AutoModelForSeq2SeqLM
         tok = AutoTokenizer.from_pretrained(model_id)
         model = AutoModelForSeq2SeqLM.from_pretrained(model_id).eval()
@@ -183,9 +181,16 @@ def main():
                 outs += re.split(r"(?<=[.!?])\s+", tok.decode(gen[0], skip_special_tokens=True).strip())
             outs = dedupe([o for o in outs if o])
             return outs[0], outs[1:]
-    else:
-        sys.exit(f"unknown approach {approach}")
-    load = time.perf_counter() - t0
+        return summarize
+    sys.exit(f"unknown approach {approach}")
+
+
+def main():
+    approach = sys.argv[1]
+    model_id = sys.argv[2] if len(sys.argv) > 2 else ""
+    t0 = time.perf_counter()
+    summarize = load(approach, model_id)
+    load_s = time.perf_counter() - t0
 
     name = approach + ("-" + model_id.split("/")[-1] if model_id else "")
     os.makedirs(os.path.join(HERE, "out", name), exist_ok=True)
@@ -203,7 +208,7 @@ def main():
         rows.append((*r, dt))
     avg = [sum(r[i] for r in rows) / len(rows) for i in range(4)]
     rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1 << 20)  # bytes on macOS
-    print(f"| {name} | {avg[0]:.3f} | {avg[1]:.3f} | {avg[2]:.3f} | {avg[3]*1000:.0f} ms | {load:.1f} s | {rss:.0f} MB |")
+    print(f"| {name} | {avg[0]:.3f} | {avg[1]:.3f} | {avg[2]:.3f} | {avg[3]*1000:.0f} ms | {load_s:.1f} s | {rss:.0f} MB |")
 
 
 if __name__ == "__main__":
