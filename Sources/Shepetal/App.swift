@@ -25,6 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
+    private lazy var meetings = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts)) { [weak self] in self?.indicator.show($0, seconds: 4) }
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -65,6 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
+        meetings.watch()
 
         permissions = PermissionMonitor(revoked: { [weak self] message in
             self?.fail(message)
@@ -77,6 +79,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         if hintAtLaunch { indicator.show(Hint.shortPress, seconds: Hint.seconds) }
     }
+
+    /// Closes the meeting files so their WAV headers are written (rule 4).
+    func applicationWillTerminate(_ notification: Notification) { meetings.stop() }
 
     // MARK: fn → gestures
 
@@ -226,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         keepItem.submenu = keep
         menu.addItem(keepItem)
         menu.addItem(item("Open recordings folder", #selector(openRecordings)))
+        menu.addItem(meetings.menuItem)
         menu.addItem(sounds.menuItem)
         menu.addItem(loginItem.menuItem)
         menu.addItem(item(Permission.missing.isEmpty ? "Permissions…" : "Permissions… (\(Permission.missing.count) missing)", #selector(openPermissions)))
