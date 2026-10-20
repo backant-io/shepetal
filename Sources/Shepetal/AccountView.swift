@@ -1,0 +1,27 @@
+import ShepetalCore
+import SwiftUI
+
+/// The Account section on Home: trial days left, "Yours forever", or why dictation is off and how to fix it.
+struct AccountSection: View {
+    @ObservedObject var account = Account.shared
+
+    var body: some View {
+        Section("Account") {
+            LabeledContent("License", value: account.summaryLine)
+            switch account.access {
+            case .signedOut:
+                Button(account.signingIn ? "Open the sign-in page again" : AccountText.signIn) { account.signIn() }
+            case .trial, .expired:
+                Button(AccountText.buy) { account.buy() }
+            case .unchecked:
+                Button("Check license now") { account.checkNow() }
+            case .lifetime:
+                EmptyView()
+            }
+            if account.signedIn { Button("Sign out") { account.signOut() } }
+            if !account.message.isEmpty, account.pendingCode == nil {
+                Text(account.message).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}

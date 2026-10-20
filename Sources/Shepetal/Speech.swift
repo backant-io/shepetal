@@ -21,9 +21,10 @@ enum Speech {
         var models = [prefer ?? tier.primary]
         if let f = tier.fallback, f != models[0] { models.append(f) }
         for model in models {
-            do { return try await engine(for: model) } catch { tried.append("\(model.rawValue): \(error.localizedDescription)") }
+            do { return try await engine(for: model) } catch { tried.append("\(model.rawValue): \(error.localizedDescription)") }  // not shown: logged below
         }
-        throw SpeechError("No speech model available. " + tried.joined(separator: "; "))
+        NSLog("shepetal: no speech model: %@", tried.joined(separator: "; "))  // names in the log, not the UI
+        throw SpeechError("On-device speech recognition is not available")
     }
 
     static func engine(for model: SpeechModel) async throws -> SpeechEngine {
@@ -50,7 +51,7 @@ final class ParakeetEngine: SpeechEngine {
 
     static func load() async throws -> ParakeetEngine {
         // Checked first so FluidAudio never fetches missing files on its own.
-        guard isInstalled else { throw SpeechError("Parakeet v3 is not downloaded (\(directory.path))") }
+        guard isInstalled else { throw SpeechError("On-device speech recognition is not downloaded yet") }
         let models = try await AsrModels.load(from: directory, version: .v3)
         let asr = AsrManager()
         try await asr.loadModels(models)
@@ -86,10 +87,11 @@ final class WhisperCppEngine: SpeechEngine {
         cli = env["SHEPETAL_WHISPER_CLI"].map { URL(fileURLWithPath: $0) }
             ?? Paths.models.appendingPathComponent("whisper.cpp/whisper-cli")
         model = env["SHEPETAL_WHISPER_MODEL"].map { URL(fileURLWithPath: $0) }
-            ?? Paths.models.appendingPathComponent("\(m.rawValue).bin")
+            ?? Paths.models.appendingPathComponent("\(m.rawValue).bin")  // not shown: a path
         name = model.deletingPathExtension().lastPathComponent
         for url in [cli, model] where !FileManager.default.fileExists(atPath: url.path) {
-            throw SpeechError("\(url.path) not found")
+            NSLog("shepetal: %@ not found", url.path)
+            throw SpeechError("The alternative engine is not installed")
         }
     }
 
@@ -105,7 +107,7 @@ final class WhisperCppEngine: SpeechEngine {
             try p.run()
             let data = out.fileHandleForReading.readDataToEndOfFile()
             p.waitUntilExit()
-            guard p.terminationStatus == 0 else { throw SpeechError("whisper-cli exited with \(p.terminationStatus)") }
+            guard p.terminationStatus == 0 else { throw SpeechError("The alternative engine stopped with code \(p.terminationStatus)") }
             return String(decoding: data, as: UTF8.self)
                 .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
                 .joined(separator: " ")

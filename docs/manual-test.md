@@ -125,7 +125,7 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 2. With all three permissions granted, quit Shepetal and open it again from Finder or Spotlight. Expected: only 🤫 appears. No Shepetal window opens.
 3. Open the 🤫 menu and choose Open Shepetal…. Expected: a window titled "Shepetal" with Home, History and Settings tabs comes to the front.
 4. Close it. Open `dist/Shepetal.app` again (Finder, Spotlight or `open dist/Shepetal.app`). Expected: the same window opens. No second 🤫 appears.
-5. Home: expected rows for the speech model, the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
+5. Home: expected rows for speech recognition ("On-device speech recognition (standard engine)", no model name), the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
 
 ### M-HUB-2: search and copy
 1. Dictate "Send the quarterly report today" and then "Call the dentist at 100% volume" into TextEdit (M-FN-1). Open History.
@@ -138,8 +138,8 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 3. Expected: that row now says "recording deleted", its Play and Re-transcribe are greyed out, and its text and Copy still work. Set Recordings back to Keep recordings if you want.
 
 ### M-HUB-4: re-transcribe
-1. Click Re-transcribe on a dictation and choose the entry marked "(current)". Expected: "Re-transcribed with parakeet-tdt-0.6b-v3" under the list. The row keeps its time, outcome and app.
-2. Install the whisper.cpp fallback (README, Mac). Choose the other model in the same menu. Expected: after a few seconds, "Re-transcribed with ggml-…", and the row's text is the whisper result. Without the fallback installed, expected: "Re-transcribe failed: … not found", and the row is unchanged.
+1. Click Re-transcribe on a dictation and choose the entry marked "(current)". Expected: "Re-transcribed with the standard engine" under the list. The row keeps its time, outcome and app.
+2. Install the whisper.cpp fallback (README, Mac). Choose the other model in the same menu. It is listed as "With the alternative engine". Expected: after a few seconds, "Re-transcribed with the alternative engine", and the row's text is the whisper result. Without the fallback installed, expected: "Re-transcribe failed: The alternative engine is not installed", and the row is unchanged.
 
 ### M-HUB-5: archive
 1. Click Archive on a dictation. Expected: it leaves the list.
@@ -154,3 +154,17 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 2. Open History. Expected: the rows show "TextEdit", "Safari · github.com" and "Google Chrome · github.com". The URL is stored only in `history.sqlite` (`sqlite3 … 'select app, bundle_id, url from history order by created_at desc limit 3'`).
 3. If a Chrome row has no host, note it on the PR: Chrome had no accessibility tree for the page (see the `ponytail:` note in `Sources/Shepetal/AppContext.swift`).
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
+
+### M-ACC-1: first launch, sign-in and the free trial
+Needs shepetal.backant.io live. To test against a local copy of the site, start the app with `SHEPETAL_ACCOUNT_URL=http://localhost:3000 dist/Shepetal.app/Contents/MacOS/shepetal`.
+1. Sign out first if this Mac was signed in (🤫 menu > Sign out). Quit and open Shepetal. Expected: next to 🤫 "Sign in to start your free 30-day trial" for a few seconds; the 🤫 menu shows "Not signed in" and "Sign in to start your free 30-day trial…". Open Shepetal… > Home shows the same under Account.
+2. Hold fn in TextEdit. Expected: nothing is recorded or inserted, and the hint "Sign in to start your free 30-day trial" shows next to 🤫.
+3. Choose Sign in… Expected: the browser opens shepetal.backant.io with a code; the menu says "Signing in: confirm code … in your browser". Confirm in the browser. Expected: within a few seconds the menu shows "Free trial: 30 days left · <your email>", Get Shepetal for $4.99 (lifetime, updates included)… and Sign out. Run `security find-generic-password -s io.backant.shepetal.account` in Terminal. Expected: an item exists (do not print its secret).
+4. Hold fn and dictate into TextEdit. Expected: it works as in M-FN-1.
+5. Quit and reopen Shepetal with Wi-Fi off. Expected: the trial line is unchanged and dictation still works (7-day offline grace). Turn Wi-Fi back on.
+
+### M-ACC-2: buy, lifetime, sign out
+1. Choose Get Shepetal for $4.99… Expected: Stripe Checkout opens in the browser. Pay with a Stripe test card on a test deployment. Expected: within about a minute of paying, the menu says "Yours forever · <email>" and has no Buy item.
+2. On the site, end the trial of a test account (or wait for it). Reopen Shepetal. Expected: the menu says "Trial ended" with Get Shepetal for $4.99…; holding fn shows "Trial ended: get Shepetal for $4.99" and records nothing.
+3. Choose Sign out. Expected: "Not signed in", fn shows the sign-in hint, and `security find-generic-password -s io.backant.shepetal.account` finds nothing.
+4. While dictating a long hands-free note, watch Little Snitch or `nettop -p shepetal`: expected no connection during the dictation.
