@@ -53,8 +53,9 @@ impl Store {
         Ok(Store { dir })
     }
 
-    /// Keep `samples` (16 kHz mono) as `<stamp_ms>[.<flag>].wav`. A stamp is never reused: an
-    /// existing file is an error, not overwritten.
+    /// Keep `samples` (16 kHz mono) as `<stamp_ms>[.<flag>].wav`, where `stamp_ms` is the Unix
+    /// time in milliseconds the clip started (`prune` ages clips by it). A stamp is never reused:
+    /// an existing file is an error, not overwritten.
     pub fn save(&self, stamp_ms: u64, kind: Kind, samples: &[f32]) -> io::Result<PathBuf> {
         let flag = match kind {
             Kind::Dictation => "",
@@ -67,7 +68,7 @@ impl Store {
         #[cfg(unix)]
         std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
         let file = opts.open(&path)?;
-        crate::wav::write(io::BufWriter::new(file), samples, crate::RATE)?;
+        crate::wav::write(file, samples, crate::RATE)?;
         Ok(path)
     }
 

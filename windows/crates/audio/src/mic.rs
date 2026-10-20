@@ -58,7 +58,8 @@ pub struct Mic {
 }
 
 impl Mic {
-    /// Open the default microphone, keeping `pre_roll` of audio before each `start`.
+    /// Open the default microphone, keeping `pre_roll` of audio before each `start` (about
+    /// 300 ms holds a syllable spoken as the key goes down).
     pub fn open(pre_roll: Duration) -> Result<Mic, String> {
         let device = cpal::default_host().default_input_device().ok_or("No microphone found")?;
         let supported = device.default_input_config().map_err(|e| format!("Microphone: {e}"))?;
