@@ -1,3 +1,4 @@
+import UIKit
 import XCTest
 @testable import ShepetalSessionCore
 
@@ -88,13 +89,14 @@ final class HandoffTests: XCTestCase {
         XCTAssertEqual(starts, 1)
     }
 
-    func testFailedMicStartRollsBackToIdle() {
+    func testFailedMicStartEndsTheSessionAndTellsTheKeyboard() {
         var h = Handoff()
         h.request(a, document: field, now: t0)
         struct MicError: Error {}
         XCTAssertFalse(h.startRecording(a, now: t0) { throw MicError() })
-        XCTAssertEqual(h.phase, .idle)
+        XCTAssertEqual(h.phase, .failed)
         XCTAssertFalse(h.shouldKeepRecording(a, now: t0))
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.hasPrefix("Could not start the microphone"), true)
     }
 
     // MARK: Security fix 2: recording is capped and stops when the session is no longer current.
@@ -142,6 +144,9 @@ final class HandoffTests: XCTestCase {
         var h = ready(a, text: "private", at: t0)
         XCTAssertNil(h.consume(a, document: otherField, now: t0))
         XCTAssertNil(h.text)
+        // The keyboard says so instead of sitting on "Transcribing..." until the session expires.
+        XCTAssertEqual(h.phase, .failed)
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.contains("history"), true)
         // Discarded for good: going back to the original field must not insert it either.
         XCTAssertNil(h.consume(a, document: field, now: t0))
     }
@@ -158,6 +163,35 @@ final class HandoffTests: XCTestCase {
     func testReadyResultIsInsertedRightAtTheTimeout() {
         var h = ready(a, text: "edge", at: t0)
         XCTAssertEqual(h.consume(a, document: field, now: t0.addingTimeInterval(Handoff.timeout)), "edge")
+    }
+
+    // MARK: The keyboard is told how every dictation ended (product rule 3: errors show at the indicator).
+
+    func testKeyboardShowsWhyADictationFailed() {
+        var h = recording(a, at: t0)
+        h.finishRecording(a, now: t0)
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Transcribing...")
+        XCTAssertTrue(h.fail(a, "Could not transcribe: bad audio", now: t0))
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Could not transcribe: bad audio")
+        XCTAssertNil(h.consume(a, document: field, now: t0))
+    }
+
+    func testKeyboardShowsCancelledAndTimedOutSessions() {
+        var h = recording(a, at: t0)
+        h.cancel(a, now: t0)
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0)?.hasPrefix("Cancelled"), true)
+        let stuck = ready(a, text: "late", at: t0)
+        XCTAssertEqual(stuck.keyboardStatus(for: a, now: t0.addingTimeInterval(Handoff.timeout + 1))?.contains("timed out"), true)
+        // A session the keyboard no longer knows about says nothing.
+        XCTAssertNil(stuck.keyboardStatus(for: nil, now: t0))
+    }
+
+    func testNoteOnDeliveredTextStaysAfterInsertion() {
+        var h = recording(a, at: t0)
+        h.finishRecording(a, now: t0)
+        h.deliver(a, text: "partial", note: "Recording stopped early", now: t0)
+        XCTAssertEqual(h.consume(a, document: field, now: t0), "partial")
+        XCTAssertEqual(h.keyboardStatus(for: a, now: t0), "Recording stopped early")
     }
 
     func testOutOfOrderTransitionsAreRejected() {
@@ -205,25 +239,35 @@ final class AudioArchiveTests: XCTestCase {
         XCTAssertEqual(decoded, samples) // bit-exact, not re-quantized
     }
 
-    func testCancelledSessionKeepsItsAudio() throws {
-        let id = UUID()
-        var h = Handoff()
-        h.request(id, document: UUID())
-        h.startRecording(id) {}
-        try AudioArchive.cancel(id, samples: [0.1, 0.2], handoff: &h, in: dir)
-        XCTAssertEqual(h.phase, .cancelled)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: AudioArchive.url(for: id, in: dir).path))
+    func testAudioIsExcludedFromICloudAndDeviceBackup() throws {
+        // Application Support is backed up unless excluded, and the audio must never leave the device.
+        try AudioArchive.save([0], id: UUID(), in: dir)
+        let values = try URL(fileURLWithPath: dir.path).resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
+        let entryDir = dir.appendingPathComponent("entries-only", isDirectory: true)
+        try AudioArchive.write(Recording(id: UUID(), date: Date(), outcome: .cancelled), in: entryDir)
+        XCTAssertEqual(try URL(fileURLWithPath: entryDir.path).resourceValues(forKeys: [.isExcludedFromBackupKey]).isExcludedFromBackup, true)
     }
 
-    func testCancellingAfterTheAudioWasSavedDoesNotDeleteIt() throws {
-        let id = UUID()
-        var h = Handoff()
-        h.request(id, document: UUID())
-        h.startRecording(id) {}
-        try AudioArchive.save([0.3], id: id, in: dir)
-        h.finishRecording(id)
-        try AudioArchive.cancel(id, samples: [0.3], handoff: &h, in: dir)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: AudioArchive.url(for: id, in: dir).path))
+    func testHistoryEntrySitsNextToItsAudioAndRoundTrips() throws {
+        let entry = Recording(id: UUID(), date: Date(timeIntervalSince1970: 5), outcome: .transcribed, text: "hi")
+        try AudioArchive.write(entry, in: dir)
+        XCTAssertEqual(entry.audio, AudioArchive.url(for: entry.id, in: dir).lastPathComponent)
+        XCTAssertEqual(AudioArchive.history(in: dir), [entry])
+    }
+
+    func testSweepDeletesOnlyRecordingsOlderThanTheAge() throws {
+        let now = Date()
+        let old = Recording(id: UUID(), date: now.addingTimeInterval(-25 * 3600), outcome: .transcribed)
+        let new = Recording(id: UUID(), date: now.addingTimeInterval(-23 * 3600), outcome: .cancelled)
+        for entry in [old, new] {
+            try AudioArchive.save([0.5], id: entry.id, in: dir)
+            try AudioArchive.write(entry, in: dir)
+        }
+        XCTAssertEqual(AudioArchive.sweep(olderThan: 24 * 3600, now: now, in: dir), [old.id])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: AudioArchive.url(for: old.id, in: dir).path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: AudioArchive.url(for: new.id, in: dir).path))
+        XCTAssertEqual(AudioArchive.history(in: dir), [new])
     }
 
     func testFilesAreWrittenWithCompleteProtection() throws {
@@ -238,5 +282,24 @@ final class AudioArchiveTests: XCTestCase {
         XCTAssertTrue(path.hasSuffix("Application Support/audio"))
         XCTAssertFalse(path.contains(SharedHandoff.appGroup))
         XCTAssertFalse(path.contains("Shared/AppGroup"))
+    }
+}
+
+// MARK: Product rule 3: the 🤫 indicator is tiny and sits in the bottom-left corner.
+
+@MainActor
+final class IndicatorTests: XCTestCase {
+    func testIndicatorIsInTheBottomLeftCornerWithTheStateNextToIt() throws {
+        let view = UIView(frame: CGRect(x: 0, y: 0, width: 375, height: 180))
+        let status = Indicator.install(in: view)
+        status.text = "Could not transcribe"
+        view.layoutIfNeeded()
+        let psst = try XCTUnwrap(view.subviews.compactMap { $0 as? UILabel }.first { $0.text == "🤫" })
+        XCTAssertEqual(psst.font.pointSize, 18)
+        XCTAssertEqual(psst.frame.minX, 8, accuracy: 0.5)
+        XCTAssertEqual(psst.frame.maxY, 172, accuracy: 0.5)
+        XCTAssertFalse(psst.isUserInteractionEnabled) // never takes a tap meant for a key
+        XCTAssertGreaterThanOrEqual(status.frame.minX, psst.frame.maxX)
+        XCTAssertLessThanOrEqual(status.frame.maxX, 367)
     }
 }

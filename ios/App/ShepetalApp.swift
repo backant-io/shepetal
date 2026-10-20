@@ -5,152 +5,108 @@ import SwiftUI
 
 @main
 struct ShepetalApp: App {
-    @StateObject private var dictation = Dictation()
+    @StateObject private var session: DictationSession
+    @Environment(\.scenePhase) private var scenePhase
+
+    init() {
+        let mic = EngineMic()
+        let session = DictationSession(mic: mic) { await AVAudioApplication.requestRecordPermission() }
+        mic.onSamples = { [weak session] chunk in Task { @MainActor in session?.append(chunk) } }
+        mic.onInterruption = { [weak session] in
+            Task { @MainActor in await session?.stop(reason: "Recording stopped early: a call, Siri or another app took the microphone.") }
+        }
+        SharedHandoff.observe(SharedHandoff.stopNotification) { [weak session] in Task { await session?.stop() } }
+        // Audio saved while the iPhone was locked could not be written; write it now.
+        NotificationCenter.default.addObserver(forName: UIApplication.protectedDataDidBecomeAvailableNotification, object: nil, queue: .main) { [weak session] _ in
+            Task { @MainActor in session?.flush() }
+        }
+        _session = StateObject(wrappedValue: session)
+    }
 
     var body: some Scene {
         WindowGroup {
             VStack(spacing: 16) {
                 Text("Shepetal").font(.largeTitle.bold())
-                Text(dictation.status).multilineTextAlignment(.center)
-                if dictation.isRecording { Button("Cancel", role: .destructive) { dictation.cancel() } }
+                Text(session.status).multilineTextAlignment(.center)
+                if let error = session.saveError { Text(error).foregroundStyle(.red).multilineTextAlignment(.center) }
+                if session.isRecording { Button("Cancel", role: .destructive) { session.cancel() } }
+                Toggle("Delete recordings after 24 h", isOn: $session.deleteAfter24h)
+                List(session.history) { recording in
+                    VStack(alignment: .leading) {
+                        Text("\(recording.date.formatted()) · \(recording.outcome.rawValue)").font(.caption).foregroundStyle(.secondary)
+                        if let text = recording.text { Text(text).textSelection(.enabled) }
+                        if let note = recording.note { Text(note).font(.caption) }
+                    }
+                }
                 Text("Settings > General > Keyboard > Keyboards > Add New Keyboard > Shepetal, then turn on Allow Full Access.")
                     .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                HStack {
+                    Link("Donate: Buy Me a Coffee", destination: Donate.coffee)
+                    Link("GitHub Sponsors", destination: Donate.sponsors)
+                }
+                .font(.footnote)
             }
             .padding()
-            .task { await dictation.prepare() }
-            .onOpenURL { url in
-                // shepetal://dictate?id=<UUID>, opened by the keyboard
-                guard url.host == "dictate",
-                      let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?
-                          .queryItems?.first(where: { $0.name == "id" })?.value.flatMap(UUID.init(uuidString:))
-                else { return }
-                Task { await dictation.start(id) }
-            }
+            .task { await loadModel() }
+            .onOpenURL { url in Task { await session.open(url) } }
         }
-    }
-}
-
-/// Records in the containing app (keyboard extensions get no microphone) and transcribes on device.
-@MainActor
-final class Dictation: ObservableObject {
-    @Published var status = "Loading speech model..."
-    @Published private(set) var isRecording = false
-    private let engine = AVAudioEngine()
-    private var asr: AsrManager?
-    private var decoderLayers = 2
-    private var samples: [Float] = []
-    private var sessionID: UUID?
-    private var watchdog: Timer?
-
-    init() {
-        SharedHandoff.observe(SharedHandoff.stopNotification) { [weak self] in
-            Task { await self?.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { session.sweep() }
         }
     }
 
-    func prepare() async {
-        guard asr == nil else { return }
+    private func loadModel() async {
+        guard session.transcribe == nil else { return }
         do {
             // First run downloads Parakeet TDT v3 (CoreML) into Application Support; later runs load it from disk.
             let models = try await AsrModels.downloadAndLoad()
             let manager = AsrManager()
             try await manager.loadModels(models)
-            decoderLayers = models.version.decoderLayers
-            asr = manager
-            status = "Ready. Tap the mic on the Shepetal keyboard."
-        } catch {
-            status = "Model load failed: \(error.localizedDescription)"
-        }
-    }
-
-    /// Any app can open shepetal://dictate, so the mic starts only for a request the keyboard wrote.
-    func start(_ id: UUID) async {
-        guard sessionID == nil, SharedHandoff.read().canStart(id) else {
-            status = "Ignored a dictation request that did not come from the Shepetal keyboard."
-            return
-        }
-        guard await AVAudioApplication.requestRecordPermission() else {
-            SharedHandoff.update { $0.cancel(id) }
-            status = "Microphone access denied. Enable it in Settings > Shepetal."
-            return
-        }
-        samples = []
-        let started = SharedHandoff.update { $0.startRecording(id, startMic: startEngine) }
-        guard started else {
-            stopEngine()
-            status = "Could not start recording. Tap the mic again."
-            return
-        }
-        sessionID = id
-        isRecording = true
-        status = "Listening. Go back to your app and tap the mic to finish."
-        // Stops at the 5-minute cap, and as soon as the session is superseded or cancelled.
-        watchdog = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self, let id = self.sessionID, !SharedHandoff.read().shouldKeepRecording(id) else { return }
-                await self.stop()
+            let decoderLayers = models.version.decoderLayers
+            session.modelReady { samples in
+                var state = TdtDecoderState.make(decoderLayers: decoderLayers)
+                return try await manager.transcribe(samples, decoderState: &state).text
             }
-        }
-    }
-
-    func stop() async {
-        guard let id = endRecording() else { return }
-        // Every recording is kept, also when it is not transcribed.
-        do { try AudioArchive.save(samples, id: id) } catch { status = "Could not save audio: \(error.localizedDescription)" }
-        guard SharedHandoff.update({ $0.finishRecording(id) }) else { return }
-        guard let asr else {
-            status = "Speech model is not loaded yet."
-            return
-        }
-        status = "Transcribing..."
-        do {
-            var state = TdtDecoderState.make(decoderLayers: decoderLayers)
-            let text = try await asr.transcribe(samples, decoderState: &state).text
-            SharedHandoff.update { $0.deliver(id, text: text) }
-            SharedHandoff.post(SharedHandoff.readyNotification)
-            status = "Ready. Tap the mic on the Shepetal keyboard."
         } catch {
-            status = "Transcription failed: \(error.localizedDescription)"
+            session.modelFailed(error)
         }
     }
+}
 
-    func cancel() {
-        guard let id = endRecording() else { return }
-        do {
-            try SharedHandoff.update { try AudioArchive.cancel(id, samples: samples, handoff: &$0) }
-            status = "Cancelled. The recording is kept."
-        } catch {
-            SharedHandoff.update { $0.cancel(id) }
-            status = "Cancelled. Could not save audio: \(error.localizedDescription)"
-        }
-    }
+/// The mic for `DictationSession`: AVAudioEngine input, resampled to 16 kHz mono Float, what Parakeet expects.
+final class EngineMic: Microphone {
+    var onSamples: ([Float]) -> Void = { _ in }
+    /// A call, Siri or another app took the audio session. Recording does not resume on its own.
+    var onInterruption: () -> Void = {}
+    private let engine = AVAudioEngine()
+    private var interruptions: NSObjectProtocol?
 
-    /// Stops the mic and returns the session that was recording, if any.
-    private func endRecording() -> UUID? {
-        guard let id = sessionID else { return nil }
-        sessionID = nil
-        isRecording = false
-        watchdog?.invalidate()
-        watchdog = nil
-        stopEngine()
-        return id
-    }
+    /// False once the engine stopped itself (interruption, route or hardware change); the session's
+    /// once-a-second tick then stops the recording and keeps what it has.
+    var isRunning: Bool { engine.isRunning }
 
-    private func startEngine() throws {
+    func start() throws {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .measurement, options: [.mixWithOthers]) // do not stop the user's music
         try session.setActive(true)
-        let converter = AudioConverter() // resamples to 16 kHz mono Float, what Parakeet expects
+        let converter = AudioConverter()
         let input = engine.inputNode
         input.removeTap(onBus: 0)
         input.installTap(onBus: 0, bufferSize: 4096, format: input.outputFormat(forBus: 0)) { [weak self] buffer, _ in
             guard let chunk = try? converter.resampleBuffer(buffer) else { return }
-            Task { @MainActor in self?.samples += chunk }
+            self?.onSamples(chunk)
         }
         try engine.start()
+        interruptions = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: session, queue: .main) { [weak self] note in
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
+            self?.onInterruption()
+        }
     }
 
-    private func stopEngine() {
+    func stop() {
+        interruptions.map(NotificationCenter.default.removeObserver)
+        interruptions = nil
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

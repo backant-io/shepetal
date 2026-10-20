@@ -4,7 +4,8 @@ import UIKit
 /// Mic button that hands dictation to the Shepetal app and inserts the text it sends back.
 final class KeyboardViewController: UIInputViewController {
     private let mic = UIButton(type: .system)
-    private let label = UILabel()
+    /// State text next to the 🤫 indicator in the bottom-left corner.
+    private var label = UILabel()
 
     /// The keyboard process is torn down while the user is in the app, so its session id
     /// lives in the extension's own defaults. Only text for this id is ever inserted.
@@ -17,8 +18,6 @@ final class KeyboardViewController: UIInputViewController {
         super.viewDidLoad()
         mic.setImage(UIImage(systemName: "mic.fill", withConfiguration: UIImage.SymbolConfiguration(pointSize: 32)), for: .normal)
         mic.addTarget(self, action: #selector(micTapped), for: .touchUpInside)
-        label.font = .preferredFont(forTextStyle: .footnote)
-        label.textAlignment = .center
         let globe = UIButton(type: .system)
         globe.setImage(UIImage(systemName: "globe"), for: .normal)
         globe.addTarget(self, action: #selector(handleInputModeList(from:with:)), for: .allTouchEvents)
@@ -29,24 +28,22 @@ final class KeyboardViewController: UIInputViewController {
 
         let row = UIStackView(arrangedSubviews: [globe, mic, delete])
         row.distribution = .equalCentering
-        let stack = UIStackView(arrangedSubviews: [label, row])
-        stack.axis = .vertical
-        stack.spacing = 8
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        row.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(row)
+        label = Indicator.install(in: view)
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
-            stack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+            row.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 24),
+            row.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -24),
+            row.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            row.bottomAnchor.constraint(lessThanOrEqualTo: label.topAnchor, constant: -8),
             view.heightAnchor.constraint(equalToConstant: 180),
         ])
-        SharedHandoff.observe(SharedHandoff.readyNotification) { [weak self] in self?.insertIfReady() }
+        SharedHandoff.observe(SharedHandoff.readyNotification) { [weak self] in self?.refresh() }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        insertIfReady()
+        refresh()
     }
 
     @objc private func micTapped() {
@@ -74,17 +71,18 @@ final class KeyboardViewController: UIInputViewController {
         textDocumentProxy.deleteBackward()
     }
 
-    private func insertIfReady() {
+    /// Inserts a ready result, and shows next to 🤫 how the session stands or why it ended without text.
+    private func refresh() {
         guard let id = sessionID else { return }
-        let state = SharedHandoff.read()
-        if state.sessionID == id, state.phase == .recording {
-            label.text = "Listening. Tap the mic to finish."
-        }
         let document = textDocumentProxy.documentIdentifier
-        guard let text = SharedHandoff.update({ $0.consume(id, document: document) }) else { return }
-        sessionID = nil
-        textDocumentProxy.insertText(text)
-        label.text = nil
+        if let text = SharedHandoff.update({ $0.consume(id, document: document) }) {
+            textDocumentProxy.insertText(text)
+        }
+        let state = SharedHandoff.read()
+        label.text = state.keyboardStatus(for: id)
+        if state.sessionID != id || ![.requested, .recording, .transcribing].contains(state.phase) {
+            sessionID = nil // finished; the message stays until the next dictation
+        }
     }
 
     /// Extensions cannot call UIApplication.shared; walk the responder chain to the host's UIApplication.
