@@ -61,11 +61,14 @@ public enum PasteCheck {
 /// Deterministic cleanup that runs before insertion: drops fillers and stutters, tidies spaces.
 /// Only words that are never doubled in correct English count as stutters ("the the"); "had had",
 /// "that that" and "very very" are what the user said.
-/// The local-LLM cleanup comes later and runs after this.
+/// `SmartCleanup` (CleanupModel.swift) runs the local cleanup model after this.
 public enum Cleanup {
     public static func apply(_ raw: String) -> String {
         var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         let startsUpper = s.first?.isUppercase ?? false
+        // A filler between commas was a pause, so both commas go with it ("we should, uh, push" → "we should push").
+        // ponytail: "apples, um, pears" loses its list comma too.
+        s = s.replacingOccurrences(of: #"(?i),\s*(?:u+m+|u+h+|uhm|erm|hmm+)\s*,"#, with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: #"(?i)(?<![\w-])(?:u+m+|u+h+|uhm|erm|hmm+)(?![\w-])[,.]?\s*"#, with: "", options: .regularExpression)
         s = s.replacingOccurrences(of: #"(?i)\b(the|an?|and|i)(?:\s+\1\b)+"#, with: "$1", options: .regularExpression)
         s = s.replacingOccurrences(of: #"\s+([,.!?;:])"#, with: "$1", options: .regularExpression)

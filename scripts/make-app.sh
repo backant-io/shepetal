@@ -8,8 +8,10 @@ BIN=$(swift build -c release --show-bin-path)
 APP=dist/Shepetal.app
 VERSION=$(git describe --tags --always 2>/dev/null || echo 0)
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
 cp "$BIN/shepetal" "$APP/Contents/MacOS/Shepetal"
+cp -R "$BIN/llama.framework" "$APP/Contents/Frameworks/"  # the cleanup model's runtime (llama.cpp)
+install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/Shepetal"
 for b in "$BIN"/*.bundle; do [ -e "$b" ] && cp -R "$b" "$APP/Contents/Resources/"; done
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -31,6 +33,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 plutil -lint "$APP/Contents/Info.plist"
+codesign --force --sign - "$APP/Contents/Frameworks/llama.framework"
 codesign --force --sign - --identifier io.backant.shepetal "$APP"
 codesign --verify --strict --verbose=2 "$APP"
 echo "Built $PWD/$APP"

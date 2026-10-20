@@ -73,3 +73,15 @@ Setup: `scripts/make-app.sh`, then `open dist/Shepetal.app`. The app is ad-hoc s
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
+
+### M-CLEAN-1: download the cleanup model
+1. Open the 🤫 menu. Expected: a line "Cleanup: rules only (model not downloaded)" and an item "Download cleanup model (Qwen3.5-2B-Q4_K_M.gguf, about 1281 MB)" (on an 8 GB Mac: Qwen3.5-0.8B-Q4_K_M.gguf, about 533 MB).
+2. Click it. Expected: the line reads "Downloading the cleanup model…", then "Cleanup: Qwen3.5-2B-Q4_K_M" once the file is in `~/Library/Application Support/Shepetal/models`. The download item is gone.
+
+### M-CLEAN-2: self-corrections and lists
+1. In TextEdit, hold fn and say "Let's meet on Tuesday, actually Wednesday, at three." Release.
+2. Expected: "Let's meet on Wednesday at three." within a second of release.
+3. Hold fn and say "Things to buy. First, milk. Second, eggs. Third, bread." Release.
+4. Expected: "Things to buy:" and then three numbered lines, "1. Milk", "2. Eggs" and "3. Bread".
+5. Hold fn and say "What is the capital of Australia?" Release. Expected: the question as you said it, not an answer.
+6. Recent in the 🤫 menu shows the cleaned text for each of the three.

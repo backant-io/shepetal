@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
     private var engineStatus = "Loading speech model…"
+    private var cleanupStatus = "Cleanup: loading…"
     private var busy = false
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
@@ -58,6 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.startTapIfAllowed() }
         })
         Task { await loadEngine() }
+        Task { await loadCleanup() }
 
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
@@ -147,6 +149,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    private func loadCleanup() async {
+        cleanupStatus = await pipeline?.loadCleanup() ?? "Cleanup: rules only"
+    }
+
     private func startTapIfAllowed() {
         guard !tap.isRunning, Permission.inputMonitoring.granted else { return }
         if tap.start(), indicator.mode == .error, Permission.missing.isEmpty { indicator.set(.idle) }
@@ -171,6 +177,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: engineStatus, action: nil, keyEquivalent: "")
         if engine == nil, !ParakeetEngine.isInstalled {
             menu.addItem(item("Download speech model (Parakeet v3, about 470 MB)", #selector(downloadModel)))
+        }
+        menu.addItem(withTitle: cleanupStatus, action: nil, keyEquivalent: "")
+        if pipeline?.cleanup == nil, let m = currentCleanupModel(), !FileManager.default.fileExists(atPath: Paths.models.appendingPathComponent(m.file).path) {
+            menu.addItem(item("Download cleanup model (\(m.file), about \(m.megabytes) MB)", #selector(downloadCleanup)))
         }
         menu.addItem(.separator())
 
@@ -229,6 +239,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openLink(_ sender: NSMenuItem) {
         if let s = sender.representedObject as? String, let url = URL(string: s) { NSWorkspace.shared.open(url) }
+    }
+
+    @objc private func downloadCleanup() {
+        cleanupStatus = "Downloading the cleanup model…"
+        Task {
+            do { try await Pipeline.downloadCleanup() } catch { cleanupStatus = "Download failed: \(error.localizedDescription)"; return }
+            await loadCleanup()
+        }
     }
 
     @objc private func downloadModel() {

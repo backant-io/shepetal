@@ -6,11 +6,11 @@ What is on main after iteration 1 (60cc333). On each platform, shepetal is a thi
 
 | Path | What | Language, build | Tests |
 |---|---|---|---|
-| `Package.swift`, `Sources/`, `Tests/` | Mac app: `ShepetalCore` (logic) and `Shepetal` (AppKit shell) | Swift 6 / SwiftPM, macOS 14+ | `swift build && swift test`, `scripts/e2e-mac.sh` |
+| `Package.swift`, `Sources/`, `Tests/` | Mac app: `ShepetalCore` (logic), `ShepetalCleanup` (the local cleanup model on llama.cpp) and `Shepetal` (AppKit shell) | Swift 6 / SwiftPM, macOS 14+ | `swift build && swift test`, `scripts/e2e-mac.sh` |
 | `meeting/` | Meeting detection and capture: `MeetingCore` (portable), `MeetingMac` (Core Audio, EventKit), CLI `shepetal-meeting` | Swift / SwiftPM, macOS 14.4+; MeetingCore also builds on Linux | `cd meeting && swift test`, plus MeetingCore in `swift:6.2` on Linux |
 | `ios/` | iPhone: `ShepetalSessionCore` (framework), `Shepetal` (app), `ShepetalKeyboard` (keyboard extension) | Swift, XcodeGen `project.yml`, iOS 17+ | `xcodegen generate && xcodebuild ... test` on the iOS simulator |
 | `summarize/` | Meeting summarizer: extractive TextRank plus rules (not an LLM), and the QMSum/AMI eval | Python, numpy only on the default path | `python -m unittest` |
-| `bench/` | STT benchmark harness, plus `bench/fluid`, a FluidAudio CLI | Python with uv, SwiftPM | `bench/test_bench.py` |
+| `bench/` | STT benchmark harness, plus `bench/fluid`, a FluidAudio CLI, and `bench/cleanup`, the cleanup-model benchmark | Python with uv, SwiftPM | `bench/test_bench.py`, `bench/cleanup/score.py --self-test` |
 | `scripts/` | `parity.py` (ledger and coverage), `extract_identifiers.py`, `check_re_docs.py`, `make-app.sh`, `e2e-mac.sh` | Python stdlib, bash | `--self-test` on each Python script |
 | `docs/` | `parity.md` (ledger), `progress.md`, `manual-test.md`, `models.md`, `summarization.md`, `re/` (Wispr Flow behavior notes and the feature inventory) | Markdown | `check_re_docs.py`, `parity.py` |
 | `agent/` | The goal and the agent runner | | |
@@ -29,6 +29,7 @@ No code is shared across platforms yet. Each platform implements the same rules 
 | History | `ShepetalCore/History.swift` (SQLite, 0600) | `audio/<id>.json` next to each WAV | not built |
 | Dictation flow | `ShepetalCore/Dictation.swift` (mic and transcriber injected) | `Core/DictationSession.swift` (a `Microphone` protocol and a transcribe closure) | daemon in PR #2 |
 | Insertion text rules (`docs/re/insertion-context.md` 2.5) | `ShepetalCore/TextRules.swift`: spacing, casing, paste check, filler and stutter cleanup | not needed: `textDocumentProxy` inserts directly | wtype / xdotool / ydotool over stdin |
+| Cleanup model (goal rule 5, `docs/models.md` Cleanup) | `ShepetalCore/CleanupModel.swift`: rules, cue gate, word guard, tier choice; `ShepetalCleanup/Llama.swift`: llama.cpp with Metal | not built | not built |
 | Model choice (goal rule 5, `docs/models.md`) | `ShepetalCore/ModelTier.swift` | Parakeet v3 through FluidAudio | `model` (whisper.cpp tiers) |
 | 🤫 indicator (goal rule 3) | `Shepetal/Indicator.swift` (shell only, untested, #15) | `Core/Indicator.swift` (keyboard corner, tested) | not built |
 | Meeting detection (goal rule 7, `docs/re/meetings.md`) | `meeting/Sources/MeetingCore/MeetingDetector.swift`. It builds on Linux too, but no app uses it yet | in-person mic only (not built) | `meeting`: `pw-dump` parser |

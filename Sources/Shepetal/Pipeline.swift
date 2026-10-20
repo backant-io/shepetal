@@ -1,4 +1,6 @@
 import AppKit
+import CryptoKit
+import ShepetalCleanup
 import ShepetalCore
 
 enum Paths {
@@ -18,12 +20,15 @@ final class Pipeline {
         var readyMs: Double = 0      // release to text ready (STT + cleanup)
         var inserted: String = ""
         var paste: Inserter.Result?
+        var cleanupModel: String?    // set when the local model's rewrite was used
         var error: String?
     }
 
     let store: AudioStore
     let history: History
     let inserter: Inserter
+    /// The local cleanup model (docs/models.md, Cleanup). nil: the rules run alone.
+    var cleanup: CleanupModel?
 
     /// No default: a forgotten argument must not fall back to the user's clipboard.
     init(pasteboard: NSPasteboard) throws {
@@ -57,7 +62,10 @@ final class Pipeline {
         } catch {
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Cleanup.apply(run.entry.rawText)
+        let (raw, model) = (run.entry.rawText, cleanup)
+        let cleaned = await Task.detached { SmartCleanup.apply(raw, model: model) }.value
+        run.entry.text = cleaned.text
+        run.cleanupModel = cleaned.usedModel ? model?.name : nil
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         guard !run.entry.text.isEmpty else { return "No speech heard" }
         let (before, after) = context()
@@ -66,6 +74,43 @@ final class Pipeline {
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
         return paste.landed ? nil : "Paste did not land. The text is on the clipboard: press ⌘V to paste it."
+    }
+
+    // MARK: cleanup model
+
+    /// SHEPETAL_CLEANUP_MODEL, else this Mac's default in <data>/models.
+    static var cleanupPath: String? {
+        ProcessInfo.processInfo.environment["SHEPETAL_CLEANUP_MODEL"]
+            ?? currentCleanupModel().map { Paths.models.appendingPathComponent($0.file).path }
+    }
+
+    /// Loads the cleanup model when its file is there. Returns the status line for the menu.
+    func loadCleanup() async -> String {
+        guard let path = Self.cleanupPath else { return "Cleanup: rules only on this Mac" }
+        guard FileManager.default.fileExists(atPath: path) else { return "Cleanup: rules only (model not downloaded)" }
+        do {
+            let model = try await Task.detached { try LlamaCleanup(path: path) }.value
+            cleanup = model
+            return "Cleanup: \(model.name)"
+        } catch {
+            return "Cleanup: rules only (\(error.localizedDescription))"
+        }
+    }
+
+    /// User action only: this Mac's cleanup model from Hugging Face into <data>/models, checked against its SHA-256.
+    static func downloadCleanup() async throws {
+        guard let m = currentCleanupModel() else { return }
+        let (tmp, response) = try await URLSession.shared.download(from: m.url)
+        defer { try? FileManager.default.removeItem(at: tmp) }
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SpeechError("Download failed: \(response)") }
+        let handle = try FileHandle(forReadingFrom: tmp)
+        var hash = SHA256()
+        while let chunk = try handle.read(upToCount: 1 << 24), !chunk.isEmpty { hash.update(data: chunk) }
+        try handle.close()
+        let hex = hash.finalize().map { String(format: "%02x", $0) }.joined()
+        guard hex == m.sha256 else { throw SpeechError("\(m.file) does not match its checksum") }
+        try FileManager.default.createDirectory(at: Paths.models, withIntermediateDirectories: true)
+        try FileManager.default.moveItem(at: tmp, to: Paths.models.appendingPathComponent(m.file))
     }
 
     private func save(_ samples: [Float], _ run: inout Run) {

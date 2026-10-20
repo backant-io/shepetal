@@ -54,8 +54,14 @@ final class PasteCheckTests: XCTestCase {
 
 final class CleanupTests: XCTestCase {
     func testDropsFillersAndStutters() {
-        XCTAssertEqual(Cleanup.apply("Um, so the the build is, uh, green."), "So the build is, green.")
+        XCTAssertEqual(Cleanup.apply("Um, so the the build is, uh, green."), "So the build is green.")
         XCTAssertEqual(Cleanup.apply("  We ship   today .  "), "We ship today.")
+    }
+
+    // The commas around a mid-sentence filler were the pause, not punctuation the user wanted.
+    func testDropsTheCommasAroundAFiller() {
+        XCTAssertEqual(Cleanup.apply("I think we should, uh, push the launch."), "I think we should push the launch.")
+        XCTAssertEqual(Cleanup.apply("Send me the, um, the slides."), "Send me the slides.")
     }
 
     func testKeepsWordsThatContainFillers() {
