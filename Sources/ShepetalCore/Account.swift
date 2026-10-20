@@ -47,7 +47,13 @@ public enum LicenseReply: Equatable, Sendable {
 
 public struct AccountError: LocalizedError, Equatable {
     public let errorDescription: String?
-    public init(_ message: String) { errorDescription = message }
+    /// The HTTP status behind it, 0 when there is none.
+    public var status = 0
+    public init(_ message: String, status: Int = 0) { errorDescription = message; self.status = status }
+
+    /// 401 from checkout: the token is gone, so the app signs out.
+    public static let signedOut = AccountError("Signed out: sign in again to buy", status: 401)
+    public var isServerError: Bool { status >= 500 }
 }
 
 public struct AccountClient: Sendable {
@@ -103,9 +109,9 @@ public struct AccountClient: Sendable {
     /// The Stripe Checkout page for the lifetime license.
     public func checkout(token: String) async throws -> URL {
         let (status, data) = try await send("POST", "/api/checkout", token: token, json: [:])
-        if status == 401 { throw AccountError("Signed out: sign in again to buy") }
+        if status == 401 { throw AccountError.signedOut }
         guard status == 200, let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let s = body["url"] as? String, let url = URL(string: s), url.scheme == "https" || url.scheme == "http"
+              let s = body["url"] as? String, let url = URL(string: s), DeviceFlow.isWebPage(url)
         else { throw Self.unexpected(status) }
         return url
     }
@@ -125,7 +131,7 @@ public struct AccountClient: Sendable {
     }
 
     static func unexpected(_ status: Int) -> AccountError {
-        AccountError("The account service answered \(status)")
+        AccountError("The account service answered \(status)", status: status)
     }
 
     /// ISO 8601, with or without fractional seconds (JavaScript's toISOString has them).
@@ -148,6 +154,9 @@ public enum DeviceFlow {
                               sleep: Sleep = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
                               now: @Sendable () -> Date = Date.init) async throws -> (token: String, email: String) {
         let start = try await client.startDevice()
+        guard isWebPage(start.verificationURIComplete) else {
+            throw AccountError("The account service sent a sign-in page that is not a web address")
+        }
         let deadline = now().addingTimeInterval(TimeInterval(start.expiresIn))
         var interval = TimeInterval(max(1, start.interval))
         await open(start)
@@ -158,10 +167,10 @@ public enum DeviceFlow {
             let reply: TokenPoll
             do { reply = try await client.pollToken(deviceCode: start.deviceCode) } catch is CancellationError {
                 throw CancellationError()
-            } catch let e as AccountError {
+            } catch let e as AccountError where !e.isServerError {
                 throw e
             } catch {
-                continue  // offline for a moment: keep polling until the code expires
+                continue  // offline or a 5xx for a moment: keep polling until the code expires
             }
             switch reply {
             case .pending: continue
@@ -171,6 +180,11 @@ public enum DeviceFlow {
             case let .granted(token, email): return (token, email)
             }
         }
+    }
+
+    /// Only https pages are opened, plus http on this Mac for a local copy of the service.
+    public static func isWebPage(_ url: URL) -> Bool {
+        url.scheme == "https" || (url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? ""))
     }
 }
 
@@ -237,12 +251,18 @@ public struct AccountState: Codable, Equatable, Sendable {
         return (try? d.decode(AccountState.self, from: data)) ?? AccountState()
     }
 
-    /// Owner-only (0600).
+    /// Owner-only (0600) from the moment it exists: written to a 0600 temp file, then renamed over.
     public func save(_ url: URL) throws {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
-        try e.encode(self).write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let data = try e.encode(self)
+        let tmp = url.path + ".tmp"
+        let fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0o600)
+        guard fd >= 0 else { throw AccountError("Cannot write \(tmp)") }
+        defer { close(fd) }
+        guard fchmod(fd, 0o600) == 0,
+              data.withUnsafeBytes({ write(fd, $0.baseAddress, $0.count) }) == data.count,
+              rename(tmp, url.path) == 0 else { unlink(tmp); throw AccountError("Cannot write \(url.path)") }
     }
 }
 

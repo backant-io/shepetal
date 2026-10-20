@@ -11,8 +11,11 @@ struct AccountSection: View {
             switch account.access {
             case .signedOut:
                 Button(account.signingIn ? "Open the sign-in page again" : AccountText.signIn) { account.signIn() }
-            case .trial, .expired:
+            case .trial:
                 Button(AccountText.buy) { account.buy() }
+            case .expired:
+                Button(AccountText.buy) { account.buy() }
+                Button("Check license now") { account.checkNow() }
             case .unchecked:
                 Button("Check license now") { account.checkNow() }
             case .lifetime:

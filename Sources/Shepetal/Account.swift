@@ -33,6 +33,7 @@ final class Account: NSObject, ObservableObject {
     private(set) var checkTask: Task<Void, Never>?
     private(set) var signInTask: Task<Void, Never>?
     private var pendingURL: URL?
+    private var signInRun = 0
     private var recheckUntil: Date?
     private var timer: Timer?
 
@@ -51,7 +52,8 @@ final class Account: NSObject, ObservableObject {
         self.isDictating = isDictating
         self.hint = hint
         if signedIn { check() }
-        if let h = access.blockedHint { hint(h) }
+        // A signed-in user whose cache is stale gets the answer of the check that just started instead.
+        if let h = access.blockedHint, access != .unchecked || !signedIn { hint(h) }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -70,6 +72,9 @@ final class Account: NSObject, ObservableObject {
         refresh()
         guard access.allowsDictation else {
             hint(pendingCode.map { "Finish signing in: confirm code \($0) in your browser" } ?? access.blockedHint ?? "")
+            // Nothing is being dictated, so ask again: a purchase on the website or a network that came back
+            // unlocks on the next press instead of the next day. At most once a minute.
+            if signedIn, now().timeIntervalSince(state.lastAttempt ?? .distantPast) >= 60 { check() }
             return false
         }
         checkTask?.cancel()
@@ -112,8 +117,13 @@ final class Account: NSObject, ObservableObject {
             return
         }
         message = "Opening your browser to sign in…"
+        signInRun += 1
+        let run = signInRun
         signInTask = Task { [client, sleep] in
-            defer { signInTask = nil; pendingCode = nil; pendingURL = nil; refresh() }
+            defer {
+                if run == signInRun { signInTask = nil; pendingCode = nil; pendingURL = nil }  // not a newer sign-in's
+                refresh()
+            }
             do {
                 let (token, _) = try await DeviceFlow.signIn(client, open: { [weak self] start in
                     await self?.showSignInPage(start)
@@ -142,6 +152,9 @@ final class Account: NSObject, ObservableObject {
 
     @objc func signOut() {
         signInTask?.cancel()
+        signInTask = nil
+        pendingCode = nil
+        pendingURL = nil
         checkTask?.cancel()
         checkTask = nil
         tokens.delete()
@@ -162,6 +175,9 @@ final class Account: NSObject, ObservableObject {
                 openURL(try await client.checkout(token: token))
                 message = ""
                 recheckUntil = now().addingTimeInterval(3600)
+            } catch let e as AccountError where e == .signedOut {
+                signOut()  // the token was revoked: offer Sign in again
+                message = "Signed out on shepetal.backant.io. Sign in again, then buy."
             } catch {
                 message = "Checkout failed: \(error.localizedDescription)"
             }
@@ -188,7 +204,10 @@ final class Account: NSObject, ObservableObject {
         }
         switch access {
         case .signedOut: add(signingIn ? "Open the sign-in page again…" : AccountText.signIn + "…", #selector(signIn))
-        case .trial, .expired: add(AccountText.buy + "…", #selector(buy))
+        case .trial: add(AccountText.buy + "…", #selector(buy))
+        case .expired:
+            add(AccountText.buy + "…", #selector(buy))
+            add("Check license now", #selector(checkNow))  // bought on the website
         case .unchecked: add("Check license now", #selector(checkNow))
         case .lifetime: break
         }

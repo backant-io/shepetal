@@ -29,11 +29,13 @@ struct TokenStore {
                 return String(data: data, encoding: .utf8)
             },
             write: { token in
-                SecItemDelete(base as CFDictionary)
-                var item = base
-                item[kSecValueData as String] = Data(token.utf8)
-                item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-                let status = SecItemAdd(item as CFDictionary, nil)
+                // Update in place first: an item left by an earlier build is replaced rather than duplicated.
+                var status = SecItemUpdate(base as CFDictionary, [kSecValueData as String: Data(token.utf8)] as CFDictionary)
+                if status == errSecItemNotFound {
+                    var item = base
+                    item[kSecValueData as String] = Data(token.utf8)
+                    status = SecItemAdd(item as CFDictionary, nil)
+                }
                 guard status == errSecSuccess else {
                     throw SpeechError("Could not save the sign-in to the Keychain (\(status))")
                 }

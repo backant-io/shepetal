@@ -11,6 +11,14 @@ protocol SpeechEngine: AnyObject {
 struct SpeechError: LocalizedError {
     let errorDescription: String?
     init(_ message: String) { errorDescription = message }
+
+    /// For the UI: our own messages pass as they are. Anything else (FluidAudio, CoreML, a failed process) can
+    /// carry model names and paths, so it goes to the log and the user sees `fallback`.
+    init(plain error: Error, _ fallback: String) {
+        if let own = error as? SpeechError { self = own; return }
+        NSLog("shepetal: speech: %@", String(describing: error))
+        errorDescription = fallback
+    }
 }
 
 enum Speech {
@@ -28,9 +36,13 @@ enum Speech {
     }
 
     static func engine(for model: SpeechModel) async throws -> SpeechEngine {
-        switch model {
-        case .parakeetV3: return try await ParakeetEngine.load()
-        case .whisperBaseEn, .whisperLargeV3Turbo: return try WhisperCppEngine(model)
+        do {
+            switch model {
+            case .parakeetV3: return try await ParakeetEngine.load()
+            case .whisperBaseEn, .whisperLargeV3Turbo: return try WhisperCppEngine(model)
+            }
+        } catch {
+            throw SpeechError(plain: error, "On-device speech recognition could not start")
         }
     }
 }
@@ -68,7 +80,9 @@ final class ParakeetEngine: SpeechEngine {
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         var state = TdtDecoderState.make(decoderLayers: decoderLayers)
-        return try await asr.transcribe(samples, decoderState: &state).text
+        do { return try await asr.transcribe(samples, decoderState: &state).text } catch {
+            throw SpeechError(plain: error, "On-device speech recognition could not read this recording")
+        }
     }
 }
 
@@ -97,7 +111,13 @@ final class WhisperCppEngine: SpeechEngine {
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         let (cli, model) = (cli, model)
-        return try await Task.detached {
+        do { return try await run(cli, model, wav) } catch {
+            throw SpeechError(plain: error, "The alternative engine could not read this recording")
+        }
+    }
+
+    private func run(_ cli: URL, _ model: URL, _ wav: URL) async throws -> String {
+        try await Task.detached {
             let p = Process()
             p.executableURL = cli
             p.arguments = ["-m", model.path, "-f", wav.path, "-l", "auto", "-nt", "-np"]

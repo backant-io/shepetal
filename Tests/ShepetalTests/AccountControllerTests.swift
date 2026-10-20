@@ -106,6 +106,51 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer tok-1")
     }
 
+    func testAPurchaseOnTheWebsiteUnlocksOnTheNextFnPress() async throws {
+        try tokens.write("tok-1")
+        var status = "expired"
+        server.handler = { [unowned self] _ in license(status, endsIn: -day) }
+        let a = account()
+        try await until("checked at launch") { a.access == .expired }
+        XCTAssertTrue(titles(a).contains("Check license now"))
+        status = "active"  // paid on shepetal.backant.io
+        let sent = server.requests.count
+        XCTAssertFalse(a.allowFnDown(), "this press is still blocked")
+        XCTAssertEqual(server.requests.count, sent, "a check was tried less than a minute ago")
+        a.now = { Date() + 61 }
+        XCTAssertFalse(a.allowFnDown())
+        try await until("the blocked press asked again") { a.access == .lifetime }
+        XCTAssertTrue(a.allowFnDown(), "the next press dictates")
+    }
+
+    func testBuyRechecksUntilThePurchaseShowsUp() async throws {
+        try tokens.write("tok-1")
+        var status = "trial"
+        server.handler = { [unowned self] r in
+            r.path == "/api/checkout" ? (200, ["url": "https://checkout.stripe.com/c/pay/cs_test_2"]) : license(status, endsIn: 5 * day)
+        }
+        let a = account()
+        try await until("checked at launch") { a.access == .trial(daysLeft: 5) }
+        a.buy()
+        try await until("checkout opened") { !opened.isEmpty }
+        status = "active"
+        a.now = { Date() + 120 }
+        a.tick()  // a minute later, not 24 h
+        try await until("re-checked after checkout") { a.access == .lifetime }
+        XCTAssertEqual(titles(a), ["Yours forever · a@example.com", "Sign out"])
+    }
+
+    func testCheckoutWithARevokedTokenSignsOut() async throws {
+        try tokens.write("tok-1")
+        server.handler = { [unowned self] r in r.path == "/api/checkout" ? (401, ["error": "unauthorized"]) : license("expired", endsIn: -day) }
+        let a = account()
+        try await until("checked at launch") { a.access == .expired }
+        a.buy()
+        try await until("signed out") { a.access == .signedOut }
+        XCTAssertNil(tokens.read())
+        XCTAssertEqual(titles(a).prefix(2), ["Not signed in", "Sign in to start your free 30-day trial…"])
+    }
+
     func testUnauthorizedSignsOut() async throws {
         try tokens.write("tok-old")
         try AccountState(license: License(status: .active, trialEndsAt: nil, email: "a@example.com"),

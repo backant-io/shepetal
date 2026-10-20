@@ -116,7 +116,7 @@ final class HubModel: ObservableObject {
                 let done = try await pipeline.retranscribe(e, with: engine)
                 message = "Re-transcribed with the \(EngineLabel.of(done.model)) engine"
             } catch {
-                message = "Re-transcribe failed: \(error.localizedDescription)"
+                message = "Re-transcribe failed: " + (SpeechError(plain: error, "on-device speech recognition could not run").errorDescription ?? "")
             }
         }
     }

@@ -66,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         })
         Task { await loadEngine() }
 
+        // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
+        Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
+                             hint: { [weak self] in self?.indicator.show($0, seconds: 6) })
         permissions = PermissionMonitor(revoked: { [weak self] message in
             self?.fail(message)
             if self?.allowPrompts == true { self?.showOnboarding() }
@@ -75,8 +78,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
         }
-        Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
-                             hint: { [weak self] in self?.indicator.show($0, seconds: 6) })
         if hintAtLaunch { indicator.show(Hint.shortPress, seconds: Hint.seconds) }
     }
 
@@ -286,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func downloadModel() {
         engineStatus = "Downloading on-device speech recognition…"
         Task {
-            do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: \(error.localizedDescription)"; return }
+            do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""); return }
             await loadEngine()
         }
     }

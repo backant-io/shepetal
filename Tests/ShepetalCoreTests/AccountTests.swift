@@ -85,6 +85,27 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(token, "tok-2")
     }
 
+    func testDeviceFlowKeepsPollingThroughAServerError() async throws {
+        deviceFlow([(502, ["error": "bad gateway"]), (503, [:]), (200, ["access_token": "tok-3", "email": "c@example.com"])])
+        let (token, _) = try await DeviceFlow.signIn(client, open: { _ in }, sleep: { _ in })
+        XCTAssertEqual(token, "tok-3")
+    }
+
+    func testDeviceFlowOpensOnlyWebPages() async throws {
+        var start = Self.start
+        start["verification_uri_complete"] = "file:///System/Applications/Calculator.app"
+        server.handler = { [start] _ in (200, start) }
+        let opened = Box(0)
+        do {
+            _ = try await DeviceFlow.signIn(client, open: { _ in opened.value += 1 }, sleep: { _ in })
+            XCTFail("a file URL must not be opened")
+        } catch {}
+        XCTAssertEqual(opened.value, 0)
+        XCTAssertTrue(DeviceFlow.isWebPage(URL(string: "https://shepetal.backant.io/device?code=A")!))
+        XCTAssertTrue(DeviceFlow.isWebPage(URL(string: "http://localhost:3000/device")!))
+        XCTAssertFalse(DeviceFlow.isWebPage(URL(string: "http://evil.example/device")!))
+    }
+
     // MARK: license and checkout
 
     func testLicenseRepliesAndBearerToken() async throws {
@@ -126,6 +147,11 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(server.requests.last?.method, "POST")
         XCTAssertEqual(server.requests.last?.path, "/api/checkout")
         XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer tok-1")
+
+        server.handler = { _ in (401, ["error": "unauthorized"]) }
+        do { _ = try await client.checkout(token: "tok-1"); XCTFail("401 must throw") } catch let e as AccountError {
+            XCTAssertEqual(e, .signedOut)
+        }
     }
 
     func testBaseURLDefaultsToTheServiceAndHonorsTheOverride() {
@@ -173,6 +199,9 @@ final class AccountTests: XCTestCase {
     }
 
     func testSevenDayOfflineGrace() {
+        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.active, checkedAgo: 7 * day), now: now), .lifetime,
+                       "exactly 7 days still counts")
+        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.active, checkedAgo: 7 * day + 1), now: now), .unchecked)
         let active = state(.active, checkedAgo: 7 * day - 60)
         XCTAssertEqual(AccountPolicy.access(signedIn: true, state: active, now: now), .lifetime, "6.9 days offline still works")
         XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.active, checkedAgo: 7 * day + 60), now: now), .unchecked)
