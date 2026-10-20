@@ -48,6 +48,8 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Expected: a small 🤫 (about 18 pt) about 8 pt from the bottom and left edges, above the Dock.
 3. Switch to another Space, then put Safari in full screen. Expected: 🤫 stays in the same corner in both.
 4. Click on 🤫. Expected: the click goes to whatever is under it. Shepetal does not take focus.
+5. Tap fn once briefly. Expected: the hint shows to the right of 🤫, and 🤫 itself does not move. When the hint goes, 🤫 stays (idle has no ring).
+(The frame, the panel flags, the hint timing and the ring colours are covered by `IndicatorTests`. This step checks them on a real display, Space and full-screen app.)
 
 ### M-FN-1: hold to talk
 1. Click into a TextEdit document. Hold fn, say "Testing one two three, this is a hold to talk check.", then release.
@@ -86,6 +88,13 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-INS-4: paste that does not land
 1. Open Activity Monitor and click its process list, so no text field has focus. Hold fn, say a sentence, then release.
 2. Expected: a yellow ring and "Paste did not land. The text is in Recent." Clicking the entry in Recent copies the text.
+
+### M-NS-1: no speech
+1. Copy a word in TextEdit (Cmd+C), then click into the document. In a quiet room, hold fn for about 2 s without speaking, then release.
+2. Expected: nothing is inserted. A yellow ring and "No speech heard" show for about 4 s. Cmd+V still pastes the word you copied.
+3. Expected: Recent in the 🤫 menu has a "(no speech)" entry, and a new WAV is in Open recordings folder.
+4. Hold fn, say only "um, uh", then release. Expected: the same as steps 2 and 3.
+5. Hold fn and say a quiet "yes" from about an arm's length away. Expected: "yes" is inserted. If it shows "No speech heard" instead, or room noise in step 1 got transcribed, the -60 dBFS floor does not fit this mic: note the mic and the room in #15. You can try another floor with `defaults write io.backant.shepetal speechFloorDb -float -65` and relaunch.
 
 ### M-RET-1: delete after 24 hours
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.

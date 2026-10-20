@@ -10,6 +10,11 @@ final class FnTap {
     private var tap: CFMachPort?
     private var isDown = false
     private var watchdog: Timer?
+    private let fnHeld: () -> Bool
+
+    init(fnHeld: @escaping () -> Bool = { CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn) }) {
+        self.fnHeld = fnHeld
+    }
 
     var isRunning: Bool { tap != nil }
 
@@ -30,7 +35,7 @@ final class FnTap {
         return true
     }
 
-    fileprivate func handle(_ type: CGEventType, _ event: CGEvent) {
+    func handle(_ type: CGEventType, _ event: CGEvent) {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput { return reenable() }
         let keyDown: Bool? = type == .keyDown ? true : type == .keyUp ? false : nil
         guard let down = FnKey.transition(keycode: event.getIntegerValueField(.keyboardEventKeycode),
@@ -44,9 +49,8 @@ final class FnTap {
     }
 
     private func reenable() {
-        guard let tap else { return }
-        CGEvent.tapEnable(tap: tap, enable: true)
-        if isDown && !CGEventSource.flagsState(.hidSystemState).contains(.maskSecondaryFn) {
+        if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
+        if isDown && !fnHeld() {
             isDown = false
             onChange?(false)
         }
