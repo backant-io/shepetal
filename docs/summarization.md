@@ -64,7 +64,7 @@ without stemming. Latency is per meeting after the model has loaded. Peak RAM is
 
 | Approach | ROUGE-1 | ROUGE-2 | ROUGE-L | Latency / meeting | Model load | Peak RSS |
 |---|---|---|---|---|---|---|
-| textrank-tfidf + rules | 0.647 | 0.426 | 0.448 | 12-14 ms | 0 s | 30 MB |
+| textrank-tfidf + rules | 0.647 | 0.426 | 0.448 | 12-45 ms (varies with machine load) | 0 s | 30 MB |
 | textrank-minilm + rules | 0.628 | 0.421 | 0.471 | 125 ms | 2.0 s (mostly torch import) | 487 MB (PyTorch runtime; the model is 90 MB) |
 
 Decisions and action items come from the same rules in both rows. Only the Overview and Key points differ, and on
@@ -114,9 +114,9 @@ where N is the length of our output, so the comparison is at equal length.
 - The references are third-person prose ("The team agreed on ..."). Extracted sentences are first-person speech
   ("Okay, so um, we ..."), which hurts ROUGE-2 most. This gap is the case for an abstractive Overview model later.
 - **Speed and memory on real lengths:** 184 ms per meeting on average (AMI 81 ms, ICSI 239 ms, committee
-  485 ms), 1.5 s at most; latency varies by about 10% between runs. The longest meeting (ICSI Bmr003: 2,393
-  sentences, 21.6k words) takes 1.0 s and about 210 MB peak RSS on its own. The whole 232-meeting run peaks at
-  355 to 650 MB across three runs. The dense TF-IDF and similarity matrices dominate, so the fixtures' 30 MB does
+  485 ms). The slowest meeting took 1.4 to 2.7 s across four runs, because other jobs shared the machine. The
+  longest meeting (ICSI Bmr003: 2,393 sentences, 21.6k words) takes 1.0 s and about 210 MB peak RSS on its own.
+  The whole 232-meeting run peaks at 355 to 650 MB across four runs. The dense TF-IDF and similarity matrices dominate, so the fixtures' 30 MB does
   not hold for an hour-long meeting. A port should use sparse vectors.
 
 **textrank-minilm + rules** on the same 232 meetings (project-local torch, see Reproduce):
@@ -179,7 +179,7 @@ Decisions were not scored on real data: AMI also has a `decisions` list, but it 
 | Length | 480-690 words | 6k-14k words on average, up to 23.7k |
 | ROUGE-1 / 2 / L | 0.647 / 0.426 / 0.448 | 0.212 / 0.036 / 0.114 (LEAD 0.197 / 0.039 / 0.113) |
 | Action items with right owner | 100% | 4-7% |
-| Latency per meeting | 12-14 ms | 184 ms mean, 1.5 s max |
+| Latency per meeting | 12-45 ms | about 190 ms mean, 1.4-2.7 s max |
 | Peak RSS | 30 MB | 210 MB for the longest meeting alone, 355-650 MB for a full run |
 
 The fixtures overstate quality badly. Treat them as a regression test for the rules, not as a quality number.
@@ -188,7 +188,7 @@ The fixtures overstate quality badly. Treat them as a regression test for the ru
 
 | Platform | Default | Fallback |
 |---|---|---|
-| Mac | TF-IDF TextRank + rules (no model; on real meetings 184 ms mean, 1.5 s max, a few hundred MB RSS) | MiniLM-L6 TextRank via CoreML (90 MB), optional |
+| Mac | TF-IDF TextRank + rules (no model; on real meetings about 190 ms mean, up to 2.7 s, a few hundred MB RSS) | MiniLM-L6 TextRank via CoreML (90 MB), optional |
 | iPhone | TF-IDF TextRank + rules | MiniLM-L6 CoreML encoder on the ANE |
 | Linux CPU | TF-IDF TextRank + rules | MiniLM-L6 via ONNX Runtime |
 
