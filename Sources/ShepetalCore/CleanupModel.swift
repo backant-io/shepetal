@@ -42,9 +42,12 @@ public enum SmartCleanup {
           | new\ line | new\ paragraph )\b
         | \bone,.*\btwo,
         """#)
-    /// The spoken words a list or line break turns into layout.
-    static let layoutWords: Set = ["first", "second", "third", "fourth", "fifth", "finally", "and", "number", "step",
-                                   "one", "two", "three", "four", "five", "bullet", "point", "new", "line", "paragraph"]
+    /// Spoken list and line-break markers. They count as layout only at the start of an item (see `listMarkers`).
+    static let listMarker = try! NSRegularExpression(pattern: #"""
+        (?xi) \b(?: (?:number|step)\ (?:one|two|three|four|five|six|seven|eight|nine|ten|\d+) | bullet\ point
+          | new\ line | new\ paragraph | first | second | third | fourth | fifth | finally
+          | one | two | three | four | five | six | seven | eight | nine | ten )\b
+        """#)
     /// "1. " or "2) " at the start of a line: the model's list numbers.
     static let listNumber = try! NSRegularExpression(pattern: #"(?m)^\s*\d+[.)]\s"#)
 
@@ -107,9 +110,7 @@ public enum SmartCleanup {
             for k in cue { marker[k] = true }
             cues.append((cue, back, end - cue[cue.count - 1] - 1))
         }
-        if has(layout, input) {
-            for k in said.indices where layoutWords.contains(said[k].word) { droppable[k] = true; marker[k] = true }
-        }
+        for k in listMarkers(input, said, opens) { droppable[k] = true; marker[k] = true }
 
         // fits[i][j]: said[i...] can become written[j...] by dropping only droppable words.
         let m = written.count
@@ -140,8 +141,78 @@ public enum SmartCleanup {
                 return false                                      // a chained cue ("Sorry, I mean") goes with its first cue
             }
             if takenBack > c.replacement + 1 { return false }     // takes back more than what replaces it
+            // What a cue takes back is the words right before it: one run ending at the cue, not a word
+            // picked out of the clause ("Let's meet Tuesday, Wednesday" drops "on" and keeps Tuesday).
+            let words = c.takesBack.filter { !marker[$0] }
+            let gone = words.filter { !kept[$0] }
+            if gone != Array(words.suffix(gone.count)) { return false }
+            // A replacement that repeats the start of what it replaces ("two hundred units, sorry, two hundred and
+            // fifty") takes back from that word on, not only the last word ("We need two hundred, two hundred...").
+            let last = c.words[c.words.count - 1]
+            if let r = (last + 1 < n ? Array(last + 1..<n) : []).first(where: { !marker[$0] }),
+               let from = words.lastIndex(where: { said[$0].word == said[r].word }),
+               gone != Array(words[from...]) { return false }
+        }
+        return listNumbersCount(out)
+    }
+
+    /// The model's list numbers go 1, 2, 3 within each list; any other number at a line start is a new word.
+    static func listNumbersCount(_ out: String) -> Bool {
+        var previous = 0
+        for m in listNumber.matches(in: out, range: NSRange(location: 0, length: (out as NSString).length)) {
+            let n = Int((out as NSString).substring(with: m.range).filter(\.isNumber)) ?? 0
+            guard n == 1 || n == previous + 1 else { return false }
+            previous = n
         }
         return true
+    }
+
+    /// The tokens of list and line-break markers that start an item: "First, ...", ". Number two, ...",
+    /// "And finally, ...", ". New line. ...", "Bullet point, ...". Bare counting words ("One, ...") only open a
+    /// sentence. So "hire one designer" or "a new line of credit" keep their words. In text with no sentence
+    /// punctuation at all, items cannot be told apart, so every marker counts.
+    static func listMarkers(_ input: String, _ said: [(word: String, first: Character, range: NSRange)],
+                            _ opens: [Bool]) -> [Int] {
+        let ns = input as NSString
+        let unpunctuated = !input.contains(where: { ".?!".contains($0) })
+        // The nearest character before or after `loc` that is not a space; nil at either end of the text.
+        func char(_ loc: Int, step: Int) -> Character? {
+            var i = step < 0 ? loc - 1 : loc
+            while i >= 0, i < ns.length {
+                let c = ns.substring(with: NSRange(location: i, length: 1))
+                if c != " " { return Character(c) }
+                i += step
+            }
+            return nil
+        }
+        func charBefore(_ loc: Int) -> Character? { char(loc, step: -1) }
+        func charAfter(_ loc: Int) -> Character? { char(loc, step: 1) }
+        let punct: Set<Character> = [",", ".", ":", ";", "!", "?"]
+        var out: [Int] = []
+        for m in listMarker.matches(in: input, range: NSRange(location: 0, length: ns.length)) {
+            let ks = said.indices.filter { NSLocationInRange(said[$0].range.location, m.range) }
+            guard let first = ks.first else { continue }
+            if !unpunctuated {
+                let after = charAfter(NSMaxRange(m.range))
+                guard after == nil || punct.contains(after!) else { continue }
+                let bare = ks.count == 1 && ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"]
+                    .contains(said[first].word)
+                var starts = opens[first]
+                var and: Int? = nil
+                if !starts, first > 0, said[first - 1].word == "and" {   // "And third, ..."
+                    let b = charBefore(said[first - 1].range.location)
+                    if opens[first - 1] || b == nil || punct.contains(b!) { starts = true; and = first - 1 }
+                }
+                if !starts, !bare {
+                    let b = charBefore(m.range.location)
+                    starts = b == nil || punct.contains(b!)
+                }
+                guard starts else { continue }
+                if let and { out.append(and) }
+            }
+            out += ks
+        }
+        return out
     }
 
     static func tokens(_ s: String) -> [(word: String, first: Character, range: NSRange)] {

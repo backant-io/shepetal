@@ -208,19 +208,25 @@ Goal rule 5: rewrite-type cleanup runs on a local model. The pipeline is `SmartC
    examples decoded once at load, with that state restored for each dictation.
 3. **Guard** (`SmartCleanup.accepts`): the model's text is used only when it is the user's own words in
    the user's order, with nothing added: only list numbers at the start of a line may be new, and only
-   punctuation, case and line breaks may change. Words may be left out only in two cases. List and
-   line-break words ("first", "number one", "new line") may go when the text has such a cue. And a
-   self-correction may go: the whole cue ("I mean", "scratch that") together with at least one word it takes
-   back, from the words just before it in the same sentence (at most 8), or from the sentence before when the
-   cue opens a sentence (at most 20), and no more words than replace them, plus one. Otherwise the rules'
-   text is inserted. Small models answer questions (Qwen3.5 0.8B turned "What is the capital of Australia?"
+   punctuation, case and line breaks may change, and list numbers must count 1, 2, 3. Words may be left out
+   only in two cases. List and line-break markers ("First,", "Number two,", "And finally,", "Bullet point,",
+   ". New line.") may go where they start an item; "hire one designer" or "a new line of credit" keep their
+   words (in text with no sentence punctuation every marker counts). And a self-correction may go: the whole
+   cue ("I mean", "scratch that") together with the words it takes back, which must be one run ending right
+   before the cue, from the same sentence (at most 8 words) or from the sentence before when the cue opens a
+   sentence (at most 20), no longer than what replaces it plus one. When the replacement starts with a word
+   that is also in that run ("the London office, or rather the Berlin office"), the run starts at that word.
+   Otherwise the rules' text is inserted. Small models answer questions (Qwen3.5 0.8B turned "What is the capital of Australia?"
    into "The capital of Australia is Sydney.", "Sorry, what is seven times eight?" into "Seven times eight is
    56.", and Qwen3.5 2B turned "Sorry, what is twenty plus twenty two?" into "24") and follow instructions
    (Qwen3.5 2B turned "...reply with the word banana." into "banana"). They also get corrections backwards:
    Qwen3.5 0.8B turned "Send it to John, I mean Jane" into "Send it to John" and swapped "gate twelve.
-   Correction, gate fourteen." Since the PR #44 review, these are rejected: the order-aware check rejects
+   Correction, gate fourteen." Since the PR #44 reviews, these are rejected: the order-aware check rejects
    every such output in the committed results (sc01, sc02, sc06, sc11, sc13 for the 0.8B, sc11 for the 2B)
-   and keeps every exact match (`SmartCleanupTests.testCorrectionsThatKeepTheWrongHalfAreRejected`). The
+   and keeps every exact match (`SmartCleanupTests.testCorrectionsThatKeepTheWrongHalfAreRejected`), and
+   near-copies one word away are rejected too (`testCorrectionsThatKeepTheTakenBackWordsAreRejected`,
+   `testListWordsInsideItemsAreKept`, `testListNumbersMustCountUp`). Cue words used without correcting
+   ("Sorry, I also need the slides") can still let a rewrite drop the sentence before them (#43). The
    ceiling: a correction said without a cue word stays as heard, and a correction that moves words (sc16,
    "put the notes in the folder, no wait, send them to me") gets the rules' text.
    Dictations over 150 words skip the model (`SmartCleanup.maxModelWords`), and a rewrite that runs past
@@ -242,7 +248,7 @@ app's own `LlamaCleanup` code.
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | **Qwen3.5 2B** | 1,281 MB | 81 % | 5.4 % | **89 %** | **3.2 %** | 155 | 297 / 313 | 2,188 | 1,545 MB | 356 MB | Apache-2.0 |
 | Qwen3.5 0.8B | 533 MB | 59 % | 18.4 % | 65 % | 15.1 % | 99 | 181 / 192 | 1,124 | 801 MB | 292 MB | Apache-2.0 |
-| Gemma 3 1B it | 806 MB | 54 % | 18.0 % | 60 % | 11.9 % | 122 | 230 / 242 | 1,411 | 987 MB | 230 MB | Gemma terms |
+| Gemma 3 1B it | 806 MB | 54 % | 18.0 % | 60 % | 13.4 % | 122 | 230 / 242 | 1,411 | 987 MB | 230 MB | Gemma terms |
 | Rules only | - | - | - | 43 % | 28.3 % | - | - | 0 | 9 MB | 4 MB | |
 
 How to read it:
@@ -250,10 +256,10 @@ How to read it:
 - **Exact** is the whole output string equal to the expected one, line breaks included. **CER** is characters
   changed per character of the expected text. "Model on every fixture" sends every fixture to the model with
   no cue gate and no guard; "app path" is what the user gets (rules, gate, model, guard).
-- The app-path columns of the two Qwen3.5 rows were rerun after the order-aware guard (PR #44 review, results in
-  `bench/cleanup/results/`): exact match is unchanged (89 % and 65 %); CER rose (2.8 to 3.2 %, 13.5 to 15.1 %)
-  because rejected wrong rewrites now give the rules' text, which keeps the cue words. The other columns are
-  from the first run. Gemma 3 1B was not rerun.
+- The app-path columns were rerun after the order-aware guard (PR #44 reviews, results in
+  `bench/cleanup/results/`): exact match is unchanged (Qwen3.5 2B 89 %, 0.8B 65 %, Gemma 3 1B 60 %); CER rose
+  (2.8 to 3.2 %, 13.5 to 15.1 %, 11.9 to 13.4 %) because rejected wrong rewrites now give the rules' text,
+  which keeps the cue words. The timing and memory columns are from the first run.
 - **10 s transcript** is the model's time on the four fixtures of 24 or more words (about 10 s of speech),
   five runs each: 20 calls, median and max. It is time added on top of speech-to-text. Peak RSS includes the
   memory-mapped model file; peak footprint is `ri_lifetime_max_phys_footprint`, closer to what Activity

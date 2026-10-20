@@ -125,6 +125,60 @@ final class SmartCleanupTests: XCTestCase {
         XCTAssertTrue(SmartCleanup.accepts("Please send the slides to the whole team after lunch.", for: far))
     }
 
+    // Second review of #44: one function word away from the real bad outputs. Dropping a small word anywhere in
+    // the clause used to count as "taking back"; now what a cue takes back is one run ending right before it.
+    func testCorrectionsThatKeepTheTakenBackWordsAreRejected() {
+        for (said, out) in [
+            ("Let's meet on Tuesday, actually Wednesday, at three.", "Let's meet Tuesday, Wednesday, at three."),
+            ("Send it to John, I mean Jane, by the end of the day.", "Send to John Jane by the end of the day."),
+            ("Our flight leaves from gate twelve. Correction, gate fourteen.", "Our flight leaves gate twelve. Gate fourteen."),
+            ("Can you review my pull request today, actually, tomorrow?", "Can you review my request today, tomorrow?"),
+            ("We need two hundred units, sorry, two hundred and fifty units by Friday.",
+             "We need two hundred, two hundred and fifty units by Friday."),
+            ("Please call the London office, or rather the Berlin office, tomorrow morning.",
+             "Please call the London the Berlin office tomorrow morning."),
+            ("Ship the release to all customers on Monday, wait, no, to beta users first.",
+             "Ship the release to customers to beta users first."),
+            ("Do not deploy on Friday, I mean Saturday.", "Do deploy on Saturday."),
+            ("Meet Tom at five, sorry, at six.", "Meet at six."),
+        ] {
+            XCTAssertFalse(SmartCleanup.accepts(out, for: said), out)
+        }
+    }
+
+    func testParallelCorrectionsAreAccepted() {
+        XCTAssertTrue(SmartCleanup.accepts("Meet Tom at six.", for: "Meet Tom at five, sorry, at six."))
+        XCTAssertTrue(SmartCleanup.accepts("We need two hundred and fifty units by Friday.",
+                                           for: "We need two hundred units, sorry, two hundred and fifty units by Friday."))
+        XCTAssertTrue(SmartCleanup.accepts("Use the green theme for the landing page.",
+                                           for: "Use the blue theme, no, the green theme for the landing page."))
+    }
+
+    // List words go only where they mark an item; counted things inside an item keep their numbers.
+    func testListWordsInsideItemsAreKept() {
+        for (said, out) in [
+            ("Number one, hire one designer and two engineers. Number two, rent an office.", "1. Hire designer engineers\n2. Rent an office"),
+            ("First, order two new laptops and one monitor. Second, book the room.", "First, order laptops monitor. Second, book the room."),
+            ("First, buy bread and milk. Second, call mom and dad.", "1. Buy bread milk\n2. Call mom dad"),
+            ("We need a new line of credit first.", "We need a of credit."),
+        ] {
+            XCTAssertFalse(SmartCleanup.accepts(out, for: said), out)
+        }
+        XCTAssertTrue(SmartCleanup.accepts("1. Hire one designer and two engineers\n2. Rent an office",
+                                           for: "Number one, hire one designer and two engineers. Number two, rent an office."))
+        XCTAssertTrue(SmartCleanup.accepts("My goals:\n1. Finish the migration\n2. Hire two engineers\n3. Cut costs",
+                                           for: "My goals. First, finish the migration. Second, hire two engineers. And third, cut costs."))
+        XCTAssertTrue(SmartCleanup.accepts("Agenda:\n1. Budget\n2. Hiring", for: "Agenda. One, budget. Two, hiring."))
+        XCTAssertTrue(SmartCleanup.accepts("Buy milk\nCall mom", for: "buy milk new line call mom"))
+    }
+
+    // List numbers count 1, 2, 3; a number the model puts at a line start out of order is an answer.
+    func testListNumbersMustCountUp() {
+        let said = "number one what is six times seven number two buy milk"
+        XCTAssertFalse(SmartCleanup.accepts("1. What is six times seven\n42. Buy milk", for: said))
+        XCTAssertTrue(SmartCleanup.accepts("1. What is six times seven\n2. Buy milk", for: said))
+    }
+
     // Long dictations skip the model: decode time grows with the text.
     func testLongDictationSkipsTheModel() {
         let long = Array(repeating: "first we ship it", count: 40).joined(separator: " ")
