@@ -15,9 +15,10 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 PLATFORMS = ("Mac", "Linux", "iPhone")
-VALUES = {"done", "hand-test", "confirmed", "impossible", "n/a", "todo"}
-AUTOMATED = {"done", "hand-test", "confirmed", "impossible", "n/a"}
+VALUES = {"done", "hand-test", "confirmed", "impossible", "n/a", "outside", "todo"}
+AUTOMATED = {"done", "hand-test", "confirmed", "impossible", "n/a", "outside"}
 CONFIRMED = AUTOMATED - {"hand-test"}
+DESKTOP = {"M", "W"}  # inventory Wispr-column letters that map to the Mac and Linux columns (goal "Platform mapping")
 NA_CATEGORIES = {"billing", "subscriptions", "referrals", "telemetry", "remote-flags", "ab-tests", "account-admin"}
 ROW = re.compile(r"^\|\s*(F\d+)\s*\|(.*)\|\s*$", re.M)
 
@@ -41,6 +42,7 @@ def evidence(notes):
 def check(inventory, ledger):
     """Return (errors, cell values) for a ledger against the inventory."""
     errors, ledger_ids, cells = [], set(), []
+    wispr = {fid: set(cols[1].split()) for fid, cols in rows(inventory)}
     for fid, cols in rows(ledger):
         if fid in ledger_ids:
             errors.append(f"{fid}: duplicate row")
@@ -63,7 +65,10 @@ def check(inventory, ledger):
                 m = re.search(r"\bn/a ([\w-]+): *\w", e)
                 if not m or m.group(1) not in NA_CATEGORIES:
                     errors.append(f"{fid} {p}: n/a needs 'n/a <category>: <reason>' with a category in {sorted(NA_CATEGORIES)}")
-    inventory_ids = {fid for fid, _ in rows(inventory)}
+            elif value == "outside" and (p == "iPhone" or DESKTOP & wispr.get(fid, set())):
+                errors.append(f"{fid} {p}: outside needs a Mac or Linux cell whose inventory Wispr column has no M or W "
+                              "(an iPhone cell is never outside; use impossible)")
+    inventory_ids = set(wispr)
     errors += [f"{fid}: in the inventory but missing from the ledger" for fid in sorted(inventory_ids - ledger_ids)]
     errors += [f"{fid}: in the ledger but not in the inventory" for fid in sorted(ledger_ids - inventory_ids)]
     return errors, cells
@@ -126,6 +131,20 @@ def self_test():
     fails(good.replace("Mac: `HotkeyTests", "Linux: `HotkeyTests"), "F01 Mac: done needs")  # no cross-platform evidence
     fails(good.replace("n/a billing: store only", "n/a billing"), "F01 iPhone: n/a needs")
     fails(good.replace("| todo |", "| wip |"), "unknown value 'wip'")
+
+    # outside: only for a column the feature's Wispr platforms don't map to.
+    ios_inv = inv + "| F09 | k | i | y | x | P2 | y |\n"
+    ios = good + "| F09 | k | outside | outside | todo | |\n"
+    errors, cells = check(ios_inv, ios)
+    assert errors == [], errors
+    assert coverage(cells[-3:]) == (200 / 3, 200 / 3), coverage(cells[-3:])
+    fails(good.replace("| hand-test |", "| outside |"), "F02 Mac: outside needs")  # Wispr ships it on Mac
+    for wispr in ("M", "W", "M W i"):  # any desktop letter keeps Mac and Linux inside the mapping
+        errors = check(ios_inv.replace("| k | i |", f"| k | {wispr} |"), ios)[0]
+        assert any("F09 Mac: outside needs" in e for e in errors), (wispr, errors)
+        assert any("F09 Linux: outside needs" in e for e in errors), (wispr, errors)
+    errors = check(ios_inv, ios.replace("| todo | |", "| outside | |"))[0]
+    assert any("F09 iPhone: outside needs" in e for e in errors), errors
 
     ids = {("flags", "x-flag"), ("events", "y_event")}
     full = "flags\tx-flag\tF01\nevents\ty_event\tinternal\tserver-side metric\n"

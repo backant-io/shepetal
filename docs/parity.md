@@ -13,6 +13,7 @@ Cell values:
 - `confirmed`: set only by Pavel after he runs the hand test.
 - `impossible`: the platform forbids it. The evidence for that platform cites the Apple, Linux or kernel doc by URL and names the substitute that was built.
 - `n/a`: only for features that exist solely for Wispr's servers or business. The evidence reads `n/a <category>: <reason>`, with the category one of `billing`, `subscriptions`, `referrals`, `telemetry`, `remote-flags`, `ab-tests`, `account-admin`. Cloud-backed user features (sync, sharing, MCP, team dictionaries, cloud ASR) are never n/a; they get a local-first equivalent.
+- `outside`: the cell's platform is outside the platform mapping for this feature. Allowed only for a Mac or Linux cell whose inventory Wispr column has no `M` or `W` (an iOS-only feature); the inventory row is the evidence. An iPhone cell is never `outside`: an iOS-forbidden feature is `impossible`.
 
 Evidence syntax: segments separated by `;`, each starting with `Mac:`, `Linux:`, `iPhone:` or `All:` (all three). Other text is a free note.
 
@@ -127,7 +128,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F105 | Subscriptions, trials, weekly word limit, referrals, student plan, paywalls | n/a | n/a | n/a | All: n/a subscriptions: plans, trials, word limits, referrals and paywalls only serve Wispr's billing; shepetal is free and local. |
 | F106 | Product analytics, session telemetry, Sentry, Datadog logs | n/a | n/a | n/a | All: n/a telemetry: product analytics and crash/log upload only serve Wispr; shepetal keeps logs local. |
 | F107 | Remote feature flags and A/B experiments | n/a | n/a | n/a | All: n/a remote-flags: remote feature flags and A/B experiments only serve Wispr; shepetal uses compile-time features. |
-| F108 | Mobile keyboard dictation (iPhone keyboard extension + app) | todo | todo | todo | iPhone: keyboard extension and app handoff on main (#3, `HandoffTests` and `DictationSessionTests`, 44 tests on the simulator), not run on a device (#13), todo until its device steps are in docs/manual-test.md (#19); Mac and Linux: iOS-only row with no allowed value (#20) |
+| F108 | Mobile keyboard dictation (iPhone keyboard extension + app) | outside | outside | todo | iPhone: keyboard extension and app handoff on main (#3, `HandoffTests` and `DictationSessionTests`, 44 tests on the simulator), not run on a device (#13), todo until its device steps are in docs/manual-test.md (#19); Mac and Linux: outside, Wispr ships it on iOS only (inventory Wispr column `i`) |
 | F109 | Smart spacing at insertion boundaries (leading or trailing space, nbsp, capitalization based on surrounding text) | todo | todo | todo | Mac: spacing and casing rules on main (`InsertionRulesTests` #10), the NBSP and selection rules are not built |
 | F110 | Formality mismatch detection (notices when the tone does not fit the app) | todo | todo | todo | |
 | F111 | Feature tour / what's-new / changelog | todo | todo | todo | |
@@ -135,7 +136,7 @@ The completeness check (`--completeness /Users/sorcecoder/shepetal-re/identifier
 | F113 | Team dictionary and snippets (shared with a team, scoped by department) | todo | todo | todo | |
 | F114 | Creator mode: an optional on-screen label while dictating, for screen recordings and streams | todo | todo | todo | |
 | F115 | Microphone advice quiz (environment and gear questions, a whisper try-out, a recommended mic setup) | todo | todo | todo | |
-| F116 | Start dictation from the iPhone Action Button, with a setup guide and keyboard tips | todo | todo | todo | Mac and Linux: iOS-only row with no allowed value (#20) |
+| F116 | Start dictation from the iPhone Action Button, with a setup guide and keyboard tips | outside | outside | todo | Mac and Linux: outside, Wispr ships it on iOS only (inventory Wispr column `i`) |
 | F117 | Bulk import of dictionary words and snippets from a file, with a preview | todo | todo | todo | |
 | F118 | Share usage stats as an image card (copy, save, post) | todo | todo | todo | |
 | F119 | Meeting recorder from the keyboard (triple-tap of the dictation key, or a rebindable shortcut) | todo | todo | todo | |
