@@ -12,8 +12,10 @@
 #   ad-hoc ("-")
 #
 #   scripts/make-app.sh            build and sign dist/Shepetal.app
-#   scripts/make-app.sh --install  also copy it to ~/Applications/Shepetal.app (quits a running copy first)
-#   scripts/make-app.sh --zip      also write dist/Shepetal-<version>-mac.zip for a release
+#   scripts/make-app.sh --install  also copy it to ~/Applications/Shepetal.app; a copy running from there
+#                                  is quit first and opened again afterwards
+#   scripts/make-app.sh --zip      also write dist/Shepetal-<version>-mac.zip (+ .sha256) for a release
+#   VERSION=0.1.1 scripts/make-app.sh ...   the version shown in Finder and in the zip name (default 0.1.0)
 set -euo pipefail
 cd "$(dirname "$0")/.."
 INSTALL=0; ZIP=0
@@ -28,7 +30,7 @@ done
 swift build -c release -j "${JOBS:-4}"
 BIN=$(swift build -c release --show-bin-path)
 APP=dist/Shepetal.app
-SHORT_VERSION=0.1.0
+SHORT_VERSION=${VERSION:-0.1.0}
 BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 1)
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
@@ -101,17 +103,22 @@ if [ "$ZIP" = 1 ]; then
   Z=dist/Shepetal-$SHORT_VERSION-mac.zip
   rm -f "$Z"
   ditto -c -k --sequesterRsrc --keepParent "$APP" "$Z"
-  shasum -a 256 "$Z"
+  (cd dist && shasum -a 256 "$(basename "$Z")" | tee "$(basename "$Z").sha256")
 fi
 
 if [ "$INSTALL" = 1 ]; then
   DEST="$HOME/Applications/Shepetal.app"
-  if pgrep -qx Shepetal; then
-    pkill -x Shepetal || true
-    for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -qx Shepetal || break; sleep 0.5; done
+  EXE="$DEST/Contents/MacOS/Shepetal"
+  WAS_RUNNING=0
+  if pgrep -qf "^$EXE"; then
+    WAS_RUNNING=1
+    pkill -f "^$EXE" || true  # only the installed copy, never another Shepetal on this Mac
+    for _ in $(seq 1 40); do pgrep -qf "^$EXE" || break; sleep 0.25; done
+    if pgrep -qf "^$EXE"; then echo "the running $DEST did not quit; quit it from its 🤫 menu and retry" >&2; exit 1; fi
   fi
   mkdir -p "$HOME/Applications"
   rm -rf "$DEST"
   ditto "$APP" "$DEST"
   echo "Installed $DEST"
+  if [ "$WAS_RUNNING" = 1 ]; then open "$DEST" && echo "Opened it again"; fi
 fi
