@@ -121,9 +121,9 @@ A takeover session finished the last PRs after the self-hosted worker's token ra
 | PR | State | What landed | Verified before merge |
 |---|---|---|---|
 | #28 | merged | Automated tests for the Mac shell paths (🤫 panel frame and flags, `paste_failed`, empty transcript, tap re-enable) and the F51 guard. A run of the e2e that stops partway fails | four review rounds, the last one PASS; 108 tests; sandboxed e2e OK |
-| #40 | merged | AMI-trained action-item detection for the summarizer (65% with the right owner, under the 80% goal, so #8 stayed open until #129) | independent review |
+| #40 | merged | AMI-trained action-item detection for the summarizer (65% with the right owner, under the 80% goal; #129 later raised it, and #8 is still open) | independent review |
 | #24, #25 | merged | Outside cells in the parity ledger. CI and `scripts/ci/run-checks.sh` | re-reviews PASS; Actions green |
-| #39 | merged | Mic choice with ranking, mic health alerts, language routing and the personal dictionary. Merged with main's off-main-thread mic: the mic opens on the Recorder's queue, the device choice and health checks run on top, and an open that fails ends the dictation. Speech errors use main's plain wording, so no model names reach the UI | review findings fixed (merge, model names, re-transcribe dictionary test); 273 tests, only the then-known #133 failure; sandboxed e2e WER 0.0%; CI green apart from #133 |
+| #39 | merged | Mic choice with ranking, mic health alerts, language routing and the personal dictionary. Merged with main's off-main-thread mic: the mic opens on the Recorder's queue, the device choice and health checks run on top, and an open that fails ends the dictation. Speech errors use main's plain wording, so no model names reach the UI | review findings fixed (merge, model names, re-transcribe dictionary test); 271 tests, only the then-known #133 failure; sandboxed e2e WER 0.0%; CI green apart from #133 |
 | #47 | merged | Esc cancel, rebindable shortcuts, a 20 min cap with a 1 min warning, paste last and copy last. Also these review fixes: the key tap runs on its own thread, a hidden key-up no longer blocks fn, typing and app chords are refused, stored chords are validated, paste last goes through the secure-input gate. Globe 179 is ignored (#139), and the ending tap of hands-free transcribes on its press | 317 tests, 0 failures; sandboxed e2e OK; deliberate breaks red; CI green |
 | #163 | merged | #78: FluidAudio stays in offline mode, so a model it cannot load is never deleted and downloaded again. Only the menu's download lifts that mode | `OfflineModelTests` (a broken cache survives; red when offline mode is off); 280 tests; e2e OK |
 | #168 | merged | #75: every dictation goes through Apple's sound-isolation effect before the model, the WAV stays raw, and voice processing and the Mic Mode picker are never used. Knob: `voiceIsolationMix` | `VoiceIsolationTests`; 320 tests; e2e WER 3.1% (was 0.0%), ready 131–218 ms (was 59–85) |
@@ -132,7 +132,7 @@ A takeover session finished the last PRs after the self-hosted worker's token ra
 
 **Left for merge-a:**
 - Hand tests: M-ESC, M-KEY, M-LEN, M-LAST (#47), M-MIC-1..6 and M-LANG-1 (#39, #168).
-- The 20 min forced stop is silent (#47 review nit).
+- The 20 min forced stop shows no hint next to 🤫 and no marker on the history row (#47 review nit).
 - Voice isolation costs accuracy on clean synthetic speech. M-MIC-6 decides whether real rooms need `voiceIsolationMix` 50.
 - Meetings and the whisper.cpp engine still hear raw audio.
 
