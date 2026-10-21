@@ -27,6 +27,9 @@ final class AccountWiringTests: XCTestCase {
                                  "the fn gate is gone from key(_:at:)")
         let run = try XCTUnwrap(body.range(of: "run { $0.handle(input, at: t) }"))
         XCTAssertLessThan(gate.lowerBound, run.lowerBound, "the gate must come before the gesture")
+        // Every input, before the switch: a refused press opens Home on its release, never when a key came first.
+        let release = try XCTUnwrap(body.range(of: "Account.shared.afterBlockedPress(input)"), "a blocked press never opens Home")
+        XCTAssertLessThan(release.lowerBound, try XCTUnwrap(body.range(of: "switch input {")).lowerBound)
     }
 
     func testLicenseTimerKnowsWhenADictationRuns() throws {

@@ -19,6 +19,11 @@ VERSION=${VERSION:-0.1.0}
 export VERSION
 export REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-1}  # the release requires sign-in
 [ "${SKIP_APP:-0}" = 1 ] || scripts/make-app.sh
+# SKIP_APP=1 packages the dist/Shepetal.app already there, which may be a plain build that dictates without sign-in.
+if [ "$REQUIRE_SIGNIN" = 1 ] && [ "$(plutil -extract ShepetalRequiresSignIn raw dist/Shepetal.app/Contents/Info.plist 2>/dev/null)" != true ]; then
+  echo "dist/Shepetal.app does not require sign-in: rebuild it without SKIP_APP=1, or set REQUIRE_SIGNIN=0" >&2
+  exit 2
+fi
 
 WORK=.cache/pkg
 rm -rf "$WORK"
