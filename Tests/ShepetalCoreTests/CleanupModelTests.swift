@@ -291,6 +291,7 @@ final class CleanupContextTests: XCTestCase {
         XCTAssertEqual(SmartCleanup.apply(said, model: three, context: list), .init(text: "3. Headphones", usedModel: true))
         XCTAssertFalse(SmartCleanup.apply(said, model: three).usedModel, "no list above the cursor")
         let sameLine = CleanupContext(before: "Packing list:\n1. Passport\n2. Charger", after: "", selected: "")
+        XCTAssertEqual(sameLine.listNumber, 0, "the cursor is not on a new line, so no list goes on")
         XCTAssertFalse(SmartCleanup.apply(said, model: three, context: sameLine).usedModel, "the cursor is not on a new line")
         XCTAssertFalse(SmartCleanup.apply(said, model: FakeCleanupModel { _ in "4. Headphones" }, context: list).usedModel,
                        "numbering may go on from 2, not skip to 4")
@@ -301,6 +302,8 @@ final class CleanupContextTests: XCTestCase {
         XCTAssertEqual(SmartCleanup.apply("Number three, the office move.", model: punctuated).usedModel, false)
         XCTAssertEqual(punctuated.calls.count, 1, "without the list above, the sentence skips the model")
         XCTAssertEqual(list.listNumber, 2)
+        XCTAssertEqual(CleanupContext(before: "1. Passport\r2. Charger\r", after: "", selected: "").listNumber, 2, "Word ends lines with \\r")
+        XCTAssertEqual(CleanupContext(before: "1. Passport\r\n2. Charger\r\n", after: "", selected: "").listNumber, 2)
         XCTAssertEqual(CleanupContext(before: "1. Passport\n2. Charger\n\n", after: "", selected: "").listNumber, 0, "a blank line ends the list")
     }
 

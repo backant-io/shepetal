@@ -40,11 +40,12 @@ public struct CleanupContext: Equatable, Sendable, CustomStringConvertible {
     public var description: String { "CleanupContext(\(before.count) + \(selected.count) + \(after.count) characters)" }
 
     /// The number of the list item on the line above the cursor, when the cursor starts a new line after it
-    /// ("1. Milk\n2. Eggs\n"): the model's "3. Bread" goes on with that list. 0 otherwise.
+    /// ("1. Milk\n2. Eggs\n"): the model's "3. Bread" goes on with that list. 0 otherwise. Any line break counts:
+    /// Word's fields end paragraphs with "\r".
     public var listNumber: Int {
-        let lines = before.components(separatedBy: "\n")
+        let lines = before.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         guard lines.count > 1, lines[lines.count - 1].allSatisfy(\.isWhitespace) else { return 0 }
-        let line = lines[lines.count - 2] as NSString
+        let line = String(lines[lines.count - 2]) as NSString
         guard let m = SmartCleanup.listNumber.firstMatch(in: line as String, range: NSRange(location: 0, length: line.length)) else { return 0 }
         return Int(line.substring(with: m.range).filter(\.isNumber)) ?? 0
     }

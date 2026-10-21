@@ -71,18 +71,21 @@ def table(results):
 def context_table(paths):
     """fixtures/context.jsonl on the app's path with the text around the cursor off (`app`) and on (`app_ctx`)."""
     fixtures = [json.loads(l) for l in open(CONTEXT) if l.strip()]
-    lines = ["| Model | Exact, off | Exact, on | CER, off | CER, on | Model text used, on | Mean / max ms per model call, on |",
-             "|---|---|---|---|---|---|---|"]
+    lines = ["| Model | Exact, off | Exact, on | CER, off | CER, on | Model text used, on | Mean / max ms per model call, off | on |",
+             "|---|---|---|---|---|---|---|---|"]
     for p in paths:
         rows = [json.loads(l) for l in open(p) if l.strip()]
         name = next(l for l in rows if l.get("summary"))["model"]
         rows = {l["id"]: l for l in rows if "id" in l}
         assert all(f["id"] in rows for f in fixtures), (p, "missing fixtures")
         off, on = score(fixtures, rows, "app"), score(fixtures, rows, "app_ctx")
-        ms = [rows[f["id"]]["model_ctx_ms"] for f in fixtures if "model_ctx_ms" in rows[f["id"]]]
-        lines.append("| {} | {:.0%} | {:.0%} | {:.1%} | {:.1%} | {} | {} |".format(
+
+        def ms(key):  # the model alone on every fixture: `model_ms` without the field, `model_ctx_ms` with it
+            t = [rows[f["id"]][key] for f in fixtures if key in rows[f["id"]]]
+            return f"{statistics.mean(t):.0f} / {max(t):.0f}" if t else "-"
+        lines.append("| {} | {:.0%} | {:.0%} | {:.1%} | {:.1%} | {} | {} | {} |".format(
             name, off[0], on[0], off[1], on[1], sum(rows[f["id"]]["used_model_ctx"] for f in fixtures),
-            f"{statistics.mean(ms):.0f} / {max(ms):.0f}" if ms else "-"))
+            ms("model_ms"), ms("model_ctx_ms")))
     return "\n".join(lines)
 
 

@@ -114,16 +114,11 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         guard llama_state_seq_set_data(ctx, state, state.count, 0) > 0 else {
             throw LoadError(errorDescription: "llama.cpp could not restore the prompt state")
         }
-        // The dictation's and the field's own text never become control tokens; only the template around them does.
-        let said = try tokenize(text, bos: false, special: false)
-        let input = context.isEmpty
-            ? try said + tokenize(tail, bos: false, special: true)
-            : try tokenize(CleanupPrompt.message(text, context), bos: false, special: false) + tokenize(fieldTail, bos: false, special: true)
+        let (input, answer) = try self.input(text, context: context)
         try decode(input)
         var bytes: [UInt8] = []
         var piece = [CChar](repeating: 0, count: 256)
-        // The answer is about as long as the dictation, however much the field holds.
-        for _ in 0..<((context.isEmpty ? input.count : said.count + 16) * 2 + 32) {
+        for _ in 0..<answer {
             let token = llama_sampler_sample(sampler, ctx, -1)
             if llama_vocab_is_eog(vocab, token) { break }
             let n = llama_token_to_piece(vocab, token, &piece, Int32(piece.count), 0, false)
@@ -136,7 +131,21 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         return Self.clean(String(decoding: bytes, as: UTF8.self))
     }
 
-    private func tokenize(_ s: String, bos: Bool, special: Bool) throws -> [llama_token] {
+    /// The tokens after the cached prompt: the dictation, with the field in front of it (F24), then the template's
+    /// end of the turn. The dictation's and the field's own text never become control tokens, whatever they hold;
+    /// only the template does. `answer` caps the answer's tokens.
+    func input(_ text: String, context: CleanupContext) throws -> (tokens: [llama_token], answer: Int) {
+        let said = try tokenize(text, bos: false, special: false)
+        if context.isEmpty {
+            let input = try said + tokenize(tail, bos: false, special: true)
+            return (input, input.count * 2 + 32)
+        }
+        let input = try tokenize(CleanupPrompt.message(text, context), bos: false, special: false)
+            + tokenize(fieldTail, bos: false, special: true)
+        return (input, (said.count + 16) * 2 + 32)  // about as long as the dictation, however much the field holds
+    }
+
+    func tokenize(_ s: String, bos: Bool, special: Bool) throws -> [llama_token] {
         let utf8 = Array(s.utf8CString)
         var tokens = [llama_token](repeating: 0, count: utf8.count + 8)
         let n = llama_tokenize(vocab, utf8, Int32(utf8.count - 1), &tokens, Int32(tokens.count), bos, special)
