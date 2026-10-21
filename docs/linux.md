@@ -19,7 +19,7 @@ PipeWire bindings are less mature. Python would need a runtime and a virtualenv 
 | Part | v0 | Later |
 | --- | --- | --- |
 | Hotkey | fn (evdev `KEY_FN`). Read only the `/dev/input/event*` keyboards whose sysfs key capabilities include the hotkey (see "fn hotkey" below). Their key events go to one state machine. User must be in the `input` group. | GlobalShortcuts portal first (press and release, GNOME 48+, Plasma, Hyprland), evdev as the opt-in fallback, `evdev` crate for hotplug |
-| Gesture | Recording starts on the fn press. Hold fn at least 500 ms for push-to-talk. Two taps with at most 500 ms between the release and the second press for hands-free, next press stops. A shorter press with no second tap is too short: nothing is transcribed or typed, the clip is kept as too short, and the hint `Hold fn to talk · double-tap for hands-free` shows next to 🤫 for about 2 s (and goes to stderr). A chord (fn+F1) cancels without a hint, and the clip is kept as cancelled. The 500/500 ms values match the Mac (`Sources/ShepetalCore/FnGesture.swift`) and the 500 ms debounce in `docs/re/dictation-input.md` section 2.3. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code). | Config file, tunable thresholds |
+| Gesture | Recording starts on the fn press. Hold fn at least 500 ms for push-to-talk. Two taps with at most 500 ms between the release and the second press for hands-free, next press stops. A shorter press with no second tap is too short: nothing is transcribed or typed, the clip is kept as too short, and the hint `Hold fn to talk · double-tap for hands-free` shows next to 🤫 for about 2 s (and goes to stderr). A chord (fn+F1) cancels without a hint, and the clip is kept as cancelled. The 500/500 ms values match the Mac (`Sources/ShepetalCore/FnGesture.swift`) and the 500 ms debounce in `docs/re/dictation-input.md` section 2.3. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code), or a combo of up to 3 keys or a mouse button with `dictation` in config.json (docs/linux-shortcuts.md). | Config file, tunable thresholds |
 | Mic | `pw-record` at 16 kHz mono s16, falling back to `parecord` (PulseAudio). Stopped with SIGINT so the WAV header is written. | `pipewire-rs` stream, no temp file |
 | STT | `sherpa-onnx-offline` (Parakeet) or `whisper-cli` from whisper.cpp (Whisper), run on the kept WAV. sherpa-onnx prints one JSON line per file on stdout, and shepetal reads its `text`. | `sherpa-rs` / `whisper-rs` in-process, model kept warm, sherpa-onnx streaming for meetings |
 | Model | The Linux rows of the tier table in `docs/models.md` (goal rule 5). CPU: Parakeet TDT 0.6B v3 int8 on sherpa-onnx, or Parakeet TDT-CTC 110M int8 below 4 GB RAM. CUDA (`/dev/nvidia0`, 8 GB RAM or more): Parakeet TDT 0.6B v3 with `--provider=cuda`. Vulkan (an ICD in `/usr/share/vulkan/icd.d`, 8 GB RAM or more): Whisper large-v3-turbo q5_0 on whisper.cpp. | Thresholds from measured latency, VRAM check, the Whisper fallback for languages Parakeet lacks |
@@ -55,7 +55,11 @@ The colors are Apple's system red, orange, blue and yellow, which the Mac indica
 | GNOME Wayland | `linux/gnome-extension/`, a GNOME Shell extension (GNOME 45 and later), because Mutter has no layer-shell and lets no app place an overlay. It adds 🤫 as top chrome (above all windows, also full-screen ones), not part of the input region and not reactive, so clicks go through. |
 
 `shepetal daemon` starts `shepetal-indicator` from PATH, except on GNOME Wayland, where it says
-that 🤫 comes from the extension. If the program is missing, the daemon says so once on stderr.
+that 🤫 comes from the extension. The daemon looks the program up on PATH before each start,
+because Rust 1.75 (Ubuntu 24.04) spawns a missing program as a child that exits 127 instead of
+failing (#130). If it is missing (or exits 127, which `env` does when python3 is missing), the
+daemon says so once on stderr and looks again with the same backoff as below, so installing it
+brings 🤫 up without a restart.
 Whenever the indicator exits while the daemon runs (a crash, an X server or compositor restart, a
 display that was not ready yet), the daemon reports it on stderr, reaps it and starts it again
 after 2 s, doubling the wait up to 64 s while it keeps exiting within 30 s (goal rule 3: 🤫 is
@@ -176,7 +180,7 @@ text is ready (`linux/src/focus.rs`):
 
 - Same window at both ends: the text is typed. The clipboard is not touched.
 - Another window has focus: nothing is typed. The text goes to the clipboard (`wl-copy` on
-  Wayland, else `xclip`), and the hint next to 🤫 says
+  Wayland, else `xclip` or `xsel`), and the hint next to 🤫 says
   `Focus moved. The text is on the clipboard: press Ctrl+V (Ctrl+Shift+V in a terminal).`
 - Focus unreadable at either end: there is nothing to compare, so the text is typed.
 - Typing fails (the tool exits non-zero): the text goes to the clipboard with the hint
@@ -230,8 +234,8 @@ is gone. A missing, broken or unknown setting keeps everything. There is no "nev
 
 ## Security
 
-- Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`
-  and `xclip` over stdin. It never goes in argv, which every local user can read with `ps`.
+- Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`,
+  `xclip` and `xsel` over stdin. It never goes in argv, which every local user can read with `ps`.
 - Every dictation's raw audio is kept, the exact 16 kHz mono WAV the model received, in
   `$XDG_DATA_HOME/shepetal/audio/` (default `~/.local/share/shepetal/audio/`; an empty or relative
   `XDG_DATA_HOME` is ignored, as the XDG spec says). The directory is created 0700. If it is a

@@ -12,6 +12,10 @@ import ShepetalCore
 final class FnTap {
     /// On the tap's thread. `t` is the uptime when the key moved (`FnClock`).
     var onInput: ((KeyInput, TimeInterval) -> Void)?
+    /// Every keycode 63 flagsChanged (fn down or up), whatever the router makes of it, and every 179 keyDown:
+    /// what `FnHealth` decides "fn not received" from. On the tap's thread, like `onInput`.
+    var onFn: ((Bool, TimeInterval) -> Void)?
+    var onGlobe: ((TimeInterval) -> Void)?
     /// Whether a held key is physically up; a seam for tests.
     var isUp: (Int) -> Bool = FnTap.systemIsUp
     private(set) var canSwallow = false
@@ -98,6 +102,7 @@ final class FnTap {
         }
         // Our own Cmd+V (paste) is not a key the user pressed.
         if event.getIntegerValueField(.eventSourceUnixProcessID) == Int64(getpid()) { return false }
+        let t = FnClock.seconds(timestamp: event.timestamp, now: ProcessInfo.processInfo.systemUptime)
         let code: Int
         let down: Bool
         switch type {
@@ -105,9 +110,13 @@ final class FnTap {
             code = Int(event.getIntegerValueField(.keyboardEventKeycode))
             guard let d = Key.modifierDown(code, flags: event.flags.rawValue) else { return false }
             down = d
+            if code == Key.fn { onFn?(d, t) }
         case .keyDown, .keyUp:
             code = Int(event.getIntegerValueField(.keyboardEventKeycode))
-            if code == Key.globe { return false }  // neither fn nor another key (see above)
+            if code == Key.globe {  // neither fn nor another key (see above)
+                if type == .keyDown { onGlobe?(t) }
+                return false
+            }
             down = type == .keyDown
         case .otherMouseDown, .otherMouseUp:
             code = Key.mouse(Int(event.getIntegerValueField(.mouseEventButtonNumber)) + 1)
@@ -115,7 +124,6 @@ final class FnTap {
         default:
             return false
         }
-        let t = FnClock.seconds(timestamp: event.timestamp, now: ProcessInfo.processInfo.systemUptime)
         let flags = event.flags.rawValue
         let isUp = isUp
         let (inputs, swallow) = lock.withLock {

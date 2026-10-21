@@ -154,7 +154,7 @@ fn history_cmd(args: &[String]) -> Res {
 /// Put `text` on the clipboard of this session.
 fn copy(text: &str) -> Res {
     let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
-    let clip = insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("no wl-copy or xclip")?;
+    let clip = insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("no wl-copy, xclip or xsel")?;
     clip.insert(text).map_err(|e| e.to_string())
 }
 
@@ -172,7 +172,7 @@ fn probe(dump_file: Option<&String>) -> Res {
     println!("model:     {} ({:?}) on {} ({})", choice.model, choice.engine, choice.backend, model_path(&choice).display());
     println!("session:   {:?} desktop {:?}", env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
     println!("insert:    {:?}", backend());
-    let fns = keyboards_with(Path::new(SYS_INPUT), shepetal::KEY_FN);
+    let fns = keyboards_with(Path::new(SYS_INPUT), &[shepetal::KEY_FN]);
     if fns.is_empty() {
         println!("fn key:    not visible to Linux (many laptops handle fn in firmware); set SHEPETAL_KEY, e.g. rightalt");
     }
@@ -198,15 +198,15 @@ fn probe(dump_file: Option<&String>) -> Res {
 }
 
 /// The /dev/input/event* nodes under `sys` (/sys/class/input) whose key capabilities include
-/// `key`, with their names. The kernel drops events for keys a device does not declare, so the
-/// others cannot send it. ydotoold is skipped: it never sends a key the user pressed.
-fn keyboards_with(sys: &Path, key: u16) -> Vec<(PathBuf, String)> {
+/// any of `codes`, with their names. The kernel drops events for keys a device does not declare,
+/// so the others cannot send them. ydotoold is skipped: it never sends a key the user pressed.
+fn keyboards_with(sys: &Path, codes: &[u16]) -> Vec<(PathBuf, String)> {
     let Ok(dir) = std::fs::read_dir(sys) else { return vec![] };
     let mut out: Vec<_> = dir.flatten().filter_map(|e| {
         let node = e.file_name().to_string_lossy().into_owned();
         let caps = std::fs::read_to_string(e.path().join("device/capabilities/key")).ok()?;
         let name = std::fs::read_to_string(e.path().join("device/name")).unwrap_or_default().trim().to_string();
-        if !node.starts_with("event") || !shepetal::has_key(&caps, key) || name == YDOTOOLD {
+        if !node.starts_with("event") || !codes.iter().any(|&c| shepetal::has_key(&caps, c)) || name == YDOTOOLD {
             return None;
         }
         Some((PathBuf::from("/dev/input").join(node), name))
@@ -215,25 +215,25 @@ fn keyboards_with(sys: &Path, key: u16) -> Vec<(PathBuf, String)> {
     out
 }
 
-/// The hotkey (`SHEPETAL_KEY`, else fn), its name, and the keyboards under `sys` that can send
-/// it. None is an error: the daemon must not start and wait for a key that never arrives.
-fn hotkey_keyboards(sys: &Path) -> Result<(u16, String, Vec<(PathBuf, String)>), String> {
-    let key_env = std::env::var("SHEPETAL_KEY").ok();
-    // A raw evdev code reads "Hold key 58 to talk" in the hint, not "Hold 58 to talk".
-    let key_name = match key_env.as_deref() {
-        None => "fn".into(),
-        Some(k) if k.parse::<u16>().is_ok() => format!("key {k}"),
-        Some(k) => k.to_string(),
-    };
-    let key = shepetal::hotkey(key_env.as_deref()).ok_or(format!("unknown SHEPETAL_KEY {key_name:?}"))?;
-    let devs = keyboards_with(sys, key);
-    if devs.is_empty() {
-        return Err(match key {
-            shepetal::KEY_FN => NO_FN.into(),
-            _ => format!("no keyboard reports SHEPETAL_KEY {key_name:?} (evdev code {key})"),
-        });
+/// The shortcuts (the dictation key from `SHEPETAL_KEY`, else config.json, else fn) and the
+/// input devices under `sys` to read: those that can send a key of the dictation key, or a
+/// mouse button of another shortcut. Every key of the dictation key must be on some device: the
+/// daemon must not start and wait for a key that never arrives.
+fn hotkey_keyboards(sys: &Path) -> Result<(shortcuts::Config, Vec<(PathBuf, String)>), String> {
+    let config = shortcuts::config_file(std::env::var("XDG_CONFIG_HOME").ok().as_deref(), &env("HOME"));
+    let keys = shortcuts::load(&config, std::env::var("SHEPETAL_KEY").ok().as_deref())?;
+    let mut codes: Vec<u16> = keys.dictation.codes().collect();
+    codes.extend([&keys.paste_last, &keys.copy_last, &keys.hands_free].iter().flat_map(|c| c.codes()).filter(|&c| shortcuts::is_button(c)));
+    let devs = keyboards_with(sys, &codes);
+    for k in keys.dictation.keys() {
+        if !devs.iter().any(|(p, _)| keyboards_with(sys, k).iter().any(|(q, _)| q == p)) {
+            return Err(match k[..] {
+                [shepetal::KEY_FN] => NO_FN.into(),
+                _ => format!("no input device reports {:?} (evdev code {})", keys.dictation_name, k[0]),
+            });
+        }
     }
-    Ok((key, key_name, devs))
+    Ok((keys, devs))
 }
 
 /// One thread per keyboard; each sends (code, value) of key events.
@@ -357,8 +357,8 @@ fn without_markers(s: &str) -> String {
 }
 
 fn daemon() -> Res {
-    let (key, key_name, devs) = hotkey_keyboards(Path::new(SYS_INPUT))?;
-    let keys = shortcuts::load(&shortcuts::config_file(std::env::var("XDG_CONFIG_HOME").ok().as_deref(), &env("HOME")), key)?;
+    let (keys, devs) = hotkey_keyboards(Path::new(SYS_INPUT))?;
+    let key_name = keys.dictation_name.clone();
     let choice = model::choose(&model::detect());
     let model = model_path(&choice);
     if !model.exists() {
@@ -373,13 +373,13 @@ fn daemon() -> Res {
     let (tx, rx) = mpsc::channel();
     watch_keys(tx, &devs)?;
     let names: Vec<_> = devs.iter().map(|(p, n)| format!("{} ({n})", p.display())).collect();
-    eprintln!("shepetal: hold {key_name} to talk, double-tap for hands-free. keyboards {}, model {}, insert {typer:?}", names.join(", "), choice.model);
+    eprintln!("shepetal: hold {key_name} to talk, double-tap for hands-free. input devices {}, model {}, insert {typer:?}", names.join(", "), choice.model);
     if let Some(note) = focus::Session::from_env().unreadable_note() {
         eprintln!("shepetal: {note}");
     }
     meeting_rec::spawn(&choice)?;
 
-    listen(&rx, key, &key_name, &data_home, &choice, typer, &ind, &keys)
+    listen(&rx, &key_name, &data_home, &choice, typer, &ind, &keys)
 }
 
 /// Open the 🤫 socket and start the indicator that reads it (docs/linux.md, "🤫 indicator").
@@ -434,9 +434,9 @@ fn next_key(rx: &mpsc::Receiver<(u16, i32)>, t0: Instant) -> Result<(Option<(u16
 
 /// The dictation loop. It returns only on an error, and never with a recorder still running.
 #[allow(clippy::too_many_arguments)]
-fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: &Path, stt: &model::Choice, typer: insert::Backend, ind: &Indicator, keys: &shortcuts::Config) -> Res {
+fn listen(rx: &mpsc::Receiver<(u16, i32)>, key_name: &str, data_home: &Path, stt: &model::Choice, typer: insert::Backend, ind: &Indicator, keys: &shortcuts::Config) -> Res {
     let t0 = Instant::now();
-    let mut s = Shortcuts::new(key, keys.clone());
+    let mut s = Shortcuts::new(keys.clone());
     let mut rec: Option<Rec> = None;
     let mut retention_at: Option<Instant> = None;
     loop {
@@ -462,7 +462,10 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
         for cmd in s.feed(k, now) {
             let hint = match cmd {
                 Cmd::Dictation(a) => act(a, &mut rec, data_home, stt, typer, key_name, ind)?,
-                Cmd::MaxLengthWarning => Some(shortcuts::WARNING.into()),
+                Cmd::MaxLengthWarning => {
+                    notify(shortcuts::WARNING);
+                    Some(shortcuts::WARNING.into())
+                }
                 Cmd::PasteLast | Cmd::CopyLast => again(cmd, data_home, typer),
             };
             if let Some(hint) = hint {
@@ -491,6 +494,21 @@ type Rec = (Child, PathBuf, Option<String>);
 
 /// The paste-last key types the newest dictated text in the history at the cursor again (F21), so
 /// it survives a restart; copy-last puts it on the clipboard. Returns the hint for 🤫.
+/// The length warning also goes to the desktop's notifications: the hint next to 🤫 is gone after
+/// about 2 s, and on GNOME without the extension there is no 🤫. Without notify-send
+/// (libnotify-bin) only 🤫 and stderr say it. Not waited for here; a thread reaps it.
+fn notify(text: &str) {
+    if !insert::on_path("notify-send") {
+        return;
+    }
+    match Command::new("notify-send").args(["-a", "shepetal", "-t", "10000", "shepetal", text]).spawn() {
+        Ok(mut c) => {
+            std::thread::spawn(move || c.wait());
+        }
+        Err(e) => eprintln!("shepetal: notify-send: {e}"),
+    }
+}
+
 fn again(cmd: Cmd, data_home: &Path, typer: insert::Backend) -> Option<String> {
     let entries = history::load(data_home);
     let Some(text) = history::last_text(&entries).map(|e| e.text.as_str()) else { return Some("Nothing dictated yet".into()) };
@@ -593,7 +611,7 @@ fn deliver(text: &str, typer: insert::Backend, focused_at_start: Option<&str>, i
     };
     let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
     let clip = if typer.is_clipboard() { Some(typer) } else { insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path) };
-    match clip.ok_or_else(|| std::io::Error::other("no wl-copy or xclip")).and_then(|c| c.insert(text)) {
+    match clip.ok_or_else(|| std::io::Error::other("no wl-copy, xclip or xsel")).and_then(|c| c.insert(text)) {
         Ok(()) => {
             ind.send("idle");
             ("paste_failed", Some(focus::clipboard_hint(why)))
@@ -628,6 +646,36 @@ mod tests {
     const FN: &str = "10000 0 0 0 0 0 0 0\n"; // KEY_FN (464): word 7, bit 16
     const RCTRL: &str = "200000000 0\n"; // KEY_RIGHTCTRL (97): word 1, bit 33
     const BOTH: &str = "10000 0 0 0 0 0 200000000 0\n"; // ydotoold declares both, and more
+    const POWER: &str = "8000 10000000000000 0\n"; // KEY_POWER and KEY_WAKEUP
+
+    /// `capabilities/key` text for these codes, 64-bit words, most significant first.
+    fn bitmap(codes: &[u16]) -> String {
+        let mut words = vec![0u64; 8];
+        codes.iter().for_each(|&c| words[c as usize / 64] |= 1 << (c % 64));
+        words.iter().rev().map(|w| format!("{w:x}")).collect::<Vec<_>>().join(" ") + "\n"
+    }
+
+    /// `hotkey_keyboards` with SHEPETAL_KEY `key` and config.json `json` (an empty file: none).
+    fn devices_for(sys: &Path, key: Option<&str>, json: &str) -> Result<(shortcuts::Config, Vec<(PathBuf, String)>), String> {
+        let cfg = sys.with_extension("cfg");
+        std::fs::create_dir_all(cfg.join("shepetal")).unwrap();
+        std::fs::write(cfg.join("shepetal/config.json"), json).unwrap();
+        let saved = (std::env::var_os("SHEPETAL_KEY"), std::env::var_os("XDG_CONFIG_HOME"));
+        match key {
+            Some(k) => std::env::set_var("SHEPETAL_KEY", k),
+            None => std::env::remove_var("SHEPETAL_KEY"),
+        }
+        std::env::set_var("XDG_CONFIG_HOME", &cfg);
+        let got = hotkey_keyboards(sys);
+        for (k, v) in [("SHEPETAL_KEY", saved.0), ("XDG_CONFIG_HOME", saved.1)] {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        std::fs::remove_dir_all(cfg).unwrap();
+        got
+    }
 
     #[test]
     fn daemon_waits_for_fn_only_on_keyboards_that_can_send_it() {
@@ -636,24 +684,50 @@ mod tests {
         let _lock = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner()); // SHEPETAL_KEY is process-wide
         let desk = fake_sys("desk", &[laptop_kbd, ("event5", "Apple keyboard", FN), ydotoold]);
         let laptop = fake_sys("laptop", &[laptop_kbd, ydotoold]);
-        std::env::remove_var("SHEPETAL_KEY");
 
         // Pavel's decision: with SHEPETAL_KEY unset the daemon records on fn, never Right Ctrl.
-        let (key, name, devs) = hotkey_keyboards(&desk).unwrap();
-        assert_eq!((key, name.as_str()), (shepetal::KEY_FN, "fn"));
+        let (keys, devs) = devices_for(&desk, None, "").unwrap();
+        assert_eq!((keys.dictation.keys(), keys.dictation_name.as_str()), (&[vec![shepetal::KEY_FN]][..], "fn"));
         // Only keyboards that declare fn are read; ydotoold declares it but never sends a real key.
         assert_eq!(devs, [(PathBuf::from("/dev/input/event5"), "Apple keyboard".to_string())]);
 
         // Firmware fn with ydotoold running (GNOME Wayland): exit with the fn advice, not listen
         // on ydotoold forever.
-        assert_eq!(hotkey_keyboards(&laptop).unwrap_err(), NO_FN);
+        assert_eq!(devices_for(&laptop, None, "").unwrap_err(), NO_FN);
 
-        std::env::set_var("SHEPETAL_KEY", "rightctrl");
-        let (key, _, devs) = hotkey_keyboards(&laptop).unwrap();
-        std::env::remove_var("SHEPETAL_KEY");
-        assert_eq!((key, devs.len()), (97, 1), "SHEPETAL_KEY overrides fn, ydotoold still skipped");
+        let (keys, devs) = devices_for(&laptop, Some("rightctrl"), "").unwrap();
+        assert_eq!((keys.dictation.keys(), devs.len()), (&[vec![97]][..], 1), "SHEPETAL_KEY overrides fn, ydotoold still skipped");
         std::fs::remove_dir_all(desk).unwrap();
         std::fs::remove_dir_all(laptop).unwrap();
+    }
+
+    #[test]
+    fn a_combo_or_mouse_dictation_key_reads_every_device_that_sends_part_of_it() {
+        const BTN_SIDE: u16 = 0x113;
+        let _lock = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let kbd = bitmap(&[1, 29, 30, 56, 97, 100]);
+        let mouse = bitmap(&[0x110, 0x111, 0x112, BTN_SIDE, 0x114]);
+        let sys = fake_sys("combo", &[("event3", "kbd", &kbd), ("event7", "mouse", &mouse), ("event8", "power", POWER)]);
+        let both = [(PathBuf::from("/dev/input/event3"), "kbd".to_string()), (PathBuf::from("/dev/input/event7"), "mouse".to_string())];
+
+        let (keys, devs) = devices_for(&sys, None, r#"{"shortcuts": {"dictation": "ctrl+mouse4"}}"#).unwrap();
+        assert_eq!((keys.dictation_name.as_str(), &devs[..]), ("ctrl+mouse4", &both[..]));
+        let (_, devs) = devices_for(&sys, None, r#"{"shortcuts": {"dictation": "mouse4"}}"#).unwrap();
+        assert_eq!(devs, both[1..], "the mouse alone");
+        let (_, devs) = devices_for(&sys, None, r#"{"shortcuts": {"dictation": "ctrl+alt"}}"#).unwrap();
+        assert_eq!(devs, both[..1]);
+        // Another shortcut on a mouse button: the mouse is read too.
+        let (_, devs) = devices_for(&sys, Some("rightctrl"), r#"{"shortcuts": {"hands_free": "mouse5"}}"#).unwrap();
+        assert_eq!(devs, both);
+        // A key no device can send: exit, naming it.
+        let no_mouse = fake_sys("nomouse", &[("event3", "kbd", &kbd)]);
+        assert_eq!(devices_for(&no_mouse, None, r#"{"shortcuts": {"dictation": "ctrl+mouse4"}}"#).unwrap_err(),
+                   "no input device reports \"ctrl+mouse4\" (evdev code 275)");
+        // A config error stops the daemon with the file and the reason.
+        let err = devices_for(&sys, None, r#"{"shortcuts": {"dictation": "a"}}"#).unwrap_err();
+        assert!(err.ends_with("config.json: dictation: \"a\" needs a modifier: ctrl, alt, shift, meta or a mouse button"), "{err}");
+        std::fs::remove_dir_all(sys).unwrap();
+        std::fs::remove_dir_all(no_mouse).unwrap();
     }
 
     /// The tier table's choice for a 16 GB, 8-core machine without a GPU: Parakeet v3 on CPU.
@@ -693,7 +767,7 @@ mod tests {
     }
 
     fn defaults() -> shortcuts::Config {
-        shortcuts::parse("", shepetal::KEY_FN).unwrap()
+        shortcuts::parse("", None).unwrap()
     }
 
     #[test]
@@ -755,8 +829,8 @@ mod tests {
                 tx.send((shortcuts::KEY_ESC, 0)).unwrap();
                 wait_until("the cancel", || clips(&watched).iter().any(|p| p.to_string_lossy().ends_with(".cancelled.wav")));
             });
-            let keys = shortcuts::parse("", shepetal::KEY_FN).unwrap();
-            assert_eq!(listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &keys).unwrap_err(), "all input devices closed");
+            let keys = shortcuts::parse("", None).unwrap();
+            assert_eq!(listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &keys).unwrap_err(), "all input devices closed");
             keyboard.join().unwrap();
             let kept = clips(&audio);
             assert_eq!(kept.len(), 1, "{kept:?}");
@@ -798,7 +872,7 @@ mod tests {
                 combo(copy);
                 wait_until("copy-last", || dir.join("clipboard").exists());
             });
-            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
+            let err = listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
             keyboard.join().unwrap();
             assert_eq!(err, "all input devices closed");
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.", "typed again at the cursor");
@@ -809,7 +883,7 @@ mod tests {
             [42, 56, 44].iter().for_each(|&k| tx.send((k, 1)).unwrap());
             [44, 56, 42].iter().for_each(|&k| tx.send((k, 0)).unwrap());
             drop(tx);
-            listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
+            listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.", "a new daemon pastes the last text too");
         });
     }
@@ -936,7 +1010,7 @@ mod tests {
                 tx.send((shepetal::KEY_FN, 1)).unwrap();
                 wait_until("the recorder", || clips(&watched).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
             }); // tx is dropped here: the keyboard is gone while fn is down
-            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
+            let err = listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
             keyboard.join().unwrap();
             assert_eq!(err, "all input devices closed");
             let kept = clips(&audio);
@@ -977,7 +1051,7 @@ mod tests {
             let recording = || wait_until("the recorder", || clips(&audio).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
             keys(&tx, &recording);
         });
-        assert_eq!(listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, ind, &defaults()).unwrap_err(), "all input devices closed");
+        assert_eq!(listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, ind, &defaults()).unwrap_err(), "all input devices closed");
         keyboard.join().unwrap();
     }
 
@@ -998,6 +1072,36 @@ mod tests {
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");
             // The last idle is the cancel when the keyboard went away.
             assert_eq!(read_lines(r, 6), ["idle", "recording", "handsfree", "processing", "idle", "idle"]);
+        });
+    }
+
+    #[test]
+    fn a_dictation_that_reaches_the_cap_is_warned_stopped_and_typed() {
+        // F10 through the daemon: config.json's cap (here 1.5 s, so the one-minute warning comes
+        // at once) warns next to 🤫 and as a notification, then stops the recording while fn is
+        // still held. The text is typed as on a release, and the late release does nothing.
+        with_fake_tools("cap", |d| {
+            let home = d.join("home");
+            let audio = home.join("shepetal/audio");
+            let (ind, r) = indicator_in(d);
+            let (tx, rx) = mpsc::channel();
+            let typed = d.join("typed");
+            let keyboard = std::thread::spawn(move || {
+                tx.send((shepetal::KEY_FN, 1)).unwrap();
+                wait_until("the recorder", || clips(&audio).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
+                wait_until("the forced stop", || typed.exists());
+                tx.send((shepetal::KEY_FN, 0)).unwrap();
+                std::thread::sleep(Duration::from_millis(800)); // a late tap would end as too short here
+            });
+            let cfg = shortcuts::Config { max_ms: 1500, ..defaults() };
+            assert_eq!(listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &ind, &cfg).unwrap_err(), "all input devices closed");
+            keyboard.join().unwrap();
+            assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");
+            assert_eq!(std::fs::read(d.join("heard.wav")).unwrap(), b"RIFF final", "the whole clip was transcribed");
+            assert_eq!(std::fs::read_to_string(d.join("notified")).unwrap(), "-a shepetal -t 10000 shepetal Recording stops in 1 minute\n");
+            // The last idle is the cancel when the keyboard went away: nothing was recording.
+            assert_eq!(read_lines(r, 6), ["idle", "recording", "hint Recording stops in 1 minute", "processing", "idle", "idle"]);
+            assert_eq!(clips(&home.join("shepetal/audio")).len(), 1, "one recording, not a second from the release");
         });
     }
 
@@ -1196,7 +1300,7 @@ mod tests {
                 tx.send((shepetal::KEY_FN, 0)).unwrap(); // the late release does nothing
                 typed_while_held
             });
-            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
+            let err = listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
             assert!(keyboard.join().unwrap(), "typed while fn was still held: the watcher ended the dictation");
             assert_eq!(err, "all input devices closed");
             assert!(started.elapsed() >= shepetal::mic::NO_FRAMES_AFTER, "not before 5 s: {:?}", started.elapsed());
@@ -1232,7 +1336,7 @@ mod tests {
                 tx.send((shepetal::KEY_FN, 1)).unwrap();
                 wait_until("a second recording", || clips(&audio).len() == 2);
             });
-            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
+            let err = listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
             keyboard.join().unwrap();
             assert_eq!(err, "all input devices closed");
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");
@@ -1253,12 +1357,11 @@ mod tests {
     fn a_numeric_key_is_named_key_n_in_the_hint() {
         let _lock = PATH_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let sys = fake_sys("numkey", &[("event3", "kbd", "400000000000000\n")]); // KEY_CAPSLOCK (58)
-        std::env::set_var("SHEPETAL_KEY", "58");
-        let got = hotkey_keyboards(&sys);
-        std::env::remove_var("SHEPETAL_KEY");
+        let got = devices_for(&sys, Some("58"), "");
         std::fs::remove_dir_all(sys).unwrap();
-        let (key, name, _) = got.unwrap();
-        assert_eq!((key, shepetal::short_press_hint(&name).as_str()), (58, "Hold key 58 to talk · double-tap for hands-free"));
+        let (keys, _) = got.unwrap();
+        assert_eq!((keys.dictation.keys(), shepetal::short_press_hint(&keys.dictation_name).as_str()),
+                   (&[vec![58]][..], "Hold key 58 to talk · double-tap for hands-free"));
     }
 
     #[test]
@@ -1371,7 +1474,7 @@ mod tests {
             let run = || {
                 let (tx, rx) = mpsc::channel();
                 drop(tx); // no keyboard: listen() returns after its first pass
-                listen(&rx, shepetal::KEY_FN, "fn", &data, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err()
+                listen(&rx, "fn", &data, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err()
             };
             run();
             assert!(old.exists(), "no config: keep");
@@ -1429,7 +1532,7 @@ mod tests {
                 }
                 up.elapsed()
             });
-            assert_eq!(listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err(), "all input devices closed");
+            assert_eq!(listen(&rx, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err(), "all input devices closed");
             let took = keyboard.join().unwrap();
             assert!(took < Duration::from_millis(900), "too short only {took:?} after the release, while the key repeated");
             assert!(!d.join("typed").exists());
