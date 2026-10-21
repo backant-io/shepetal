@@ -34,6 +34,12 @@ const ID_COFFEE: usize = 3;
 const ID_SPONSORS: usize = 4;
 const ID_QUIT: usize = 5;
 const ID_LOGIN: usize = 6;
+/// Recordings submenu: item `i` of `recordings_menu` is `ID_RECORDINGS + i`.
+const ID_RECORDINGS: usize = 7;
+/// Recent submenu: transcript `n` is `ID_RECENT + n`.
+const ID_RECENT: usize = 1000;
+/// Hotkey submenu: `HOTKEYS[n]` is `ID_HOTKEY + n`.
+const ID_HOTKEY: usize = 1100;
 /// The account lines: ID_ACCOUNT + their index in `State::account`.
 const ID_ACCOUNT: usize = 100;
 
@@ -47,6 +53,9 @@ enum Cmd {
     Mode(Mode),
     Hint(String, u64),
     StartAtLogin(bool),
+    DeleteAfter24h(bool),
+    Recent(Vec<String>),
+    Hotkey(Hotkey, String),
     Account(Vec<MenuLine>),
     Quit,
 }
@@ -78,6 +87,26 @@ impl Ui {
         self.send(Cmd::StartAtLogin(on));
     }
 
+    /// Sets the check mark in the Recordings submenu. The app owns the setting and calls this
+    /// after spawn and after each `Event::DeleteAfter24h`.
+    pub fn set_delete_after_24h(&self, on: bool) {
+        self.send(Cmd::DeleteAfter24h(on));
+    }
+
+    /// The transcripts in the Recent submenu, newest first (at most `RECENT`). The app calls this
+    /// after spawn and after each dictation; `Event::CopyRecent(n)` names an item of this list.
+    pub fn set_recent(&self, texts: Vec<String>) {
+        self.send(Cmd::Recent(texts));
+    }
+
+    /// Switches the hook to `name` (`Hotkey::parse` syntax) and checks it in the Hotkey submenu.
+    /// The app owns the setting and calls this after each `Event::Hotkey`.
+    pub fn set_hotkey(&self, name: &str) -> std::result::Result<(), String> {
+        let hotkey = Hotkey::parse(name)?;
+        self.send(Cmd::Hotkey(hotkey, name.to_string()));
+        Ok(())
+    }
+
     /// The account lines at the top of the tray menu (trial days left, Sign in, Buy, Sign out).
     /// The app owns the account and calls this whenever they change.
     pub fn set_account(&self, lines: Vec<MenuLine>) {
@@ -97,16 +126,18 @@ impl Ui {
     }
 }
 
-/// Starts the input thread: installs the hook for `hotkey` and Esc, shows the overlay and adds
+/// Starts the input thread: installs the hook for the hotkey `name` (`Hotkey::parse`) and Esc, shows the overlay and adds
 /// the tray icon. Events arrive on the receiver until Quit.
-pub fn spawn(hotkey: Hotkey) -> Result<(Ui, Receiver<Event>)> {
+pub fn spawn(name: &str) -> Result<(Ui, Receiver<Event>)> {
+    let hotkey = Hotkey::parse(name).map_err(|e| Error::new(E_INVALIDARG, e))?;
+    let name = name.to_string();
     let (events, rx) = channel();
     let (tx, cmds) = channel();
     let (ready_tx, ready) = sync_channel(1);
     std::thread::Builder::new()
         .name("shepetal-input".into())
         .spawn(move || unsafe {
-            let hwnd = init(hotkey, events, cmds).map(|h| h.0 as isize);
+            let hwnd = init(hotkey, name, events, cmds).map(|h| h.0 as isize);
             let ok = hwnd.is_ok();
             let _ = ready_tx.send(hwnd.map_err(|e| (e.code(), e.message())));
             if !ok {
@@ -228,6 +259,10 @@ struct State {
     icon: HICON,
     paused: bool,
     start_at_login: bool,
+    delete_after_24h: bool,
+    recent: Vec<String>,
+    /// The hotkey's name, for the check mark.
+    hotkey: String,
     account: Vec<MenuLine>,
     /// What the overlay shows now, to skip redraws that change nothing.
     shown: Option<(Frame, Rect, u32)>,
@@ -239,7 +274,12 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
     STATE.with(|s| s.try_borrow_mut().ok()?.as_mut().map(f))
 }
 
-unsafe fn init(hotkey: Hotkey, events: Sender<Event>, cmds: Receiver<Cmd>) -> Result<HWND> {
+unsafe fn init(
+    hotkey: Hotkey,
+    name: String,
+    events: Sender<Event>,
+    cmds: Receiver<Cmd>,
+) -> Result<HWND> {
     // Physical pixels on every monitor, whatever the app's manifest says.
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     let instance: HINSTANCE = GetModuleHandleW(None)?.into();
@@ -305,6 +345,9 @@ unsafe fn init(hotkey: Hotkey, events: Sender<Event>, cmds: Receiver<Cmd>) -> Re
         icon,
         paused: false,
         start_at_login: false,
+        delete_after_24h: false,
+        recent: Vec::new(),
+        hotkey: name,
         account: Vec::new(),
         shown: None,
     };
@@ -343,6 +386,18 @@ impl State {
                 Cmd::Mode(m) => self.view.set_mode(m, now),
                 Cmd::Hint(text, ms) => self.view.show_hint(&text, ms, now),
                 Cmd::StartAtLogin(on) => self.start_at_login = on,
+                Cmd::DeleteAfter24h(on) => self.delete_after_24h = on,
+                Cmd::Recent(texts) => self.recent = texts,
+                Cmd::Hotkey(hotkey, name) => {
+                    HOOK.with(|h| {
+                        if let Some(h) = h.borrow_mut().as_mut() {
+                            if let Some(up) = h.chord.set_hotkey(hotkey) {
+                                h.emit(up);
+                            }
+                        }
+                    });
+                    self.hotkey = name;
+                }
                 Cmd::Account(lines) => self.account = lines,
                 Cmd::Quit => return self.shutdown(),
             }
@@ -413,12 +468,26 @@ impl State {
 
 /// The tray menu. Runs a modal loop, so the state is only borrowed before and after it.
 unsafe fn menu() {
-    let Some((ctrl, paused, login, account)) =
-        with(|s| (s.ctrl, s.paused, s.start_at_login, s.account.clone()))
-    else {
+    let Some((ctrl, paused, login, account, delete, recent, hotkey)) = with(|s| {
+        let recent: Vec<String> = s
+            .recent
+            .iter()
+            .take(RECENT)
+            .map(|t| recent_label(t))
+            .collect();
+        (
+            s.ctrl,
+            s.paused,
+            s.start_at_login,
+            s.account.clone(),
+            s.delete_after_24h,
+            recent,
+            s.hotkey.clone(),
+        )
+    }) else {
         return;
     };
-    let Ok(menu) = build_menu(paused, login, &account) else {
+    let Ok(menu) = build_menu(paused, login, &account, delete, &recent, &hotkey) else {
         return;
     };
     let mut pt = POINT::default();
@@ -438,6 +507,16 @@ unsafe fn menu() {
         }
         ID_LOGIN => {
             let _ = s.events.send(Event::StartAtLogin);
+        }
+        id if (ID_HOTKEY..ID_HOTKEY + HOTKEYS.len()).contains(&id) => {
+            let _ = s.events.send(Event::Hotkey(id - ID_HOTKEY));
+        }
+        id if (ID_RECENT..ID_RECENT + RECENT).contains(&id) => {
+            let _ = s.events.send(Event::CopyRecent(id - ID_RECENT));
+        }
+        id if (ID_RECORDINGS..ID_RECORDINGS + 2).contains(&id) => {
+            let (_, _, delete) = recordings_menu(s.delete_after_24h)[id - ID_RECORDINGS];
+            let _ = s.events.send(Event::DeleteAfter24h(delete));
         }
         ID_COFFEE => open_url("https://buymeacoffee.com/sorcecoder"),
         ID_SPONSORS => open_url("https://github.com/sponsors/backant-io"),
@@ -465,7 +544,14 @@ fn open_url(url: &'static str) {
     });
 }
 
-unsafe fn build_menu(paused: bool, login: bool, account: &[MenuLine]) -> Result<HMENU> {
+unsafe fn build_menu(
+    paused: bool,
+    login: bool,
+    account: &[MenuLine],
+    delete_after_24h: bool,
+    recent: &[String],
+    hotkey: &str,
+) -> Result<HMENU> {
     let check = |on| MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED };
     let menu = CreatePopupMenu()?;
     for (i, line) in account.iter().enumerate() {
@@ -488,7 +574,40 @@ unsafe fn build_menu(paused: bool, login: bool, account: &[MenuLine]) -> Result<
     AppendMenuW(donate, MF_STRING, ID_COFFEE, w!("Buy Me a Coffee"))?;
     AppendMenuW(donate, MF_STRING, ID_SPONSORS, w!("GitHub Sponsors"))?;
     AppendMenuW(menu, MF_STRING, ID_OPEN, w!("Open"))?;
+    let history = CreatePopupMenu()?;
+    for (i, label) in recent.iter().enumerate() {
+        AppendMenuW(
+            history,
+            MF_STRING,
+            ID_RECENT + i,
+            &HSTRING::from(label.as_str()),
+        )?;
+    }
+    if recent.is_empty() {
+        AppendMenuW(history, MF_STRING | MF_GRAYED, 0, w!("Nothing yet"))?;
+    }
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        history.0 as usize,
+        w!("Recent (click to copy)"),
+    )?;
     AppendMenuW(menu, check(paused), ID_PAUSE, w!("Pause"))?;
+    let keys = CreatePopupMenu()?;
+    for (i, (name, on)) in hotkey_menu(hotkey).into_iter().enumerate() {
+        AppendMenuW(keys, check(on), ID_HOTKEY + i, &HSTRING::from(name))?;
+    }
+    AppendMenuW(menu, MF_POPUP, keys.0 as usize, w!("Hotkey"))?;
+    let recordings = CreatePopupMenu()?;
+    for (i, (label, on, _)) in recordings_menu(delete_after_24h).into_iter().enumerate() {
+        AppendMenuW(
+            recordings,
+            check(on),
+            ID_RECORDINGS + i,
+            &HSTRING::from(label),
+        )?;
+    }
+    AppendMenuW(menu, MF_POPUP, recordings.0 as usize, w!("Recordings"))?;
     AppendMenuW(menu, check(login), ID_LOGIN, w!("Start at login"))?;
     AppendMenuW(menu, MF_POPUP, donate.0 as usize, w!("Donate"))?;
     AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null())?;

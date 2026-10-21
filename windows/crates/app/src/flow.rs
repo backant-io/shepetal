@@ -5,11 +5,11 @@
 //! caller passes the result to `transcribed`.
 
 use input::{Key, KeyEvent, Mode};
-use shepetal_core::gesture::{short_press_hint, Action, Gesture, HINT_MS, VK_ESCAPE};
+use shepetal_core::gesture::{short_press_hint, Action, Gesture, HINT_MS, MAX_LENGTH_WARNING, VK_ESCAPE};
 use shepetal_core::text;
 
-/// The dictation hotkey. Windows keyboards don't report fn, so it is Ctrl+Win, the default of
-/// Wispr's Windows app. `win.rs` parses it for the hook, and the short-press hint names it.
+/// The default dictation hotkey. Windows keyboards don't report fn, so it is Ctrl+Win, the default
+/// of Wispr's Windows app. Tray > Hotkey picks another (`Flow::hotkey`).
 pub const HOTKEY: &str = "Ctrl+Win";
 
 /// Why a clip was kept. Every recording is kept (goal rule 4); cancelled and too-short ones are
@@ -29,6 +29,8 @@ pub trait Mic {
 
 pub trait Store {
     fn keep(&mut self, samples: &[f32], why: Kept) -> Result<(), String>;
+    /// The history: the text of the last dictation clip `keep` kept, as it was inserted.
+    fn transcript(&mut self, text: &str) -> Result<(), String>;
 }
 
 /// Goal rule 8: remember the focused window at the start, paste only into that same window,
@@ -76,6 +78,11 @@ pub struct Flow<M, S, I, O> {
     pub store: S,
     pub insert: I,
     pub show: O,
+    /// The hotkey's name, which the short-press hint gives. `HOTKEY` until the app sets the saved one.
+    pub hotkey: String,
+    /// Some(percent) while the first-run model download runs: a press records nothing then and
+    /// says how far it is, instead of a blue ring for minutes.
+    pub downloading: Option<u8>,
     state: State,
     /// When the error ring goes back to idle.
     error_until: Option<u64>,
@@ -85,7 +92,7 @@ pub struct Flow<M, S, I, O> {
 
 impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
     pub fn new(mic: M, store: S, insert: I, show: O) -> Self {
-        Flow { mic, store, insert, show, state: State::Idle, error_until: None, pending: None }
+        Flow { mic, store, insert, show, hotkey: HOTKEY.into(), downloading: None, state: State::Idle, error_until: None, pending: None }
     }
 
     /// True while a clip is being recorded or transcribed.
@@ -97,6 +104,10 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
     pub fn action(&mut self, action: Action, now: u64) -> Option<Vec<f32>> {
         use Action::*;
         match (self.state, action) {
+            (State::Idle, Start) if self.downloading.is_some() => {
+                let percent = self.downloading.unwrap_or_default();
+                self.show.hint(&crate::system::downloading_hint(percent));
+            }
             (State::Idle, Start) => {
                 self.insert.remember_focus();
                 match self.mic.start() {
@@ -108,6 +119,7 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
                 }
             }
             (State::Recording, LockHandsFree) => self.mode(Mode::HandsFree),
+            (State::Recording, WarnDuration) => self.show.hint(MAX_LENGTH_WARNING),
             (State::Recording, Stop) => {
                 let samples = self.mic.stop();
                 self.pending = self.store.keep(&samples, Kept::Dictation).err();
@@ -124,7 +136,7 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
                     Ok(()) => {
                         self.mode(Mode::Idle);
                         if why == Kept::TooShort {
-                            self.show.hint(&short_press_hint(HOTKEY));
+                            self.show.hint(&short_press_hint(&self.hotkey));
                         }
                     }
                 }
@@ -144,7 +156,13 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
         self.state = State::Idle;
         let inserted = match text.map(|t| rules(&t)) {
             Ok(t) if t.is_empty() => Ok(None),
-            Ok(t) => self.insert.insert(&t),
+            Ok(t) => {
+                // Into the history first, so it is there even if the clipboard fails.
+                if let Err(e) = self.store.transcript(&t) {
+                    self.pending.get_or_insert(e);
+                }
+                self.insert.insert(&t)
+            }
             Err(e) => Err(e),
         };
         match (inserted, self.pending.take()) {
@@ -204,6 +222,10 @@ mod tests {
     impl Store for FakeStore {
         fn keep(&mut self, samples: &[f32], why: Kept) -> Result<(), String> {
             self.0.borrow_mut().push(format!("keep {} {why:?}", samples.len()));
+            self.1.clone()
+        }
+        fn transcript(&mut self, text: &str) -> Result<(), String> {
+            self.0.borrow_mut().push(format!("history {text}"));
             self.1.clone()
         }
     }
@@ -290,7 +312,7 @@ mod tests {
         // Rule 4: the clip is kept before it is transcribed, so a crash in STT still keeps it.
         assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "mode Processing"]);
         f.transcribed(Ok("  um hello world ".into()), 1100);
-        assert_eq!(take(&log), ["insert hello world", "mode Idle"], "the core cleanup runs before insert");
+        assert_eq!(take(&log), ["history hello world", "insert hello world", "mode Idle"], "the core cleanup runs before insert");
     }
 
     // The date rule runs after the cleanup: before it, "the the" would leave a "the" in front of the date.
@@ -301,7 +323,7 @@ mod tests {
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("Um, see you on the the twenty sixth of July twenty twenty-six.".into()), 1100);
-        assert_eq!(take(&log), ["insert See you on 26.07.26.", "mode Idle"]);
+        assert_eq!(take(&log), ["history See you on 26.07.26.", "insert See you on 26.07.26.", "mode Idle"]);
     }
 
     // Cleanup drops a filler but keeps the comma before it, so the date rule sees "of, March" and
@@ -322,7 +344,7 @@ mod tests {
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("hi".into()), 1000);
-        assert_eq!(take(&log), ["insert hi".to_string(), "mode Idle".into(), format!("hint {moved}")]);
+        assert_eq!(take(&log), ["history hi".to_string(), "insert hi".into(), "mode Idle".into(), format!("hint {moved}")]);
     }
 
     #[test]
@@ -341,12 +363,55 @@ mod tests {
     }
 
     #[test]
+    fn the_short_press_hint_names_the_hotkey_picked_in_the_tray() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        f.hotkey = "Alt+Win".into();
+        f.action(Action::Start, 0);
+        f.action(Action::TooShort, 600);
+        assert_eq!(take(&log).last().unwrap(), "hint Hold Alt+Win to talk · double-tap for hands-free");
+    }
+
+    #[test]
+    fn nothing_records_while_the_model_downloads() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        f.downloading = Some(40);
+        assert_eq!(f.action(Action::Start, 0), None);
+        assert_eq!(take(&log), ["hint Getting the speech model ready (40 %). Dictation works once it's done."]);
+        assert!(!f.busy(), "the app then resets the gesture, so the release stops nothing");
+        assert_eq!(f.action(Action::Stop, 900), None);
+        assert!(take(&log).is_empty());
+        f.downloading = None;
+        f.action(Action::Start, 2000);
+        assert_eq!(take(&log), ["remember focus", "mic start", "mode Recording"], "works once it is in place");
+    }
+
+    #[test]
     fn hands_free_shows_its_own_state() {
         let (mut f, log) = flow(Ok(()), Ok(()), None);
         f.action(Action::Start, 0);
         f.action(Action::LockHandsFree, 300);
         assert_eq!(take(&log).last().unwrap(), "mode HandsFree");
         assert!(f.busy());
+    }
+
+    #[test]
+    fn the_length_cap_warns_then_stops_and_transcribes() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        let mut g = Gesture::default();
+        let run = |f: &mut Fake, actions: Vec<Action>, t| actions.into_iter().filter_map(|a| f.action(a, t)).count();
+        run(&mut f, g.hotkey_down(0), 0);
+        run(&mut f, g.hotkey_up(100), 100);
+        run(&mut f, g.hotkey_down(300), 300);
+        take(&log);
+        assert_eq!(run(&mut f, g.tick(19 * 60_000), 19 * 60_000), 0);
+        assert_eq!(take(&log), ["hint Recording stops in 1 minute"], "the ring stays orange");
+        assert_eq!(run(&mut f, g.tick(20 * 60_000), 20 * 60_000), 1, "the 20 minutes go to speech-to-text");
+        assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "mode Processing"]);
+        f.transcribed(Ok("a long one".into()), 20 * 60_000 + 500);
+        assert_eq!(take(&log), ["history a long one", "insert a long one", "mode Idle"]);
+        // A warning that arrives when nothing records shows nothing.
+        f.action(Action::WarnDuration, 30 * 60_000);
+        assert!(take(&log).is_empty());
     }
 
     #[test]
@@ -360,12 +425,12 @@ mod tests {
         assert!(take(&log).is_empty(), "the mic must not restart mid-transcription");
         f.transcribed(Ok("one".into()), 2000);
         f.transcribed(Ok("two".into()), 2100);
-        assert_eq!(take(&log), ["insert one", "mode Idle"], "one transcript per stop");
+        assert_eq!(take(&log), ["history one", "insert one", "mode Idle"], "one transcript per stop");
         assert!(!f.busy());
     }
 
     #[test]
-    fn mic_error_shows_for_2_s_and_clears() {
+    fn mic_error_shows_for_3_s_and_clears() {
         let (mut f, log) = flow(Err("No microphone found".into()), Ok(()), None);
         f.action(Action::Start, 0);
         assert_eq!(take(&log), ["remember focus", "mic start", "mode Error", "hint No microphone found"]);
@@ -409,7 +474,7 @@ mod tests {
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("keep me".into()), 1000);
-        assert_eq!(take(&log), ["insert keep me", "mode Error", "hint Disk full"]);
+        assert_eq!(take(&log), ["history keep me", "insert keep me", "mode Error", "hint Disk full"]);
     }
 
     #[test]

@@ -53,6 +53,7 @@ version = "0.0.1"
 dependencies = [
  "cpal",
  "sha2",
+ "shepetal-core",
  "whisper-rs",
  "windows-sys",
 ]

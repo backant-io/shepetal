@@ -684,6 +684,34 @@ mod tests {
         "The first of, March.",
         "the 29th of February nineteen hundred",
         "the first of January nineteen hundred.",
+        // From the #159 review: #197.
+        "the forty ninth of July",
+        "the hundred and first of May",
+        "the 4th of July 26 people",
+        "the thirtieth of February 15 people",
+        "Step 2 may take a while.",
+        "Option 3 may be better.",
+        "The first may be easier than the second.",
+        "the second may not work",
+        "Call me March 3rd, 10:30.",
+        "July 26th 11:00",
+        "On July 4th, 15,000 people came.",
+        "On July 4th 12.5 percent left.",
+        "On May 5th 1200 visitors came.",
+        "By March 1st 5000 units shipped.",
+        "On July 4th two thousand people came.",
+        "On May 5th 1350 visitors came.",
+        "the 14th of July 1789",
+        "May the fourth be with you.",
+        "in week 2 of March we ship",
+        "Chapter 3 of May's report",
+        "wir hatten 3 März-Termine",
+        "the second March sprint",
+        "the first July weekend",
+        "das erste Mai-Wochenende",
+        "the first march was peaceful",
+        "In March second-quarter numbers dropped",
+        "on June 5, 10, and 15",
     ];
 
     // Pavel: dates are written as numbers. Every platform passes the same vectors (docs/text-rules.md),
@@ -709,7 +737,7 @@ mod tests {
             })
             .collect();
         assert!(failed.is_empty(), "{} of {} date vectors fail:\n{}", failed.len(), cases.len(), failed.join("\n"));
-        assert!(passing_but_pending.is_empty(), "these pass now, remove them from PENDING (#189): {passing_but_pending:?}");
+        assert!(passing_but_pending.is_empty(), "these pass now, remove them from PENDING (#189, #197): {passing_but_pending:?}");
     }
 
     // "Uh-huh" and "mm-hmm" are answers, not fillers.

@@ -4,7 +4,7 @@
 //!
 //! - `idle`, `recording`, `handsfree`, `processing`: the ring around 🤫
 //! - `error <text>`: yellow ring, the text next to 🤫 for about 4 s
-//! - `hint <text>`: the text next to 🤫 for about 2 s, the ring unchanged
+//! - `hint <text>`: the text next to 🤫 for about 3 s, the ring unchanged
 //!
 //! Readers: `linux/indicator/shepetal-indicator` (X11, wlr-layer-shell) and the GNOME Shell
 //! extension in `linux/gnome-extension/`.

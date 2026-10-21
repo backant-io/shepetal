@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $app = Join-Path $env:LOCALAPPDATA 'Programs\Shepetal'
 $data = Join-Path $env:LOCALAPPDATA 'Shepetal'
 $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+$settings = 'HKCU:\Software\Shepetal'
 $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Shepetal.lnk'
 function Check($ok, $what) { if (-not $ok) { throw "FAIL: $what" }; "ok: $what" }
 function RunValue { (Get-ItemProperty $run -ErrorAction SilentlyContinue).Shepetal }
@@ -22,14 +23,18 @@ Check ((RunValue) -eq "`"$app\shepetal.exe`"") "start at login: HKCU Run = $(Run
 New-Item -ItemType Directory -Force "$data\audio", "$data\models" | Out-Null
 Set-Content "$data\audio\installer-test.wav" 'RIFF'
 Set-Content "$data\models\installer-test.bin" 'ggml'
+# The tray's Recordings choice, as the app writes it. The uninstaller removes the settings.
+New-Item -Force $settings | Out-Null
+Set-ItemProperty $settings Retention 'delete_after_24h'
 
 $p = Start-Process "$app\unins000.exe" '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
 Check ($p.ExitCode -eq 0) "uninstaller exit code $($p.ExitCode)"
 # The uninstaller re-runs itself from %TEMP% and returns at once, so wait for it to finish.
-for ($i = 0; $i -lt 60 -and ((Test-Path $app) -or (RunValue)); $i++) { Start-Sleep 1 }
+for ($i = 0; $i -lt 60 -and ((Test-Path $app) -or (RunValue) -or (Test-Path $settings)); $i++) { Start-Sleep 1 }
 Check (-not (Test-Path "$app\shepetal.exe")) 'uninstall removed shepetal.exe'
 Check (-not (Test-Path $lnk)) 'uninstall removed the Start menu entry'
 Check ($null -eq (RunValue)) 'uninstall removed the Run value'
 Check (-not (Test-Path "$data\models")) 'uninstall removed the speech models'
+Check (-not (Test-Path $settings)) 'uninstall removed the settings'
 Check ((Get-Content "$data\audio\installer-test.wav") -eq 'RIFF') "recordings kept in $data"
 Remove-Item "$data\audio\installer-test.wav"

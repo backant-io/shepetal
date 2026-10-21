@@ -1,16 +1,30 @@
 #if canImport(CoreAudio)
 import AVFoundation
 import Foundation
+import MeetingCore
 import Testing
 @testable import MeetingMac
 
 @Test func snapshotCarriesDeviceAndWakeSignals() {
-    // The detector's device-change grace and wake holdoff only work if the probe fills these.
-    let s = Probes.snapshot()
-    #expect(s.devices.count == 2)
-    #expect(s.devices.contains { $0 != 0 })
-    #expect(s.wakeMarker.hasSuffix("/0"))
-    #expect(!s.wakeMarker.hasPrefix("-1."))
+    // The detector's device-change grace and wake holdoff only work if the probe fills these. Only these two are
+    // read: the mic users and the camera state of the machine running the tests are left alone.
+    let devices = Probes.devices()
+    #expect(devices.count == 2)
+    #expect(devices.contains { $0 != 0 })
+    let wake = Probes.wakeMarker()
+    #expect(wake.hasSuffix("/0"))
+    #expect(!wake.hasPrefix("-1."))
+}
+
+@Test func theCLIIgnoresTheShepetalAppsDictation() {
+    // MEET-4: `shepetal-meeting watch` runs in its own process, so excluding only its pid would make the Shepetal
+    // app's dictation (another pid) a meeting. The app is skipped by its exact bundle ID; other apps still count.
+    var d = Probes.detector()
+    let app = MicUser(pid: getpid() + 1, bundleID: "io.backant.shepetal", path: "/Applications/Shepetal.app/Contents/MacOS/Shepetal")
+    for t in 0...20 { #expect(d.update(Snapshot(micUsers: [app]), now: Double(t)).isEmpty) }
+    let zoom = MicUser(pid: getpid() + 2, bundleID: "us.zoom.xos", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us")
+    #expect(d.app(in: Snapshot(micUsers: [app, zoom])) == "zoom.us")
+    #expect(d.app(in: Snapshot(micUsers: [MicUser(pid: getpid(), path: "/usr/local/bin/shepetal-meeting")])) == nil)
 }
 
 /// Two mono buffers (mic, tap) as the aggregate device delivers them.

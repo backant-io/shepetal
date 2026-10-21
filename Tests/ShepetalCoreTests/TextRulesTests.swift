@@ -34,6 +34,11 @@ final class InsertionRulesTests: XCTestCase {
         XCTAssertEqual(fit("on 26.07.?", "", "and then"), "on 26.07." + nbsp)
         XCTAssertEqual(fit("on 26.07.26.", "", "and then"), "on 26.07.26" + nbsp)
         XCTAssertEqual(fit("version 1.2.", "", "and then"), "version 1.2" + nbsp)
+        // Only a real day and month: two-digit prices, times and versions are no date and lose the sentence's dot.
+        XCTAssertEqual(fit("It costs 19.99.", "", "plus tax"), "It costs 19.99" + nbsp)
+        XCTAssertEqual(fit("Wir treffen uns um 10.30.", "", "und dann"), "Wir treffen uns um 10.30" + nbsp)
+        XCTAssertEqual(fit("Upgrade to 14.15.", "", "and restart"), "Upgrade to 14.15" + nbsp)
+        XCTAssertEqual(fit("on 31.12.", "", "and then"), "on 31.12." + nbsp)
     }
 
     func testFollowingTextDropsSentenceEndAndAddsSpace() {

@@ -22,6 +22,8 @@ pub enum Action {
     /// Nothing is transcribed. The audio is kept, marked cancelled. No hint. Esc, or the hotkey used as part
     /// of a shortcut (Ctrl+Win+Left switches the virtual desktop).
     Cancel,
+    /// One minute before the length cap: the shell shows `MAX_LENGTH_WARNING`. Recording goes on.
+    WarnDuration,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,8 +44,14 @@ pub const DOUBLE_TAP_MS: u64 = 500;
 /// Another key in the first second of a hold makes the hotkey part of a shortcut, not a dictation
 /// (docs/re/dictation-input.md 2.3, "Chord collision").
 pub const CHORD_WINDOW_MS: u64 = 1000;
-/// How long the short-press hint shows.
-pub const HINT_MS: u64 = 2000;
+/// A dictation is stopped (and transcribed as usual) after 20 minutes, with a warning at 19, as in
+/// Wispr and on the Mac and Linux.
+pub const MAX_MS: u64 = 20 * 60_000;
+pub const WARN_MS: u64 = 19 * 60_000;
+/// Shown next to 🤫 at 19 minutes. Our own wording, as on Linux.
+pub const MAX_LENGTH_WARNING: &str = "Recording stops in 1 minute";
+/// How long the short-press hint shows (product rule 2: about 3 s, `Hint.seconds` on the Mac).
+pub const HINT_MS: u64 = 3000;
 
 /// Shown next to the 🤫 indicator after a too-short press. Our own wording, as on the Mac and Linux.
 pub fn short_press_hint(hotkey: &str) -> String {
@@ -55,12 +63,26 @@ pub struct Gesture {
     pub hold_ms: u64,
     pub double_tap_ms: u64,
     pub chord_window_ms: u64,
+    pub max_ms: u64,
+    pub warn_ms: u64,
     state: State,
+    /// When the running recording started (its first press), and whether its warning was given.
+    started: u64,
+    warned: bool,
 }
 
 impl Default for Gesture {
     fn default() -> Self {
-        Gesture { hold_ms: HOLD_MS, double_tap_ms: DOUBLE_TAP_MS, chord_window_ms: CHORD_WINDOW_MS, state: State::Idle }
+        Gesture {
+            hold_ms: HOLD_MS,
+            double_tap_ms: DOUBLE_TAP_MS,
+            chord_window_ms: CHORD_WINDOW_MS,
+            max_ms: MAX_MS,
+            warn_ms: WARN_MS,
+            state: State::Idle,
+            started: 0,
+            warned: false,
+        }
     }
 }
 
@@ -88,6 +110,10 @@ impl Gesture {
             State::HandsFree => (State::Idle, vec![Stop]),
             s @ State::Holding { .. } => (s, vec![]), // a duplicate event
         };
+        if out.last() == Some(&Start) {
+            self.started = t;
+            self.warned = false;
+        }
         self.state = next;
         out
     }
@@ -126,6 +152,20 @@ impl Gesture {
             State::AwaitingSecondTap { deadline } if t >= deadline => {
                 self.state = State::Idle;
                 vec![Action::TooShort]
+            }
+            State::Holding { .. } | State::HandsFree => {
+                let long = t.saturating_sub(self.started);
+                if long >= self.max_ms {
+                    // A forced stop: transcribed and inserted like a release. The release that
+                    // follows a hold then finds nothing to stop.
+                    self.state = State::Idle;
+                    vec![Action::Stop]
+                } else if long >= self.warn_ms && !self.warned {
+                    self.warned = true;
+                    vec![Action::WarnDuration]
+                } else {
+                    vec![]
+                }
             }
             _ => vec![],
         }
@@ -185,7 +225,7 @@ mod tests {
     #[test]
     fn hint_wording_and_duration() {
         assert_eq!(short_press_hint("Ctrl+Win"), "Hold Ctrl+Win to talk · double-tap for hands-free");
-        assert!((1500..=2500).contains(&HINT_MS), "about 2 s, rule 2");
+        assert_eq!(HINT_MS, 3000, "about 3 s, rule 2, as on the Mac");
     }
 
     // The input crate reports keys as Windows VK codes.
@@ -350,6 +390,40 @@ mod tests {
         assert_eq!(g.state(), State::Idle);
 
         assert_eq!(g.key_down(VK_ESCAPE, 70_000), vec![], "Esc while idle belongs to the app");
+    }
+
+    // The length cap (Wispr: a warning at 19 min, a stop at 20), counted from the first press, in
+    // hands-free and in a hold alike.
+    #[test]
+    fn dictation_warns_at_19_min_and_stops_at_20() {
+        assert_eq!((MAX_MS, WARN_MS), (20 * 60_000, 19 * 60_000));
+        let mut g = Gesture::default();
+        g.hotkey_down(1000);
+        g.hotkey_up(1100);
+        assert_eq!(g.hotkey_down(1300), vec![LockHandsFree]);
+        assert_eq!(g.tick(1000 + WARN_MS - 1), vec![]);
+        assert_eq!(g.tick(1000 + WARN_MS), vec![WarnDuration], "from the first press, not the second");
+        assert_eq!(g.tick(1000 + WARN_MS + 50), vec![], "warned once");
+        assert_eq!(g.tick(1000 + MAX_MS - 1), vec![]);
+        assert_eq!(g.tick(1000 + MAX_MS), vec![Stop]);
+        assert_eq!(g.state(), State::Idle);
+        assert_eq!(g.tick(1000 + MAX_MS + 50), vec![], "stopped once");
+        assert_eq!(g.hotkey_down(2000 + MAX_MS), vec![Start], "the next press starts a new one");
+
+        let mut hold = Gesture::default();
+        hold.hotkey_down(0);
+        assert_eq!(hold.tick(WARN_MS), vec![WarnDuration]);
+        assert_eq!(hold.tick(MAX_MS), vec![Stop]);
+        assert_eq!(hold.hotkey_up(MAX_MS + 5000), vec![], "the release after the cap stops nothing");
+
+        // A new recording gets its own warning and its own 20 minutes.
+        let mut again = Gesture::default();
+        again.hotkey_down(0);
+        again.tick(WARN_MS);
+        again.hotkey_up(WARN_MS + 10);
+        assert_eq!(again.hotkey_down(WARN_MS + 5000), vec![Start]);
+        assert_eq!(again.tick(WARN_MS + 5000 + WARN_MS - 1), vec![]);
+        assert_eq!(again.tick(WARN_MS + 5000 + WARN_MS), vec![WarnDuration]);
     }
 
     // An error ends the recording; a tap that was waiting must not turn into a too-short hint afterwards.

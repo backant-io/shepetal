@@ -5,7 +5,7 @@
 fn main() -> windows::core::Result<()> {
     use input::*;
     use std::time::Duration;
-    let (ui, events) = spawn(Hotkey::default())?;
+    let (ui, events) = spawn("Ctrl+Win")?;
     let mut login = false;
     loop {
         let ev = events.recv_timeout(Duration::from_secs(2));
