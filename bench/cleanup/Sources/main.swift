@@ -4,8 +4,9 @@ import ShepetalCore
 
 // cleanup-bench <model.gguf|rules> <fixtures.jsonl>
 // For each fixture: the model alone on the rules' text (`model`), and the app's path (`app`: rules, cue
-// gate, model, word guard), each with its time in ms. Then one summary line: load time, the model's time on
-// the 10 s transcripts (five runs each), and peak memory.
+// gate, model, word guard), each with its time in ms. A fixture with the text around the cursor (`before`,
+// `after`, `selected`: fixtures/context.jsonl, F24) gets both again with that context (`model_ctx`, `app_ctx`).
+// Then one summary line: load time, the model's time on the 10 s transcripts (five runs each), and peak memory.
 let args = CommandLine.arguments
 guard args.count == 3 else {
     FileHandle.standardError.write(Data("usage: cleanup-bench <model.gguf|rules> <fixtures.jsonl>\n".utf8))
@@ -54,6 +55,19 @@ for f in fixtures {
     out["app_ms"] = now() - t
     out["app"] = app.text
     out["used_model"] = app.usedModel
+    if f["before"] != nil || f["after"] != nil || f["selected"] != nil {
+        let context = CleanupContext(before: f["before"] ?? "", after: f["after"] ?? "", selected: f["selected"] ?? "")
+        if let model {
+            let t = now()
+            out["model_ctx"] = (try? model.rewrite(Cleanup.apply(raw), context: context)) ?? ""
+            out["model_ctx_ms"] = now() - t
+        }
+        let t = now()
+        let app = SmartCleanup.apply(raw, model: model, context: context)
+        out["app_ctx_ms"] = now() - t
+        out["app_ctx"] = app.text
+        out["used_model_ctx"] = app.usedModel
+    }
     line(out)
 }
 // Latency for a 10 s utterance: each fixture of 24 or more words (about 10 s of speech) five more times.
