@@ -88,6 +88,38 @@ final class IndicatorTests: XCTestCase {
         XCTAssertEqual(indicator.panel.frame, Indicator.frame(screen: mainScreen, labelWidth: nil))
     }
 
+    /// F100: a hint the user missed is kept for the Hub's Recent notices, newest first.
+    func testShowKeepsEachNotice() {
+        let indicator = make()
+        XCTAssertEqual(indicator.notices.newestFirst, [])
+        indicator.show(Hint.shortPress, seconds: Hint.seconds)
+        indicator.show(PasteGate.focusMoved, seconds: 4)
+        XCTAssertEqual(indicator.notices.newestFirst.map(\.text), [PasteGate.focusMoved, Hint.shortPress])
+    }
+
+    /// F100: Recent notices must never hold dictated text. The clipboard hint is checked through the real
+    /// Pipeline (temp data dir, private pasteboard) and shown as App.fail shows it.
+    @MainActor
+    func testClipboardHintKeepsNoDictatedText() async throws {
+        let dictated = "meet me at the old pier at nine"
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-notice-\(UUID().uuidString)")
+        let pasteboard = NSPasteboard(name: .init("io.backant.shepetal.test.\(UUID().uuidString)"))
+        defer { pasteboard.releaseGlobally(); try? FileManager.default.removeItem(at: root) }
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let samples = (0..<AudioStore.sampleRate).map { Float(sin(Double($0) * 0.2)) * 0.045 }  // speech level
+        let indicator = make()
+        for (focusKept, secure) in [(false, nil), (true, "Terminal")] as [(Bool, String?)] {
+            let engine = MeetingTranscriberTests.StubEngine()
+            engine.texts = [dictated]
+            let run = await pipeline.process(samples, engine: engine, context: { ("", "", "") }, focusKept: { focusKept },
+                                             secureInput: { secure }, sendPaste: { _ in XCTFail("no Cmd+V") })
+            XCTAssertEqual(pasteboard.string(forType: .string)?.contains("old pier"), true, "the text is on the clipboard")
+            indicator.show(try XCTUnwrap(run.error), seconds: 4)
+        }
+        XCTAssertEqual(indicator.notices.newestFirst.map(\.text), [PasteGate.secureInput("Terminal"), PasteGate.focusMoved])
+        for n in indicator.notices.newestFirst { XCTAssertFalse(n.text.contains("pier"), n.text) }
+    }
+
     func testModeRings() throws {
         let indicator = make()
         var colors: [Indicator.Mode: CGColor] = [:]

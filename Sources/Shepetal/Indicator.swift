@@ -1,4 +1,5 @@
 import AppKit
+import ShepetalCore
 
 /// The 🤫 indicator: about 18 pt, 8 pt in from the bottom-left corner of the main display,
 /// on every Space and over full-screen apps, click-through, never takes focus, always shown.
@@ -79,8 +80,12 @@ final class Indicator {
         }
     }
 
-    /// Text next to the indicator for `seconds`, e.g. the short-press hint.
+    /// Everything `show` put next to 🤫, for the Hub's Recent notices (F100).
+    private(set) var notices = NoticeLog()
+
+    /// Text next to the indicator for `seconds`, e.g. the short-press hint. It is also kept in `notices`.
     func show(_ text: String, seconds: TimeInterval) {
+        notices.append(text)
         labelUntil?.cancel()
         label.stringValue = " \(text) "
         label.isHidden = false
