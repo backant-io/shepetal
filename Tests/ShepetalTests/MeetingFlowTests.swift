@@ -46,7 +46,7 @@ final class MeetingFlowTests: XCTestCase {
     private let summarizer = MeetingTranscriberTests.StubSummarizer()
     private var hints: [String] = []
     private var recording: [Bool] = []
-    private let zoom = Snapshot(micClients: [MicClient(bundleID: "us.zoom.xos", name: "zoom.us")])
+    private let zoom = Snapshot(micUsers: [MicUser(pid: 100, bundleID: "us.zoom.xos", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us")])
 
     override func setUp() async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-flow-\(UUID().uuidString)")
@@ -54,7 +54,7 @@ final class MeetingFlowTests: XCTestCase {
         store = try MeetingStore(path: root.appendingPathComponent("meetings.sqlite"))
         capture = WavCapture()
         recorder = MeetingRecorder(dir: root.appendingPathComponent("meetings"), capture: capture,
-                                   detector: MeetingDetector(), autoRecord: { false }, card: { _ in }) { [unowned self] in hints.append($0) }
+                                   detector: MeetingDetector(ownPID: getpid()), autoRecord: { false }, card: { _ in }) { [unowned self] in hints.append($0) }
         connect(self.engine)
     }
 
@@ -83,7 +83,7 @@ final class MeetingFlowTests: XCTestCase {
         recorder.record()  // the click on the card
         tab.refresh()
         let listed = try XCTUnwrap(tab.record, "the meeting is in the Meetings tab from its first second")
-        XCTAssertEqual(listed.meeting.app, "Zoom")
+        XCTAssertEqual(listed.meeting.app, "zoom.us")
         XCTAssertNil(listed.meeting.endedAt)
         XCTAssertEqual(recording, [true])
 
