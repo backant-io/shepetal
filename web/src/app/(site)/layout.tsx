@@ -6,31 +6,26 @@ import './site.css';
 const description =
   'Dictation that runs fully on your Mac with on-device speech recognition. Hold fn, talk, and the text lands where your cursor is. Free for 30 days, then $4.99 once.';
 
-// The tab icon is the š mark. 🤫 is the brand's documented alternative (BRAND.md): set 'emoji' to use it alone.
-const FAVICON = 'mark' as 'mark' | 'emoji';
-
 export const metadata: Metadata = {
   title: { default: 'shepetal: hold fn, talk, done', template: '%s - shepetal' },
   description,
   openGraph: { title: 'shepetal: hold fn, talk, done', description, url: '/', siteName: 'shepetal', type: 'website' },
   twitter: { card: 'summary_large_image', title: 'shepetal: hold fn, talk, done', description },
-  icons:
-    FAVICON === 'mark'
-      ? {
-          icon: [
-            { url: '/favicon.svg', type: 'image/svg+xml' },
-            { url: '/favicon-32.png', sizes: '32x32', type: 'image/png' },
-            { url: '/favicon-16.png', sizes: '16x16', type: 'image/png' },
-          ],
-          apple: '/apple-touch-icon.png',
-        }
-      : { icon: { url: '/favicon-emoji.svg', type: 'image/svg+xml' } },
+  // The tab and app icons are the Noto 🤫 (BRAND.md).
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: '48x48' },
+      { url: '/favicon.svg', type: 'image/svg+xml' },
+    ],
+    apple: '/apple-touch-icon.png',
+  },
+  manifest: '/site.webmanifest',
 };
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#E9E9E5' },
-    { media: '(prefers-color-scheme: dark)', color: '#0B121E' },
+    { media: '(prefers-color-scheme: light)', color: '#FAEEE8' },
+    { media: '(prefers-color-scheme: dark)', color: '#1C0A13' },
   ],
 };
 

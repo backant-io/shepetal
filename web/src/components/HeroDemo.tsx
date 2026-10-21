@@ -139,7 +139,9 @@ export function HeroDemo() {
       </div>
 
       <div className="shush" data-mode={mode} aria-hidden="true">
-        <span className="shush-face">🤫</span>
+        <span className="shush-face">
+          <img src="/brand/emoji/emoji_u1f92b.svg" alt="" width={13} height={13} />
+        </span>
         {hint && <span className="shush-hint">Hold fn to talk</span>}
       </div>
     </>

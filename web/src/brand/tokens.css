@@ -1,4 +1,4 @@
-/* shepetal brand tokens, version 1.1, October 21, 2026.
+/* shepetal brand tokens, version 2.1, October 21, 2026.
    Mirrors tokens.json. Change both together.
    Font paths are relative to brand/; adjust them when you copy the fonts. */
 
@@ -32,31 +32,32 @@
 }
 
 :root {
-  /* Neutrals: limestone mist by day (hue 110, near-neutral) to blue-black night (hue 261), generated in OKLCH */
-  --sh-neutral-0: #F4F5F0;
-  --sh-neutral-50: #E9E9E5;   /* Megla, mist */
-  --sh-neutral-100: #DEDEDA;
-  --sh-neutral-200: #CECECA;
-  --sh-neutral-300: #B5B6B3;
-  --sh-neutral-400: #959797;
-  --sh-neutral-500: #76797D;
-  --sh-neutral-600: #5C6167;
-  --sh-neutral-700: #424850;
-  --sh-neutral-800: #2A313B;
-  --sh-neutral-850: #1C232E;
-  --sh-neutral-900: #151C20;  /* Tinta, ink */
-  --sh-neutral-950: #0B121E;  /* Noč, night */
+  /* Neutrals: blush by day (OKLCH hue 48, chroma 0.016) to a plum-black dusk (hue 352, chroma 0.034), mixed in OKLab */
+  --sh-neutral-0: #FFF9F6;
+  --sh-neutral-50: #FAEEE8;   /* Blush, the day ground */
+  --sh-neutral-100: #F0E3DE;
+  --sh-neutral-200: #E0D3CE;
+  --sh-neutral-300: #C8BAB6;
+  --sh-neutral-400: #A59694;
+  --sh-neutral-500: #867676;
+  --sh-neutral-600: #6C5B5E;
+  --sh-neutral-700: #544246;
+  --sh-neutral-800: #3B292F;
+  --sh-neutral-850: #2F1D23;
+  --sh-neutral-900: #26141C;  /* Ink */
+  --sh-neutral-950: #1C0A13;  /* Dusk, the night ground */
 
-  /* Soča, the accent */
-  --sh-soca-200: #93CAC5;
-  --sh-soca-300: #6FB0AB;
-  --sh-soca-500: #3E8180;
-  --sh-soca-600: #1F5F60;
-  --sh-soca-700: #144A4C;
+  /* Mulberry, the accent (OKLCH hue 356) */
+  --sh-mulberry-200: #F8C3D5;
+  --sh-mulberry-300: #E6ABB8;  /* the night accent, a dusty rose */
+  --sh-mulberry-500: #BE4F7F;  /* ramp step only, never UI */
+  --sh-mulberry-600: #9E3664;
+  --sh-mulberry-650: #8A2D57;  /* the lit top of the app icon ground */
+  --sh-mulberry-700: #7A244B;  /* the afterglow; text on it is blush only */
 
   /* Core names */
-  --sh-mist: var(--sh-neutral-50);
-  --sh-night: var(--sh-neutral-950);
+  --sh-blush: var(--sh-neutral-50);
+  --sh-dusk: var(--sh-neutral-950);
   --sh-ink: var(--sh-neutral-900);
   --sh-paper: var(--sh-neutral-0);
 
@@ -121,7 +122,7 @@
   --sh-border: var(--sh-neutral-200);
   --sh-text: var(--sh-neutral-900);
   --sh-text-muted: var(--sh-neutral-600);
-  --sh-accent: var(--sh-soca-600);
+  --sh-accent: var(--sh-mulberry-600);
   --sh-on-accent: var(--sh-neutral-0);
   --sh-primary-fill: var(--sh-neutral-900);
   --sh-on-primary: var(--sh-neutral-50);
@@ -131,6 +132,8 @@
   --sh-note: #FFCC00;
   --sh-grain-opacity: 0.035;
   --sh-gradient: linear-gradient(180deg, var(--sh-neutral-0) 0%, var(--sh-neutral-50) 55%, var(--sh-neutral-100) 100%);
+  /* The one Mulberry field of a surface: dusk with a mulberry glow at the horizon. Text on it is blush only. */
+  --sh-gradient-afterglow: radial-gradient(150% 100% at 50% 100%, var(--sh-mulberry-700) 0%, var(--sh-neutral-950) 82%);
   color-scheme: light dark;
 }
 
@@ -142,7 +145,7 @@
     --sh-border: var(--sh-neutral-800);
     --sh-text: var(--sh-neutral-50);
     --sh-text-muted: var(--sh-neutral-400);
-    --sh-accent: var(--sh-soca-300);
+    --sh-accent: var(--sh-mulberry-300);
     --sh-on-accent: var(--sh-neutral-950);
     --sh-primary-fill: var(--sh-neutral-50);
     --sh-on-primary: var(--sh-neutral-950);
@@ -162,7 +165,7 @@
   --sh-border: var(--sh-neutral-800);
   --sh-text: var(--sh-neutral-50);
   --sh-text-muted: var(--sh-neutral-400);
-  --sh-accent: var(--sh-soca-300);
+  --sh-accent: var(--sh-mulberry-300);
   --sh-on-accent: var(--sh-neutral-950);
   --sh-primary-fill: var(--sh-neutral-50);
   --sh-on-primary: var(--sh-neutral-950);
