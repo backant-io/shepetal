@@ -155,22 +155,12 @@ enum FocusedText {
         return PasteGate.focus(axPid: axPid, frontmostPid: frontmost, window: ok ? (window as! AXUIElement) : nil)
     }
 
-    private static let textTimeout: Float = 0.25  // a whole document's AXValue is the slowest read
-
-    /// Runs on the main thread just before a paste. Each element gets a short timeout: a busy app must not
-    /// freeze Shepetal for AX's default (1.5 s per call measured on macOS 15). A slow field reads as unknown.
     /// An unreadable field logs which attribute failed and the AX error code, never the text.
     private static func read() -> (String, NSRange)? {
-        var app: CFTypeRef?
-        var err = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString, &app)
-        guard err == .success, let app else { return unreadable(kAXFocusedApplicationAttribute, err) }
-        let appEl = app as! AXUIElement
-        AXUIElementSetMessagingTimeout(appEl, textTimeout)
         var focused: CFTypeRef?
-        err = AXUIElementCopyAttributeValue(appEl, kAXFocusedUIElementAttribute as CFString, &focused)
+        var err = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused)
         guard err == .success, let focused else { return unreadable(kAXFocusedUIElementAttribute, err) }
         let el = focused as! AXUIElement
-        AXUIElementSetMessagingTimeout(el, textTimeout)
         var value: CFTypeRef?
         err = AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value)
         guard err == .success, let string = value as? String else { return unreadable(kAXValueAttribute, err) }

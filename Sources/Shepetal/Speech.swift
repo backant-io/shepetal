@@ -4,8 +4,15 @@ import ShepetalCore
 
 protocol SpeechEngine: AnyObject {
     var name: String { get }
+    /// True when `transcribe` reads `wav`. Dictation then waits for the file; otherwise it is still being
+    /// written while the samples are transcribed.
+    var readsWav: Bool { get }
     /// `wav` is the saved recording holding the same samples.
     func transcribe(_ samples: [Float], wav: URL) async throws -> String
+}
+
+extension SpeechEngine {
+    var readsWav: Bool { false }
 }
 
 struct SpeechError: LocalizedError {
@@ -173,6 +180,7 @@ final class ParakeetEngine: SpeechEngine {
 /// SHEPETAL_WHISPER_MODEL override the paths.
 final class WhisperCppEngine: SpeechEngine {
     let name: String
+    let readsWav = true  // whisper-cli reads the WAV file
     private let cli: URL
     private let model: URL
     private let language: String
