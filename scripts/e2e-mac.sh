@@ -6,8 +6,8 @@
 # that history kept the app, bundle id and page URL given for each dictation. The page-URL lookup must
 # return at once and do its work off the main thread. Each clip is then re-transcribed from its kept WAV,
 # as History's re-transcribe does, and must give the same text and the engine's model name on the same row.
-# A dictionary.txt in SHEPETAL_HOME replaces one word of e03; that clip is checked for the replacement and
-# left out of the WER. SHEPETAL_HOME defaults to .cache/e2e/home.
+# A dictionary.txt in the test's own data dir replaces one word of e03; that clip is checked for the replacement
+# and left out of the WER. The data dir is .cache/e2e/home, or E2E_HOME; an exported SHEPETAL_HOME is ignored.
 # A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
 # short.wav is the loudest 200 ms of e01: Parakeet refuses under 300 ms, so the engine must pad it, and a
 # clip that short must never end as "Transcription failed" (a quick hold used to).
@@ -21,9 +21,19 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=${SHEPETAL_BIN:-.build/release/shepetal}
 [ -x "$BIN" ] || swift build -c release
+# The cleanup model's library links no socket or DNS call, so it cannot reach the network even when a failed
+# call would be swallowed (the sandboxed run below only shows that nothing breaks without the network).
+LLAMA=$(dirname "$BIN")/llama.framework/llama
+[ -f "$LLAMA" ] || LLAMA=$(dirname "$BIN")/../Frameworks/llama.framework/llama
+[ -f "$LLAMA" ] || { echo "no llama.framework next to $BIN" >&2; exit 1; }
+if nm -u "$LLAMA" | grep -Eq '^_(socket|connect|getaddrinfo|gethostbyname|curl_[a-z_]+)$'; then
+  echo "$LLAMA links network calls" >&2; exit 1
+fi
+echo "llama.framework: no network calls linked"
 WORK=$PWD/.cache/e2e
 FIX=$WORK/fixtures
-export SHEPETAL_HOME=${SHEPETAL_HOME:-$WORK/home}
+# Never the user's data dir, even when SHEPETAL_HOME is exported: E2E_HOME moves the test's own.
+export SHEPETAL_HOME=${E2E_HOME:-$WORK/home}
 mkdir -p "$FIX" "$SHEPETAL_HOME"
 DICT=$SHEPETAL_HOME/dictionary.txt
 if [ -e "$DICT" ] && ! head -1 "$DICT" | grep -q '^# e2e-mac'; then
