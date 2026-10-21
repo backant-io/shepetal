@@ -64,6 +64,22 @@ final class Pipeline {
         return run
     }
 
+    /// Paste last and copy last: the newest history text, a paste that did not land included.
+    var lastText: String? { ShepetalCore.lastText(in: (try? history.recent(limit: 50)) ?? []) }
+
+    /// Copy last (⌃⌘C): the last text on the clipboard. nil, and the clipboard left alone, when there is none.
+    func copyLast() -> String? {
+        guard let text = lastText else { return nil }
+        copy(text)
+        return text
+    }
+
+    /// Copy last and the 🤫 menu's Recent: plain text on the clipboard, the user's to keep.
+    func copy(_ text: String) {
+        inserter.pasteboard.clearContents()
+        inserter.pasteboard.setString(text, forType: .string)
+    }
+
     /// Returns an error message, or nil when the text landed.
     private func transcribeAndInsert(_ samples: [Float], _ engine: SpeechEngine?, _ t0: TimeInterval,
                                      _ saving: Task<URL, Error>,

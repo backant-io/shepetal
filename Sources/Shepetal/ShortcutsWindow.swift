@@ -106,7 +106,7 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
             buttons[action]?.isEnabled = recording == nil || isRecording
         }
         if !tap.isRunning {
-            note.stringValue = "Shortcuts need Input Monitoring. Open Permissions… in the 🤫 menu."
+            note.stringValue = "Shortcuts need Input Monitoring. Open Settings > Permissions… in the shepetal window."
         } else if !tap.canSwallow {
             note.stringValue = "Without Accessibility, Esc and the keys of a shortcut also reach the app you are typing in."
         } else {
