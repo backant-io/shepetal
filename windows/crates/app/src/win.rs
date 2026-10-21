@@ -289,7 +289,6 @@ pub fn run() {
     // Goal rule 4: with delete after 24 h, clips go at launch and within a minute of turning 24 h old.
     let mut prune = system::Prune::default();
     let mut prune_failed = false;
-    let mut meeting_app = String::new();
     let card = card.map_err(|e| flow.error(&format!("Shepetal can't offer to record meetings: {e}"), 0)).ok();
     loop {
         let msg = rx.recv_timeout(Duration::from_millis(50));
@@ -359,7 +358,7 @@ pub fn run() {
             }
             Ok(Msg::Meeting(notice)) => {
                 match notice {
-                    meetings::Notice::Event(e) => match (meeting::show(&e, &mut meeting_app), &card) {
+                    meetings::Notice::Event(e) => match (meeting::show(&e), &card) {
                         (Show::Offer(label), Some(card)) => card.offer(&label),
                         (Show::Withdraw, Some(card)) => card.hide(),
                         (Show::Hint(text), _) => flow.show.show_hint(text, HINT),
