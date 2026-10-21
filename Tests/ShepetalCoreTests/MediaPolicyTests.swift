@@ -1,6 +1,13 @@
 import XCTest
 @testable import ShepetalCore
 
+extension MediaPolicy {
+    /// Both steps at once, as on the hands-free lock.
+    mutating func start(processes: [AudioProcess], output: OutputDevice?, meeting: Bool) -> [MediaAction] {
+        startMute(processes: processes, output: output, meeting: meeting) + startPause(processes: processes, meeting: meeting)
+    }
+}
+
 /// F09: muting and pausing must never leave the user worse off than before the dictation. Each test is one way
 /// it could: silencing a call, unmuting what the user muted, starting playback nobody asked for.
 final class MediaPolicyTests: XCTestCase {
@@ -18,7 +25,7 @@ final class MediaPolicyTests: XCTestCase {
     func testMutesAndPausesWhatIsPlayingThenRestoresBoth() {
         var p = policy()
         XCTAssertEqual(p.start(processes: [music], output: speakers, meeting: false),
-                       [.playPause, .setMute(uid: "speakers", true)])
+                       [.setMute(uid: "speakers", true), .playPause])
         let paused = AudioProcess(pid: 1, bundleID: "com.apple.Music", output: false)
         var muted = speakers; muted.muted = true
         XCTAssertEqual(p.stop(processes: [paused], device: { $0 == "speakers" ? muted : nil }),
@@ -130,6 +137,33 @@ final class MediaPolicyTests: XCTestCase {
         let chrome = AudioProcess(pid: 3, bundleID: "com.google.Chrome.helper", output: true)
         _ = p.start(processes: [music, chrome], output: speakers, meeting: false)
         XCTAssertEqual(p.stop(processes: [chrome], device: { _ in nil }), [.playPause])
+    }
+
+    // Mute comes at the hold threshold, pause only at the chord window: each step does only its own part.
+    func testMuteAndPauseAreSeparateSteps() {
+        var p = policy()
+        XCTAssertEqual(p.startMute(processes: [music], output: speakers, meeting: false), [.setMute(uid: "speakers", true)])
+        XCTAssertEqual(p.startPause(processes: [music], meeting: false), [.playPause])
+    }
+
+    // The key is a toggle: with a game or afplay holding the output and Music paused, it starts Music. Music must
+    // not play on into the recording or after it.
+    func testAPlayerTheKeyStartedIsPressedAgain() {
+        let afplay = AudioProcess(pid: 4, bundleID: "", output: true)
+        var p = policy(mute: false)
+        XCTAssertEqual(p.startPause(processes: [afplay], meeting: false), [.playPause])
+        XCTAssertEqual(p.stop(processes: [afplay, music], device: { _ in nil }), [.playPause], "at the end")
+        // A second after the key: pressed again at once, and nothing is left for the end.
+        p = policy(mute: false)
+        _ = p.startPause(processes: [afplay], meeting: false)
+        XCTAssertEqual(p.check(processes: [afplay]), [], "nothing changed: wait for the end")
+        XCTAssertEqual(p.check(processes: [afplay, music]), [.playPause])
+        XCTAssertEqual(p.stop(processes: [afplay, music], device: { _ in nil }), [])
+        // What we paused stopped: the pause worked, so the check leaves it alone, even with another player started.
+        p = policy(mute: false)
+        _ = p.startPause(processes: [music], meeting: false)
+        XCTAssertEqual(p.check(processes: [AudioProcess(pid: 3, output: true)]), [])
+        XCTAssertEqual(p.stop(processes: [], device: { _ in nil }), [.playPause])
     }
 
     // The hands-free lock calls start again: a second pause key would restart the media mid-dictation.

@@ -21,7 +21,9 @@ final class MediaControl {
     private let system: System
     private let defaults: UserDefaults
     private let meeting: () -> Bool
-    private var pending: DispatchWorkItem?
+    /// How long after the pause key `MediaPolicy.check` looks for a player the key started.
+    var settle: TimeInterval = 1
+    private var pending: [DispatchWorkItem] = []
 
     /// `meeting`: a meeting records or is detected; nothing is muted or paused then.
     init(system: System = .live, defaults: UserDefaults = .standard, meeting: @escaping () -> Bool) {
@@ -30,30 +32,39 @@ final class MediaControl {
         self.meeting = meeting
     }
 
-    /// Call on the gesture's `.start` with the hold threshold, and again on `.lockHandsFree` with 0. It acts once
-    /// `live()` says fn is held or hands-free, so fn as a modifier (fn+Delete) or a short tap never pauses anything.
-    func begin(after delay: TimeInterval, live: @escaping () -> Bool) {
-        pending?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            MainActor.assumeIsolated {
-                guard let self, live() else { return }
-                self.policy.mute = self.defaults.bool(forKey: Self.muteKey)
-                self.policy.pause = self.defaults.bool(forKey: Self.pauseKey)
-                guard self.policy.mute || self.policy.pause else { return }
-                let actions = self.policy.start(processes: self.system.processes(), output: self.system.output(nil),
-                                                meeting: self.meeting())
-                actions.forEach(self.system.apply)
-            }
+    /// Call on the gesture's `.start` with its hold threshold (mute) and chord window (pause), and again on
+    /// `.lockHandsFree` with 0 and 0. Each step acts once `live()` says fn is held or hands-free, so a short tap
+    /// never acts, and fn as a modifier (fn+Delete, fn+arrow, which cancel up to the chord window) never presses
+    /// the pause key. Mute may come earlier: its restore reads the device exactly. Each step acts once per
+    /// dictation, so the lock's second call does not act again.
+    func begin(mute muteDelay: TimeInterval, pause pauseDelay: TimeInterval, live: @escaping () -> Bool) {
+        policy.mute = defaults.bool(forKey: Self.muteKey)
+        policy.pause = defaults.bool(forKey: Self.pauseKey)
+        after(muteDelay) { me in
+            guard live() else { return }
+            me.policy.startMute(processes: me.system.processes(), output: me.system.output(nil), meeting: me.meeting())
+                .forEach(me.system.apply)
         }
-        pending = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        after(pauseDelay) { me in
+            guard live() else { return }
+            let actions = me.policy.startPause(processes: me.system.processes(), meeting: me.meeting())
+            actions.forEach(me.system.apply)
+            guard !actions.isEmpty else { return }
+            me.after(me.settle) { $0.policy.check(processes: $0.system.processes()).forEach($0.system.apply) }
+        }
     }
 
-    /// Call on stop, cancel, too short and quit: restores what this dictation muted or paused.
+    /// Call on stop, cancel, too short, a failed end and quit: restores what this dictation muted or paused.
     func end() {
-        pending?.cancel()
-        pending = nil
+        pending.forEach { $0.cancel() }
+        pending = []
         policy.stop(processes: system.processes(), device: { system.output($0) }).forEach(system.apply)
+    }
+
+    private func after(_ delay: TimeInterval, _ body: @escaping @MainActor (MediaControl) -> Void) {
+        let work = DispatchWorkItem { [weak self] in MainActor.assumeIsolated { if let self { body(self) } } }
+        pending.append(work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 }
 
