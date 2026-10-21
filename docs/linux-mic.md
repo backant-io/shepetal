@@ -43,11 +43,16 @@ While recording, a watcher reads the growing WAV every 0.5 s and the source list
 | --- | --- |
 | No sound from the mic | The samples have been exactly zero for more than 5 s. Quiet speech is never all zero; a run of pure zeros is a dead or hardware-muted mic. Once per run. |
 | Mic disconnected | The source being recorded disappears. The recorder is stopped with SIGINT, so the WAV stays valid, and what was said before is transcribed and kept. |
+| Cannot read the mic | No new samples for 5 s while the recorder runs (the device stopped delivering, or the WAV cannot be read). The recorder is stopped with SIGINT and what was said before is transcribed and kept, as for a disconnect. |
 | No PipeWire or PulseAudio | Neither `pw-dump` nor `pactl` answers at record start. |
+| Bluetooth mic (advice) | The mic picked at a record start is on the Bluetooth bus and another mic (not Bluetooth, not the built-in one under a closed lid) could take its place. A Bluetooth headset records in its call profile (HSP/HFP: narrowband, and its playback drops to call quality too). Once per daemon run. |
+| Lid closed (advice) | The lid is closed and the built-in mic is the one picked, so nothing else is plugged in. Once per daemon run. |
 
 Each alert is a desktop notification (`notify-send`) with the whole text, and a few words next
-to 🤫 (`error No sound from the mic`, `error Mic disconnected`, `error No PipeWire or
-PulseAudio` on the daemon's indicator socket), and the whole text on stderr. The same kind
+to 🤫 (`error No sound from the mic`, `error Mic disconnected`, `error Cannot read the mic`,
+`error No PipeWire or PulseAudio` on the daemon's indicator socket; the advice as `hint
+Bluetooth mic: lower quality` and `hint Lid closed: mic muffled`, so 🤫 does not turn yellow),
+and the whole text on stderr. There are no sounds. The same kind
 shows at most once a minute. When the mic is unplugged mid-dictation, the dictation ends right
 there: what was said is typed without another press, and the next press starts a new one.
 
@@ -66,12 +71,15 @@ there: what was said is typed without another press, and the next press starts a
    the built-in mic is last with `lid closed`.
 7. `systemctl --user stop pipewire pipewire-pulse wireplumber` and press fn: the
    "No PipeWire or PulseAudio" notification shows. Start them again.
+8. The mic that stops delivering, the Bluetooth headset and the lid closed on the only mic are
+   L-MIC-7 to L-MIC-9 in docs/manual-test.md.
 
 ## Known gaps
 
 - The source list is polled, not followed through `pw-dump --monitor` events, so a disconnect
   is noticed within about 2 s.
-- If a mic sends no frames at all (the file stops growing), no alert shows. Wispr stops after
-  5 s without packets.
+- The Mac also warns again at 15 s of zeros, reopens the mic once after a silent first second,
+  and suggests a closer mic for a quiet recording; Linux does not yet.
+- The Bluetooth and lid advice is shown once per daemon run, not once ever as on the Mac.
 - Whether `/proc/acpi/button/lid` is present depends on the laptop's ACPI tables. Some newer
   machines report the lid only through `SW_LID` on an input device, which is not read yet.

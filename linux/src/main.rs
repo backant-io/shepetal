@@ -847,6 +847,7 @@ mod tests {
             ("hyprctl", format!("echo \"$*\" > \"{d_}/focus.args\"\ncat \"{d_}/hypr-active\"\n")),
             ("wl-copy", format!("cat > \"{d_}/clipboard\"\n")),
             ("pw-play", format!("echo \"$*\" > \"{d_}/played\"\n")),
+            ("notify-send", format!("echo \"$*\" >> \"{d_}/notified\"\n")),
         ];
         for (bin, body) in tools {
             std::fs::write(d.join(bin), format!("#!/bin/sh\n{body}")).unwrap();
@@ -1167,6 +1168,45 @@ mod tests {
             let (hint, _) = dictate_on_x11(d, insert::Backend::Xclip, Some("7"), Some("7"));
             assert!(hint.unwrap().starts_with("No typing tool. The text is on the clipboard"));
             assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), "Hello world.");
+        });
+    }
+
+    #[test]
+    fn a_mic_that_stops_sending_ends_the_dictation_and_types_what_was_said() {
+        // The fake recorder writes once and then nothing, as a mic that stopped delivering. After
+        // 5 s the mic watcher says the mic cannot be read and stops the recorder with SIGINT;
+        // what was said is typed without a release, and 🤫 shows the error.
+        with_fake_tools("stall", |d| {
+            let home = d.join("home");
+            let lines = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+            let l = lines.clone();
+            shepetal::mic::set_hint_sink(move |line| l.lock().unwrap().push(line.to_string()));
+            let (tx, rx) = mpsc::channel();
+            let dir = d.to_path_buf();
+            let started = Instant::now();
+            let keyboard = std::thread::spawn(move || {
+                tx.send((shepetal::KEY_FN, 1)).unwrap(); // held down the whole time
+                for _ in 0..1000 {
+                    if dir.join("typed").exists() {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+                let typed_while_held = dir.join("typed").exists();
+                tx.send((shepetal::KEY_FN, 0)).unwrap(); // the late release does nothing
+                typed_while_held
+            });
+            let err = listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &Indicator::default(), &defaults()).unwrap_err();
+            assert!(keyboard.join().unwrap(), "typed while fn was still held: the watcher ended the dictation");
+            assert_eq!(err, "all input devices closed");
+            assert!(started.elapsed() >= shepetal::mic::NO_FRAMES_AFTER, "not before 5 s: {:?}", started.elapsed());
+            assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");
+            let kept = clips(&home.join("shepetal/audio"));
+            assert_eq!(kept.len(), 1, "{kept:?}");
+            assert_eq!(std::fs::read(&kept[0]).unwrap(), b"RIFF final", "the recorder was stopped with SIGINT, the clip kept");
+            let notified = std::fs::read_to_string(d.join("notified")).unwrap();
+            assert!(notified.contains("Cannot read HD Webcam C615 Analog Stereo: no sound arrived for 5 s"), "{notified}");
+            assert!(lines.lock().unwrap().contains(&"error Cannot read the mic".to_string()), "{:?}", lines.lock().unwrap());
         });
     }
 
