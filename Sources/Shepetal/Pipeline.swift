@@ -77,9 +77,10 @@ final class Pipeline {
         }
         run.entry.model = engine.name
         do {
+            let heard = await Task.detached { VoiceIsolation.apply(samples) }.value  // the kept WAV stays raw
             // Only an engine that reads the file waits for the disk; the others start on the samples at once.
             let wav = engine.readsWav ? try await saving.value : store.url(run.entry.id)
-            run.entry.rawText = try await engine.transcribe(samples, wav: wav)
+            run.entry.rawText = try await engine.transcribe(heard, wav: wav)
         } catch {
             if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"
