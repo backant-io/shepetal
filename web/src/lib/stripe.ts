@@ -66,7 +66,8 @@ export async function customerFor(user: User): Promise<string> {
   if (user.stripe_customer_id) return user.stripe_customer_id;
   const c = await getStripe().customers.create(
     { email: user.email, metadata: { app: APP, user_id: String(user.id) } },
-    { idempotencyKey: `shepetal-customer-${user.id}` },
+    // Two clicks at once make one customer. The trial start makes the key unique to this row, even across databases.
+    { idempotencyKey: `shepetal-customer-${user.id}-${user.trial_started_at}` },
   );
   await setCustomer(user.id, c.id);
   return (await userById(user.id))?.stripe_customer_id ?? c.id;

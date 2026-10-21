@@ -118,7 +118,7 @@ describe('lifetime ($23.99 once)', () => {
     expect(getStripe().customers.create).toHaveBeenCalledTimes(1);
     expect(getStripe().customers.create).toHaveBeenCalledWith(
       { email: 'a@example.com', metadata: { app: 'shepetal', user_id: String(user.id) } },
-      { idempotencyKey: `shepetal-customer-${user.id}` },
+      { idempotencyKey: `shepetal-customer-${user.id}-${user.trial_started_at}` },
     );
     expect(create.mock.calls.map((c) => (c[0] as Stripe.Checkout.SessionCreateParams).customer)).toEqual(['cus_1', 'cus_1']);
     expect((await fresh()).stripe_customer_id).toBe('cus_1');
