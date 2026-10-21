@@ -22,9 +22,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. In the 🤫 menu choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the setting is back to that value.
 4. Run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
 
-### M-SETUP-5: fn not received
-1. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s.
-2. Expected: a yellow ring and "fn not received: re-grant Input Monitoring" next to 🤫; Open Shepetal… > Home shows the same under fn problem. Turn Shepetal back on: within 2 s fn dictates again.
+### M-SETUP-5: no false "fn not received"
+"fn not received" only shows when the 🌐 key's keycode 179 reaches Shepetal and fn's keycode 63 does not (another app took fn). Ordinary keys never show it. The positive case cannot be produced by hand; `FnHealthTests` and `FnTapTests` cover it.
+1. With all three permissions granted, type a few sentences in TextEdit. Hold Down arrow for 2 s, then Left arrow for 2 s. Press ⌘C, ⌘V, ⇧ with letters, ⌥←, ⌘Space (then Esc), ⌃⌘V. Hold ⌃⌥ together for 2 s. Press fn+Delete and fn+↓. Hold ⌃, then hold fn for 2 s, release both. Tap fn, double-tap fn, and hold fn for 2 s (a dictation, fine).
+2. Expected: no "fn not received" next to 🤫 at any point, no yellow ring, and Open Shepetal… > Home shows no fn problem.
+3. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s. Expected: "Input Monitoring access was turned off" with a yellow ring and the Permissions window, not "fn not received". Turn Shepetal back on: within 2 s fn dictates again.
 
 ### M-SETUP-2: permissions survive a rebuild
 1. With all three permissions granted, quit Shepetal, run `scripts/make-app.sh --install` (it must print "Signed with: Apple Development…" or "Developer ID…"), and open the app again.
@@ -669,8 +671,17 @@ In the L-SC steps the shortcuts have their defaults: Esc cancels, Shift+Alt+Z is
 
 ### L-SC-6: 20-minute cap
 1. Start a hands-free dictation (double-tap fn or Ctrl+Meta+Space) and leave it running for 20 min, speaking now and then.
-2. Expected: at 19 min next to 🤫 shows `Recording stops in 1 minute` (stderr: `shepetal: hint: Recording stops in 1 minute`). At 20 min the recording stops by itself and the text is typed. Write down how long the text took after the stop: the whole clip goes to the model at once.
+2. Expected: at 19 min next to 🤫 shows `Recording stops in 1 minute` (stderr: `shepetal: hint: Recording stops in 1 minute`), and a desktop notification says the same. At 20 min the recording stops by itself and the text is typed. Write down how long the text took after the stop: the whole clip goes to the model at once.
 (Automated: `warning_at_19_minutes_and_stop_at_20`, `a_20_minute_hold_stops_and_the_late_release_does_nothing`.)
+
+### L-LEN-1: a configurable cap (F10)
+1. `sudo apt install libnotify-bin` (for `notify-send`). Put `{"dictation": {"max_minutes": 2}}` in `~/.config/shepetal/config.json` and start `shepetal daemon`, with a text editor focused.
+2. Double-tap fn and keep talking. Expected: after 1 minute `Recording stops in 1 minute` shows next to 🤫 and as a desktop notification (on GNOME Wayland without the extension, only the notification). After 2 minutes the recording stops by itself and everything said is typed, as if you had tapped fn. No sound plays.
+3. Hold fn (no double-tap) and keep talking for over 2 minutes. Expected: the same warning at 1 minute; at 2 minutes the text is typed while fn is still down, and letting go of fn afterwards starts nothing and shows no hint.
+4. `ls -t ~/.local/share/shepetal/audio | head -2`. Expected: both recordings are there, not marked cancelled, each about 2 minutes long.
+5. Put `{"dictation": {"max_minutes": 0}}` in the file and start the daemon. Expected: it exits with `...config.json: dictation.max_minutes: expected whole minutes from 1 to 1440, got 0`.
+6. Remove `dictation` from the file and restart. Expected: the cap is back to 20 minutes (L-SC-6).
+(Automated: `the_cap_is_configurable_for_holds_double_taps_and_the_toggle`, `a_one_minute_cap_warns_at_the_start`, `max_minutes_must_be_whole_minutes_from_1_to_a_day`, `a_dictation_that_reaches_the_cap_is_warned_stopped_and_typed`, `warning_at_19_minutes_and_stop_at_20`, `a_20_minute_hold_stops_and_the_late_release_does_nothing`.)
 
 ### L-AUD-1: every recording is kept, owner-only
 1. After L-FN-1 to L-FN-4, run `stat -c '%a %U %n' ~/.local/share/shepetal/audio ~/.local/share/shepetal/audio/*`.
@@ -934,3 +945,18 @@ Before: `sudo apt install xdg-utils wl-clipboard xclip`, sound on, and a text ed
 7. Record a call and leave the notification alone, then stop the daemon with Ctrl+C. Expected: the notification disappears from the notification list, and the transcript window stays open.
 8. In "Ubuntu on Xorg": `sudo apt remove xclip && sudo apt install xsel`, record a call and click Copy transcript. Expected: "Transcript copied", and the turns paste. Then `sudo apt remove xsel`, record a call and click Copy transcript. Expected: "Transcript not copied: no wl-copy, xclip or xsel" and the same on the daemon's stderr after `shepetal: meeting transcript not copied:`. `sudo apt install xclip` afterwards.
 (Automated: `a_meeting_records_only_after_record_is_clicked`, `auto_record_records_without_asking`, `the_transcript_window_copies_only_on_a_click`, `the_ready_notification_offers_copy_only_with_speech_and_never_a_sound`, `meeting_times_are_local_and_day_first`, `transcript_interleaves_me_and_others_by_time`, `clipboard_tool_follows_the_session`, `text_goes_over_stdin_not_argv`.)
+
+## Windows
+
+Setup: a Windows 11 PC with Shepetal installed from the CI run's `shepetal-windows-setup` artifact, and windows/README.md, "Hand test on a Windows 11 PC", done up to step 15 (a call is offered and recorded only after Record). Wear headphones (without them the other side is recorded in Me.wav too), and have a second device in the call to play the other side.
+
+### W-MTG-1: the Meeting transcript window (F69, F120)
+1. Copy a word in Notepad (Ctrl+C), so you can tell later whether the clipboard changed. Join a Zoom call in the Zoom app and click Record on the card. Say "Hello, can you hear me?", have the other side answer "Yes, loud and clear.", wait about 10 s, then say "I will send the notes on Friday." Leave the call after about a minute, click into Notepad and keep typing.
+2. Expected: a few seconds after you leave, "Transcribing the meeting" shows next to the 🤫. Within a few minutes (write down how long), a "Meeting transcript" window opens in front of Notepad, with no sound. Notepad keeps the keyboard: its title bar stays active and your typing still lands in Notepad. Click into the window: only now does it take the focus.
+3. Expected in the window: the first line is "Zoom · DD.MM.YY HH:MM · 1 min", with today's date and the time the recording started. Under it: "No summary: Shepetal for Windows does not summarize meetings yet." Then the turns in the order they were said, each with its time: "[00:00:..] Me: Hello, can you hear me?", "[00:00:..] Others: Yes, loud and clear." and, about 10 s later, "Me: I will send the notes on Friday." Copy summary is greyed out. No model name shows anywhere.
+4. In Notepad press Ctrl+V. Expected: the word you copied in step 1, not the transcript.
+5. Click Copy transcript. Expected: "Copied" next to the buttons, gone after about 2 s, and no sound. Ctrl+V in Notepad pastes the header and every turn with its time and speaker. Select one line in the window with the mouse and press Ctrl+C: Ctrl+V pastes only that line.
+6. Click Open folder. Expected: Explorer opens `%LOCALAPPDATA%\Shepetal\meetings\<yyyyMMdd-HHmmss>` with Me.wav, Others.wav and transcript.md, and transcript.md holds the same text as Copy transcript. transcript.md > Properties > Security lists only your user.
+7. Close the window (its X, or Esc). Record two short meetings one after the other (join, Record, say a sentence, leave, then the same again). Expected: one window, which shows the second meeting once it is transcribed, never two windows.
+8. Join a call, click Record, stay silent with the other side muted for about 20 s, and leave. Expected: the window says "No speech was recorded." under the header, and Open folder still opens that meeting's folder.
+(Automated: `the_window_shows_it_and_copies_only_on_a_click`, `copy_summary_stays_off_until_there_is_a_summary`, `a_newer_meeting_replaces_the_text_of_the_one_window`, `no_speech_says_so_and_still_opens_the_folder`, `the_window_never_takes_the_focus_on_its_own`, `a_channel_splits_into_its_stretches_of_speech`.)
