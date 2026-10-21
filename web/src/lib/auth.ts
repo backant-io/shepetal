@@ -20,6 +20,8 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
       return true;
     },
   },
+  // Our own sign-in page, also for next-auth's errors (a cancelled Google sign-in, a refused account).
+  pages: { signIn: '/login', error: '/login' },
   trustHost: true,
 }));
 

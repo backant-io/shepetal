@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { SiteHeader } from '@/components/site/Shell';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy',
@@ -9,11 +10,13 @@ export const metadata: Metadata = {
 
 export default function PrivacyPolicy() {
   return (
-    <main className="mx-auto max-w-3xl px-4 pt-16 sm:px-8">
-      <h1 className="display text-[clamp(2.75rem,8vw,4.5rem)] leading-none">Privacy Policy</h1>
-      <p className="mt-4 text-sm text-[var(--hush)]">Last updated: October 20, 2026</p>
+    <>
+      <SiteHeader end={<Link href="/account">Account</Link>} />
+      <main className="s-main s-legal">
+      <h1 className="s-h2">Privacy Policy</h1>
+      <p className="s-mono">Last updated: October 20, 2026</p>
 
-      <div className="prose-legal mt-12">
+      <div className="s-prose">
         <p>
           Backant Inc. (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes shepetal, a
           dictation app for Mac, and runs this website (the &quot;Site&quot;). The Site and the
@@ -125,5 +128,6 @@ export default function PrivacyPolicy() {
         </p>
       </div>
     </main>
+    </>
   );
 }

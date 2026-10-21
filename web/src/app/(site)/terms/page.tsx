@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { SiteHeader } from '@/components/site/Shell';
 
 export const metadata: Metadata = {
   title: 'Terms of Use',
@@ -9,11 +10,13 @@ export const metadata: Metadata = {
 
 export default function TermsOfUse() {
   return (
-    <main className="mx-auto max-w-3xl px-4 pt-16 sm:px-8">
-      <h1 className="display text-[clamp(2.75rem,8vw,4.5rem)] leading-none">Terms of Use</h1>
-      <p className="mt-4 text-sm text-[var(--hush)]">Version 1.1. Last revised on October 21, 2026</p>
+    <>
+      <SiteHeader end={<Link href="/account">Account</Link>} />
+      <main className="s-main s-legal">
+      <h1 className="s-h2">Terms of Use</h1>
+      <p className="s-mono">Version 1.1. Last revised on October 21, 2026</p>
 
-      <div className="prose-legal mt-12">
+      <div className="s-prose">
         <p>
           This website (the &quot;Site&quot;) and the shepetal app (together, the
           &quot;Service&quot;) belong to Backant Inc. (&quot;Company&quot;, &quot;us&quot;, &quot;our&quot; and
@@ -21,14 +24,14 @@ export default function TermsOfUse() {
           which will be posted on the Site in connection with such features and are incorporated by reference into
           these Terms.
         </p>
-        <p className="uppercase">
+        <p className="s-caps">
           These Terms of Use (these &quot;Terms&quot;) set forth the legally binding terms and conditions that govern
           your use of the Service. By accessing or using the Service, you are accepting these Terms, and you represent
           and warrant that you have the right, authority and capacity to enter into these Terms. You may not access or
           use the Service or accept the Terms if you are not at least 18 years old. If you do not agree with all of the
           provisions of these Terms, do not access or use the Service.
         </p>
-        <p className="uppercase">
+        <p className="s-caps">
           Please be aware that section 11 contains provisions governing how to resolve disputes between you and
           Company, including an agreement to arbitrate, a class action waiver and a jury trial waiver. Please read
           section 11 carefully.
@@ -107,7 +110,7 @@ export default function TermsOfUse() {
         </p>
 
         <h2>7. Disclaimers</h2>
-        <p className="uppercase">
+        <p className="s-caps">
           The Service is provided on an &quot;as-is&quot; and &quot;as available&quot; basis, and Company (and our
           suppliers) expressly disclaim any and all warranties and conditions of any kind, whether express, implied or
           statutory, including all warranties or conditions of merchantability, fitness for a particular purpose,
@@ -116,13 +119,13 @@ export default function TermsOfUse() {
         <p>Speech recognition can make mistakes, so check important text before you rely on it.</p>
 
         <h2>8. Limitation on liability</h2>
-        <p className="uppercase">
+        <p className="s-caps">
           To the maximum extent permitted by law, in no event shall Company (or our suppliers) be liable to you or any
           third party for any lost profits, lost data, costs of procurement of substitute products, or any indirect,
           consequential, exemplary, incidental, special or punitive damages arising from or relating to these Terms or
           your use of, or inability to use, the Service.
         </p>
-        <p className="uppercase">
+        <p className="s-caps">
           To the maximum extent permitted by law, notwithstanding anything to the contrary contained herein, our
           liability to you for any damages arising from or related to these Terms will at all times be limited to a
           maximum of fifty US dollars.
@@ -162,5 +165,6 @@ export default function TermsOfUse() {
         </p>
       </div>
     </main>
+    </>
   );
 }
