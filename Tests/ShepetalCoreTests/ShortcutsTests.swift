@@ -14,9 +14,47 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertEqual(s.chord(.dismiss), [esc])
         XCTAssertEqual(s.chord(.pasteLast), [ctrl, cmd, v])
         XCTAssertEqual(s.chord(.copyLast), [ctrl, cmd, c])
-        for action in ShortcutAction.allCases {
+        XCTAssertEqual(s.chord(.openNotes), [], "open notes has no default chord")
+        for action in ShortcutAction.allCases where !s.chord(action).isEmpty {
             XCTAssertNil(s.problem(s.chord(action), for: action), "the default for \(action) must pass its own rules")
         }
+    }
+
+    // F55: open notes is unbound, so no chord of anyone's fires it until they record one in the Shortcuts window;
+    // then the router hands it to the app, the front app never sees the keys, and it survives a relaunch.
+    func testOpenNotesFiresOnlyOnceBoundAndIsKept() {
+        let n = Key.n
+        func press(_ r: inout KeyRouter, _ keys: [Int]) -> (inputs: [KeyInput], swallowed: Bool) {
+            defer { for k in keys.reversed() { _ = r.key(k, down: false, active: false, canSwallow: true) } }
+            let results = keys.map { r.key($0, down: true, active: false, canSwallow: true) }
+            return (results.flatMap { $0.inputs }, results.last?.swallow ?? false)
+        }
+        var r = KeyRouter()
+        let unbound = press(&r, [ctrl, opt, n])
+        XCTAssertEqual(unbound.inputs, [], "unbound: the keys are the front app's")
+        XCTAssertFalse(unbound.swallowed)
+
+        XCTAssertNil(r.shortcuts.set([ctrl, opt, n], for: .openNotes))
+        let bound = press(&r, [ctrl, opt, n])
+        XCTAssertEqual(bound.inputs, [.openNotes])
+        XCTAssertTrue(bound.swallowed, "the N never types into the app in front")
+        let paste = press(&r, [ctrl, cmd, v])
+        XCTAssertEqual(paste.inputs, [.pasteLast], "the other shortcuts keep working")
+
+        var g = FnGesture()
+        XCTAssertEqual(g.handle(.openNotes, at: 0), [], "opening notes never starts a dictation")
+        XCTAssertEqual(g.handle(.toggle, at: 1), [.start, .lockHandsFree])
+        XCTAssertEqual(g.handle(.openNotes, at: 3), [], "nor stops or cancels one")
+        XCTAssertEqual(g.state, .handsFree(since: 1))
+
+        XCTAssertEqual(Shortcuts(stored: r.shortcuts.stored).chord(.openNotes), [ctrl, opt, n], "kept in UserDefaults")
+        XCTAssertEqual(r.shortcuts.problem([ctrl, opt, n], for: .copyLast), .inUse, "two actions never share a chord")
+        XCTAssertEqual(r.shortcuts.problem([fn, Key.s], for: .openNotes), .inUse, "fn+S would start a recording first")
+        XCTAssertEqual(r.shortcuts.problem([Key.n], for: .openNotes), .noModifier)
+        r.shortcuts.reset()
+        XCTAssertEqual(r.shortcuts.chord(.openNotes), [], "Reset to defaults unbinds it")
+        let reset = press(&r, [ctrl, opt, n])
+        XCTAssertEqual(reset.inputs, [])
     }
 
     func testRejectsFourKeys() {
