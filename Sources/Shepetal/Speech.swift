@@ -89,6 +89,7 @@ final class SpeechMenu: NSObject {
 
     func languagesItem() -> NSMenuItem {
         let menu = NSMenu()
+        menu.autoenablesItems = false  // every item is enabled (#207)
         let auto = menu.addItem(withTitle: "Automatic", action: #selector(automatic), keyEquivalent: "")
         auto.target = self
         auto.state = languages.isEmpty ? .on : .off

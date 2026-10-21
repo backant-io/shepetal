@@ -388,11 +388,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         Account.shared.refresh()
         let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,
-                              engineProblem: engine == nil ? engineStatus : nil,
                               canDownloadEngine: engine == nil && !downloading && !ParakeetEngine.isInstalled,
                               cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,
                               downloadingCleanup: pipeline?.downloadingCleanup == true,
-                              cleanupDownloadFailed: pipeline?.cleanupDownloadFailed == true,
                               dictionarySupport: speech.dictionarySupport(),
                               access: Account.shared.access, signingIn: Account.shared.signingIn,
                               recordingMeeting: meetings.current != nil,

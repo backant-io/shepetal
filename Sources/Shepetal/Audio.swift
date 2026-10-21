@@ -211,6 +211,7 @@ final class Mic: NSObject {
 
     private let defaults = UserDefaults.standard
     private let inputs: () -> [MicDevice]  // CoreAudio's, or a test's
+    private let isLidClosed: () -> Bool  // IOKit's, or a test's
     private var notices: MicNotices
     private var timer: Timer?
     private var rebuilds = 0
@@ -225,9 +226,11 @@ final class Mic: NSObject {
         set { defaults.set(newValue, forKey: "micRanking") }
     }
 
-    init(recorder: Recorder = Recorder(), inputs: @escaping () -> [MicDevice] = AudioDevices.inputs) {
+    init(recorder: Recorder = Recorder(), inputs: @escaping () -> [MicDevice] = AudioDevices.inputs,
+         isLidClosed: @escaping () -> Bool = { AudioDevices.lidClosed }) {
         self.recorder = recorder
         self.inputs = inputs
+        self.isLidClosed = isLidClosed
         notices = MicNotices(seen: defaults.stringArray(forKey: "micSeen").map(Set.init),
                              bluetoothHintShown: defaults.bool(forKey: "micBluetoothHintShown"))
         super.init()
@@ -243,7 +246,7 @@ final class Mic: NSObject {
 
     func open() throws {
         let devices = inputs()
-        let lidClosed = AudioDevices.lidClosed
+        let lidClosed = isLidClosed()
         let pick = try MicChoice.pick(devices, forced: forced, ranking: ranking,
                                       systemDefault: AudioDevices.defaultInputUID, lidClosed: lidClosed)
         recorder.start(pick)
@@ -300,7 +303,7 @@ final class Mic: NSObject {
             stopDictation(transcribe: true, "Mic disconnected")
         }
         let pick = try? MicChoice.pick(devices, forced: forced, ranking: ranking,
-                                       systemDefault: AudioDevices.defaultInputUID, lidClosed: AudioDevices.lidClosed)
+                                       systemDefault: AudioDevices.defaultInputUID, lidClosed: isLidClosed())
         remember(notices.update(devices, pick: pick))
     }
 
@@ -328,23 +331,23 @@ final class Mic: NSObject {
 
     // MARK: menu
 
-    /// Automatic, each device (to force it), and "Prefer <name>" (moves it to the top of the ranking).
+    /// Automatic, each device (to force it), and "Prefer <name>" (moves it to the top of the ranking). A closed
+    /// lid's built-in mic is left out, not greyed out (#207).
     func menuItem() -> NSMenuItem {
-        let devices = inputs()
-        let lidClosed = AudioDevices.lidClosed
+        let lidClosed = isLidClosed()
+        let devices = MicChoice.usable(inputs(), lidClosed: lidClosed)
         let pick = try? MicChoice.pick(devices, forced: forced, ranking: ranking,
                                        systemDefault: AudioDevices.defaultInputUID, lidClosed: lidClosed)
         let menu = NSMenu()
+        menu.autoenablesItems = false  // #207: with it on, AppKit decides what is greyed out
         let auto = menu.addItem(withTitle: "Automatic" + (pick.map { d in " (\(d.name))" } ?? ""), action: #selector(automatic), keyEquivalent: "")
         auto.target = self
         auto.state = forced == nil ? .on : .off
         for d in devices {
-            let covered = lidClosed && d.transport == .builtIn
-            let i = menu.addItem(withTitle: d.name + (covered ? " (lid closed)" : ""), action: #selector(force(_:)), keyEquivalent: "")
+            let i = menu.addItem(withTitle: d.name, action: #selector(force(_:)), keyEquivalent: "")
             i.target = self
             i.representedObject = d.uid
             i.state = forced == d.uid ? .on : .off
-            i.isEnabled = !covered
         }
         menu.addItem(.separator())
         for d in devices {
