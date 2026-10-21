@@ -41,6 +41,7 @@ final class MeetingsModel: ObservableObject {
     func select(_ id: String?) {
         guard let id, id != selectedID else { return }
         selectedID = id
+        message = ""  // "copied" was about the other meeting
         refresh()
     }
 
@@ -48,6 +49,12 @@ final class MeetingsModel: ObservableObject {
         guard let r = record, r.summary != nil else { return }
         copy(MeetingFormat.markdown(r, transcript: false))
         message = "Summary copied"
+    }
+
+    func copyTranscript() {
+        guard let r = record, !r.segments.isEmpty else { return }
+        copy(MeetingFormat.transcript(r))
+        message = "Transcript copied"
     }
 
     /// Writes the Markdown to a file the user picks. Nothing is written without the panel.
@@ -203,6 +210,8 @@ private struct MeetingDetail: View {
 
     private var actions: some View {
         HStack(spacing: 8) {
+            Button { model.copyTranscript() } label: { Label("Copy transcript", systemImage: "text.quote") }
+                .disabled(record.segments.isEmpty).help("Copy transcript")
             Button { model.copySummary() } label: { Label("Copy summary", systemImage: "doc.on.doc") }
                 .disabled(record.summary == nil).help("Copy summary")
             Button { model.export() } label: { Label("Export Markdown…", systemImage: "square.and.arrow.up") }
@@ -265,7 +274,7 @@ private struct SummaryPane: View {
     }
 }
 
-private struct ActionRow: View {
+struct ActionRow: View {
     let item: ActionItem
 
     var body: some View {
@@ -316,7 +325,7 @@ private struct TranscriptPane: View {
     }
 }
 
-private struct Bubble: View {
+struct Bubble: View {
     let segment: Segment
 
     var body: some View {
