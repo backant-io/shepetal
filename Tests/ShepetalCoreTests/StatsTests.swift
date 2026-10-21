@@ -79,7 +79,11 @@ final class StatsTests: XCTestCase {
         XCTAssertEqual(s.wpm, 0)
         XCTAssertEqual(s.timeSavedMinutes, 0)
         XCTAssertEqual(s.speakingMinutes, 0)
-        XCTAssertEqual(DictationStats(typingWpm: 0).timeSavedMinutes, 0, "a zero typing speed must not divide by zero")
+        // Words > 0, or 0/0 is NaN and max(0, NaN) hides a missing guard. With words, x/0 is inf, and inf traps
+        // StatsFormat.duration's Int(…), so `defaults write … typingWpm 0` would crash Home.
+        var zero = DictationStats(typingWpm: 0)
+        zero.words = 10
+        XCTAssertEqual(zero.timeSavedMinutes, 0, "a zero typing speed must not divide by zero")
         // A dictation with zero duration (a clock glitch) must not give an infinite WPM.
         try add("z", words: 3, ms: 0)
         XCTAssertEqual(try history.stats().wpm, 0)
