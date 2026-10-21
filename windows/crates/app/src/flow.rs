@@ -82,6 +82,9 @@ pub struct Flow<M, S, I, O> {
     pub rules: fn(&str) -> String,
     /// The hotkey's name, which the short-press hint gives. `HOTKEY` until the app sets the saved one.
     pub hotkey: String,
+    /// Some(percent) while the first-run model download runs: a press records nothing then and
+    /// says how far it is, instead of a blue ring for minutes.
+    pub downloading: Option<u8>,
     state: State,
     /// When the error ring goes back to idle.
     error_until: Option<u64>,
@@ -91,7 +94,7 @@ pub struct Flow<M, S, I, O> {
 
 impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
     pub fn new(mic: M, store: S, insert: I, show: O, rules: fn(&str) -> String) -> Self {
-        Flow { mic, store, insert, show, rules, hotkey: HOTKEY.into(), state: State::Idle, error_until: None, pending: None }
+        Flow { mic, store, insert, show, rules, hotkey: HOTKEY.into(), downloading: None, state: State::Idle, error_until: None, pending: None }
     }
 
     /// True while a clip is being recorded or transcribed.
@@ -103,6 +106,10 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
     pub fn action(&mut self, action: Action, now: u64) -> Option<Vec<f32>> {
         use Action::*;
         match (self.state, action) {
+            (State::Idle, Start) if self.downloading.is_some() => {
+                let percent = self.downloading.unwrap_or_default();
+                self.show.hint(&crate::system::downloading_hint(percent));
+            }
             (State::Idle, Start) => {
                 self.insert.remember_focus();
                 match self.mic.start() {
@@ -355,6 +362,20 @@ mod tests {
         f.action(Action::Start, 0);
         f.action(Action::TooShort, 600);
         assert_eq!(take(&log).last().unwrap(), "hint Hold Alt+Win to talk · double-tap for hands-free");
+    }
+
+    #[test]
+    fn nothing_records_while_the_model_downloads() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        f.downloading = Some(40);
+        assert_eq!(f.action(Action::Start, 0), None);
+        assert_eq!(take(&log), ["hint Getting the speech model ready (40 %). Dictation works once it's done."]);
+        assert!(!f.busy(), "the app then resets the gesture, so the release stops nothing");
+        assert_eq!(f.action(Action::Stop, 900), None);
+        assert!(take(&log).is_empty());
+        f.downloading = None;
+        f.action(Action::Start, 2000);
+        assert_eq!(take(&log), ["remember focus", "mic start", "mode Recording"], "works once it is in place");
     }
 
     #[test]

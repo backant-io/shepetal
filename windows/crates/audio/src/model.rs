@@ -79,15 +79,22 @@ fn nvidia_driver() -> bool {
 }
 
 /// The path of `m` in `dir`, downloading it first if it is missing. A download only replaces
-/// the final name after its SHA-256 matches, so a cut or altered file is never loaded.
-pub fn ensure(dir: &Path, m: &Model) -> Result<PathBuf, String> {
+/// the final name after its SHA-256 matches, so a cut or altered file is never loaded. While it
+/// downloads, `progress` gets the percent done about every half second (see `percent`).
+pub fn ensure(dir: &Path, m: &Model, mut progress: impl FnMut(u8)) -> Result<PathBuf, String> {
     let path = dir.join(m.file);
     if path.is_file() {
         return Ok(path);
     }
     fs::create_dir_all(dir).map_err(|e| format!("Could not create the models folder: {e}"))?;
     let part = dir.join(format!("{}.part", m.file));
-    let fetched = curl().args(["-fsL", "--retry", "3", "-o"]).arg(&part).arg(m.url).status();
+    let fetched = curl().args(["-fsL", "--retry", "3", "-o"]).arg(&part).arg(m.url).spawn().and_then(|mut child| loop {
+        if let Some(status) = child.try_wait()? {
+            break Ok(status);
+        }
+        progress(percent(fs::metadata(&part).map_or(0, |md| md.len()), m.bytes));
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    });
     let result = match fetched {
         Err(e) => Err(format!("Could not start the download: {e}")),
         Ok(s) if !s.success() => Err(format!("The speech model download failed ({s}). Check the connection and try again.")),
@@ -99,6 +106,12 @@ pub fn ensure(dir: &Path, m: &Model) -> Result<PathBuf, String> {
     };
     let _ = fs::remove_file(&part);
     result.map(|()| path)
+}
+
+/// How much of a download of `total` bytes is done, 0 to 99: 100 would claim the file is
+/// checked and in place before it is.
+pub fn percent(done: u64, total: u64) -> u8 {
+    (done.saturating_mul(100) / total.max(1)).min(99) as u8
 }
 
 /// Windows 10 1803 and later ship curl.exe in System32. Absolute, so PATH cannot swap it, and
@@ -163,9 +176,21 @@ mod tests {
     }
 
     #[test]
+    fn progress_counts_up_and_never_says_100_before_the_check() {
+        assert_eq!(percent(0, GPU.bytes), 0);
+        assert_eq!(percent(GPU.bytes / 2, GPU.bytes), 49, "574 MB, half: 49, rounded down");
+        assert_eq!(percent(GPU.bytes - 1, GPU.bytes), 99);
+        assert_eq!(percent(GPU.bytes, GPU.bytes), 99, "done is said once the hash matched");
+        assert_eq!(percent(2 * GPU.bytes, GPU.bytes), 99, "a server sending more");
+        assert_eq!(percent(5, 0), 99, "no division by zero");
+    }
+
+    #[test]
     fn first_use_downloads_and_verifies() {
         let (dir, m) = fixture("ok", b"weights");
-        let p = ensure(&dir, &m).unwrap();
+        let mut seen = Vec::new();
+        let p = ensure(&dir, &m, |pct| seen.push(pct)).unwrap();
+        assert!(seen.windows(2).all(|w| w[0] <= w[1]) && seen.iter().all(|&p| p <= 99), "{seen:?}");
         assert_eq!((p.clone(), fs::read(&p).unwrap()), (dir.join("m.bin"), b"weights".to_vec()));
         assert!(!dir.join("m.bin.part").exists());
     }
@@ -174,7 +199,7 @@ mod tests {
     fn a_damaged_download_is_never_put_in_place() {
         let (dir, m) = fixture("bad", b"weights");
         let m = Model { sha256: "0000000000000000000000000000000000000000000000000000000000000000", ..m };
-        let err = ensure(&dir, &m).unwrap_err();
+        let err = ensure(&dir, &m, |_| {}).unwrap_err();
         assert!(err.contains("damaged"), "{err}");
         assert!(!dir.join("m.bin").exists() && !dir.join("m.bin.part").exists());
     }
@@ -183,7 +208,7 @@ mod tests {
     fn a_failed_download_leaves_nothing() {
         let (dir, m) = fixture("gone", b"weights");
         let m = Model { url: "file:///nonexistent/shepetal/m.bin", ..m };
-        assert!(ensure(&dir, &m).unwrap_err().contains("download failed"));
+        assert!(ensure(&dir, &m, |_| {}).unwrap_err().contains("download failed"));
         assert!(!dir.join("m.bin").exists() && !dir.join("m.bin.part").exists());
     }
 
@@ -193,14 +218,14 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("m.bin"), b"local").unwrap();
         let m = Model { url: "file:///nonexistent/shepetal/m.bin", ..m };
-        assert_eq!(fs::read(ensure(&dir, &m).unwrap()).unwrap(), b"local");
+        assert_eq!(fs::read(ensure(&dir, &m, |_| {}).unwrap()).unwrap(), b"local");
     }
 
     #[test]
     fn user_facing_errors_never_name_a_model() {
         let (dir, m) = fixture("names", b"weights");
         for m in [Model { url: "file:///nonexistent/x", ..m }, Model { sha256: "00", url: m.url, file: m.file, bytes: 0 }] {
-            let err = ensure(&dir, &m).unwrap_err().to_lowercase();
+            let err = ensure(&dir, &m, |_| {}).unwrap_err().to_lowercase();
             for name in ["whisper", "ggml", "turbo", "base.en", "m.bin"] {
                 assert!(!err.contains(name), "{err}");
             }

@@ -119,6 +119,8 @@ fn now_ms() -> u64 {
 /// What the other threads send to this one.
 enum Msg {
     Input(input::Event),
+    /// How far the first-run model download is, in percent.
+    Progress(u8),
     /// The model loaded (None) or could not be fetched or loaded.
     Ready(Option<String>),
     Text(Result<String, String>),
@@ -197,7 +199,9 @@ impl flow::Show for input::Ui {
 fn spawn_stt(dir: PathBuf, model: &'static audio::model::Model, tx: Sender<Msg>) -> Sender<Vec<f32>> {
     let (clips, rx) = mpsc::channel::<Vec<f32>>();
     thread::spawn(move || {
-        let mut whisper = audio::model::ensure(&dir, model).and_then(|path| audio::Whisper::load(&path));
+        let progress = tx.clone();
+        let mut whisper = audio::model::ensure(&dir, model, |p| drop(progress.send(Msg::Progress(p))))
+            .and_then(|path| audio::Whisper::load(&path));
         let _ = tx.send(Msg::Ready(whisper.as_ref().err().cloned()));
         for samples in rx {
             let text = match &mut whisper {
@@ -324,9 +328,16 @@ pub fn run() {
             }
             // The tray, overlay and hook are already gone.
             Ok(Msg::Input(input::Event::Quit)) | Err(RecvTimeoutError::Disconnected) => break,
+            Ok(Msg::Progress(p)) => {
+                flow.downloading = Some(p);
+                vec![]
+            }
             Ok(Msg::Ready(err)) => {
-                if let Some(e) = err {
-                    flow.error(&e, now);
+                let downloaded = flow.downloading.take().is_some();
+                match err {
+                    Some(e) => flow.error(&e, now),
+                    None if downloaded => flow.show.show_hint(&system::ready_hint(&flow.hotkey), HINT),
+                    None => {}
                 }
                 vec![]
             }
@@ -375,7 +386,8 @@ pub fn run() {
             if let Some(samples) = flow.action(action, now) {
                 let _ = stt.send(samples);
             }
-            // The mic did not open: end the gesture too, so its release stops nothing.
+            // The mic did not open, or the model is still downloading: end the gesture too, so its
+            // release stops nothing.
             if action == Action::Start && !flow.busy() {
                 gesture.reset();
             }

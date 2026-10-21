@@ -4,6 +4,17 @@
 use shepetal_core::retention::Retention;
 use std::path::Path;
 
+/// Next to the 🤫 when the hotkey is pressed while the speech model downloads on first run:
+/// nothing records until it is in place. Names no model, only how far along it is.
+pub fn downloading_hint(percent: u8) -> String {
+    format!("Getting the speech model ready ({percent} %). Dictation works once it's done.")
+}
+
+/// Next to the 🤫 once the first-run download is in place and loaded.
+pub fn ready_hint(hotkey: &str) -> String {
+    format!("Ready. Hold {hotkey} to talk.")
+}
+
 /// Single instance. The installer's `AppMutex` names the same mutex, so setup and the uninstaller
 /// ask the user to quit a running shepetal first. No `Global\` prefix: one instance per session.
 pub const MUTEX: &str = "Shepetal.SingleInstance";
@@ -192,6 +203,17 @@ mod tests {
         for (file, src) in sources {
             for api in ["MessageBox", "MessageBeep", "PlaySound", "Beep(", "sndPlaySound"] {
                 assert!(!src.contains(api), "{file} uses {api}");
+            }
+        }
+    }
+
+    #[test]
+    fn download_hints_give_progress_and_name_no_model() {
+        assert_eq!(downloading_hint(40), "Getting the speech model ready (40 %). Dictation works once it's done.");
+        assert_eq!(ready_hint("Alt+Win"), "Ready. Hold Alt+Win to talk.");
+        for h in [downloading_hint(0), ready_hint("Ctrl+Win")] {
+            for name in ["ggml", "whisper", "base", "large", "turbo", "q5", ".bin"] {
+                assert!(!h.to_lowercase().contains(name), "{h} names the model ({name})");
             }
         }
     }
