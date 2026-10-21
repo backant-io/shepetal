@@ -1,12 +1,32 @@
 import Foundation
 import SQLite3
 
-/// Meetings, their segments and summaries in one owner-only (0600) SQLite file, through the system library.
-/// App, segment and summary text also go into an FTS5 trigram index, so search finds any substring in any case.
+/// Meetings, their segments, summaries and notes in one owner-only (0600) SQLite file, through the system library.
+/// App, segment, summary and notes text also go into an FTS5 trigram index, so search finds any substring in any case.
 public final class MeetingStore: MeetingStoring {
     private var db: OpaquePointer?
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
     private static let columns = "id, app, started_at, ended_at, me_audio, others_audio"
+
+    /// Schema steps; `PRAGMA user_version` counts how many ran, as in History. Append only: a file from an older
+    /// build runs just the steps it is missing, and keeps its rows. Builds before notes left user_version at 0 with
+    /// step 1's tables in place, which is why step 1 says IF NOT EXISTS.
+    static let migrations = [
+        // 1: meetings, segments, summaries and their search index (#113)
+        """
+        CREATE TABLE IF NOT EXISTS meetings(
+          id TEXT PRIMARY KEY, app TEXT NOT NULL, started_at REAL NOT NULL, ended_at REAL,
+          me_audio TEXT NOT NULL, others_audio TEXT NOT NULL, summary TEXT);
+        CREATE INDEX IF NOT EXISTS meetings_started ON meetings(started_at);
+        CREATE TABLE IF NOT EXISTS segments(
+          meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+          speaker TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS segments_meeting ON segments(meeting_id, start);
+        CREATE VIRTUAL TABLE IF NOT EXISTS meeting_text USING fts5(meeting_id UNINDEXED, kind UNINDEXED, text, tokenize='trigram');
+        """,
+        // 2: notes typed during or after the meeting (F71)
+        "ALTER TABLE meetings ADD COLUMN notes TEXT NOT NULL DEFAULT '';",
+    ]
 
     public init(path: URL) throws {
         guard sqlite3_open_v2(path.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK else {
@@ -14,18 +34,22 @@ public final class MeetingStore: MeetingStoring {
         }
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: path.path)
         sqlite3_busy_timeout(db, 2000)
-        try exec("""
-            PRAGMA foreign_keys = ON;
-            CREATE TABLE IF NOT EXISTS meetings(
-              id TEXT PRIMARY KEY, app TEXT NOT NULL, started_at REAL NOT NULL, ended_at REAL,
-              me_audio TEXT NOT NULL, others_audio TEXT NOT NULL, summary TEXT);
-            CREATE INDEX IF NOT EXISTS meetings_started ON meetings(started_at);
-            CREATE TABLE IF NOT EXISTS segments(
-              meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
-              speaker TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL);
-            CREATE INDEX IF NOT EXISTS segments_meeting ON segments(meeting_id, start);
-            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_text USING fts5(meeting_id UNINDEXED, kind UNINDEXED, text, tokenize='trigram');
-            """)
+        try exec("PRAGMA foreign_keys = ON")  // per connection, and outside a transaction, where it would do nothing
+        try migrate()
+    }
+
+    private func migrate() throws {
+        // The statement is finalized before the migrations run: an open read locks tables a migration may alter.
+        let stmt = try prepare("PRAGMA user_version")
+        guard sqlite3_step(stmt) == SQLITE_ROW else { sqlite3_finalize(stmt); throw error("user_version") }
+        let version = Int(sqlite3_column_int64(stmt, 0))
+        sqlite3_finalize(stmt)
+        for step in version..<max(version, Self.migrations.count) {
+            try transaction {
+                try exec(Self.migrations[step])
+                try exec("PRAGMA user_version = \(step + 1)")
+            }
+        }
     }
 
     deinit { sqlite3_close(db) }
@@ -115,6 +139,18 @@ public final class MeetingStore: MeetingStoring {
         }
     }
 
+    public func setNotes(_ notes: String, for meetingID: String) throws {
+        try transaction {
+            let stmt = try prepare("UPDATE meetings SET notes = ? WHERE id = ?")
+            defer { sqlite3_finalize(stmt) }
+            bind(stmt, 1, notes)
+            bind(stmt, 2, meetingID)
+            guard sqlite3_step(stmt) == SQLITE_DONE else { throw error("notes") }
+            guard sqlite3_changes(db) == 1 else { throw notFound(meetingID) }
+            try index(meetingID, "notes", [notes])
+        }
+    }
+
     public func list(limit: Int) throws -> [Meeting] {
         try meetings("SELECT \(Self.columns) FROM meetings ORDER BY started_at DESC LIMIT ?1", limit: limit)
     }
@@ -133,11 +169,11 @@ public final class MeetingStore: MeetingStoring {
     }
 
     public func get(_ id: String) throws -> MeetingRecord? {
-        let stmt = try prepare("SELECT \(Self.columns), summary FROM meetings WHERE id = ?")
+        let stmt = try prepare("SELECT \(Self.columns), summary, notes FROM meetings WHERE id = ?")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, id)
         guard sqlite3_step(stmt) == SQLITE_ROW else { return nil }
-        var record = MeetingRecord(meeting: meeting(stmt))
+        var record = MeetingRecord(meeting: meeting(stmt), notes: text(stmt, 7))
         if let s = sqlite3_column_text(stmt, 6) {
             record.summary = try JSONDecoder().decode(Summary.self, from: Data(String(cString: s).utf8))
         }

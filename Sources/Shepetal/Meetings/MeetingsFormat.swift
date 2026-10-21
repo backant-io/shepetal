@@ -1,5 +1,6 @@
 import Foundation
 import ShepetalCore
+import ShepetalSummary
 
 /// Text for the Meetings tab, its Copy summary button and its Markdown export. Pure, so tests pin it down.
 enum MeetingFormat {
@@ -51,13 +52,14 @@ enum MeetingFormat {
             + r.segments.map { "\($0.speaker.rawValue) (\(clock($0.start))): \($0.text)" }).joined(separator: "\n") + "\n"
     }
 
-    /// The Markdown file. Copy summary uses it without the transcript. Empty sections are left out.
+    /// The Markdown file, the user's notes first. Copy summary uses it without the transcript. Empty sections are left out.
     static func markdown(_ r: MeetingRecord, transcript: Bool = true, timeZone: TimeZone = .current,
                          now: Date = Date()) -> String {
         var parts = ["# \(headline(r.meeting, timeZone: timeZone, now: now))"]
         func section(_ title: String, _ lines: [String]) {
             if !lines.isEmpty { parts.append("## \(title)\n\n" + lines.joined(separator: "\n")) }
         }
+        section("Your notes", noteLines(r.notes).map { "- \($0)" })
         if let s = r.summary {
             section("Overview", s.overview.isEmpty ? [] : [s.overview])
             section("Key points", s.keyPoints.map { "- \($0)" })
@@ -112,13 +114,18 @@ final class InMemoryMeetingStore: MeetingStoring {
         records[meetingID]!.summary = summary
     }
 
+    func setNotes(_ notes: String, for meetingID: String) throws {
+        guard records[meetingID] != nil else { throw UnknownMeeting(id: meetingID) }
+        records[meetingID]!.notes = notes
+    }
+
     func list(limit: Int) throws -> [Meeting] {
         Array(records.values.map(\.meeting).sorted { $0.startedAt > $1.startedAt }.prefix(limit))
     }
 
     func search(_ query: String, limit: Int) throws -> [Meeting] {
         let hits = records.values.filter { r in
-            var text: [String] = [r.meeting.app] + r.segments.map(\.text)
+            var text: [String] = [r.meeting.app, r.notes] + r.segments.map(\.text)
             if let s = r.summary {
                 text += [s.overview] + s.keyPoints + s.decisions
                 text += s.actionItems.flatMap { [$0.owner, $0.task, $0.due] }

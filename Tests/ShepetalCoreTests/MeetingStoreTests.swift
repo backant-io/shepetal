@@ -1,3 +1,4 @@
+import SQLite3
 import XCTest
 @testable import ShepetalCore
 
@@ -96,6 +97,74 @@ final class MeetingStoreTests: XCTestCase {
         try store.save(meeting("sum", at: 2, app: "Slack"))
         XCTAssertEqual(try store.search("google", limit: 10).map(\.id), [])
         XCTAssertEqual(try store.search("slack", limit: 10).map(\.id), ["sum"])
+    }
+
+    // Every meetings.sqlite written before notes (no user_version) must open with its meetings, transcripts,
+    // summaries and search intact, take notes, and keep opening on every later launch.
+    func testOldMeetingsFileUpgradesWithoutLosingRows() throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        // The schema as shipped in #113, with what a recorded meeting left in it.
+        XCTAssertEqual(sqlite3_exec(db, """
+            PRAGMA foreign_keys = ON;
+            CREATE TABLE IF NOT EXISTS meetings(
+              id TEXT PRIMARY KEY, app TEXT NOT NULL, started_at REAL NOT NULL, ended_at REAL,
+              me_audio TEXT NOT NULL, others_audio TEXT NOT NULL, summary TEXT);
+            CREATE INDEX IF NOT EXISTS meetings_started ON meetings(started_at);
+            CREATE TABLE IF NOT EXISTS segments(
+              meeting_id TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+              speaker TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL, text TEXT NOT NULL);
+            CREATE INDEX IF NOT EXISTS segments_meeting ON segments(meeting_id, start);
+            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_text USING fts5(meeting_id UNINDEXED, kind UNINDEXED, text, tokenize='trigram');
+            INSERT INTO meetings VALUES ('a', 'Zoom', 1000, 2000, '/m/a/Me.wav', '/m/a/Others.wav',
+              '{"overview":"Budget call","keyPoints":[],"decisions":[],"actionItems":[]}');
+            INSERT INTO segments VALUES ('a', 'Me', 1, 2, 'the budget is fine');
+            INSERT INTO meeting_text VALUES ('a', 'app', 'Zoom'), ('a', 'segment', 'the budget is fine'), ('a', 'summary', 'Budget call');
+            """, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+
+        let m = Meeting(id: "a", app: "Zoom", startedAt: Date(timeIntervalSince1970: 1000), endedAt: Date(timeIntervalSince1970: 2000),
+                        meAudioPath: "/m/a/Me.wav", othersAudioPath: "/m/a/Others.wav")
+        let old = MeetingRecord(meeting: m, segments: [Segment(speaker: .me, start: 1, end: 2, text: "the budget is fine")],
+                                summary: Summary(overview: "Budget call"))
+        let store = try MeetingStore(path: dbURL)
+        XCTAssertEqual(try store.get("a"), old, "first open migrates and keeps the row, with no notes")
+        XCTAssertEqual(try store.search("budget", limit: 10).map(\.id), ["a"])
+        try store.setNotes("ask about Q3", for: "a")
+        var noted = old
+        noted.notes = "ask about Q3"
+        XCTAssertEqual(try MeetingStore(path: dbURL).get("a"), noted, "second open must not migrate again")
+    }
+
+    // Notes are typed while the meeting records, so the save that ends it must keep them; they are found by search
+    // like the transcript, a rewrite replaces them in the index, and they go when the meeting is deleted.
+    func testNotesSurviveTheEndOfTheMeetingAreSearchableAndGoWithIt() throws {
+        let store = try MeetingStore(path: dbURL)
+        var m = meeting("a")
+        try store.save(m)
+        XCTAssertEqual(try store.get("a")?.notes, "")
+        try store.setNotes("- Ask Kate about the Größe\n- TODO: book room", for: "a")
+        m.endedAt = Date(timeIntervalSince1970: 2_000)
+        try store.save(m)
+        try store.setSummary(Summary(overview: "o"), for: "a")
+        XCTAssertEqual(try MeetingStore(path: dbURL).get("a")?.notes, "- Ask Kate about the Größe\n- TODO: book room")
+        XCTAssertEqual(try store.search("GRÖßE", limit: 10).map(\.id), ["a"])
+        XCTAssertEqual(try store.search("book room", limit: 10).map(\.id), ["a"])
+
+        try store.setNotes("call Leo", for: "a")
+        XCTAssertEqual(try store.search("kate", limit: 10).map(\.id), [], "the old notes leave the index")
+        XCTAssertEqual(try store.search("leo", limit: 10).map(\.id), ["a"])
+        XCTAssertThrowsError(try store.setNotes("x", for: "nope"))
+
+        try store.delete("a")
+        XCTAssertNil(try store.get("a"))
+        // The index has no foreign key: a row left behind would keep the notes' text in the file.
+        var db: OpaquePointer?, stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        defer { sqlite3_finalize(stmt); sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_prepare_v2(db, "SELECT count(*) FROM meeting_text WHERE text LIKE '%Leo%'", -1, &stmt, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(stmt, 0), 0, "nothing of the notes is left in the index")
     }
 
     // Rule 4: what was said in a meeting is as private as its audio.

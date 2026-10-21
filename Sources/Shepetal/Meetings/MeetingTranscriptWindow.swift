@@ -1,5 +1,6 @@
 import AppKit
 import ShepetalCore
+import ShepetalSummary
 import SwiftUI
 
 /// "Meeting transcript": opens by itself when a recorded meeting's whole transcript is stored, with the summary
@@ -118,7 +119,7 @@ struct MeetingTranscriptView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        summary(r.summary)
+                        summary(r)
                         Divider()
                         LazyVStack(spacing: 12) {
                             ForEach(Array(r.segments.enumerated()), id: \.offset) { _, s in Bubble(segment: s) }
@@ -130,15 +131,16 @@ struct MeetingTranscriptView: View {
         }
     }
 
-    /// The same sections as the Meetings tab, so what shows here is what Copy summary copies.
-    @ViewBuilder private func summary(_ s: Summary?) -> some View {
-        if let s, !s.isEmpty {
-            SummarySections(summary: s).textSelection(.enabled)
-        } else if s == nil && summarizing {
+    /// The same sections as the Meetings tab, your notes first, so what shows here is what Copy summary copies.
+    @ViewBuilder private func summary(_ r: MeetingRecord) -> some View {
+        let notes = noteLines(r.notes)
+        if r.summary == nil && summarizing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Summarizing…").foregroundStyle(.secondary)
             }
+        } else if !notes.isEmpty || !(r.summary?.isEmpty ?? true) {
+            SummarySections(summary: r.summary ?? Summary(overview: ""), notes: notes).textSelection(.enabled)
         } else {
             Text("No summary for this meeting").foregroundStyle(.secondary)
         }

@@ -179,4 +179,17 @@ final class MeetingTranscriptWindowTests: XCTestCase {
         XCTAssertFalse(key(.command, "v", 9))
         XCTAssertFalse(key(.command, "м", 9), "Cyrillic м is on the V key")
     }
+
+    // F71: the window that opens after the call shows the notes typed during it, and copies them with the summary.
+    func testShowsAndCopiesTheNotesTypedDuringTheCall() throws {
+        let m = try ended("a", "Zoom", minutesAgo: 5, said: [Segment(speaker: .others, start: 1, end: 3, text: "Ship it.")])
+        try store.setNotes("- ask Kate about pricing", for: "a")
+        try store.setSummary(Summary(overview: ""), for: "a")
+        window.show(m, summarizing: false)
+        XCTAssertEqual(window.model.record?.notes, "- ask Kate about pricing")
+        XCTAssertTrue(window.model.canCopySummary, "an empty summary with notes still has something to copy")
+        window.model.copySummary()
+        XCTAssertTrue(copied.last?.contains("## Your notes\n\n- ask Kate about pricing") ?? false)
+        XCTAssertEqual(panel.calls, ["orderFrontRegardless"], "never made key")
+    }
 }
