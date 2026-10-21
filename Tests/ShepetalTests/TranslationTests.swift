@@ -42,8 +42,8 @@ final class TranslationTests: XCTestCase {
     }
 
     // Off by default, and off, nothing is handed to a translator: the German lands as it was said.
-    func testOffLeavesTheTextAlone() async {
-        XCTAssertNil(UserDefaults.standard.object(forKey: Translate.key), "a fresh install has no setting")
+    func testOffLeavesTheTextAlone() async throws {
+        try XCTSkipIf(UserDefaults.standard.object(forKey: Translate.key) != nil, "set in this test runner's defaults")
         XCTAssertFalse(TranslateStep(translator: nil).isOn(), "off by default")
         let stub = StubTranslator()
         let out = await step(stub, on: false)(german)
@@ -53,11 +53,12 @@ final class TranslationTests: XCTestCase {
     }
 
     // Source equal to target skips the step: English is never sent off to become English, and an empty
-    // dictation or one whose language cannot be told stays as it is, without a hint.
+    // dictation or one whose language cannot be told stays as it is, without a hint. With Automatic a short one
+    // cannot be told: "Redis." reads as French and "x" as Slovak, and neither must ask for a download.
     func testEnglishSkipsTheStep() async {
         let stub = StubTranslator()
         for (text, languages) in [("Send the report to Anna by Friday.", [String]()), ("Okay, see you tomorrow.", ["en-US", "de"]),
-                                  ("", []), ("42", [])] {
+                                  ("", []), ("42", []), ("Redis.", []), ("x", []), ("Ship it now", [])] {
             let out = await step(stub, languages: languages)(text)
             XCTAssertEqual(out.text, text)
             XCTAssertNil(out.hint, text)
@@ -69,6 +70,9 @@ final class TranslationTests: XCTestCase {
     func testTheChosenLanguagesPinTheSpokenOne() {
         XCTAssertEqual(Translate.spokenLanguage("Gift", among: ["de"]), "de")
         XCTAssertEqual(Translate.spokenLanguage("Gift", among: ["en"]), "en")
+        XCTAssertNil(Translate.spokenLanguage("Gift", among: []), "Automatic: one word is too short to tell")
+        XCTAssertNil(Translate.spokenLanguage("Danke schön", among: []), "Automatic: under 3 words")
+        XCTAssertEqual(Translate.spokenLanguage("Danke schön", among: ["de", "en"]), "de", "chosen: no word count")
         XCTAssertEqual(Translate.spokenLanguage("Bonjour à tous, merci d'être venus si nombreux.", among: []), "fr")
         XCTAssertEqual(Translate.spokenLanguage("Bonjour à tous, merci d'être venus si nombreux.", among: ["fr-CA", "en"]), "fr")
     }
@@ -222,13 +226,15 @@ final class TranslationTests: XCTestCase {
 
     // MARK: the 🤫 Languages menu
 
-    // Translate to English sits in Languages, off by default. Turned on, it offers each language a dictation
-    // needed; before macOS 15 neither item is there (never a grey item, #207).
+    // Translate to English sits first in Languages (the language list below it is long), off by default. Turned
+    // on, it offers each language a dictation needed; before macOS 15 neither item is there (never a grey item,
+    // #207). A throwaway defaults suite: the user's settings are never read or changed.
     func testTheLanguagesMenuHasTheSettingAndTheDownloads() async throws {
-        let saved = UserDefaults.standard.object(forKey: Translate.key)
-        defer { UserDefaults.standard.set(saved, forKey: Translate.key) }
-        UserDefaults.standard.removeObject(forKey: Translate.key)
+        let suite = "shepetal-translate-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
         let menu = SpeechMenu()
+        menu.translateDefaults = defaults
         let stub = StubTranslator()
         stub.toDownload = ["de"]
         var notices: [String] = []
@@ -236,15 +242,18 @@ final class TranslationTests: XCTestCase {
         menu.notice = { notices.append($0) }
         func items() throws -> [NSMenuItem] { try XCTUnwrap(menu.languagesItem().submenu).items }
 
-        let toggle = try XCTUnwrap(try items().first { $0.title == "Translate to English" })
-        XCTAssertEqual(toggle.state, .off)
+        let toggle = try XCTUnwrap(try items().first)
+        XCTAssertEqual(toggle.title, "Translate to English")
+        XCTAssertEqual(toggle.state, .off, "off by default")
+        XCTAssertTrue(toggle.isEnabled)
         XCTAssertFalse(try items().contains { $0.title.hasPrefix("Download") }, "off: nothing to download")
         XCTAssertTrue(click(toggle))
-        XCTAssertTrue(UserDefaults.standard.bool(forKey: Translate.key))
+        XCTAssertTrue(defaults.bool(forKey: Translate.key))
 
         let on = try items()
         XCTAssertEqual(on.first { $0.title == "Translate to English" }?.state, .on)
-        let download = try XCTUnwrap(on.first { $0.title == "Download \(Translate.name("de")) for translation…" })
+        XCTAssertEqual(on.map(\.title).prefix(4), ["Translate to English", "Download \(Translate.name("de")) for translation…", "", "Automatic"])
+        let download = on[1]
         XCTAssertTrue(download.isEnabled)
         XCTAssertTrue(click(download))
         for _ in 0..<100 where notices.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
@@ -252,9 +261,10 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(notices, ["ready"], "🤫 says how it went")
 
         XCTAssertTrue(click(try XCTUnwrap(try items().first { $0.title == "Translate to English" })))
-        XCTAssertFalse(UserDefaults.standard.bool(forKey: Translate.key), "a second click turns it off")
+        XCTAssertFalse(defaults.bool(forKey: Translate.key), "a second click turns it off")
 
         menu.translator = nil
+        XCTAssertEqual(try items().first?.title, "Automatic", "before macOS 15: not there at all")
         XCTAssertFalse(try items().contains { $0.title == "Translate to English" || $0.title.hasPrefix("Download") })
     }
 

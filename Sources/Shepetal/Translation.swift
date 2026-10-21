@@ -30,14 +30,16 @@ enum Translate {
         return nil
     }
 
-    /// The language the text is in, one of the chosen ones when there are any (short dictations are easy to
-    /// misread). nil when the recognizer cannot tell.
-    /// ponytail: the recognizer's guess with Automatic; choosing the spoken language in Languages pins it.
+    /// The language the text is in: one of the chosen ones when there are any. With Automatic, only a sure guess
+    /// on at least 3 words, F12's bar (it read "Redis." as French). nil when the recognizer cannot tell.
     static func spokenLanguage(_ text: String, among languages: [String]) -> String? {
         let recognizer = NLLanguageRecognizer()
-        recognizer.languageConstraints = languageCodes(languages).map { NLLanguage($0) }
+        let chosen = languageCodes(languages)
+        recognizer.languageConstraints = chosen.map { NLLanguage($0) }
         recognizer.processString(text)
-        guard let language = recognizer.dominantLanguage, language != .undetermined else { return nil }
+        guard chosen.isEmpty else { return recognizer.dominantLanguage?.rawValue }
+        guard text.split(whereSeparator: \.isWhitespace).count >= 3,
+              let (language, p) = recognizer.languageHypotheses(withMaximum: 1).first, p >= 0.9 else { return nil }
         return language.rawValue
     }
 

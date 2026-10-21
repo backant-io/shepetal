@@ -98,6 +98,21 @@ final class SpeechMenu: NSObject {
     func languagesItem() -> NSMenuItem {
         let menu = NSMenu()
         menu.autoenablesItems = false  // every item is enabled (#207)
+        // F41, first: the language list below is long. macOS 15 and later; before that the items are not there at
+        // all, never a grey item (#207). A download is offered once a dictation needed it, and hidden while it runs.
+        if let translator {
+            let on = translateDefaults.bool(forKey: Translate.key)
+            let t = menu.addItem(withTitle: "Translate to English", action: #selector(toggleTranslate), keyEquivalent: "")
+            t.target = self
+            t.state = on ? .on : .off
+            for code in on ? translator.toDownload : [] {
+                let d = menu.addItem(withTitle: "Download \(Translate.name(code)) for translation…",
+                                     action: #selector(clickedDownload(_:)), keyEquivalent: "")
+                d.target = self
+                d.representedObject = code
+            }
+            menu.addItem(.separator())
+        }
         let auto = menu.addItem(withTitle: "Automatic", action: #selector(automatic), keyEquivalent: "")
         auto.target = self
         auto.state = languages.isEmpty ? .on : .off
@@ -109,20 +124,6 @@ final class SpeechMenu: NSObject {
             i.representedObject = code
             i.state = languages.contains(code) ? .on : .off
         }
-        // F41: macOS 15 and later. Before that the item is not there at all: never a grey item (#207).
-        if let translator {
-            menu.addItem(.separator())
-            let on = UserDefaults.standard.bool(forKey: Translate.key)
-            let t = menu.addItem(withTitle: "Translate to English", action: #selector(toggleTranslate), keyEquivalent: "")
-            t.target = self
-            t.state = on ? .on : .off
-            for code in on ? translator.toDownload : [] {
-                let d = menu.addItem(withTitle: "Download \(Translate.name(code)) for translation…",
-                                     action: #selector(clickedDownload(_:)), keyEquivalent: "")
-                d.target = self
-                d.representedObject = code
-            }
-        }
         let languagesItem = NSMenuItem(title: "Languages", action: nil, keyEquivalent: "")
         languagesItem.submenu = menu
         return languagesItem
@@ -130,11 +131,13 @@ final class SpeechMenu: NSObject {
 
     @objc private func automatic() { languages = [] }
 
-    /// F41's translator; nil before macOS 15. A seam, so tests reach neither the framework nor a window.
+    /// F41's translator; nil before macOS 15. Seams, so tests reach neither the framework, a window nor the
+    /// user's settings.
     var translator: Translator? = Translate.onDevice
+    var translateDefaults = UserDefaults.standard
 
     @objc private func toggleTranslate() {
-        UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: Translate.key), forKey: Translate.key)
+        translateDefaults.set(!translateDefaults.bool(forKey: Translate.key), forKey: Translate.key)
     }
 
     @objc private func clickedDownload(_ sender: NSMenuItem) {
