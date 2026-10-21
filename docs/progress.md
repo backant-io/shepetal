@@ -4,9 +4,9 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
-### mac80 wave 3 (integration PR #INTPR)
+### mac80 wave 3 (integration PR #264)
 
-- **Merged:** #246 (F13), #249 (F55), #245 (F40), #247 (F67), #248 (F81, F78, F120), #252 (F41), #258 (F38), #250 (F28, F36) and #251 (F124, F118, F18). Their hot-file wiring, wiring tests, manual steps and ledger rows came in #INTPR.
+- **Merged:** #246 (F13), #249 (F55), #245 (F40), #247 (F67), #248 (F81, F78, F120), #252 (F41), #258 (F38), #250 (F28, F36) and #251 (F124, F118, F18). Their hot-file wiring, wiring tests, manual steps and ledger rows came in #264.
 - **Mac column:** 69 of 124 cells counted before, 82 after. All 13 new cells are `hand-test`, waiting on M-NOTE-1, M-SNIP-1, M-MTG-1 step 13, M-RET-2, M-MTG-12, M-TRN-1, M-VOICE-1, M-LINK-1, M-EMAIL-1, M-SLOW-1, M-SHARE-1 and M-MOVE-2.
 - **F13 stays todo:** the code, its tests and M-LIVE-1 are in (live text is off by default), but the full `scripts/e2e-mac.sh` with live text on had c05 at 834 and 814 ms against 800. Paired runs had c05 at 809 to 821 ms with live text on and 816 to 1518 ms with it off, so this Mac misses the bar either way. Pavel decides: accept the bar, or rerun on a quiet Mac.
 - F67 Mac: `todo` to `hand-test` (#247): a meeting recording ends once no one has spoken for `meeting.silenceEnd` seconds (default 2 min) on every channel, decided once per live pass.
