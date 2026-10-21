@@ -96,6 +96,84 @@ final class FnTapTests: XCTestCase {
         XCTAssertEqual(tap.router.held, [])
     }
 
+    // "fn not received" comes only from what the tap itself sees (FnHealth): a 🌐 keycode 179 keyDown that no
+    // keycode 63 came with. Pavel got it for keys that are not fn (2026-10-21): typing, modifiers, shortcuts and fn+key
+    // must never alert. Raw flags carry the device bits the tap reads (⌃ 0x1, ⇧ 0x2, ⌘ 0x8, ⌥ 0x20, fn 0x800000).
+    let (fnF, cmdF, shiftF, ctrlF, optF) = (UInt64(0x80_0000), UInt64(0x10_0008), UInt64(0x2_0002), UInt64(0x4_0001), UInt64(0x8_0020))
+    let fnKeyF = UInt64(0x80_0000 | 0x20_0000)  // arrows and F-keys carry the fn (and numeric pad) flag themselves
+    let fm = CGEventType.flagsChanged, kd = CGEventType.keyDown, ku = CGEventType.keyUp
+
+    /// Sends `events` through the real tap, each `wait` s after the one before, into FnHealth on a test clock
+    /// (polled every 0.1 s as it goes and for 3 s after). Returns how often "fn not received" would show.
+    func fnNotReceived(_ events: [(type: CGEventType, code: Int64, flags: UInt64, wait: TimeInterval)]) -> Int {
+        var health = FnHealth(), clock: TimeInterval = 100, alerts = 0
+        tap.onFn = { down, _ in health.fn(down: down, at: clock) }
+        tap.onGlobe = { _ in health.globe(at: clock) }
+        func advance(_ s: TimeInterval) {
+            for _ in 0..<max(1, Int((s / 0.1).rounded())) { clock += min(s, 0.1); if health.poll(at: clock) { alerts += 1 } }
+        }
+        for e in events {
+            advance(e.wait)
+            send(e.type, key(e.code, type: e.type, flags: CGEventFlags(rawValue: e.flags)))
+        }
+        advance(3)
+        return alerts
+    }
+
+    func testTypingNeverSaysFnNotReceived() {
+        var typing = [4, 14, 37, 37, 31, 49, 13, 31, 15, 37, 2, 36, 51].flatMap { c in
+            [(type: kd, code: Int64(c), flags: UInt64(0), wait: 0.08), (type: ku, code: Int64(c), flags: UInt64(0), wait: 0.05)]
+        }
+        // A held Down arrow and a held F5 repeat for 1.5 s: their own events carry the fn flag.
+        for c: Int64 in [125, 96] {
+            typing += (0..<15).map { _ in (type: kd, code: c, flags: fnKeyF, wait: 0.1) } + [(type: ku, code: c, flags: fnKeyF, wait: 0.1)]
+        }
+        XCTAssertEqual(fnNotReceived(typing), 0)
+    }
+
+    func testModifierCombosAndShortcutsNeverSayFnNotReceived() {
+        let combos: [(type: CGEventType, code: Int64, flags: UInt64, wait: TimeInterval)] = [
+            (fm, 55, cmdF, 0.1), (kd, 8, cmdF, 0.1), (ku, 8, cmdF, 0.1), (fm, 55, 0, 0.1),                         // ⌘C
+            (fm, 56, shiftF, 0.1), (kd, 0, shiftF, 0.1), (ku, 0, shiftF, 0.1), (fm, 56, 0, 0.1),                   // ⇧A
+            (fm, 58, optF, 0.1), (kd, 123, optF | fnKeyF, 0.1), (ku, 123, optF | fnKeyF, 0.1), (fm, 58, 0, 0.1),   // ⌥←
+            (fm, 59, ctrlF, 0.1), (fm, 58, ctrlF | optF, 0.1), (fm, 58, ctrlF, 1.5), (fm, 59, 0, 0.1),             // ⌃⌥ held
+            (fm, 59, ctrlF, 0.1), (fm, 55, ctrlF | cmdF, 0.1), (kd, 9, ctrlF | cmdF, 0.1), (ku, 9, ctrlF | cmdF, 0.1),
+            (fm, 55, ctrlF, 0.1), (fm, 59, 0, 0.1),                                                                 // ⌃⌘V paste last
+            (fm, 55, cmdF, 0.1), (kd, 49, cmdF, 0.1), (ku, 49, cmdF, 0.1), (fm, 55, 0, 0.1),                       // ⌘Space
+        ]
+        XCTAssertEqual(fnNotReceived(combos), 0)
+    }
+
+    // ⌃ then fn held: fn reaches the tap but completes no shortcut. The old check counted only shortcut inputs as
+    // "received", so this held fn said "fn not received".
+    func testFnWithOtherKeysNeverSaysFnNotReceived() {
+        let fnKeys: [(type: CGEventType, code: Int64, flags: UInt64, wait: TimeInterval)] = [
+            (fm, 63, fnF, 0.1), (kd, 125, fnKeyF, 0.1), (ku, 125, fnKeyF, 0.1), (fm, 63, 0, 0.1),                  // fn+↓
+            (fm, 63, fnF, 0.1), (kd, 51, fnF, 0.1), (ku, 51, fnF, 0.1), (fm, 63, 0, 0.1),                         // fn+Delete
+            (fm, 59, ctrlF, 0.1), (fm, 63, ctrlF | fnF, 0.1), (fm, 63, ctrlF, 1.5), (fm, 59, 0, 0.1),             // ⌃ then fn
+            (fm, 63, fnF, 0.1), (kd, 49, fnF, 0.1), (ku, 49, fnF, 0.1), (fm, 63, 0, 0.1),                         // fn+Space
+            (fm, 63, fnF, 0.1), (kd, 179, fnF, 2), (ku, 179, fnF, 0.1), (fm, 63, 0, 0.1),                         // 🌐+key in a hold
+        ]
+        XCTAssertEqual(fnNotReceived(fnKeys), 0)
+    }
+
+    func testGlobeWithFnNeverSaysFnNotReceived() {
+        // A 2 s hold, a short tap and a double-tap, each with the 179 pair macOS sends right after the release.
+        let held: [(type: CGEventType, code: Int64, flags: UInt64, wait: TimeInterval)] = [
+            (fm, 63, fnF, 0.1), (fm, 63, 0, 2), (kd, 179, 0, 0.01), (ku, 179, 0, 0.01),
+            (fm, 63, fnF, 1), (fm, 63, 0, 0.15), (kd, 179, 0, 0.01), (ku, 179, 0, 0.01),
+            (fm, 63, fnF, 1), (fm, 63, 0, 0.1), (kd, 179, 0, 0.01), (ku, 179, 0, 0.01),
+            (fm, 63, fnF, 0.15), (fm, 63, 0, 0.1), (kd, 179, 0, 0.01), (ku, 179, 0, 0.01),
+        ]
+        XCTAssertEqual(fnNotReceived(held), 0)
+    }
+
+    func testGlobeAloneSaysFnNotReceived() {
+        XCTAssertEqual(fnNotReceived([(kd, 179, 0, 0.1), (ku, 179, 0, 0.1)]), 1, "🌐 reached the tap, fn did not")
+        XCTAssertEqual(fnNotReceived([(kd, 179, 0, 0.1), (ku, 179, 0, 0.1), (kd, 179, 0, 2), (ku, 179, 0, 0.1)]), 2,
+                       "each unanswered 🌐 press")
+    }
+
     // The gesture is timed by when the key moved, not by when the main thread gets to it (#79).
     func testInputsCarryTheEventTime() {
         let e = key(63, fn: true, type: .flagsChanged)

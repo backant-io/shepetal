@@ -10,7 +10,7 @@ docs/re/dictation-input.md, sections 1, 2.3 and 2.4.
 | paste_last | Shift+Alt+Z | Types the newest dictated text in the history (docs/linux.md, "History, retention and paste last") at the cursor again, once every key of the combo is up, so the held Shift and Alt do not change the typed text. If typing fails, the text goes on the clipboard with the `Typing failed. ...` hint. |
 | copy_last | Shift+Alt+X | Puts the newest dictated text on the clipboard (wl-copy, else xclip or xsel), the same way. |
 | hands_free | Ctrl+Meta+Space | Starts a hands-free dictation. The next press stops and transcribes it; a press within 500 ms of the start cancels it. The hotkey and Esc end it too. |
-| (cap) | 19 / 20 min | At 19 min the hint "Recording stops in 1 minute" shows; at 20 min the dictation stops and is transcribed as usual. |
+| (cap) | 20 min, `dictation.max_minutes` | One minute before the cap (19 min by default) "Recording stops in 1 minute" shows next to 🤫 and as a desktop notification (`notify-send`, if installed); at the cap the dictation stops and is transcribed and typed as on a release. A hold, a double-tap and the toggle are all capped. A cap of 1 min warns at the start. |
 
 The paste and copy defaults are Wispr's Windows defaults; the hands-free one is Wispr's Windows
 Ctrl+Win+Space. Hold fn and double-tap fn work as before.
@@ -26,9 +26,15 @@ daemon's one settings file: the 24 h retention setting goes in the same file.
     "paste_last": "shift+alt+z",
     "copy_last": "shift+alt+x",
     "hands_free": "ctrl+meta+space"
-  }
+  },
+  "dictation": {"max_minutes": 20}
 }
 ```
+
+`dictation.max_minutes` is the length cap in whole minutes, 1 to 1440, as the Mac's
+`maxDictationMinutes`. Left out, it is 20 (Wispr's `DICTATION_DURATION_TIMEOUT`). The daemon reads
+it at start, so restart it after a change. A value that is not a whole number in that range, or an
+unknown name under `dictation`, stops the daemon with the file and the reason.
 
 Any shortcut left out keeps its default; other settings in the file are skipped. The daemon
 refuses to start, naming the file, the shortcut and the reason, when the file is not valid JSON
@@ -75,3 +81,4 @@ Run `shepetal daemon` in a terminal on a desktop session, with a text editor foc
    shift or meta`.
 6. Start a hands-free dictation and leave it for 20 min. Expected: "Recording stops in 1 minute"
    at 19 min, then the text is typed at 20 min.
+7. The configurable cap: docs/manual-test.md, L-LEN-1.

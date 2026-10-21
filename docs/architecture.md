@@ -55,7 +55,7 @@ No code is shared across platforms yet. Each platform implements the same rules 
 - `Keyboard/KeyboardViewController.swift`: mic, globe and delete keys, with no audio or model. It opens the app with `shepetal://dictate?id=` and inserts the result through `textDocumentProxy`.
 - Transport: App Group `UserDefaults` for state and Darwin notifications to signal. Audio never enters the App Group.
 
-**Mac meetings** (`meeting/`): `MeetingMac/Probes.swift` reads mic holders, window titles (only when Screen Recording is already granted), the calendar (only when access is already granted), devices and the wake marker. `MeetingMac/Capture.swift` uses a process tap and a private aggregate device to write `Me.wav` and `Others.wav`. Today it is a CLI only.
+**Mac meetings** (`meeting/`): `MeetingMac/Probes.swift` reads the processes capturing the mic (Core Audio process objects), whether any camera runs (CoreMediaIO, no camera access), devices and the wake marker. `MeetingMac/Capture.swift` uses a process tap and a private aggregate device to write `Me.wav` and `Others.wav`. Today it is a CLI only.
 
 **Linux** (PR #2, not on main): a Rust daemon using evdev for fn, `pw-record` or `parecord` for audio, `whisper-cli` for speech-to-text, and wtype, xdotool or ydotool for insertion.
 
