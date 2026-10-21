@@ -141,6 +141,7 @@ final class ParakeetEngine: SpeechEngine {
         let engine = ParakeetEngine(asr: asr, decoderLayers: models.version.decoderLayers)
         // The first inference compiles and warms the CoreML graph; do it before the user speaks.
         _ = try? await engine.transcribe([Float](repeating: 0, count: 16_000), wav: URL(fileURLWithPath: "/dev/null"))
+        _ = await Task.detached { VoiceIsolation.apply([Float](repeating: 0, count: 16_000)) }.value  // the same for the effect
         return engine
     }
 
