@@ -261,6 +261,34 @@ try {
   note(`PRODUCTHUNT on the lifetime price for this customer, who has paid before: ${second.refused ? `refused: ${second.refused}` : `accepted (!) due ${second.due}`}`);
 
   // ---- 3. Billing Portal and cancel.
+  // ---- Plan settings (GET /api/account/plan, cancel and resume through the API).
+  note(`\n## Plan settings: the current plan, cancel at period end through the API (${b.email})`);
+  const tr = await person(`pricing-t-${run}@example.com`);
+  note(`trial: ${show((await tr.call('GET', '/api/account/plan')).body)}`);
+  note(`lifetime: ${show((await a.call('GET', '/api/account/plan')).body)}`);
+  let ps = (await b.call('GET', '/api/account/plan', undefined, false)).body;
+  note(`subscription (web session): ${show(ps)}`);
+  assert.deepEqual([ps.plan, ps.subscription.status, ps.subscription.amount_display, ps.subscription.next_billing_date], ['subscription', 'active', '$0.99', lb.paid_through]);
+  const cancelled = await b.call('POST', '/api/billing/cancel', undefined, false);
+  note(`POST /api/billing/cancel: ${cancelled.status} subscription ${show(cancelled.body.subscription)}, actions ${show(cancelled.body.actions)}`);
+  assert.equal(cancelled.body.subscription.status, 'cancels_at_period_end');
+  let inStripe = await stripe('GET', `/v1/subscriptions/${ub.sub_id}`);
+  note(`in Stripe: status ${inStripe.status}, cancel_at_period_end ${inStripe.cancel_at_period_end}, cancel_at ${new Date(inStripe.cancel_at * 1000).toISOString()}`);
+  assert.equal(inStripe.cancel_at_period_end, true);
+  note(`license until then: ${show(await b.license())}`);
+  assert.deepEqual([(await b.license()).status, (await b.license()).renews], ['active', false]);
+  const resumed = await b.call('POST', '/api/billing/resume', undefined, false);
+  inStripe = await stripe('GET', `/v1/subscriptions/${ub.sub_id}`);
+  note(`POST /api/billing/resume: ${resumed.status} ${resumed.body.subscription.status}; in Stripe cancel_at_period_end ${inStripe.cancel_at_period_end}`);
+  assert.equal(inStripe.cancel_at_period_end, false);
+  const flow = await b.call('POST', '/api/billing/portal', { flow: 'cancel' }, false);
+  note(`POST /api/billing/portal {flow: "cancel"}: ${flow.status}, the portal's cancel page answers ${(await fetch(flow.body.url, { redirect: 'manual' })).status}`);
+  const link = await fetch(`${BASE}/api/billing/portal`, { redirect: 'manual', headers: { cookie: b.cookie } });
+  const to = link.headers.get('location') ?? '';
+  note(`GET /api/billing/portal (a plain link): ${link.status} to ${to.replace(/[?#].*$/, '?(secret hidden)')}, which answers ${(await fetch(to, { redirect: 'manual' })).status}`);
+  assert.equal(link.status, 303);
+  assert.match(to, /^https:\/\/billing\.stripe\.com\//);
+
   note(`\n## 3. Manage subscription (${b.email})`);
   const portal = await b.call('POST', '/api/billing/portal', undefined, false);
   note(`POST /api/billing/portal (web session): ${portal.status} ${portal.body.url?.replace(/[?#].*$/, '?(secret hidden)')}`);
@@ -310,6 +338,42 @@ try {
   note(`new card, invoice ${open.id} paid: ${pi.status}`);
   await until('active again', async () => (await c.license()).status === 'active', 90_000);
   note(`license after invoice.paid: ${show(await c.license())}`);
+
+  // ---- Switch to lifetime: a subscriber buys the lifetime license; the subscription ends at once, no further charge.
+  const d = await person(`pricing-d-${run}@example.com`);
+  note(`\n## Switch to lifetime (${d.email})`);
+  co = await d.call('POST', '/api/checkout', { plan: 'monthly' });
+  await pay(sessionOf(co.body.url));
+  await until('subscription', async () => (await d.license()).plan === 'subscription');
+  const [ud] = (await d1(`SELECT sub_id FROM users WHERE email = '${d.email}'`)).rows;
+  note(`subscribed: ${show((await d.call('GET', '/api/account/plan')).body.subscription)}`);
+  co = await d.call('POST', '/api/checkout', { plan: 'lifetime' });
+  note(`POST /api/checkout {plan: "lifetime"} as a subscriber: ${co.status}`);
+  const lcs = sessionOf(co.body.url);
+  await pay(lcs);
+  await until('lifetime', async () => (await d.license()).plan === 'lifetime');
+  await until('subscription ended in Stripe', async () => (await stripe('GET', `/v1/subscriptions/${ud.sub_id}`)).status === 'canceled');
+  const endedSub = await stripe('GET', `/v1/subscriptions/${ud.sub_id}`);
+  const invs = (await stripe('GET', '/v1/invoices', { subscription: ud.sub_id, limit: 10 })).data;
+  const upcoming = await stripe('GET', '/v1/invoices/upcoming', { subscription: ud.sub_id });
+  note(`subscription ${ud.sub_id} in Stripe: status ${endedSub.status}, ended_at ${new Date(endedSub.ended_at * 1000).toISOString()} (the period would have run to ${new Date(endedSub.current_period_end * 1000).toISOString()})`);
+  note(`its invoices: ${invs.map((i) => `${i.id} ${i.status} ${i.amount_due} ${i.billing_reason}`).join('; ')}; upcoming invoice: ${upcoming.error?.message ?? `(!) ${upcoming.amount_due}`}`);
+  assert.equal(endedSub.status, 'canceled');
+  assert.equal(invs.length, 1, 'only the first month was ever invoiced');
+  note(`license: ${show(await d.license())}`);
+  note(`plan settings: ${show((await d.call('GET', '/api/account/plan')).body)}`);
+  // The webhook runs it once: the same checkout.session.completed again (signed) is a duplicate.
+  const ce = (await stripe('GET', '/v1/events', { type: 'checkout.session.completed', limit: 5 })).data.find((e) => e.data.object.id === lcs);
+  const cb = JSON.stringify(ce);
+  const ct = Math.floor(Date.now() / 1000);
+  const again1 = await fetch(`${BASE}/api/stripe/webhook`, { method: 'POST', headers: { 'stripe-signature': `t=${ct},v1=${createHmac('sha256', WHSEC).update(`${ct}.${cb}`).digest('hex')}` }, body: cb });
+  note(`${ce.id} (the lifetime checkout) sent again: ${again1.status} ${await again1.text()}`);
+  // And had it been handled twice, nothing more happens: the subscription is already cancelled.
+  await d1(`DELETE FROM stripe_events WHERE id = '${ce.id}'`);
+  const t2 = Math.floor(Date.now() / 1000);
+  const again2 = await fetch(`${BASE}/api/stripe/webhook`, { method: 'POST', headers: { 'stripe-signature': `t=${t2},v1=${createHmac('sha256', WHSEC).update(`${t2}.${cb}`).digest('hex')}` }, body: cb });
+  note(`the same event with its record removed, so it runs again: ${again2.status}; license ${(await d.license()).plan}; invoices still ${(await stripe('GET', '/v1/invoices', { subscription: ud.sub_id, limit: 10 })).data.length}`);
+  assert.equal(again2.status, 200);
 
   // ---- 5. A redelivered event is handled once; a forged one is refused.
   note('\n## 5. Webhook idempotency and signature');

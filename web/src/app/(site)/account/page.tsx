@@ -49,7 +49,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
           Download for Mac
         </a>
         {manage && <ManageButton quiet={!license.payment_failed} />}
-        {/* A subscriber can still buy it once: the subscription then stops renewing. */}
+        {/* Switch to lifetime: once paid, the subscription ends at once with no further charge. */}
         {manage && license.status === 'active' && <BuyButton plan="lifetime" quiet />}
       </div>
       {plans && (

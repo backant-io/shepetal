@@ -16,7 +16,7 @@ export async function POST(req: Request) {
   if (!plan) return Response.json({ error: 'invalid_plan' }, { status: 400 });
   // Already bought: never charge twice.
   if (user.status === 'active') return Response.json({ error: 'already_active' }, { status: 409 });
-  // A paid-up subscriber may buy the lifetime license (the subscription then stops renewing), never a second subscription.
+  // A subscriber may switch to lifetime (the subscription then ends at once, no further charge), never buy a second subscription.
   const license = licenseOf(user);
   if (plan === 'monthly' && license.plan === 'subscription' && license.status === 'active') {
     return Response.json({ error: 'already_subscribed' }, { status: 409 });
