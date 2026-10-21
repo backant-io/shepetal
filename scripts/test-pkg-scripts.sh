@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests the installer's postinstall and the uninstaller against stand-ins for `defaults`, `killall`,
-# `open`, `osascript` and the app, so the real 🌐 key setting, login items and apps are never touched.
+# `open`, `osascript`, `pkill` and the app, so the real 🌐 key setting, login items and apps are never touched.
 #   scripts/test-pkg-scripts.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -24,7 +24,7 @@ case $1 in
   delete) rm -f "$f" ;;
 esac
 SH
-for c in killall open osascript logger pgrep; do
+for c in killall open osascript logger pgrep pkill; do
   printf '#!/bin/bash\necho "%s $*" >> "$CALLS"\n%s\n' "$c" "$([ "$c" = pgrep ] && echo 'exit 1' || echo 'exit 0')" > "$T/bin/$c"
 done
 printf '#!/bin/bash\necho "app $*" >> "$CALLS"\n' > "$T/dest/Shepetal.app/Contents/MacOS/Shepetal"
@@ -89,6 +89,9 @@ uninstall || fail "uninstall failed: $(cat "$T/out.log")"
 [ "$(pref com.apple.HIToolbox.AppleFnUsageType)" = 3 ] || fail "uninstall did not restore 3"
 [ "$(pref io.backant.shepetal.previousAppleFnUsageType)" = unset ] || fail "uninstall kept the stored value"
 grep -qx "app --unregister-login-item" "$LOG" || fail "uninstall left the login item"
+for a in "$T/home/Applications/Shepetal.app" "$T/sysapps/Shepetal.app"; do  # none running: it may still be in its backoff
+  grep -qxF "pkill -f ^$a/Contents/MacOS/Shepetal --watchdog" "$LOG" || fail "uninstall did not stop the crash watchdog of $a"
+done
 grep -qx "killall -9 TextInputSwitcher" "$LOG" || fail "uninstall did not restart TextInputSwitcher"
 [ ! -e "$T/home/Applications/Shepetal.app" ] && [ ! -e "$T/sysapps/Shepetal.app" ] || fail "uninstall left an app"
 [ -d "$T/home/Library/Application Support/Shepetal" ] || fail "uninstall deleted the recordings"
@@ -130,5 +133,15 @@ touch "$PREFS/running"
 : > "$LOG"
 bash scripts/pkg/preinstall "$T/pkg" "$T/dest" / / > "$T/out.log" 2>&1 || fail "preinstall failed"
 grep -q "osascript -e quit app \"Shepetal\"" "$LOG" || fail "preinstall did not ask Shepetal to quit"
-echo "ok: preinstall quits a running Shepetal"
+WD="pkill -f ^$T/dest/Shepetal.app/Contents/MacOS/Shepetal --watchdog"
+[ "$(grep -nxF -m1 "$WD" "$LOG" | cut -d: -f1)" -lt "$(grep -n -m1 '^osascript' "$LOG" | cut -d: -f1)" ] 2>/dev/null \
+  || fail "preinstall did not stop the crash watchdog before quitting the app (it would open the app again)"
+echo "ok: preinstall stops the crash watchdog, then quits a running Shepetal"
+
+# 9. preinstall with the app not running: its watchdog may be waiting to open it again, so it is stopped too.
+: > "$LOG"
+bash scripts/pkg/preinstall "$T/pkg" "$T/dest" / / > "$T/out.log" 2>&1 || fail "preinstall failed"
+grep -qxF "$WD" "$LOG" || fail "preinstall left the crash watchdog running with the app not running"
+grep -q '^osascript' "$LOG" && fail "preinstall quit an app that was not running"
+echo "ok: preinstall stops the crash watchdog with the app not running"
 echo "test-pkg-scripts: OK"
