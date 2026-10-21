@@ -759,7 +759,7 @@ In the L-MIC steps a USB mic is plugged in (any external mic works). `command -v
 2. Double-tap fn, wait about 7 s, then press fn. Expected: after about 5 s one notification `No sound from <mic>: it sends only silence. Check that it is not muted, or rank another one (shepetal mics).`, and `No sound from the mic` next to 🤫.
 3. Within a minute, do step 2 again. Expected: no second notification.
 4. `pactl set-source-mute <its node name> 0` and dictate in a whisper. Expected: no notification.
-(Automated: `no_audio_only_after_more_than_5_s_of_exact_zeros`, `health_reads_a_growing_wav_and_catches_a_dead_mic`, `wav_samples_start_after_the_data_chunk`, `alerts_are_rate_limited_per_kind`.)
+(Automated: `no_audio_only_after_more_than_5_s_of_exact_zeros`, `real_audio_resets_the_silence_count`, `health_reads_a_growing_wav_and_catches_a_dead_mic`, `wav_samples_start_after_the_data_chunk`, `alerts_are_rate_limited_per_kind`.)
 
 ### L-MIC-5: lid closed
 1. On a laptop with an external display, keyboard and mic, put part of the built-in mic's name first in `prefer`, then close the lid. `cat /proc/acpi/button/lid/*/state`. Expected: `state: closed`. If there is no such file, write down the laptop model: the lid is then not seen (known gap in docs/linux-mic.md).
@@ -773,6 +773,27 @@ In the L-MIC steps a USB mic is plugged in (any external mic works). `command -v
 3. Press fn. Expected: a notification with the same text, and `No PipeWire or PulseAudio` next to 🤫. Write down what else the daemon prints.
 4. `systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber` and dictate. Expected: it works again.
 (Automated: `alerts_are_rate_limited_per_kind`, `the_indicator_gets_a_few_words_and_no_device_name`.)
+
+### L-MIC-7: a mic that stops sending
+1. Run the daemon with a USB mic marked `*` in `shepetal mics`. Double-tap fn and say a sentence.
+2. In another terminal freeze the recorder's input: `pactl suspend-source <the USB mic's node name> 1` (a suspended source delivers nothing). If your PipeWire keeps it running, stop the recorder's data instead with `kill -STOP $(pgrep pw-record)`, then `kill -CONT` it after 7 s.
+3. Expected: about 5 s later a notification `Cannot read <mic>: no sound arrived for 5 s. Dictation stopped; what you said before is kept. ...`, `Cannot read the mic` next to 🤫 (yellow), and the sentence is typed without another press. `pgrep -a pw-record` prints nothing. No sound plays.
+4. `pactl suspend-source <name> 0`. Hold fn and speak. Expected: a new dictation, typed on release.
+(Automated: `no_samples_for_5_s_stops_with_mic_unreadable`, `a_mic_that_stops_sending_ends_the_dictation_and_types_what_was_said`, `advice_is_a_hint_and_problems_are_errors`.)
+
+### L-MIC-8: a Bluetooth headset mic
+Needs a Bluetooth headset with a mic (AirPods, a Jabra) and the laptop's built-in mic.
+1. Connect the headset and put part of its name first in `prefer` in `~/.config/shepetal/config.toml`. `shepetal mics`: the headset is first, `[bluetooth]`.
+2. Start the daemon, play some music through the headset, and dictate. Expected: on the press, a notification `<headset> is a Bluetooth headset: while it records, it switches to its low-quality call mode ...`, and `Bluetooth mic: lower quality` next to 🤫 in the hint style (🤫 does not turn yellow). The music sounds worse while recording: that is the headset's call profile. The text is typed. No sound is added by shepetal.
+3. Dictate again. Expected: no second notification while the daemon runs.
+4. Restart the daemon, disable the built-in mic (`pactl set-card-profile <the laptop card> off`) so the headset is the only mic, and dictate. Expected: no Bluetooth notification: there is nothing better to switch to. Turn the card profile back on.
+(Automated: `a_bluetooth_headset_mic_is_advised_once`, `advice_is_a_hint_and_problems_are_errors`.)
+
+### L-MIC-9: lid closed on the only mic
+1. On a laptop with an external display and keyboard but no external mic, close the lid (`cat /proc/acpi/button/lid/*/state` says `closed`).
+2. Start the daemon and dictate. Expected: a notification `The lid is closed and the built-in mic is the only one, so it may sound muffled. Open the lid or plug in a mic.` and `Lid closed: mic muffled` next to 🤫 in the hint style. The text is typed.
+3. Dictate again. Expected: no second notification while the daemon runs. With an external mic plugged in (restart the daemon): no notification.
+(Automated: `the_lid_closed_on_the_only_mic_is_advised_once`, `lid_state_from_acpi`.)
 
 The dictionary and snippets live in `~/.config/shepetal/` and are read again at every dictation, so the daemon keeps running through the L-VOC steps.
 
