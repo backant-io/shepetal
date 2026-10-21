@@ -1,50 +1,35 @@
-/* shepetal: a quiet page. Cool mist by day, indigo night by dark. The only loud
-   colors are the indicator's own states (red recording, blue processing). */
+/* shepetal: a quiet page. The colors, fonts and dark mode come from the brand
+   tokens (src/brand/tokens.css, see BRAND.md); these short names alias them.
+   The only loud colors are the indicator's own states. */
 :root {
-  color-scheme: light dark;
-  --paper: #e9ecf2;
-  --raised: #f6f7fa;
-  --ink: #1b1f33;
-  --hush: #6d7390;
-  --line: #cfd4e0;
-  --key: #fbfbfd;
-  --key-edge: #c3c8d6;
-  --rec: #ff3b30;
-  --busy: #0a7aff;
-  --sun: #ffc93c;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #161a2e;
-    --raised: #1e2340;
-    --ink: #e8eaf2;
-    --hush: #8d93b0;
-    --line: #2c3254;
-    --key: #262b4a;
-    --key-edge: #121528;
-    --rec: #ff453a;
-    --busy: #0a84ff;
-  }
+  --paper: var(--sh-bg);
+  --raised: var(--sh-bg-raised);
+  --ink: var(--sh-text);
+  --hush: var(--sh-text-muted);
+  --line: var(--sh-border);
+  --key: var(--sh-bg-raised);
+  --key-edge: var(--sh-border);
+  --rec: var(--sh-recording);
+  --busy: var(--sh-writing);
 }
 
 body {
   background: var(--paper);
   color: var(--ink);
-  font-family: system-ui, sans-serif;
+  font-family: var(--sh-font-text);
   -webkit-font-smoothing: antialiased;
 }
 
 :focus-visible {
-  outline: 2px solid var(--busy);
+  outline: 2px solid var(--sh-accent);
   outline-offset: 3px;
   border-radius: 6px;
 }
 
 .display {
-  font-family: var(--font-display), var(--font-sans), system-ui, sans-serif;
-  font-weight: 300;
-  letter-spacing: -0.035em;
+  font-family: var(--sh-font-display);
+  font-weight: 340;
+  letter-spacing: -0.01em;
 }
 
 .btn {

@@ -1,0 +1,186 @@
+/* shepetal brand tokens, version 1.1, October 21, 2026.
+   Mirrors tokens.json. Change both together.
+   Font paths are relative to brand/; adjust them when you copy the fonts. */
+
+@font-face {
+  font-family: "Newsreader";
+  src: url("fonts/Newsreader-Variable.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Newsreader";
+  src: url("fonts/Newsreader-Italic-Variable.woff2") format("woff2");
+  font-weight: 200 800;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  src: url("fonts/HankenGrotesk-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Hanken Grotesk";
+  src: url("fonts/HankenGrotesk-Italic-Variable.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+:root {
+  /* Neutrals: limestone mist by day (hue 110, near-neutral) to blue-black night (hue 261), generated in OKLCH */
+  --sh-neutral-0: #F4F5F0;
+  --sh-neutral-50: #E9E9E5;   /* Megla, mist */
+  --sh-neutral-100: #DEDEDA;
+  --sh-neutral-200: #CECECA;
+  --sh-neutral-300: #B5B6B3;
+  --sh-neutral-400: #959797;
+  --sh-neutral-500: #76797D;
+  --sh-neutral-600: #5C6167;
+  --sh-neutral-700: #424850;
+  --sh-neutral-800: #2A313B;
+  --sh-neutral-850: #1C232E;
+  --sh-neutral-900: #151C20;  /* Tinta, ink */
+  --sh-neutral-950: #0B121E;  /* Noč, night */
+
+  /* Soča, the accent */
+  --sh-soca-200: #93CAC5;
+  --sh-soca-300: #6FB0AB;
+  --sh-soca-500: #3E8180;
+  --sh-soca-600: #1F5F60;
+  --sh-soca-700: #144A4C;
+
+  /* Core names */
+  --sh-mist: var(--sh-neutral-50);
+  --sh-night: var(--sh-neutral-950);
+  --sh-ink: var(--sh-neutral-900);
+  --sh-paper: var(--sh-neutral-0);
+
+  /* Fonts */
+  --sh-font-display: "Newsreader", "Iowan Old Style", Georgia, serif;
+  --sh-font-text: "Hanken Grotesk", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --sh-font-code: ui-monospace, "SF Mono", Menlo, monospace; /* code samples only */
+
+  /* Type scale (px): 12 14 16 18 21 24 36 48 72 96 */
+  --sh-size-caption: 12px;
+  --sh-size-small: 14px;
+  --sh-size-body: 16px;
+  --sh-size-reading: 18px;
+  --sh-size-lead: 21px;
+  --sh-size-h4: 24px;
+  --sh-size-h3: 36px;
+  --sh-size-h2: 48px;
+  --sh-size-h1: 72px;
+  --sh-size-display: 96px;
+  --sh-measure-text: 66ch;
+  --sh-measure-reading: 62ch;
+
+  /* Space, 4 px base */
+  --sh-space-1: 4px;
+  --sh-space-2: 8px;
+  --sh-space-3: 12px;
+  --sh-space-4: 16px;
+  --sh-space-5: 24px;
+  --sh-space-6: 32px;
+  --sh-space-7: 48px;
+  --sh-space-8: 64px;
+  --sh-space-9: 96px;
+  --sh-space-10: 128px;
+  --sh-space-11: 192px;
+
+  /* Grid */
+  --sh-grid-gutter: 24px;
+  --sh-grid-margin: 16px;
+  --sh-grid-max: 1200px;
+
+  /* Radius */
+  --sh-radius-sm: 6px;
+  --sh-radius-md: 12px;
+  --sh-radius-lg: 20px;
+  --sh-radius-full: 999px;
+
+  /* Motion */
+  --sh-dur-fast: 120ms;
+  --sh-dur-base: 200ms;
+  --sh-dur-slow: 320ms;
+  --sh-dur-reveal: 560ms;
+  --sh-dur-pulse: 600ms;
+  --sh-ease-settle: cubic-bezier(0.2, 0, 0, 1);
+  --sh-ease-leave: cubic-bezier(0.4, 0, 1, 1);
+  --sh-ease-move: cubic-bezier(0.4, 0, 0.2, 1);
+  --sh-ease-breathe: cubic-bezier(0.42, 0, 0.58, 1);
+
+  /* Semantic, light (default) */
+  --sh-bg: var(--sh-neutral-50);
+  --sh-bg-raised: var(--sh-neutral-0);
+  --sh-bg-sunken: var(--sh-neutral-100);
+  --sh-border: var(--sh-neutral-200);
+  --sh-text: var(--sh-neutral-900);
+  --sh-text-muted: var(--sh-neutral-600);
+  --sh-accent: var(--sh-soca-600);
+  --sh-on-accent: var(--sh-neutral-0);
+  --sh-primary-fill: var(--sh-neutral-900);
+  --sh-on-primary: var(--sh-neutral-50);
+  --sh-recording: #FF3B30;
+  --sh-hands-free: #FF9500;
+  --sh-writing: #007AFF;
+  --sh-note: #FFCC00;
+  --sh-grain-opacity: 0.035;
+  --sh-gradient: linear-gradient(180deg, var(--sh-neutral-0) 0%, var(--sh-neutral-50) 55%, var(--sh-neutral-100) 100%);
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --sh-bg: var(--sh-neutral-950);
+    --sh-bg-raised: var(--sh-neutral-900);
+    --sh-bg-sunken: var(--sh-neutral-850);
+    --sh-border: var(--sh-neutral-800);
+    --sh-text: var(--sh-neutral-50);
+    --sh-text-muted: var(--sh-neutral-400);
+    --sh-accent: var(--sh-soca-300);
+    --sh-on-accent: var(--sh-neutral-950);
+    --sh-primary-fill: var(--sh-neutral-50);
+    --sh-on-primary: var(--sh-neutral-950);
+    --sh-recording: #FF453A;
+    --sh-hands-free: #FF9F0A;
+    --sh-writing: #0A84FF;
+    --sh-note: #FFD60A;
+    --sh-grain-opacity: 0.05;
+    --sh-gradient: radial-gradient(120% 90% at 50% -10%, var(--sh-neutral-800) 0%, var(--sh-neutral-950) 70%);
+  }
+}
+
+:root[data-theme="dark"] {
+  --sh-bg: var(--sh-neutral-950);
+  --sh-bg-raised: var(--sh-neutral-900);
+  --sh-bg-sunken: var(--sh-neutral-850);
+  --sh-border: var(--sh-neutral-800);
+  --sh-text: var(--sh-neutral-50);
+  --sh-text-muted: var(--sh-neutral-400);
+  --sh-accent: var(--sh-soca-300);
+  --sh-on-accent: var(--sh-neutral-950);
+  --sh-primary-fill: var(--sh-neutral-50);
+  --sh-on-primary: var(--sh-neutral-950);
+  --sh-recording: #FF453A;
+  --sh-hands-free: #FF9F0A;
+  --sh-writing: #0A84FF;
+  --sh-note: #FFD60A;
+  --sh-grain-opacity: 0.05;
+  --sh-gradient: radial-gradient(120% 90% at 50% -10%, var(--sh-neutral-800) 0%, var(--sh-neutral-950) 70%);
+}
+
+/* Reduced motion: motion is off and changes are instant. The pulse stops at full opacity. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --sh-dur-fast: 0ms;
+    --sh-dur-base: 0ms;
+    --sh-dur-slow: 0ms;
+    --sh-dur-reveal: 0ms;
+    --sh-dur-pulse: 0ms;
+  }
+}

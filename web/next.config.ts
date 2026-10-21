@@ -15,9 +15,10 @@ const securityHeaders = [
     value: [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com",
+      "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https: blob:",
-      "font-src 'self' data: https://api.fontshare.com https://cdn.fontshare.com https://fonts.gstatic.com",
+      // The brand fonts are self-hosted (src/brand/fonts).
+      "font-src 'self' data:",
       "connect-src 'self'",
       "frame-src 'self'",
       "frame-ancestors 'none'",
