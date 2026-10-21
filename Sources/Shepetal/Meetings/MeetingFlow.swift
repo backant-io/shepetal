@@ -13,6 +13,8 @@ final class MeetingFlow {
     private let hint: (String) -> Void
     private let liveEvery: Double
     private var transcriber: MeetingTranscriber?
+    /// Hears the live passes, to end a recording nobody speaks in (F67).
+    private weak var recorder: MeetingRecorder?
     /// The final pass of the meeting that ended last.
     private(set) var finishing: Task<Void, Never>?
     /// Final passes not done yet (an update waits for them).
@@ -40,6 +42,7 @@ final class MeetingFlow {
     }
 
     func attach(_ recorder: MeetingRecorder) {
+        self.recorder = recorder
         recorder.onStarted = { [weak self] in self?.started($0) }
         recorder.onEnded = { [weak self] in self?.ended($0) }
         recorder.onDiscarded = { [weak self] in self?.discarded($0) }
@@ -50,6 +53,8 @@ final class MeetingFlow {
         do { try store.save(m) } catch { return hint("Meeting not stored: \(error.localizedDescription)") }
         // No model yet (it loads at launch): the final pass transcribes the whole meeting instead.
         transcriber = makeTranscriber(m)
+        // ponytail: no model, no live pass, so no silence end; read the audio level without the model if that matters.
+        transcriber?.onHeard = { [weak self] in self?.recorder?.heard(m.id, $0) }
         transcriber?.startLive(every: liveEvery)
     }
 

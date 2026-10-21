@@ -72,11 +72,11 @@ In CI, the .p12 is imported into a throwaway keychain in `$RUNNER_TEMP`. The key
 
 At launch, before onboarding, the app checks where `Bundle.main.bundleURL` is. It offers the move when the app is on a read-only volume (the DMG; `volumeIsReadOnly`), under `/Volumes/`, under `~/Downloads`, or App Translocated (the path contains `/AppTranslocation/`). It is not offered in any `Applications` folder, or when the bundle ID is not `io.backant.shepetal`.
 
-- An alert asks once (`movePromptShown` in defaults): **"Move Shepetal to Applications?"** "It updates itself only from there." The buttons are **Move to Applications** (default) and **Not Now**.
-- **Move** copies the bundle to `/Applications/Shepetal.app` and removes `com.apple.quarantine` from the copy (the user has already approved this download). Then it opens the copy as a new instance and quits. An existing `/Applications/Shepetal.app` with our bundle ID is handled by version:
-  - if it is older or the same build, it goes to the Trash first;
-  - if it is **newer**, it is opened instead and nothing is replaced (downgrade protection);
-  - if it is root-owned (installed by the old .pkg), the copy asks for admin rights through the same `do shell script … with administrator privileges` prompt that `uninstall.sh` uses.
+- An alert asks once per build (`movePromptVersion` in defaults holds the `CFBundleVersion` that asked, so a newer download asks again): **"Move Shepetal to Applications?"** "It updates itself only from there." The buttons are **Move to Applications** (default) and **Not Now**. Not Now never blocks the launch.
+- **Move** copies the bundle to `/Applications/Shepetal.app`, or to `~/Applications/Shepetal.app` when `/Applications` is not writable (a standard account) or the copy there is root-owned (the old .pkg). It removes `com.apple.quarantine` from the copy (the user has already approved this download) and moves the copy it ran from to the Trash. For an App Translocated copy, that is its real path, from `SecTranslocateCreateOriginalPathForURL`. The DMG's copy stays. Then it opens the new copy as a new instance and quits. Existing copies with our bundle ID are handled by version:
+  - a copy in `/Applications` that is **newer** than this one is opened instead, wherever the move would go, and nothing is copied or trashed (downgrade protection, also for a standard account where an admin installed it);
+  - otherwise a copy at the target that is older or the same build goes to the Trash first;
+  - after a move to `~/Applications` on an admin account (the root-owned copy), an alert says to move the copy in /Applications to the Trash in Finder. A standard account is told nothing, as that copy is shared by every account.
 - Permissions belong to the DR, not to the path, so a grant made while the app ran from the DMG still holds after the move.
 - Skipped: ejecting the DMG for the user (Finder shows the eject button). Add it when someone asks.
 
@@ -221,7 +221,8 @@ All hermetic: injected I/O, no `SMAppService`, TCC, `defaults` or Trash calls fr
 | Test | Covers | Deliberate break |
 |---|---|---|
 | `UninstallPlanTests` | the step order (login item before the bundle moves); the data folder only when ticked; never for another bundle ID or a read-only volume; disabled while busy | drop the "ticked" guard → data appears in the plan |
-| `MovePromptTests` | `/Volumes/…`, `~/Downloads/…` and AppTranslocation paths are offered; any Applications folder is not; asked once; a newer installed copy is opened, not replaced | compare builds with `<=` |
+| `MovePromptTests` | `/Volumes/…`, `~/Downloads/…` and AppTranslocation paths are offered; any Applications folder is not; asked once per build; a newer installed copy is opened, not replaced | compare builds with `<=` |
+| `AppLocationTests` | the target is /Applications, or ~/Applications for a standard account or a root-owned copy; a newer copy in /Applications is opened wherever the move would go; Not Now is remembered per build | always /Applications; ignore the /Applications build; asked once ever |
 | `OnboardingFlowTests` | steps with and without required sign-in; Continue needs the three required permissions; System Audio never blocks; Start at login is registered only on Done | let System Audio block |
 | `UpdateGateTests` | dictating, meeting, transcribing and re-transcribe all block; 19:59 since the last fn press blocks, 20:00 allows; a manual install ignores the 20 minutes | 20 → 0 minutes |
 | `MenuModelTests` (existing) | still 12 items, and Check for Updates… is enabled with Sparkle | |

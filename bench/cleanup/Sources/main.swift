@@ -5,7 +5,9 @@ import ShepetalCore
 // cleanup-bench <model.gguf|rules> <fixtures.jsonl>
 // For each fixture: the model alone on the rules' text (`model`), and the app's path (`app`: rules, cue
 // gate, model, word guard), each with its time in ms. A fixture with the text around the cursor (`before`,
-// `after`, `selected`: fixtures/context.jsonl, F24) gets both again with that context (`model_ctx`, `app_ctx`).
+// `after`, `selected`: fixtures/context.jsonl, F24) gets both again with that context (`model_ctx`, `app_ctx`), and
+// one with My voice (`preferences`, `samples`: fixtures/voice.jsonl, F38) gets both again with it (`model_voice`,
+// `app_voice`). Fixtures with the same voice go one after another: the model decodes its prompt again per voice.
 // Then one summary line: load time, the model's time on the 10 s transcripts (five runs each), and peak memory.
 let args = CommandLine.arguments
 guard args.count == 3 else {
@@ -39,9 +41,10 @@ do { model = args[1] == "rules" ? nil : try LlamaCleanup(path: args[1]) } catch 
 let loadMs = now() - t0
 
 let fixtures = try! String(contentsOfFile: args[2], encoding: .utf8).split(separator: "\n").map {
-    try! JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: String]
+    try! JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any]
 }
-for f in fixtures {
+for row in fixtures {
+    let f = row.compactMapValues { $0 as? String }
     let raw = f["raw"]!
     var out: [String: Any] = ["id": f["id"]!]
     if let model {
@@ -68,13 +71,27 @@ for f in fixtures {
         out["app_ctx"] = app.text
         out["used_model_ctx"] = app.usedModel
     }
+    if f["preferences"] != nil || row["samples"] != nil {
+        let voice = MyVoice(preferences: f["preferences"] ?? "", samples: row["samples"] as? [String] ?? [])
+        if let model {
+            _ = try? model.rewrite("Warm up.", context: .none, voice: voice)  // a new voice decodes the prompt once
+            let t = now()
+            out["model_voice"] = (try? model.rewrite(Cleanup.apply(raw), context: .none, voice: voice)) ?? ""
+            out["model_voice_ms"] = now() - t
+        }
+        let t = now()
+        let app = SmartCleanup.apply(raw, model: model, voice: voice)
+        out["app_voice_ms"] = now() - t
+        out["app_voice"] = app.text
+        out["used_model_voice"] = app.usedModel
+    }
     line(out)
 }
 // Latency for a 10 s utterance: each fixture of 24 or more words (about 10 s of speech) five more times.
 var longMs: [Double] = []
 if let model {
-    for f in fixtures where f["raw"]!.split(separator: " ").count >= 24 {
-        let ruled = Cleanup.apply(f["raw"]!)
+    for f in fixtures where (f["raw"] as! String).split(separator: " ").count >= 24 {
+        let ruled = Cleanup.apply(f["raw"] as! String)
         for _ in 0..<5 {
             let t = now()
             _ = try? model.rewrite(ruled)

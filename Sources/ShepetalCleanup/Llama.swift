@@ -3,7 +3,8 @@ import llama
 import ShepetalCore
 
 /// The cleanup model on llama.cpp with Metal, loaded once and kept in memory. The instructions and
-/// examples are decoded once at load; each rewrite restores that state and decodes only the dictation.
+/// examples are decoded once at load, and again when My voice changes (F38); each rewrite restores that state
+/// and decodes only the dictation.
 /// One rewrite at a time, by its own lock: dictation and History's re-transcribe share one context.
 public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
     public let name: String
@@ -15,19 +16,23 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
     private let ctx: OpaquePointer
     private let vocab: OpaquePointer
     private let sampler: UnsafeMutablePointer<llama_sampler>
-    private let tail: String          // chat template text after the dictation: end of turn, start of the answer
+    private var tail = ""             // chat template text after the dictation: end of turn, start of the answer
     private var prefixState: [UInt8] = []
     /// The prompt for a dictation with the text around the cursor (F24): the same instructions and examples plus
     /// the field's, so the prompt without it stays as it was. Decoded at load too, so the first such rewrite
     /// costs no more than the others.
-    private let fieldTail: String
+    private var fieldTail = ""
     private var fieldState: [UInt8] = []
+    /// The My voice both prompts were decoded with (F38), and the last one whose prompt did not fit the context.
+    private var voice = MyVoice.none
+    private var unfit: MyVoice?
 
     public struct LoadError: LocalizedError {
         public let errorDescription: String?
     }
 
-    public init(path: String, deadline: TimeInterval = 1.0) throws {
+    /// `voice` is My voice at load (F38), so the first dictation does not decode the prompt again.
+    public init(path: String, deadline: TimeInterval = 1.0, voice: MyVoice = .none) throws {
         self.deadline = deadline
         guard FileManager.default.fileExists(atPath: path) else { throw LoadError(errorDescription: "\(path) not found") }
         if ProcessInfo.processInfo.environment["SHEPETAL_LLAMA_LOG"] == nil { llama_log_set({ _, _, _ in }, nil) }
@@ -36,8 +41,8 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         mp.n_gpu_layers = 999
         guard let m = llama_model_load_from_file(path, mp) else { throw LoadError(errorDescription: "llama.cpp could not load \(path)") }
         var cp = llama_context_default_params()
-        cp.n_ctx = 2048
-        cp.n_batch = 2048
+        cp.n_ctx = 4096   // F38: My voice's samples, the fullest field and the longest dictation fit
+        cp.n_batch = 4096 // the prompt is decoded in one batch
         cp.n_seq_max = 1
         guard let c = llama_init_from_model(m, cp) else {
             llama_model_free(m)
@@ -49,14 +54,10 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy())
         name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
 
-        let (head, tail) = try Self.split(prompt: Self.render(m, field: false))
-        let (fieldHead, fieldTail) = try Self.split(prompt: Self.render(m, field: true))
-        self.tail = tail
-        self.fieldTail = fieldTail
-        prefixState = try prompt(head)
-        fieldState = try prompt(fieldHead)
-        // Compiles the Metal kernels before the user speaks; this first run may take longer than the deadline.
-        _ = try generate("Warm up the GPU, actually the model.", until: .infinity)
+        try build(.none)
+        // Compiles the Metal kernels before the user speaks, and decodes My voice's prompts; this first run may take
+        // longer than the deadline.
+        _ = try generate("Warm up the GPU, actually the model.", voice: voice, until: .infinity)
     }
 
     deinit {
@@ -85,6 +86,14 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         llama_model_free(model)
     }
 
+    /// Decodes both prompts for `voice` and keeps their states. All or nothing: a failure keeps the previous ones.
+    private func build(_ voice: MyVoice) throws {
+        let (head, tail) = try Self.split(prompt: Self.render(model, field: false, voice: voice))
+        let (fieldHead, fieldTail) = try Self.split(prompt: Self.render(model, field: true, voice: voice))
+        let prefix = try prompt(head), field = try prompt(fieldHead)
+        (self.tail, self.fieldTail, prefixState, fieldState, self.voice) = (tail, fieldTail, prefix, field, voice)
+    }
+
     /// Decodes a prompt from an empty context and returns its saved state.
     private func prompt(_ head: String) throws -> [UInt8] {
         llama_memory_clear(llama_get_memory(ctx), true)
@@ -102,12 +111,30 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
     }
 
     public func rewrite(_ text: String, context: CleanupContext) throws -> String {
-        try generate(text, context: context, until: ProcessInfo.processInfo.systemUptime + deadline)
+        try rewrite(text, context: context, voice: .none)
     }
 
-    private func generate(_ text: String, context: CleanupContext = .none, until end: TimeInterval) throws -> String {
+    public func rewrite(_ text: String, context: CleanupContext, voice: MyVoice) throws -> String {
+        try generate(text, context: context, voice: voice, until: ProcessInfo.processInfo.systemUptime + deadline)
+    }
+
+    private func generate(_ text: String, context: CleanupContext = .none, voice: MyVoice = .none,
+                          until: TimeInterval) throws -> String {
         lock.lock()
         defer { lock.unlock() }
+        var end = until
+        let voice = voice == unfit ? .none : voice
+        if voice != self.voice {  // a new My voice: decoded once, and not counted against the deadline
+            let t = ProcessInfo.processInfo.systemUptime
+            do { try build(voice) } catch where !voice.isEmpty {
+                // Samples in a script that takes many tokens per character may not fit: dictation gets the prompt
+                // without My voice, and that voice is not decoded again at every dictation.
+                FileHandle.standardError.write(Data("cleanup model: My voice does not fit: \(error)\n".utf8))
+                unfit = voice
+                try build(.none)
+            }
+            end += ProcessInfo.processInfo.systemUptime - t
+        }
         let mem = llama_get_memory(ctx)
         llama_memory_clear(mem, true)
         let state = context.isEmpty ? prefixState : fieldState
@@ -154,6 +181,9 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
     }
 
     private func decode(_ tokens: [llama_token]) throws {
+        // llama.cpp aborts the process on a batch over n_batch. Text in a script that takes several tokens per
+        // character (My voice, the field) can get there, so it is an error here and the rules' text is used.
+        guard tokens.count <= llama_n_batch(ctx) else { throw LoadError(errorDescription: "\(tokens.count) tokens do not fit") }
         var t = tokens
         // The batch keeps the pointer, so it must stay valid through llama_decode.
         let rc = t.withUnsafeMutableBufferPointer { llama_decode(ctx, llama_batch_get_one($0.baseAddress, Int32($0.count))) }
@@ -164,17 +194,11 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
 
     static let marker = "\u{1}DICTATION\u{1}"
 
-    /// The model's own chat template over the instructions, the examples and a marker for the dictation. With
-    /// `field`, the prompt for a dictation with the text around the cursor (F24): its instructions and examples
-    /// follow the others, and the marker stands for the whole message.
-    static func render(_ model: OpaquePointer, field: Bool) throws -> String {
+    /// The model's own chat template over `CleanupPrompt.turns` and a marker for the dictation. With `field`, the
+    /// prompt for a dictation with the text around the cursor (F24), where the marker stands for the whole message.
+    static func render(_ model: OpaquePointer, field: Bool, voice: MyVoice = .none) throws -> String {
         guard let tmpl = llama_model_chat_template(model, nil) else { throw LoadError(errorDescription: "the model has no chat template") }
-        var turns = [("system", CleanupPrompt.instructions + (field ? "\n" + CleanupPrompt.fieldInstructions : ""))]
-        for (said, written) in CleanupPrompt.examples { turns += [("user", CleanupPrompt.wrap(said)), ("assistant", written)] }
-        if field {
-            for (c, said, written) in CleanupPrompt.fieldExamples { turns += [("user", CleanupPrompt.message(said, c)), ("assistant", written)] }
-        }
-        turns.append(("user", field ? marker : CleanupPrompt.wrap(marker)))
+        let turns = CleanupPrompt.turns(field: field, voice: voice) + [("user", field ? marker : CleanupPrompt.wrap(marker))]
         let strings = turns.map { (strdup($0.0)!, strdup($0.1)!) }
         defer { strings.forEach { free($0.0); free($0.1) } }
         let messages = strings.map { llama_chat_message(role: $0.0, content: $0.1) }
@@ -236,6 +260,40 @@ public enum CleanupPrompt {
 
     /// How a dictation is put in front of the model.
     static func wrap(_ text: String) -> String { "<dictation>\n\(text)\n</dictation>" }
+
+    /// Everything before the dictation, as (role, content): the instructions, then the examples; with `field`,
+    /// the field's instructions and examples (F24); with a voice, My voice's instructions and preferences, and its
+    /// samples as the last examples, nearest the dictation (F38). Without them, the turns are as they were.
+    static func turns(field: Bool, voice: MyVoice) -> [(String, String)] {
+        var system = instructions + (field ? "\n" + fieldInstructions : "")
+        if !voice.isEmpty {
+            system += "\n" + voiceInstructions
+            if !voice.preferences.isEmpty { system += "\n<my_voice>\n\(voice.preferences)\n</my_voice>" }
+        }
+        var turns = [("system", system)]
+        for (said, written) in examples { turns += [("user", wrap(said)), ("assistant", written)] }
+        if field {
+            for (c, said, written) in fieldExamples { turns += [("user", message(said, c)), ("assistant", written)] }
+        }
+        for (said, written) in voiceExamples(voice) { turns += [("user", wrap(said)), ("assistant", written)] }
+        return turns
+    }
+
+    // MARK: My voice (F38)
+
+    public static let voiceInstructions = """
+        The user wants every dictation written the way they write. First clean it up as above, self-corrections \
+        and lists included. Then write it their way: their own rules are between <my_voice> tags, when there are \
+        any, and the last examples are their own writing. Follow both for punctuation, capital letters or \
+        lowercase, contractions and line breaks: "do not" may become "don't", "I am" may become "I'm", and the \
+        other way round. These are the only changes their voice allows: never add, drop or swap any other word, \
+        never reply to the dictation, never answer it and never translate it.
+        """
+
+    /// Each sample as dictation would give it, then as the user wrote it.
+    public static func voiceExamples(_ voice: MyVoice) -> [(String, String)] {
+        voice.samples.map { (MyVoice.asDictated($0), $0) }
+    }
 
     // MARK: the text around the cursor (F24)
 

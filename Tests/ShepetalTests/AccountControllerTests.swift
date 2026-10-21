@@ -159,7 +159,7 @@ final class AccountControllerTests: XCTestCase {
     func testACancelledLaunchCheckNeverOpensTheWindowLater() async throws {
         try tokens.write("tok-1")
         try AccountState(license: License(status: .trial, trialEndsAt: Date() + 5 * day, email: "a@example.com"),
-                         lastGoodCheck: Date(), lastAttempt: Date()).save(stateURL(creating: true))
+                         lastGoodCheck: Date(), lastAttempt: Date()).sealed(with: "tok-1").save(stateURL(creating: true))
         let gate = DispatchSemaphore(value: 0)
         server.handler = { [unowned self] _ in gate.wait(); return license("trial", endsIn: 5 * day) }
         let a = account()
@@ -199,7 +199,7 @@ final class AccountControllerTests: XCTestCase {
     func testATrialNeverOpensTheWindow() async throws {
         try tokens.write("tok-1")
         try AccountState(license: License(status: .trial, trialEndsAt: Date() + 5 * day, email: "a@example.com"),
-                         lastGoodCheck: Date(), lastAttempt: Date()).save(stateURL(creating: true))
+                         lastGoodCheck: Date(), lastAttempt: Date()).sealed(with: "tok-1").save(stateURL(creating: true))
         server.handler = { [unowned self] _ in license("trial", endsIn: 5 * day) }
         let a = account()
         try await until("checked at launch") { !server.requests.isEmpty && a.checkTask == nil }
@@ -394,7 +394,7 @@ final class AccountControllerTests: XCTestCase {
     func testUnauthorizedSignsOut() async throws {
         try tokens.write("tok-old")
         try AccountState(license: License(status: .active, trialEndsAt: nil, email: "a@example.com"),
-                         lastGoodCheck: Date(), lastAttempt: Date()).save(stateURL(creating: true))
+                         lastGoodCheck: Date(), lastAttempt: Date()).sealed(with: "tok-old").save(stateURL(creating: true))
         server.handler = { _ in (401, ["error": "unauthorized"]) }
         let a = account()
         try await until("signed out by the 401") { a.access == .signedOut }
@@ -408,7 +408,7 @@ final class AccountControllerTests: XCTestCase {
         server.handler = { _ in (0, [:]) }  // the service does not answer
         let ends = Date() + 10 * day
         try AccountState(license: License(status: .trial, trialEndsAt: ends, email: "a@example.com"),
-                         lastGoodCheck: Date() - 6 * day, lastAttempt: Date() - 6 * day).save(stateURL(creating: true))
+                         lastGoodCheck: Date() - 6 * day, lastAttempt: Date() - 6 * day).sealed(with: "tok-1").save(stateURL(creating: true))
         let a = account()
         try await until("the launch check failed") { a.state.lastAttempt.map { Date().timeIntervalSince($0) < 60 } ?? false }
         XCTAssertEqual(a.access, .trial(daysLeft: 10))
@@ -419,6 +419,46 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertFalse(a.allowFnDown(), "past 7 days offline dictation is off")
         XCTAssertEqual(a.access, .unchecked)
         XCTAssertEqual(hints.last, "Connect to the internet so Shepetal can check your license")
+    }
+
+    /// #254: a lifetime license keeps dictating however long the Mac stays offline. The check the service answered
+    /// seals the cache; the next launches, with the service unreachable, still dictate a year later.
+    func testALifetimeLicenseKeepsDictatingOffline() async throws {
+        try tokens.write("tok-1")
+        server.handler = { [unowned self] _ in license("active") }
+        let a = account()
+        try await until("checked at launch") { a.access == .lifetime }
+
+        server.handler = { _ in (0, [:]) }  // offline from now on
+        for later in [8 * day, 30 * day, 365 * day] {
+            let b = account()
+            b.now = { Date() + later }
+            try await until("the launch check failed") { b.checkTask == nil && b.message.contains("Could not check") }
+            XCTAssertTrue(b.allowFnDown(), "\(Int(later / day)) days offline still dictates")
+            XCTAssertEqual(b.access, .lifetime)
+            XCTAssertEqual(b.summaryLine, "Signed in as a@example.com · Yours forever")
+        }
+        XCTAssertTrue(hints.isEmpty, "nothing says to connect")
+        XCTAssertEqual(homeShown, 0)
+    }
+
+    /// The other side of #254: account.json edited to a lifetime license, with no check the service answered, does not
+    /// dictate. It is "not checked", and the next check that gets through says what the account really has.
+    func testAnEditedCacheDoesNotDictate() async throws {
+        try tokens.write("tok-1")
+        server.handler = { _ in (0, [:]) }
+        try AccountState(license: License(status: .active, trialEndsAt: nil, email: "a@example.com"),
+                         lastGoodCheck: Date(), lastAttempt: Date()).save(stateURL(creating: true))
+        let a = account()
+        try await until("the launch check failed") { a.checkTask == nil && a.message.contains("Could not check") }
+        XCTAssertEqual(a.access, .unchecked)
+        XCTAssertFalse(a.allowFnDown())
+        XCTAssertEqual(hints.last, "Connect to the internet so Shepetal can check your license")
+
+        server.handler = { [unowned self] _ in license("expired", endsIn: -day) }
+        a.now = { Date() + 120 }  // a blocked press re-checks at most once a minute
+        XCTAssertFalse(a.allowFnDown())
+        try await until("the service answered") { a.access == .expired }
     }
 
     func testNoLicenseCheckDuringDictation() async throws {
@@ -437,7 +477,7 @@ final class AccountControllerTests: XCTestCase {
         // A dictation that starts cancels the check in flight, and its answer is dropped.
         let old = Date() - 2 * day
         try AccountState(license: License(status: .active, trialEndsAt: nil, email: "a@example.com"),
-                         lastGoodCheck: old, lastAttempt: old).save(stateURL)
+                         lastGoodCheck: old, lastAttempt: old).sealed(with: "tok-1").save(stateURL)
         let gate = DispatchSemaphore(value: 0)
         server.handler = { [unowned self] _ in gate.wait(); return license("active") }
         let b = Account(client: AccountClient(base: server.url), tokens: tokens, stateURL: stateURL)

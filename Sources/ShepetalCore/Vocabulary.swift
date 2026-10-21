@@ -4,7 +4,7 @@ import Foundation
 ///   `GitHub`            a word or phrase: its casing is fixed in the text and it biases the model
 ///   `spoken => written` a replacement
 ///   `*` in front stars an entry (starred go first in the model hint); a line starting with `#` is a comment.
-/// No entries ship by default. The file is re-read on every dictation.
+/// No entries ship by default. The file is re-read on every dictation, with snippets.toml (F40, `Snippets`).
 public struct Vocabulary {
     public struct Entry: Equatable {
         public var spoken: String   // what to find, case-insensitive, whole words
@@ -33,9 +33,11 @@ public struct Vocabulary {
         """
 
     public var entries: [Entry]
+    public var snippets: [Snippet]
 
-    public init(_ text: String = "") {
+    public init(_ text: String = "", snippets: [Snippet] = []) {
         entries = text.split(whereSeparator: \.isNewline).compactMap(Self.entry)
+        self.snippets = snippets
     }
 
     /// One line's entry; nil for a comment, a blank line or a half-written replacement.
@@ -53,15 +55,20 @@ public struct Vocabulary {
         return Entry(spoken: spoken, written: written, starred: starred)
     }
 
-    /// The file's entries; a missing or unreadable file is an empty dictionary. Keeps the file owner-only.
-    public static func load(_ url: URL) -> Vocabulary {
-        guard let data = FileManager.default.contents(atPath: url.path) else { return Vocabulary() }
+    /// The file's entries, and `snippets`' when given; a missing or unreadable file is empty. Keeps both owner-only.
+    public static func load(_ url: URL, snippets: URL? = nil) -> Vocabulary {
+        Vocabulary(readOwnerOnly(url) ?? "", snippets: snippets.map(Snippets.load) ?? [])
+    }
+
+    /// The file's text, nil when it is missing or unreadable. A file found is made 0600 again.
+    static func readOwnerOnly(_ url: URL) -> String? {
+        guard let data = FileManager.default.contents(atPath: url.path) else { return nil }
         try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        return Vocabulary(String(decoding: data, as: UTF8.self))
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// Creates the file (0600) with the header comment if it is missing.
-    public static func create(_ url: URL) throws {
+    public static func create(_ url: URL, header: String = header) throws {
         let fm = FileManager.default
         if !fm.fileExists(atPath: url.path),
            !fm.createFile(atPath: url.path, contents: Data(header.utf8), attributes: [.posixPermissions: 0o600]) {
@@ -96,13 +103,27 @@ public struct Vocabulary {
         return true
     }
 
-    /// Replaces every entry in one pass: case-insensitive, whole words only, longest phrase first,
-    /// so "new york city" wins over "new york" and a replacement is never replaced again.
+    /// The snippet a dictation is when it is nothing but its trigger: case, punctuation, the non-speech tags and
+    /// fillers ignored ("Um, my address." is "my address"). Checked on the words as heard, before any cleanup, so
+    /// the cleanup model never rewrites a trigger.
+    public func snippet(_ raw: String) -> Snippet? {
+        let said = Snippets.normalize(Cleanup.apply(SpeechGuard.stripTags(raw)))
+        guard !said.isEmpty else { return nil }
+        return snippets.first { Snippets.normalize($0.trigger) == said }
+    }
+
+    /// Replaces every entry and snippet trigger in one pass: case-insensitive, whole words only, longest phrase
+    /// first, so "new york city" wins over "new york" and a replacement is never replaced again. A snippet goes in
+    /// as its plain text (rich text needs the whole dictation, `snippet`) and wins over an entry of the same length.
     public func apply(_ text: String) -> String {
-        let sorted = entries.sorted { $0.spoken.count > $1.spoken.count }
+        let rules = (snippets.map { ($0.trigger, $0.rendered.plain, false) } + entries.map { ($0.spoken, $0.written, $0.isReplacement) })
+            .map { (key: $0.0.split(whereSeparator: \.isWhitespace).joined(separator: " "), written: $0.1, isReplacement: $0.2) }
+            .filter { !$0.key.isEmpty }
+        // Longest first; equal lengths keep their order, snippets first (Swift's sort is not documented as stable).
+        let sorted = rules.enumerated().sorted { ($0.element.key.count, $1.offset) > ($1.element.key.count, $0.offset) }.map(\.element)
         guard !sorted.isEmpty else { return text }
         let alternatives = sorted.map { e in
-            e.spoken.split(separator: " ").map { NSRegularExpression.escapedPattern(for: String($0)) }.joined(separator: #"\s+"#)
+            e.key.split(separator: " ").map { NSRegularExpression.escapedPattern(for: String($0)) }.joined(separator: #"\s+"#)
         }
         let pattern = #"(?<!\w)(?:"# + alternatives.joined(separator: "|") + #")(?!\w)"#
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else { return text }
@@ -112,7 +133,7 @@ public struct Vocabulary {
         for m in regex.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
             let found = ns.substring(with: m.range)
             let squashed = found.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            guard let e = sorted.first(where: { $0.spoken.compare(squashed, options: .caseInsensitive) == .orderedSame })
+            guard let e = sorted.first(where: { $0.key.compare(squashed, options: .caseInsensitive) == .orderedSame })
             else { continue }
             var written = e.written
             // A replacement at the start of a sentence keeps its capital ("Btw" -> "By the way").

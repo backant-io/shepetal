@@ -42,17 +42,17 @@ final class MenuModelTests: XCTestCase {
     func testTheMenuIsShortAndGroupedByIntent() {
         XCTAssertEqual(titles(MenuModel.groups(normalDay)), [
             ["Record meeting", "Open Meetings"],
-            ["Open shepetal"],
+            ["Open shepetal", "Notes…"],
             ["Check for Updates…"],
             ["Paste last transcript", "Recent"],
             ["Shortcuts…", "Microphone", "Languages"],
             ["Help center", "Send feedback…"],
             ["Quit shepetal"],
         ], "on a normal day nothing comes before the meetings, and there are no grey status lines")
-        XCTAssertEqual(MenuModel.groups(normalDay).joined().count, 12, "it had 22 items")
+        XCTAssertEqual(MenuModel.groups(normalDay).joined().count, 13, "it had 22 items")
         XCTAssertEqual(titles(MenuModel.groups(MenuState())), [
             ["Record meeting", "Open Meetings"],
-            ["Open shepetal"],
+            ["Open shepetal", "Notes…"],
             ["Paste last transcript"],
             ["Shortcuts…", "Microphone", "Languages"],
             ["Help center", "Send feedback…"],
@@ -117,7 +117,7 @@ final class MenuModelTests: XCTestCase {
     /// F39 (#30): the keyword model's download is with what needs doing, only while SpeechMenu offers it (speech
     /// recognition there, words in the dictionary, keyword model missing), and hidden while it runs.
     func testDictionarySupportShowsOnlyWhenOfferedAndHidesWhileItDownloads() throws {
-        XCTAssertEqual(MenuModel.groups(normalDay).joined().count, 12, "a normal day keeps the 12 items")
+        XCTAssertEqual(MenuModel.groups(normalDay).joined().count, 13, "a normal day keeps the 13 items")
 
         let offered = MenuModel.contextual(MenuState(dictionarySupport: .offered))
         XCTAssertEqual(offered, [MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport)])
@@ -463,6 +463,7 @@ final class MenuModelTests: XCTestCase {
             "case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { openTranscript(m) }",
             "case .openMeetings: openedHub()?.showMeetings()",
             "case .openApp: openHub()",
+            "case .notes: openNotes()",
             "case .checkForUpdates: updater.checkForUpdates()",
             "case .pasteLast: pasteLast()",
             "case .copy(let text): pipeline?.copy(text)",
@@ -474,6 +475,12 @@ final class MenuModelTests: XCTestCase {
         ])
         XCTAssertTrue(app.contains("openTranscript = MeetingTranscriptWindow.follow(meetingFlow)"))
         XCTAssertTrue(app.contains("private func openHub() { openedHub()?.show() }"), "Open shepetal shows the window")
+        // F55: Notes… and the open-notes shortcut open the same notes window, kept in the owner-only data dir.
+        XCTAssertTrue(app.contains("case .openNotes: openNotes()"), "the open-notes shortcut reaches the notes window")
+        XCTAssertEqual(try lines(of: "private func openNotes() {"), [
+            "do { notes = try notes ?? NotesWindow.onDisk() } catch { return fail(\"Notes could not open: \\(error.localizedDescription)\") }",
+            "notes?.show()",
+        ], "one notes window for the app's life, shown in front; a file it cannot open says so next to 🤫")
         let download = try lines(of: "private func downloadModel() {")
         XCTAssertEqual(Array(download.prefix(2)), ["guard !downloading else { return }", "downloading = true"],
                        "a second click while it downloads starts nothing")

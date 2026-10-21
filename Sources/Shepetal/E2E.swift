@@ -90,6 +90,25 @@ final class E2E: NSObject, NSApplicationDelegate {
                 failed = true
                 continue
             }
+            // F13 with live text on: the clip comes in as it would record, a second at a time, and each second may
+            // run a partial on what was heard so far. At release one more is still running on the model, the worst
+            // case for the final pass, which waits for the model step it is in; it is cancelled, never shown and
+            // never inserted.
+            var heard = 0, lastPartial = ""
+            let live = LiveCaption(recorded: { Array(samples.prefix(heard).suffix(LiveText.windowSamples)) },
+                                   engine: { engine }, enabled: { true }) { lastPartial = $0 }
+            live.start(at: 0, tick: nil)
+            let seconds = samples.count / AudioStore.sampleRate
+            for s in stride(from: 1, through: seconds, by: 1) {
+                heard = s * AudioStore.sampleRate
+                live.tick(at: Double(s))
+                await live.pass?.value
+            }
+            heard = samples.count
+            live.tick(at: Double(seconds + 1))
+            try? await Task.sleep(for: .milliseconds(15))  // the key comes up once that partial is on the model
+            let partials = live.shown, releasePartial = live.running > 0
+            live.stop()
             let start = ProcessInfo.processInfo.systemUptime
             let run = await pipeline.process(samples, engine: engine, app: app, context: { [textView] in
                 readMs = (ProcessInfo.processInfo.systemUptime - start) * 1000
@@ -101,12 +120,17 @@ final class E2E: NSObject, NSApplicationDelegate {
                 guard !dropPaste, event.type == .keyDown, let e = NSEvent(cgEvent: event) else { return }
                 _ = NSApp.mainMenu?.performKeyEquivalent(with: e)
             })
+            await live.pass?.value
             let stored = (try? pipeline.history.recent(limit: 50))?.first { $0.id == run.entry.id }
             let dir = Paths.audio.path
             failed = failed || run.error != nil
             var out: [String: Any] = ["wav": wav, "model": engine.name, "load_ms": Int(loadMs)]
             out["audio_seconds"] = Double(samples.count) / Double(AudioStore.sampleRate)
             out["ready_ms"] = Int(run.readyMs)
+            out["partials"] = partials
+            out["last_partial"] = lastPartial
+            out["late_partial_shown"] = live.shown != partials
+            out["release_partial_running"] = releasePartial
             out["raw_text"] = run.entry.rawText
             out["text"] = run.entry.text
             let typed = textView.string  // the dictation only: the field's own text around it is left out

@@ -3,7 +3,8 @@ import ShepetalCore
 
 /// Sign-in, the 30-day trial and the lifetime license in the running app. The license is checked at launch and
 /// then every 24 h, in the background, never while a dictation runs: a dictation that starts cancels a check in
-/// flight. The last good answer is cached in <data>/account.json and holds for 7 days offline.
+/// flight. The last good answer is cached in <data>/account.json, sealed with the token: a lifetime license then
+/// holds offline for good, a trial for 7 days.
 @MainActor
 final class Account: NSObject, ObservableObject {
     static let shared = Account(client: AccountClient(), tokens: .keychain(),
@@ -125,12 +126,12 @@ final class Account: NSObject, ObservableObject {
             do { result = .success(try await client.license(token: token)) } catch { result = .failure(error) }
             guard !Task.isCancelled else { return }  // a dictation started: the next tick tries again
             checkTask = nil
-            finishCheck(result)
+            finishCheck(result, sentWith: token)
         }
     }
 
-    private func finishCheck(_ result: Result<LicenseReply, Error>) {
-        let (s, signedOut) = AccountPolicy.apply(result, to: state, now: now())
+    private func finishCheck(_ result: Result<LicenseReply, Error>, sentWith checkedToken: String) {
+        let (s, signedOut) = AccountPolicy.apply(result, to: state, now: now(), token: checkedToken)
         state = s
         save()
         if signedOut {
@@ -249,7 +250,7 @@ final class Account: NSObject, ObservableObject {
     }
 
     func refresh() {
-        let a = AccountPolicy.access(signedIn: signedIn, state: state, now: now())
+        let a = AccountPolicy.access(token: token, state: state, now: now())
         if a != access { access = a }
     }
 
