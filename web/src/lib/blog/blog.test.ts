@@ -5,10 +5,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import robots from '../../app/robots';
 import sitemap from '../../app/sitemap';
-import { CTA_CLAIMS } from '../../components/blog/parts';
 import { APPS } from './apps';
 import { ARTICLES, bySlug } from './articles';
-import { articleJsonLd, SITE } from './seo';
+import { articleJsonLd, CTA_CLAIMS, SITE } from './seo';
 import type { Article } from './types';
 
 // The blog's rules: the brief for the blog (bold voice, true facts, each competitor linked once), the brand

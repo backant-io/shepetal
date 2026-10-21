@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { SignInButton } from '@/components/SignInButton';
 import { KIND_LABEL } from '../../lib/blog/articles';
 import type { Article } from '../../lib/blog/types';
 
@@ -24,12 +25,10 @@ export function Cards({ list, large }: { list: Article[]; large?: boolean }) {
 
 /**
  * The blog's one Mulberry field (the afterglow), with blush text only. The brand line, the canonical line and the price
- * claims, as written; the other claims appear once each in the article itself (CTA_CLAIMS, checked in blog.test.ts).
- * "Try 30 days free" goes to /download, which signs in (the 30 days start there) and hands over the installer;
- * "Buy shepetal" goes to the landing page's price section, where the purchase starts.
+ * claims, as written; the other claims appear once each in the article itself (CTA_CLAIMS in seo.ts, checked in blog.test.ts).
+ * "Try 30 days free" is the landing page's Google sign-in form (it starts the 30 days and lands on /account, where the
+ * download is), so it works without JavaScript; "Buy shepetal" goes to the landing page's price section.
  */
-export const CTA_CLAIMS = ['Write at the speed of thought.', 'Press one key. Your words appear wherever you speak.', '30 days free', '$4.99. Yours forever.', 'For Mac.'];
-
 export function BlogCta() {
   return (
     <section className="bl-cta" aria-labelledby="cta-h">
@@ -39,9 +38,9 @@ export function BlogCta() {
         <p className="bl-cta-lead">Press one key. Your words appear wherever you speak.</p>
         <p className="bl-cta-price">$4.99. Yours forever.</p>
         <div className="bl-cta-row">
-          <a href="/download" className="bl-btn">
+          <SignInButton redirectTo="/account" className="bl-btn">
             Try 30 days free
-          </a>
+          </SignInButton>
           <Link href="/#price" className="bl-btn bl-btn-quiet">
             Buy shepetal
           </Link>

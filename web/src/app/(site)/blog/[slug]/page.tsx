@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { ARTICLES, bySlug, KIND_LABEL } from '@/lib/blog/articles';
-import { articleJsonLd, AUTHOR, ldJson, ogImageFor } from '@/lib/blog/seo';
+import { articleJsonLd, AUTHOR, crumbOf, isoTime, ldJson, ogImageFor, TWITTER } from '@/lib/blog/seo';
 import { BlogCta, Cards, formatDate } from '@/components/blog/parts';
 
 // Every article is prerendered at build time. dynamicParams stays on: on the Worker, OpenNext without an incremental
@@ -33,12 +33,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       description: a.description,
       siteName: 'shepetal',
       locale: 'en_US',
-      publishedTime: a.published,
-      modifiedTime: a.updated,
+      publishedTime: isoTime(a.published),
+      modifiedTime: isoTime(a.updated),
       authors: [AUTHOR.name],
       images: [image],
     },
-    twitter: { card: 'summary_large_image', title: a.title, description: a.description, images: [image] },
+    twitter: { card: 'summary_large_image', site: TWITTER, title: a.title, description: a.description, images: [image] },
   };
 }
 
@@ -60,13 +60,13 @@ export default async function ArticlePage({ params }: Props) {
               <li>
                 <Link href="/blog">Blog</Link>
               </li>
-              <li aria-current="page">{KIND_LABEL[a.kind]}</li>
+              <li aria-current="page">{crumbOf(a)}</li>
             </ol>
           </nav>
           <h1 className="bl-title">{a.title}</h1>
           <p className="bl-dek">{a.dek}</p>
           <p className="bl-byline">
-            By {AUTHOR.name}, {AUTHOR.role} · Updated <time dateTime={a.updated}>{formatDate(a.updated)}</time>
+            {KIND_LABEL[a.kind]} · Updated <time dateTime={isoTime(a.updated)}>{formatDate(a.updated)}</time>
           </p>
         </header>
 

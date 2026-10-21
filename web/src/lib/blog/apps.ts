@@ -49,7 +49,7 @@ export const APPS: Record<AppId, App> = {
     platforms: 'Mac, Windows, iPhone, Android',
     price: '$8.49 a month, $84.99 a year or $249.99 once',
     free: 'Free plan with unlimited on-device dictation, and 3,000 words of Pro',
-    recognition: 'On your device or in the cloud; a new setup starts in the cloud',
+    recognition: 'On your device or in the cloud, chosen per mode',
     offline: 'Yes, in an on-device mode',
     privacy: 'Kept on your device in on-device modes; cloud modes send audio to providers with zero retention',
     everyApp: 'Every app',
@@ -87,7 +87,7 @@ export const APPS: Record<AppId, App> = {
     offline: 'No, on Mac and Windows',
     privacy: 'Sent to Aqua’s servers; with Privacy Mode on, nothing is stored there',
     everyApp: 'Every app on Mac and Windows',
-    meetings: 'Not offered',
+    meetings: 'None listed on its site',
     bestFor: 'Edited, polished prose and tools for developers',
   },
   willow: {
@@ -121,7 +121,7 @@ export const APPS: Record<AppId, App> = {
     offline: 'Yes, with its local engines',
     privacy: 'Stays on your Mac unless you connect a cloud provider',
     everyApp: 'Every app',
-    meetings: 'Not offered',
+    meetings: 'None listed on its site',
     bestFor: 'Local dictation with deep settings and open source code',
   },
   apple: {
@@ -156,7 +156,7 @@ export const APPS: Record<AppId, App> = {
     offline: 'Yes, on Windows',
     privacy: 'Stays on your PC',
     everyApp: 'Windows apps, plus voice commands for the whole PC',
-    meetings: 'Transcribes recordings',
+    meetings: 'Transcribes recorded audio files',
     bestFor: 'Controlling a Windows PC by voice',
   },
   spokenly: {

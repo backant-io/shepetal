@@ -31,29 +31,34 @@ export const ROWS: Row[] = [
   { key: 'meetings', label: 'Meetings' },
 ];
 
-/** The side-by-side table. On a phone each app becomes a card (CSS), so nothing scrolls sideways. */
+/**
+ * The side-by-side table. On a phone each fact becomes a card listing the apps (CSS), so nothing scrolls sideways.
+ * The explicit roles keep it a table for screen readers once the CSS changes its display.
+ */
 export function Compare({ ids, rows = ROWS, caption }: { ids: AppId[]; rows?: Row[]; caption: string }) {
   const apps = ids.map((id) => APPS[id]);
   return (
     <div className="bl-table-wrap">
-      <table className="bl-table" data-cols={apps.length}>
+      <table className="bl-table" data-cols={apps.length} role="table">
         <caption>{caption}</caption>
-        <thead>
-          <tr>
-            <td />
+        <thead role="rowgroup">
+          <tr role="row">
+            <td role="cell" />
             {apps.map((a) => (
-              <th key={a.id} scope="col" data-us={a.id === 'shepetal' || undefined}>
+              <th key={a.id} scope="col" role="columnheader" data-us={a.id === 'shepetal' || undefined}>
                 {a.name}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {rows.map((r) => (
-            <tr key={r.key}>
-              <th scope="row">{r.label}</th>
+            <tr key={r.key} role="row">
+              <th scope="row" role="rowheader">
+                {r.label}
+              </th>
               {apps.map((a) => (
-                <td key={a.id} data-label={a.name} data-us={a.id === 'shepetal' || undefined}>
+                <td key={a.id} role="cell" data-label={a.name} data-us={a.id === 'shepetal' || undefined}>
                   {a[r.key]}
                 </td>
               ))}
@@ -90,8 +95,8 @@ export function Ranked({ rank, id, verdict, children }: { rank: number; id: AppI
         </span>
         <span className="sr">{rank}. </span>
         {a.name}
-        <span className="bl-rank-v">{verdict}</span>
       </h3>
+      <p className="bl-rank-v">{verdict}</p>
       <dl className="bl-facts">
         <div>
           <dt>Price</dt>
@@ -119,26 +124,30 @@ export function Ranked({ rank, id, verdict, children }: { rank: number; id: AppI
 export function AppTable({ ids, cols, caption }: { ids: AppId[]; cols: Row[]; caption: string }) {
   return (
     <div className="bl-table-wrap">
-      <table className="bl-table bl-table-rows">
+      <table className="bl-table bl-table-rows" role="table">
         <caption>{caption}</caption>
-        <thead>
-          <tr>
-            <th scope="col">App</th>
+        <thead role="rowgroup">
+          <tr role="row">
+            <th scope="col" role="columnheader">
+              App
+            </th>
             {cols.map((c) => (
-              <th key={c.key} scope="col">
+              <th key={c.key} scope="col" role="columnheader">
                 {c.label}
               </th>
             ))}
           </tr>
         </thead>
-        <tbody>
+        <tbody role="rowgroup">
           {ids.map((id) => {
             const a = APPS[id];
             return (
-              <tr key={id} data-us={id === 'shepetal' || undefined}>
-                <th scope="row">{a.name}</th>
+              <tr key={id} role="row" data-us={id === 'shepetal' || undefined}>
+                <th scope="row" role="rowheader">
+                  {a.name}
+                </th>
                 {cols.map((c) => (
-                  <td key={c.key} data-label={c.label}>
+                  <td key={c.key} role="cell" data-label={c.label}>
                     {a[c.key]}
                   </td>
                 ))}

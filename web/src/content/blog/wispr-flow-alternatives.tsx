@@ -43,17 +43,17 @@ export const alternatives: Article = {
           <p>
             <Link href="/">shepetal</Link> runs on your Mac and nowhere else. 100% private. Your data is yours. Works offline. Instant. One key
             works in every app, terminals and code editors included, and meetings are transcribed on your Mac with a summary and action items.
-            $4.99 once, after a 30-day trial.
+            Paid once.
           </p>
           <h3>VoiceInk</h3>
           <p>
             <AppLink id="voiceink" /> transcribes on Apple silicon Macs by default, with optional cloud providers on your own key. It is open
-            source under GPL v3 and costs $25 once for one Mac. See <ToArticle slug="wispr-flow-vs-voiceink">Wispr Flow vs VoiceInk</ToArticle>.
+            source under GPL v3 and paid once. See <ToArticle slug="wispr-flow-vs-voiceink">Wispr Flow vs VoiceInk</ToArticle>.
           </p>
           <h3>Superwhisper</h3>
           <p>
             <AppLink id="superwhisper" /> runs on-device or in the cloud, one mode at a time, and its free plan is unlimited on on-device
-            engines. A new setup starts in a cloud mode, so switch to a local one. See{' '}
+            engines. See{' '}
             <ToArticle slug="wispr-flow-vs-superwhisper">Wispr Flow vs Superwhisper</ToArticle>.
           </p>
           <h3>Spokenly</h3>
@@ -70,7 +70,7 @@ export const alternatives: Article = {
       body: (
         <>
           <p>
-            shepetal is $4.99 once. VoiceInk is $25 once for one Mac. Superwhisper sells a lifetime Pro license for $249.99.
+            shepetal and VoiceInk are paid once. Superwhisper sells a lifetime Pro license for $249.99.
           </p>
           <p>
             <AppLink id="macwhisper" /> Pro is €64 once with lifetime updates. It is a transcription app first: files, recordings and meetings,
@@ -141,7 +141,7 @@ export const alternatives: Article = {
     },
     {
       q: 'Is there a Wispr Flow alternative without a subscription?',
-      a: 'shepetal is $4.99 once. VoiceInk is $25 once for one Mac, MacWhisper Pro is €64 once and Superwhisper sells a $249.99 lifetime license.',
+      a: 'shepetal and VoiceInk are paid once, MacWhisper Pro is €64 once and Superwhisper sells a $249.99 lifetime license. The table above has every price.',
     },
     {
       q: 'Which Wispr Flow alternative runs on Windows?',

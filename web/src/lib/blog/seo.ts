@@ -2,7 +2,18 @@ import { APPS } from './apps';
 import type { Article } from './types';
 
 export const SITE = 'https://shepetal.backant.io';
-export const AUTHOR = { name: 'Pavel Hegler', role: 'maker of shepetal' };
+/** The blog speaks in the brand voice ("we"), so shepetal is the author. */
+export const AUTHOR = { name: 'shepetal' };
+export const TWITTER = '@shepetal_app';
+
+/** The lines the call to action carries (components/blog/parts.tsx). Articles leave them to it, so each is said once a page. */
+export const CTA_CLAIMS = ['Write at the speed of thought.', 'Press one key. Your words appear wherever you speak.', '30 days free', '$4.99. Yours forever.', 'For Mac.'];
+
+/** ISO date and time, with the zone, for structured data and Open Graph. */
+export const isoTime = (date: string) => `${date}T09:00:00+02:00`;
+
+/** The last breadcrumb: the keyword in sentence case, short enough for the trail and the same in the JSON-LD. */
+export const crumbOf = (a: Article) => a.keyword.charAt(0).toUpperCase() + a.keyword.slice(1);
 
 /** The link preview for the blog: one static image per article, built by og/blog-og.mjs. No price on it. */
 export const ogImageFor = (a: Article) => ({
@@ -10,7 +21,7 @@ export const ogImageFor = (a: Article) => ({
   width: 1200,
   height: 630,
   type: 'image/jpeg',
-  alt: `${a.title} The shepetal wordmark on the dusk afterglow.`,
+  alt: `${a.title}. The shepetal wordmark on the dusk afterglow.`,
 });
 
 const abs = (path: string) => `${SITE}${path}`;
@@ -33,11 +44,11 @@ export function articleJsonLd(a: Article) {
       description: a.description,
       url,
       mainEntityOfPage: url,
-      datePublished: a.published,
-      dateModified: a.updated,
+      datePublished: isoTime(a.published),
+      dateModified: isoTime(a.updated),
       inLanguage: 'en',
       image: abs(ogImageFor(a).url),
-      author: { '@type': 'Person', name: AUTHOR.name, url: SITE },
+      author: { '@type': 'Organization', name: AUTHOR.name, url: SITE },
       publisher,
       about: a.apps.map((id) => ({ '@type': 'SoftwareApplication', name: APPS[id].name, url: APPS[id].url })),
       keywords: a.keyword,
@@ -47,7 +58,7 @@ export function articleJsonLd(a: Article) {
       itemListElement: [
         { '@type': 'ListItem', position: 1, name: 'shepetal', item: SITE },
         { '@type': 'ListItem', position: 2, name: 'Blog', item: abs('/blog') },
-        { '@type': 'ListItem', position: 3, name: a.title, item: url },
+        { '@type': 'ListItem', position: 3, name: crumbOf(a), item: url },
       ],
     },
   ];
@@ -89,9 +100,9 @@ export function blogJsonLd(list: Article[]) {
           '@type': 'BlogPosting',
           headline: a.title,
           url: abs(`/blog/${a.slug}`),
-          datePublished: a.published,
-          dateModified: a.updated,
-          author: { '@type': 'Person', name: AUTHOR.name },
+          datePublished: isoTime(a.published),
+          dateModified: isoTime(a.updated),
+          author: { '@type': 'Organization', name: AUTHOR.name, url: SITE },
         })),
       },
       {

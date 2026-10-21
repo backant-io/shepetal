@@ -238,7 +238,7 @@
 .bl-table [data-us] {
   background: color-mix(in srgb, var(--sh-accent) 7%, transparent);
 }
-/* Phones: one card per app, each fact labeled, so nothing scrolls sideways. */
+/* Phones: one card per row, each cell labeled, so nothing scrolls sideways. */
 @media (max-width: 719px) {
   .bl-table,
   .bl-table tbody,
@@ -321,7 +321,7 @@
   flex-wrap: wrap;
   align-items: baseline;
   gap: 4px 14px;
-  margin: 0 0 16px;
+  margin: 0 0 12px;
   font-size: clamp(26px, 2.6vw, 32px);
 }
 .bl-rank-n {
@@ -341,17 +341,12 @@
   color: var(--sh-on-primary);
   box-shadow: none;
 }
-.bl-rank-v {
-  flex-basis: 100%;
+.bl-body .bl-rank .bl-rank-v {
   font-family: var(--sh-font-text);
   font-size: var(--sh-size-small);
   font-weight: 500;
   color: var(--sh-text-muted);
-}
-@media (min-width: 720px) {
-  .bl-rank-v {
-    flex-basis: auto;
-  }
+  margin: -8px 0 16px 46px;
 }
 .bl-facts {
   display: grid;
@@ -513,6 +508,8 @@
   line-height: 1;
   background: var(--sh-neutral-50);
   color: var(--sh-neutral-950);
+  cursor: pointer;
+  border: 0;
   transition: transform var(--sh-dur-fast) var(--sh-ease-move);
 }
 .bl-btn:active {

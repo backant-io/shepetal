@@ -8,14 +8,14 @@ export const bestMac: Article = {
   title: 'The best dictation apps for Mac in 2026, ranked',
   seoTitle: 'Best dictation apps for Mac in 2026, ranked',
   description:
-    'Ten dictation apps for Mac, ranked on speed, privacy, offline use, every-app support and price, with who each one suits. Updated October 2026.',
+    'Ten dictation apps for Mac, ranked on privacy, offline use, support for every app and price, with who each one suits. Updated October 2026.',
   keyword: 'best dictation apps for Mac',
   published: '2026-10-21',
   updated: '2026-10-21',
   dek: 'Ten apps that turn your voice into text on a Mac, from the free one built in to cloud subscriptions, ranked on what matters when you dictate all day.',
   short: (
     <p>
-      shepetal is our first pick for most people on a Mac: instant, on your Mac, in every app, paid once. Wispr Flow is the pick if you
+      shepetal is our first pick for most people on a Mac: on your Mac, in every app, paid once. Wispr Flow is the pick if you
       dictate on several devices and want cloud polish. Superwhisper suits people who like to tune their tools, and Apple Dictation is the
       free place to start.
     </p>
@@ -28,9 +28,8 @@ export const bestMac: Article = {
       title: 'How we ranked them',
       body: (
         <>
-          <p>We make shepetal, so judge the ranking by its criteria. Every app was weighed on the same five, in this order:</p>
+          <p>We make shepetal, so judge the ranking by its criteria. Every app was weighed on the same four, in this order:</p>
           <ul className="bl-list">
-            <li>Speed: how soon the text is there after you stop speaking.</li>
             <li>Privacy and offline: where your voice goes, and whether dictation works with the Wi-Fi off.</li>
             <li>Every app: whether the text lands in any app, the terminal and code editors included.</li>
             <li>Price: what a year of daily use costs.</li>
@@ -47,14 +46,14 @@ export const bestMac: Article = {
         <>
           <Ranked rank={1} id="shepetal" verdict="Our pick for most people on a Mac">
             <p>
-              <Link href="/">shepetal</Link> is instant, and 4x faster than typing. 100% private. Your data is yours. Works offline. Works in
-              every app, terminals and code editors included. Meetings, transcribed on your Mac, with a summary and action items. Every
-              dictation waits in History to search, replay and re-transcribe. It is for Mac only, and it is new.
+              <Link href="/">shepetal</Link>: Instant. 100% private. Your data is yours. Works offline. Works in every app, terminals and
+              code editors included. Meetings, transcribed on your Mac, with a summary and action items. Every dictation waits in History
+              to search, replay and re-transcribe.
             </p>
           </Ranked>
           <Ranked rank={2} id="wispr" verdict="The pick for every device">
             <p>
-              <AppLink id="wispr" /> is the most complete cloud option: cleanup in four levels, Command Mode, styles per app, snippets, more
+              <AppLink id="wispr" /> runs in the cloud with the widest reach: cleanup levels from light to high, Command Mode, styles per app, snippets, more
               than 100 languages and its Notetaker for meetings, on Mac, Windows, iPhone and Android. Every dictation goes through the cloud,
               and Pro is $15 a month or $144 a year. See <ToArticle slug="wispr-flow-alternatives">Wispr Flow alternatives</ToArticle>.
             </p>
@@ -62,14 +61,13 @@ export const bestMac: Article = {
           <Ranked rank={3} id="superwhisper" verdict="The pick for tinkerers">
             <p>
               <AppLink id="superwhisper" /> lets you choose on-device or cloud engines per mode and write your own prompts. The free plan is
-              unlimited on on-device engines; Pro adds cloud engines, file transcription and meetings on Mac. A new setup starts in a cloud
-              mode. See <ToArticle slug="wispr-flow-vs-superwhisper">Wispr Flow vs Superwhisper</ToArticle>.
+              unlimited on on-device engines; Pro adds cloud engines, file transcription and meetings on Mac. See <ToArticle slug="wispr-flow-vs-superwhisper">Wispr Flow vs Superwhisper</ToArticle>.
             </p>
           </Ranked>
           <Ranked rank={4} id="voiceink" verdict="The open source pick">
             <p>
               <AppLink id="voiceink" /> transcribes on Apple silicon Macs by default, with modes per app, a custom vocabulary and file
-              transcription. Open source under GPL v3, $25 once for one Mac. It records no meetings. See{' '}
+              transcription. Open source under GPL v3 and paid once. See{' '}
               <ToArticle slug="wispr-flow-vs-voiceink">Wispr Flow vs VoiceInk</ToArticle>.
             </p>
           </Ranked>
@@ -82,8 +80,8 @@ export const bestMac: Article = {
           </Ranked>
           <Ranked rank={6} id="apple" verdict="The free pick">
             <p>
-              <AppLink id="apple">Apple Dictation</AppLink> is built in, works in every app and runs on the Mac for many languages. It has no
-              history, dictionary or cleanup beyond punctuation. See{' '}
+              <AppLink id="apple">Apple Dictation</AppLink> is built in, works in every app and runs on the Mac for many languages. On Macs with
+              M3 or later, Apple’s newer Dictation also formats your text as you speak, in English. See{' '}
               <ToArticle slug="wispr-flow-vs-apple-dictation">Wispr Flow vs Apple Dictation</ToArticle>.
             </p>
           </Ranked>
@@ -126,7 +124,7 @@ export const bestMac: Article = {
           />
           <p>
             For the apps that keep everything on your Mac, see <ToArticle slug="best-local-dictation-apps">the best local dictation apps</ToArticle>.
-            Coming from Dragon? Read <ToArticle slug="wispr-flow-vs-dragon">Wispr Flow vs Dragon</ToArticle>.
+            If you used Dragon, read <ToArticle slug="wispr-flow-vs-dragon">Wispr Flow vs Dragon</ToArticle>.
           </p>
         </>
       ),
@@ -135,7 +133,7 @@ export const bestMac: Article = {
   faq: [
     {
       q: 'What is the best dictation app for Mac?',
-      a: 'For most people on a Mac, shepetal: instant, private, in every app and paid once. If you dictate on several devices, Wispr Flow. If you want it free, Apple Dictation.',
+      a: 'For most people on a Mac, shepetal. If you dictate on several devices, Wispr Flow. If you want it free, Apple Dictation.',
     },
     {
       q: 'Is Mac dictation free?',

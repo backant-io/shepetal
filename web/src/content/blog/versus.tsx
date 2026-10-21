@@ -66,12 +66,11 @@ export const VERSUS: Article[] = [
             </p>
             <p>
               <AppLink id="superwhisper" /> works one mode at a time, on your device or in the cloud. The free plan uses on-device engines
-              only. A new setup starts with a cloud mode, so pick a local mode if you want every word on the Mac. Cloud modes go to
+              only. Superwhisper’s quickstart sets up a cloud mode first, so pick a local mode if you want every word on the Mac. Cloud modes go to
               providers on zero-retention terms, and your history stays on your device.
             </p>
             <p>
-              <Link href="/">shepetal</Link> has one way to work: on your Mac. 100% private. Your data is yours. There is no mode to pick and
-              no setting to check.
+              <Link href="/">shepetal</Link> has one way to work: on your Mac. 100% private. Your data is yours.
             </p>
           </>
         ),
@@ -86,7 +85,6 @@ export const VERSUS: Article[] = [
               Pro is $8.49 a month, $84.99 a year or $249.99 once, and its free plan has unlimited on-device dictation. One Superwhisper
               license covers your Macs, PCs and phones.
             </p>
-            <p>shepetal is $4.99 once, with updates.</p>
           </>
         ),
       },
@@ -97,7 +95,7 @@ export const VERSUS: Article[] = [
           <>
             <h3>Wispr Flow</h3>
             <p>
-              Cleanup in four levels, Command Mode to rewrite selected text by voice, styles per app, a dictionary and snippets, more than 100
+              Cleanup levels from light to high, Command Mode to rewrite selected text by voice, styles per app, a dictionary and snippets, more than 100
               languages and apps for iPhone and Android. Its Notetaker records meetings on Mac and Windows.
             </p>
             <h3>Superwhisper</h3>
@@ -141,7 +139,7 @@ export const VERSUS: Article[] = [
       { q: 'Does Wispr Flow work offline?', a: 'No. Wispr Flow transcribes in the cloud, so every dictation needs an internet connection.' },
       {
         q: 'Which keeps my voice more private, Wispr Flow or Superwhisper?',
-        a: 'Superwhisper in an on-device mode keeps your audio on your device. Wispr Flow sends every dictation to its servers. shepetal keeps your voice and your text on your Mac, with no mode to pick.',
+        a: 'Superwhisper in an on-device mode keeps your audio on your device. Wispr Flow sends every dictation to its servers.',
       },
       {
         q: 'Do Wispr Flow and Superwhisper run on Windows?',
@@ -211,8 +209,7 @@ export const VERSUS: Article[] = [
         title: 'What you pay',
         body: (
           <p>
-            Wispr Flow Pro is $15 a month or $144 a year. MacWhisper has a free version, and Pro is €64 once with lifetime updates. shepetal
-            is $4.99 once, with updates.
+            Wispr Flow Pro is $15 a month or $144 a year. MacWhisper has a free version, and Pro is €64 once with lifetime updates.
           </p>
         ),
       },
@@ -289,8 +286,8 @@ export const VERSUS: Article[] = [
               editors.
             </p>
             <p>
-              <AppLink id="wispr" /> offers cleanup in four levels, Command Mode, styles per app, snippets and more than 100 languages. Its
-              Notetaker records meetings on Mac and Windows. Aqua Voice has no meeting recorder.
+              <AppLink id="wispr" /> offers cleanup levels from light to high, Command Mode, styles per app, snippets and more than 100 languages. Its
+              Notetaker records meetings on Mac and Windows. Aqua Voice’s site lists no meeting recorder.
             </p>
           </>
         ),
@@ -318,8 +315,7 @@ export const VERSUS: Article[] = [
         body: (
           <p>
             Aqua Voice Pro is $10 a month, or $96 a year billed yearly. Max is $30 a month, or $288 a year. Wispr Flow Pro is $15 a month or
-            $144 a year. Aqua Voice gives you 1,000 words to try; Wispr Flow gives 2,000 words every week on Mac and Windows. shepetal is $4.99
-            once, with updates.
+            $144 a year. Aqua Voice gives you 1,000 words to try; Wispr Flow gives 2,000 words every week on Mac and Windows.
           </p>
         ),
       },
@@ -336,7 +332,7 @@ export const VERSUS: Article[] = [
               ]}
             />
             <p>
-              Comparing more cloud apps? Read <ToArticle slug="wispr-flow-vs-willow">Wispr Flow vs Willow</ToArticle> and the full list of{' '}
+              For another cloud comparison, read <ToArticle slug="wispr-flow-vs-willow">Wispr Flow vs Willow</ToArticle> and the full list of{' '}
               <ToArticle slug="wispr-flow-alternatives">Wispr Flow alternatives</ToArticle>.
             </p>
           </>
@@ -346,7 +342,7 @@ export const VERSUS: Article[] = [
     faq: [
       {
         q: 'Is Aqua Voice cheaper than Wispr Flow?',
-        a: 'Per year, yes. Aqua Voice Pro is $96 a year or $10 a month. Wispr Flow Pro is $144 a year or $15 a month.',
+        a: 'Yes. Aqua Voice Pro is $96 a year or $10 a month. Wispr Flow Pro is $144 a year or $15 a month.',
       },
       { q: 'Does Aqua Voice work offline?', a: 'No, on Mac and Windows. Aqua Voice transcribes in the cloud and says it has no offline mode there.' },
       {
@@ -391,7 +387,7 @@ export const VERSUS: Article[] = [
               and Pro, and you can turn it off.
             </p>
             <p>
-              <Link href="/">shepetal</Link> has no cloud path to switch off. 100% private. Your data is yours.
+              <Link href="/">shepetal</Link> runs on your Mac, every time. 100% private. Your data is yours.
             </p>
           </>
         ),
@@ -409,7 +405,7 @@ export const VERSUS: Article[] = [
               Wispr Flow has cleanup levels, Command Mode, snippets, styles per app, more than 100 languages, an Android app and its Notetaker
               for meetings.
             </p>
-            <p>shepetal: Instant. 4x faster than typing. Meetings, transcribed on your Mac.</p>
+            <p>shepetal: Instant. Meetings, transcribed on your Mac.</p>
           </>
         ),
       },
@@ -419,7 +415,7 @@ export const VERSUS: Article[] = [
         body: (
           <p>
             Pro is $15 a month at both, or $12 a month billed yearly. Willow’s free plan has unlimited dictation on a lighter speech engine;
-            Wispr Flow’s free plan has 2,000 words a week on Mac and Windows. shepetal is $4.99 once, with updates.
+            Wispr Flow’s free plan has 2,000 words a week on Mac and Windows.
           </p>
         ),
       },
@@ -490,7 +486,7 @@ export const VERSUS: Article[] = [
               <AppLink id="wispr" /> sends every dictation to its servers and needs a connection each time.
             </p>
             <p>
-              <Link href="/">shepetal</Link> runs on your Mac, with no cloud provider to connect. 100% private. Your data is yours.
+              <Link href="/">shepetal</Link> runs on your Mac, every time. 100% private. Your data is yours.
             </p>
           </>
         ),
@@ -519,8 +515,8 @@ export const VERSUS: Article[] = [
         title: 'What you pay',
         body: (
           <p>
-            VoiceInk is $25 once for one Mac, $39 for two and $49 for three, with lifetime updates and a 7-day trial. Wispr Flow Pro is $15 a
-            month or $144 a year. shepetal is $4.99 once, with updates.
+            VoiceInk is $25 once for one Mac, $39 for two and $49 for three, with lifetime updates and a 7-day trial, on VoiceInk’s pricing page on October 21, 2026. Wispr Flow Pro is $15 a
+            month or $144 a year.
           </p>
         ),
       },
@@ -563,16 +559,16 @@ export const VERSUS: Article[] = [
     other: 'apple',
     slug: 'wispr-flow-vs-apple-dictation',
     kind: 'comparison',
-    title: 'Wispr Flow vs Apple Dictation: the free one, or the polished one',
+    title: 'Wispr Flow vs Apple Dictation: built in, or a subscription',
     seoTitle: 'Wispr Flow vs Apple Dictation (2026): cost, privacy, offline',
     description:
       'Apple Dictation is free and built into your Mac. Wispr Flow adds cleanup and every device, in the cloud. How they compare, and where shepetal fits.',
     keyword: 'Wispr Flow vs Apple Dictation',
-    dek: 'Apple Dictation comes with your Mac and works in every app. Wispr Flow is a subscription that rewrites what you say. Here is the difference.',
+    dek: 'Apple Dictation comes with your Mac and works in every app. Wispr Flow is a subscription that rewrites what you say on every device. Here is the difference.',
     short: (
       <p>
         Apple Dictation is free, built in and works in every app, on the Mac itself for many languages. Wispr Flow adds cleanup, a dictionary,
-        snippets and every device, in the cloud, for a subscription. shepetal runs on your Mac with cleanup, history and meetings, paid once.
+        snippets and every device, in the cloud, for a subscription. shepetal runs on your Mac with cleanup, history and meetings.
       </p>
     ),
     sections: [
@@ -585,15 +581,17 @@ export const VERSUS: Article[] = [
             <p>
               <AppLink id="apple">Apple Dictation</AppLink> is in every Mac. Turn it on in Keyboard settings, pick a shortcut such as pressing
               fn twice, and speak into any text field. Apple’s guide says you can dictate text of any length without a timeout; it stops when
-              it hears no speech for 30 seconds. In supported languages it adds commas, periods and question marks for you.
+              it hears no speech for 30 seconds. In supported languages it adds commas, periods and question marks for you. On Macs with M3 or later, Apple’s newer Dictation
+              also handles capitalization and formatting as you speak, in English.
             </p>
             <p>
               Keyboard settings show whether your language runs on the Mac or on Apple’s servers. On the Mac, it works with the Wi-Fi off.
-              On the servers, your audio goes to Apple. Improve Siri & Dictation, which lets Apple store and review recordings, is opt-in,
-              and Apple’s privacy page says it can keep transcripts of server dictation for as long as two years under a rotating random
-              identifier.
+              On the servers, your audio goes to Apple. Improve Siri & Dictation, which lets Apple store and review recordings, is opt-in.
             </p>
-            <p>Apple Dictation keeps no history and has no custom dictionary or meeting transcription. Voice Control, in Accessibility settings, adds a custom vocabulary and voice commands.</p>
+            <p>
+              Dictation itself keeps no history of what you said. Voice Control, in Accessibility settings, adds a custom vocabulary and
+              voice commands.
+            </p>
           </>
         ),
       },
@@ -602,7 +600,7 @@ export const VERSUS: Article[] = [
         title: 'What Wispr Flow adds',
         body: (
           <p>
-            <AppLink id="wispr" /> rewrites what you say into clean text, with four cleanup levels, styles per app, a dictionary that learns,
+            <AppLink id="wispr" /> rewrites what you say into clean text, with cleanup levels from light to high, styles per app, a dictionary that learns,
             snippets and Command Mode to edit a selection by voice. It keeps a history, records meetings with its Notetaker and runs on Mac,
             Windows, iPhone and Android. All of it runs in the cloud, for $15 a month or $144 a year, with 2,000 free words a week on Mac and
             Windows.
@@ -616,7 +614,7 @@ export const VERSUS: Article[] = [
           <p>
             <Link href="/">shepetal</Link> runs on your Mac in every language it offers, and it is instant. It removes filler words, keeps
             every dictation in History to search, replay and re-transcribe, reads your own dictionary and transcribes meetings on your Mac.
-            One key, in every app. $4.99 once, with updates.
+            One key, in every app.
           </p>
         ),
       },
@@ -655,7 +653,7 @@ export const VERSUS: Article[] = [
       },
       {
         q: 'Is Wispr Flow worth it over the free Apple Dictation?',
-        a: 'If you want cleanup, a dictionary, snippets and every device, and the cloud is fine with you, Wispr Flow adds those. If you want those extras on your Mac and paid once, shepetal has them.',
+        a: 'If you want cleanup, a dictionary, snippets and every device, and the cloud is fine with you, Wispr Flow adds those to what your Mac already does.',
       },
     ],
     related: ['best-dictation-apps-mac', 'best-local-dictation-apps', 'wispr-flow-alternatives'],
@@ -700,8 +698,7 @@ export const VERSUS: Article[] = [
         body: (
           <p>
             <AppLink id="wispr" /> runs on Mac, Windows, iPhone and Android, works in any app and rewrites what you say into clean text. It
-            runs in the cloud, so it needs a connection for every dictation, and it costs $15 a month or $144 a year. It has no voice
-            commands for controlling your computer the way Dragon does.
+            runs in the cloud, so it needs a connection for every dictation, and it costs $15 a month or $144 a year.
           </p>
         ),
       },
@@ -711,7 +708,7 @@ export const VERSUS: Article[] = [
         body: (
           <p>
             Like Dragon on Windows, <Link href="/">shepetal</Link> runs on your own computer. Works offline. 100% private. Your data is yours.
-            Press the key and speak in any app, keep a dictionary of your own words, and find every dictation again in History. Meetings,
+            Your words land in any app, your own dictionary spells your words your way, and every dictation waits in History. Meetings,
             transcribed on your Mac.
           </p>
         ),

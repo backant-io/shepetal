@@ -1,11 +1,19 @@
 import type { Metadata } from 'next';
 import { BlogCta, Cards } from '@/components/blog/parts';
 import { ARTICLES } from '@/lib/blog/articles';
-import { blogJsonLd, ldJson } from '@/lib/blog/seo';
+import { blogJsonLd, ldJson, TWITTER } from '@/lib/blog/seo';
 
 const title = 'Dictation apps compared: the shepetal blog';
 const description =
   'Wispr Flow, Superwhisper, MacWhisper, Apple Dictation and more, side by side: prices, platforms, offline use and where your voice goes. Ranked for Mac.';
+
+const image = {
+  url: '/blog/og/blog.jpg',
+  width: 1200,
+  height: 630,
+  type: 'image/jpeg',
+  alt: 'The shepetal blog. Dictation apps, compared. The shepetal wordmark on the dusk afterglow.',
+};
 
 export const metadata: Metadata = {
   title: { absolute: title },
@@ -18,9 +26,9 @@ export const metadata: Metadata = {
     description,
     siteName: 'shepetal',
     locale: 'en_US',
-    images: [{ url: '/blog/og/blog.jpg', width: 1200, height: 630, type: 'image/jpeg', alt: 'The shepetal blog. Dictation apps compared. The shepetal wordmark on the dusk afterglow.' }],
+    images: [image],
   },
-  twitter: { card: 'summary_large_image', title, description, images: ['/blog/og/blog.jpg'] },
+  twitter: { card: 'summary_large_image', site: TWITTER, title, description, images: [image] },
 };
 
 export default function BlogIndex() {

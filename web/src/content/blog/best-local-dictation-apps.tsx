@@ -46,24 +46,21 @@ export const bestLocal: Article = {
       title: 'The ranking',
       body: (
         <>
-          <Ranked rank={1} id="shepetal" verdict="First on all four">
+          <Ranked rank={1} id="shepetal" verdict="Our pick for local dictation">
             <p>
-              <Link href="/">shepetal</Link> runs on your Mac from the first word, with no cloud mode to switch off. Works offline. 100%
-              private. Your data is yours. $4.99 once, with updates. On top of that: instant, in every app, and meetings, transcribed on your
-              Mac. It is for Mac only.
+              <Link href="/">shepetal</Link> runs on your Mac from the first word, every time. Works offline. 100% private. Your data is
+              yours. Paid once. On top of that: instant, in every app, and meetings, transcribed on your Mac.
             </p>
           </Ranked>
           <Ranked rank={2} id="voiceink" verdict="The open source pick">
             <p>
               <AppLink id="voiceink" /> transcribes on your Mac by default and works offline once its license is activated. Cloud
-              transcription and cleanup are optional, on your own keys. Open source under GPL v3; the ready-made app is $25 once for one Mac,
-              for Apple silicon. See <ToArticle slug="wispr-flow-vs-voiceink">Wispr Flow vs VoiceInk</ToArticle>.
+              transcription and cleanup are optional, on your own keys. Open source under GPL v3; the ready-made app is paid once. See <ToArticle slug="wispr-flow-vs-voiceink">Wispr Flow vs VoiceInk</ToArticle>.
             </p>
           </Ranked>
           <Ranked rank={3} id="superwhisper" verdict="The most settings, free to start">
             <p>
-              <AppLink id="superwhisper" /> offers unlimited on-device dictation on its free plan and works offline in a local mode. A new
-              setup starts in a cloud mode, so local takes a switch. Pro is $8.49 a month, $84.99 a year or $249.99 once. See{' '}
+              <AppLink id="superwhisper" /> offers unlimited on-device dictation on its free plan and works offline in a local mode. Pro is $8.49 a month, $84.99 a year or $249.99 once. See{' '}
               <ToArticle slug="wispr-flow-vs-superwhisper">Wispr Flow vs Superwhisper</ToArticle>.
             </p>
           </Ranked>
@@ -116,15 +113,15 @@ export const bestLocal: Article = {
   faq: [
     {
       q: 'What is the best offline dictation app for Mac?',
-      a: 'shepetal: it runs on your Mac from the first word, works with the Wi-Fi off, keeps your voice and text on the Mac and costs $4.99 once.',
+      a: 'shepetal. It runs on your Mac from the first word, keeps working with the Wi-Fi off and keeps your voice and text on the Mac.',
     },
     {
       q: 'Is there a free offline dictation app for Mac?',
       a: 'Yes. Spokenly and Superwhisper’s free plan run on-device, and Apple Dictation works offline in the languages it runs on the Mac.',
     },
     {
-      q: 'Does local dictation need a powerful Mac?',
-      a: 'shepetal and VoiceInk run on Macs with Apple silicon. Superwhisper says its on-device engines run best on Apple silicon too.',
+      q: 'What is the difference between local and cloud dictation?',
+      a: 'Local dictation turns your voice into text on your own Mac and keeps working with the Wi-Fi off. Cloud dictation sends your voice to a server and needs a connection for every dictation.',
     },
     {
       q: 'Is Wispr Flow local?',
