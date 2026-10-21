@@ -666,7 +666,7 @@ export default function Home() {
               <Ref n={2} first />
             </h2>
             <p className="t-lead">
-              Your voice and your text stay on your Mac. Speech recognition runs on the Mac, so dictation keeps working with the Wi-Fi off.
+              Your voice and your text stay on your Mac. Speech recognition runs on the Mac, so dictation keeps working with the <span className="nw">Wi-Fi</span> off.
             </p>
             <p className="t-body muted">
               Cloud dictation sends your voice to a server to turn it into text. shepetal does that work on your Mac, and that is how it is

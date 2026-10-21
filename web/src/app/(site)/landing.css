@@ -126,6 +126,9 @@
 .muted {
   color: var(--sh-text-muted);
 }
+.nw {
+  white-space: nowrap;
+}
 .head {
   display: grid;
   gap: 20px;
