@@ -325,7 +325,7 @@ final class AccountControllerTests: XCTestCase {
         let a = account()
         try await until("checked at launch") { a.access == .expired }
         XCTAssertFalse(a.allowFnDown())
-        XCTAssertEqual(hints.last, "Trial ended. Pick a plan to keep Shepetal.")
+        XCTAssertEqual(hints.last, "Trial ended. Pick a plan to keep shepetal.")
         XCTAssertTrue(titles(a).contains("Get shepetal: $23.99 once or $0.99 a month…"))
         let sent = server.requests.count
         a.buy()
@@ -412,7 +412,7 @@ final class AccountControllerTests: XCTestCase {
         a.now = { through + 60 }
         XCTAssertFalse(a.allowFnDown())
         XCTAssertEqual(a.access, .subscriptionEnded)
-        XCTAssertEqual(hints.last, "Your subscription ended. Pick a plan to keep Shepetal.")
+        XCTAssertEqual(hints.last, "Your subscription ended. Pick a plan to keep shepetal.")
         XCTAssertTrue(titles(a).contains("Get shepetal: $23.99 once or $0.99 a month…"))
     }
 

@@ -231,13 +231,15 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(Access.trial(daysLeft: 1).summary, "Trial, 1 day left")
         XCTAssertEqual(Access.lifetime.summary, "Yours forever")
         XCTAssertEqual(Access.signedOut.blockedHint, "Sign in with Google to start your free 30-day trial")
-        XCTAssertEqual(Access.expired.blockedHint, "Trial ended. Pick a plan to keep Shepetal.")
-        XCTAssertEqual(Access.subscriptionEnded.blockedHint, "Your subscription ended. Pick a plan to keep Shepetal.")
+        XCTAssertEqual(Access.expired.blockedHint, "Trial ended. Pick a plan to keep shepetal.")
+        XCTAssertEqual(Access.subscriptionEnded.blockedHint, "Your subscription ended. Pick a plan to keep shepetal.")
         XCTAssertEqual(Access.paymentFailed.blockedHint, "Payment failed. Update your card in Manage subscription.")
-        let nov21 = ISO8601DateFormatter().date(from: "2026-11-21T12:00:00Z")!
+        let nov21 = Date() + 30 * 86_400  // a renewal date ahead
         XCTAssertEqual(Access.subscription(paidThrough: nov21, renews: true).summary, "$0.99 a month, renews \(AccountText.day(nov21))")
         XCTAssertEqual(Access.subscription(paidThrough: nov21, renews: false).summary, "Yours until \(AccountText.day(nov21))")
         XCTAssertNil(Access.subscription(paidThrough: nov21, renews: true).blockedHint)
+        XCTAssertEqual(Access.subscription(paidThrough: Date() - 86_400, renews: true).summary, "$0.99 a month",
+                       "offline past the date, the renewal is not confirmed yet: no date that has gone by")
         XCTAssertEqual(AccountText.buy, "$23.99 once or $0.99 a month")
         for text in [AccountText.buy, AccountText.buyMenu, AccountText.trialEnded, AccountText.subscriptionEnded, AccountText.paymentFailed] {
             XCTAssertFalse(text.contains("4.99") && !text.contains("23.99"), "the retired price: \(text)")

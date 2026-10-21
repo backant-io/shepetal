@@ -285,7 +285,9 @@ public enum Access: Equatable, Sendable {
         case let .trial(days): "Trial, \(days) \(days == 1 ? "day" : "days") left"
         case .lifetime: "Yours forever"
         case let .subscription(through, renews):
-            renews ? "$0.99 a month, renews \(AccountText.day(through))" : "Yours until \(AccountText.day(through))"
+            // Past the date while renewing: offline, the renewal is not confirmed yet, so no date that has gone by.
+            !renews ? "Yours until \(AccountText.day(through))"
+                : through > Date() ? "$0.99 a month, renews \(AccountText.day(through))" : "$0.99 a month"
         case .expired: "Trial ended"
         case .subscriptionEnded: "Subscription ended"
         case .paymentFailed: "Payment failed"
@@ -308,8 +310,8 @@ public enum Access: Equatable, Sendable {
 
 public enum AccountText {
     public static let signIn = "Sign in with Google to start your free 30-day trial"
-    public static let trialEnded = "Trial ended. Pick a plan to keep Shepetal."
-    public static let subscriptionEnded = "Your subscription ended. Pick a plan to keep Shepetal."
+    public static let trialEnded = "Trial ended. Pick a plan to keep shepetal."
+    public static let subscriptionEnded = "Your subscription ended. Pick a plan to keep shepetal."
     public static let paymentFailed = "Payment failed. Update your card in Manage subscription."
     /// Buy on Home: opens the plan choice on the site.
     public static let buy = "$23.99 once or $0.99 a month"
