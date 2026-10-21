@@ -240,7 +240,8 @@ final class MenuModelTests: XCTestCase {
                      "recordingMeeting: meetings.current != nil,", "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
                      "canCheckForUpdates: updater.canCheckForUpdates)",
                      "case .permissions: showOnboarding()", "case .meeting: meetings.toggle()",
-                     "case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { showTranscript(m) }",
+                     "case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { openTranscript(m) }",
+                     "openTranscript = MeetingTranscriptWindow.follow(meetingFlow)",
                      "case .openMeetings: openedHub()?.showMeetings()", "case .checkForUpdates: updater.checkForUpdates()",
                      "case .pasteLast: pasteLast()", "case .helpCenter: NSWorkspace.shared.open(MenuModel.helpCenter)",
                      "case .feedback: NSWorkspace.shared.open(MenuModel.feedback)", "case .quit: NSApp.terminate(nil)"] {

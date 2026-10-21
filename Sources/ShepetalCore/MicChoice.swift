@@ -26,17 +26,19 @@ public struct MicError: LocalizedError, Equatable {
 /// Which mic a dictation records from. Runs on every mic open.
 public enum MicChoice {
     /// 1. the forced device, if present; 2. the first present device in the ranking; 3. the system default.
-    /// With the lid closed the built-in mic is skipped (it is covered or switched off).
+    /// With the lid closed the built-in mic is skipped (it is covered or switched off). Forced and ranked are the
+    /// user's own choice; a virtual system default (a meeting app's loopback driver, an aggregate) is not, so it is
+    /// never taken over a real mic: it records no voice.
     public static func pick(_ devices: [MicDevice], forced: String?, ranking: [String], systemDefault: String?,
                             lidClosed: Bool) throws -> MicDevice {
         let usable = lidClosed ? devices.filter { $0.transport != .builtIn } : devices
         guard let first = usable.first else { throw devices.isEmpty ? MicError.noMic : MicError.lidClosed }
-        for uid in [forced].compactMap({ $0 }) + ranking + [systemDefault].compactMap({ $0 }) {
+        for uid in [forced].compactMap({ $0 }) + ranking {
             if let d = usable.first(where: { $0.uid == uid }) { return d }
         }
-        // The default is the closed lid's built-in mic, or missing: take a real mic over a virtual one
-        // (a loopback driver records no voice).
-        return usable.first { $0.transport != .virtual } ?? first
+        let real = usable.first { $0.transport != .virtual }
+        if let d = usable.first(where: { $0.uid == systemDefault }), d.transport != .virtual || real == nil { return d }
+        return real ?? first
     }
 
     /// "Prefer <name>": that device goes to the top of the ranking.

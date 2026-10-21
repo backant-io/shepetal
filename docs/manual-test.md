@@ -19,7 +19,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-SETUP-4: the 🌐 key at launch, restore and uninstall
 1. Quit Shepetal. Set "Press 🌐 key to" to Show Emoji & Symbols. Open Shepetal.
 2. Expected: "🌐 key set to Do Nothing so fn can dictate" next to 🤫 for a few seconds, and the setting reads Do Nothing. Quit and open Shepetal again: no message this time.
-3. In Open shepetal > Settings choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the button goes away. Expected: the setting is back to that value.
+3. In Open shepetal > Settings choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the setting is back to that value, and the button goes away.
 4. Run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
 
 ### M-SETUP-5: no false "fn not received"
@@ -188,6 +188,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Open the dictation in the hub and play it. Expected: the recording plays back raw, with the background noise still in it. Only the text was made from the isolated voice.
 4. If words go missing in a quiet room, lower the effect with `defaults write io.backant.shepetal voiceIsolationMix -float 50` (percent, default 100; 0 turns it off) and relaunch.
 
+### M-MIC-7: every dictation records (21.10.26 retest: empty WAVs)
+1. With the system input on MacBook Pro Microphone and Microsoft Teams (or Zoom, BlackHole) installed, hold fn, say a sentence, release. Expected: the text is inserted, no "No audio from the microphone", and the newest WAV in Open recordings folder is longer than 44 bytes.
+2. Set System Settings > Sound > Input to Microsoft Teams Audio. Open 🤫 > Microphone. Expected: "Automatic (MacBook Pro Microphone)", and a dictation records your voice. Set the input back.
+3. Choose the iPhone or a USB mic in 🤫 > Microphone (not the system input) and dictate. Expected: it records, and the menu lists no CADefaultDeviceAggregate device.
+4. The mic's log, without any audio or text: `/usr/bin/log show --last 10m --predicate 'process == "Shepetal" AND eventMessage BEGINSWITH "shepetal: mic"'` (zsh's own `log` command shadows /usr/bin/log). Expected: one "opened <mic>" line per dictation, at most one "configuration change" line after it, and no "dictation ended" line.
+
 ### M-LANG-1: languages
 1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
 2. Check Deutsch and Français. Expected: Home's speech recognition line stays "On-device speech recognition (standard engine)" (no reload). Say a German sentence. Expected: German text.
@@ -353,12 +359,13 @@ Setup: as in M-MTG-1. No step needs Screen Recording access.
 Setup: as in M-MTG-1. Before the meeting, select the word `canary` in TextEdit and press Cmd+C.
 1. Record a Zoom meeting and say a few sentences, as in M-MTG-1 steps 1 to 5. Leave the meeting, click into TextEdit at once, and keep typing.
 2. Expected a few seconds after "Meeting recording saved": a "Meeting transcript" window comes to the front. Its first line reads "Zoom · DD.MM.YY HH:MM · N min" (for example "Zoom · 21.10.26 15:00 · 12 min"). Below that is the whole transcript, with each Me and Others line and its time, and "Summarizing…" above it. Your typing keeps landing in TextEdit: the window did not take the keyboard. There is no sound, and no model name appears anywhere. Cmd+V in TextEdit still pastes `canary`, because the window never writes the clipboard by itself.
-3. Expected: "Summarizing…" is replaced by the overview and the action items. Copy summary is greyed out until then.
-4. Click Copy transcript. Expected: "Transcript copied" appears next to the first line, with no sound. Cmd+V in TextEdit pastes the first line, an empty line, then one line per segment, such as `Me (0:05): I will send the slides by Friday.`, with no Markdown. Click Copy summary and paste. Expected: the summary, without the transcript.
-5. Click into the window, select a few words in one line, and press Cmd+C. Paste. Expected: only those words.
+3. Expected: "Summarizing…" is replaced by the sections the summary has, under the headings Overview, Key points, Decisions and Action items, as in the Meetings tab. Copy summary is greyed out until then.
+4. Click Copy transcript. Expected: "Transcript copied" appears next to the first line, with no sound. Cmd+V in TextEdit pastes the first line, an empty line, then one line per segment, such as `Me (0:05): I will send the slides by Friday.`, with no Markdown. Click Copy summary and paste. Expected: the summary, without the transcript, with the same sections as the window shows. Its first line is `# Zoom · DD.MM.YY HH:MM · N min`, the window's first line.
+5. Click into the window, select a few words in one line, and press Cmd+C. Paste. Expected: only those words. Turn Caps Lock on, select other words, and press Cmd+C again. Expected: those words paste, and there is no beep. If a Russian keyboard layout is installed, switch to it and repeat: the same.
 6. Click Open in Meetings. Expected: the Shepetal window opens on the Meetings tab, with this meeting open. Its Copy transcript button, next to Copy summary, copies the same text as in step 4.
 7. Record a second meeting and end it while the window is still open. Expected: the same window now shows the second meeting, and no second window opens. Close the window: it stays closed until the next meeting ends.
 8. No speech: choose 🤫 > Record meeting, stay silent for 20 s, then choose Stop meeting recording. Expected: the window says "No speech was recorded". The first line has no app name ("DD.MM.YY HH:MM · < 1 min"). Copy transcript and Copy summary are greyed out, and Open in Meetings opens the meeting.
+8a. A decision and nothing else: choose 🤫 > Record meeting and say only "We decided to ship on Friday.", "Okay." and "Sounds good.", then stop it. Expected: "Summarizing…" goes away and the window shows Decisions with "We decided to ship on Friday.". Copy summary pastes that decision under `## Decisions`. Record another meeting by hand and say only "Okay.". Expected: "Summarizing…" is replaced by "No summary for this meeting", and Copy summary stays greyed out.
 9. Choose 🤫 > Record meeting and say a sentence. Put Safari in full screen and click into its address bar. Then choose 🤫 > Stop meeting recording. Expected: the window shows over full-screen Safari, and typing still goes into the address bar.
 10. Close the window. Open 🤫 > Past meetings. Expected: the meetings you just recorded, newest first, each as "Zoom · DD.MM.YY HH:MM · N min" (up to 8, none still recording). Choose the first: the same "Meeting transcript" window shows it, again without taking the keyboard.
 11. After Settings > Recordings > Delete recordings after 24 hours has removed a meeting's audio (as in M-HUB-3 step 2, with `touch -t` on its folder), open that meeting in the Meetings tab. Expected: its transcript and summary are still there, and Copy transcript still works.
@@ -769,7 +776,7 @@ In the L-MIC steps a USB mic is plugged in (any external mic works). `command -v
 2. Double-tap fn, wait about 7 s, then press fn. Expected: after about 5 s one notification `No sound from <mic>: it sends only silence. Check that it is not muted, or rank another one (shepetal mics).`, and `No sound from the mic` next to 🤫.
 3. Within a minute, do step 2 again. Expected: no second notification.
 4. `pactl set-source-mute <its node name> 0` and dictate in a whisper. Expected: no notification.
-(Automated: `no_audio_only_after_more_than_5_s_of_exact_zeros`, `health_reads_a_growing_wav_and_catches_a_dead_mic`, `wav_samples_start_after_the_data_chunk`, `alerts_are_rate_limited_per_kind`.)
+(Automated: `no_audio_only_after_more_than_5_s_of_exact_zeros`, `real_audio_resets_the_silence_count`, `health_reads_a_growing_wav_and_catches_a_dead_mic`, `wav_samples_start_after_the_data_chunk`, `alerts_are_rate_limited_per_kind`.)
 
 ### L-MIC-5: lid closed
 1. On a laptop with an external display, keyboard and mic, put part of the built-in mic's name first in `prefer`, then close the lid. `cat /proc/acpi/button/lid/*/state`. Expected: `state: closed`. If there is no such file, write down the laptop model: the lid is then not seen (known gap in docs/linux-mic.md).
@@ -783,6 +790,27 @@ In the L-MIC steps a USB mic is plugged in (any external mic works). `command -v
 3. Press fn. Expected: a notification with the same text, and `No PipeWire or PulseAudio` next to 🤫. Write down what else the daemon prints.
 4. `systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber` and dictate. Expected: it works again.
 (Automated: `alerts_are_rate_limited_per_kind`, `the_indicator_gets_a_few_words_and_no_device_name`.)
+
+### L-MIC-7: a mic that stops sending
+1. Run the daemon with a USB mic marked `*` in `shepetal mics`. Double-tap fn and say a sentence.
+2. In another terminal freeze the recorder's input: `pactl suspend-source <the USB mic's node name> 1` (a suspended source delivers nothing). If your PipeWire keeps it running, stop the recorder's data instead with `kill -STOP $(pgrep pw-record)`, then `kill -CONT` it after 7 s.
+3. Expected: about 5 s later a notification `Cannot read <mic>: no sound arrived for 5 s. Dictation stopped; what you said before is kept. ...`, `Cannot read the mic` next to 🤫 (yellow), and the sentence is typed without another press. `pgrep -a pw-record` prints nothing. No sound plays.
+4. `pactl suspend-source <name> 0`. Hold fn and speak. Expected: a new dictation, typed on release.
+(Automated: `no_samples_for_5_s_stops_with_mic_unreadable`, `a_mic_that_stops_sending_ends_the_dictation_and_types_what_was_said`, `advice_is_a_hint_and_problems_are_errors`.)
+
+### L-MIC-8: a Bluetooth headset mic
+Needs a Bluetooth headset with a mic (AirPods, a Jabra) and the laptop's built-in mic.
+1. Connect the headset and put part of its name first in `prefer` in `~/.config/shepetal/config.toml`. `shepetal mics`: the headset is first, `[bluetooth]`.
+2. Start the daemon, play some music through the headset, and dictate. Expected: on the press, a notification `<headset> is a Bluetooth headset: while it records, it switches to its low-quality call mode ...`, and `Bluetooth mic: lower quality` next to 🤫 in the hint style (🤫 does not turn yellow). The music sounds worse while recording: that is the headset's call profile. The text is typed. No sound is added by shepetal.
+3. Dictate again. Expected: no second notification while the daemon runs.
+4. Restart the daemon, disable the built-in mic (`pactl set-card-profile <the laptop card> off`) so the headset is the only mic, and dictate. Expected: no Bluetooth notification: there is nothing better to switch to. Turn the card profile back on.
+(Automated: `a_bluetooth_headset_mic_is_advised_once`, `advice_is_a_hint_and_problems_are_errors`.)
+
+### L-MIC-9: lid closed on the only mic
+1. On a laptop with an external display and keyboard but no external mic, close the lid (`cat /proc/acpi/button/lid/*/state` says `closed`).
+2. Start the daemon and dictate. Expected: a notification `The lid is closed and the built-in mic is the only one, so it may sound muffled. Open the lid or plug in a mic.` and `Lid closed: mic muffled` next to 🤫 in the hint style. The text is typed.
+3. Dictate again. Expected: no second notification while the daemon runs. With an external mic plugged in (restart the daemon): no notification.
+(Automated: `the_lid_closed_on_the_only_mic_is_advised_once`, `lid_state_from_acpi`.)
 
 The dictionary and snippets live in `~/.config/shepetal/` and are read again at every dictation, so the daemon keeps running through the L-VOC steps.
 

@@ -17,8 +17,9 @@ final class MeetingFlow {
     private(set) var finishing: Task<Void, Never>?
     /// True while a meeting records (the menu bar shows it for the whole meeting).
     var onRecording: (Bool) -> Void = { _ in }
-    /// A recorded meeting's whole transcript is stored; its summary follows (the transcript window opens).
-    var onTranscript: (Meeting) -> Void = { _ in }
+    /// A recorded meeting's whole transcript is stored and its summary follows (the transcript window opens).
+    /// `summarizing` false: the final pass or the summary failed, so no summary follows; what was stored opens.
+    var onTranscript: (_ meeting: Meeting, _ summarizing: Bool) -> Void = { _, _ in }
 
     init(store: MeetingStoring, summarizer: MeetingSummarizing, engine: @escaping () -> SpeechEngine?,
          hint: @escaping (String) -> Void, liveEvery: Double = MeetingTranscriber.chunkSeconds) {
@@ -62,10 +63,11 @@ final class MeetingFlow {
         finishing = Task { [weak self, hint] in
             await previous?.value  // one meeting's final pass at a time
             do {
-                _ = try await t.finish { self?.onTranscript(m) }
+                _ = try await t.finish { self?.onTranscript(m, true) }
                 hint("Meeting notes ready · open Shepetal → Meetings")
             } catch {
                 hint("Meeting transcription failed: \(error.localizedDescription)")
+                self?.onTranscript(m, false)
             }
         }
     }
