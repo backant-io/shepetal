@@ -26,9 +26,9 @@ describe('landing page', () => {
     expect(visible).not.toMatch(/\bAI\b|\bmodel\b|\bLLM\b/);
   });
 
-  it('loads nothing from another server, and the only outside link is the cited speaking-rate source', () => {
+  it('loads nothing from another server, and the only outside links are the cited speaking and typing sources', () => {
     const urls = text.match(/https?:\/\/[^\s'"`)]+/g) ?? [];
-    expect(urls.filter((u) => !u.startsWith('https://ncvs.org/'))).toEqual([]);
+    expect(urls.filter((u) => !u.startsWith('https://ncvs.org/') && !u.startsWith('https://doi.org/10.1145/'))).toEqual([]);
     expect(text).not.toMatch(/fonts\.googleapis|fonts\.gstatic|fontshare|backant\.io/);
   });
 
@@ -50,6 +50,10 @@ describe('landing page', () => {
       expect(page.slice(at, at + 200), line).toContain(`<Ref n={${n}} first />`);
       expect(page, `note ${n}`).toContain(`id="note-${n}"`);
     }
+    // 4x stands on two rates, so both carry a source a reader can open: speaking (NCVS) and typing (Karat et al.).
+    const note4 = page.slice(page.indexOf('id="note-4"'), page.indexOf('</li>', page.indexOf('id="note-4"')));
+    expect(note4).toContain('{NCVS}');
+    expect(note4).toContain('{KARAT}');
     // The measured latency keeps its conditions next to it.
     expect(page).toMatch(/measured on an M4 Pro\.\s*<Ref n=\{3\} first \/>/);
   });
@@ -59,6 +63,11 @@ describe('landing page', () => {
       .flatMap((f) => [...f.matchAll(/\b(?:description|alt)\s*[:=]\s*'([^']*)'/g)].map((m) => m[1]));
     expect(preview.length).toBeGreaterThanOrEqual(3);
     for (const line of preview) expect(line).not.toMatch(/\$|\bonce\b|\bfree\b|hold fn|let go/i);
+  });
+
+  it('says what happens, never the steps: the instruction line is banned from brand copy (voice.md, Oct 21)', () => {
+    expect(visible).not.toMatch(/hold fn,? (?:speak|talk)|speak, let go|hold fn and say|hold fn\. speak/i);
+    expect(page).toContain('Press one key. Your words appear wherever you speak.');
   });
 
   it('keeps the brand voice: no em dashes, no hype words, no invented proof', () => {
@@ -94,7 +103,8 @@ describe('landing page', () => {
   });
 
   it('says a meeting records only after Record is clicked, with auto-record off by default', () => {
-    expect(page).toContain('Meeting detected · Zoom');
+    // The card names the call app the way the app does: the bundle name of whoever uses the mic.
+    expect(page).toContain('Meeting detected · zoom.us');
     expect(page).toContain('off until you turn it on');
     expect(page).toContain('Let people know before you record them.');
   });

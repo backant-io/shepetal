@@ -747,69 +747,9 @@
   }
 }
 
-/* ---------- How it works ---------- */
-.steps {
-  display: grid;
-  gap: 16px;
-  margin-top: clamp(40px, 5vw, 72px);
-  counter-reset: step;
-}
-.steps li {
-  display: grid;
-  align-content: start;
-  gap: 10px;
-  padding: 26px 24px 28px;
-  border-radius: 20px;
-  background: var(--sh-bg-raised);
-  border: 1px solid var(--sh-border);
-}
-.steps li > :first-child {
-  height: 56px;
-  display: flex;
-  align-items: center;
-  margin-bottom: 6px;
-}
-.steps p {
-  font-size: 16px;
-  line-height: 1.6;
-  color: var(--sh-text-muted);
-}
-.kbd-lg {
-  width: 64px;
-  height: 52px;
-  justify-content: center;
-  font-size: 17px;
-  border-radius: 10px;
-  border-color: var(--sh-border);
-  box-shadow: 0 2px 0 var(--sh-border);
-  background: var(--sh-bg);
-}
-.step-said {
-  font-family: var(--sh-font-display);
-  font-size: 21px;
-  color: var(--sh-text-muted);
-}
-.step-land {
-  font-family: var(--sh-font-text);
-  font-size: 30px;
-  font-weight: 500;
-  letter-spacing: -0.01em;
-}
-@media (min-width: 820px) {
-  .steps {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 20px;
-  }
-}
-
+/* ---------- Every app ---------- */
 .apps {
-  margin-top: clamp(72px, 9vw, 128px);
-  display: grid;
-  gap: 28px;
-}
-.apps-head {
-  display: grid;
-  gap: 10px;
+  margin-top: clamp(40px, 5vw, 72px);
 }
 
 /* Tabs that move on by themselves while on screen */

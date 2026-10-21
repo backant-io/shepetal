@@ -10,6 +10,9 @@ export const metadata: Metadata = { alternates: { canonical: '/' } };
 
 const TRY = 'Try 30 days free';
 const NCVS = 'https://ncvs.org/archive/ncvs/tutorials/voiceprod/tutorial/quality.html';
+// Typing: Karat et al., CHI 1999 (everyday computer users), and Dhakal et al., CHI 2018 (a large online typing test).
+const KARAT = 'https://doi.org/10.1145/302979.303160';
+const DHAKAL = 'https://doi.org/10.1145/3173574.3174220';
 
 /** A footnote marker. The first marker of a note carries the id the note links back to. */
 function Ref({ n, first }: { n: number; first?: boolean }) {
@@ -293,13 +296,13 @@ const MEET_SCENES = [
     key="card"
     className="stage ring-meet"
     role="img"
-    aria-label="Illustration: a video call. A card above the 🤫 indicator says Meeting detected, Zoom, with the buttons Record and Not now. Record is clicked, the card goes away and the ring turns red."
+    aria-label="Illustration: a video call. A card above the 🤫 indicator says Meeting detected, zoom.us, with the buttons Record and Not now. Record is clicked, the card goes away and the ring turns red."
   >
     <Win title="Weekly sync" className="call">
       {tiles}
     </Win>
     <div className="card">
-      <span>Meeting detected · Zoom</span>
+      <span>Meeting detected · zoom.us</span>
       <span className="b b-rec">Record</span>
       <span className="b">Not now</span>
     </div>
@@ -315,13 +318,13 @@ const MEET_SCENES = [
     <Win title="shepetal">
       <div className="hub-main live-main">
         <p className="hub-meta">
-          Zoom · 21.10.26 15:00 <span className="live">Live</span>
+          zoom.us · 21.10.26 15:00 <span className="live">Live</span>
         </p>
         {[
-          ['Others · 00:03', 'Shall we ship the beta on Friday?', ''],
-          ['Me · 00:09', 'Yes. I’ll send the release notes tomorrow.', 'me'],
-          ['Others · 00:15', 'Good, then I’ll book the review for Monday.', ''],
-          ['Me · 00:21', 'Monday works. I’ll bring the test results.', 'me'],
+          ['Others · 0:03', 'Shall we ship the beta on Friday?', ''],
+          ['Me · 0:09', 'Yes. I’ll send the release notes tomorrow.', 'me'],
+          ['Others · 0:15', 'Good, then I’ll book the review for Monday.', ''],
+          ['Me · 0:21', 'Monday works. I’ll bring the test results.', 'me'],
         ].map(([cap, text, who], i) => (
           <div key={cap} className={`line ${who}`} style={{ '--i': i } as React.CSSProperties}>
             <small>{cap}</small>
@@ -337,16 +340,16 @@ const MEET_SCENES = [
     key="sum"
     className="stage"
     role="img"
-    aria-label="Illustration: the Meetings tab in shepetal. A list of calls, and the summary of the Zoom call with an overview, key points, a decision and two action items."
+    aria-label="Illustration: the Meetings tab in shepetal. A list of calls, and the summary of the zoom.us call with an overview, key points, a decision and two action items."
   >
     <Win title="shepetal">
       <div className="hub">
         <div className="hub-side">
           <div className="hub-row on">
-            Zoom<small>21.10.26 · 42 min</small>
+            zoom.us<small>21.10.26 · 42 min</small>
           </div>
           <div className="hub-row">
-            Google Meet<small>20.10.26 · 18 min</small>
+            Google Chrome<small>20.10.26 · 18 min</small>
           </div>
           <div className="hub-row">
             FaceTime<small>17.10.26 · 9 min</small>
@@ -415,7 +418,7 @@ const FAQ: [string, React.ReactNode][] = [
   ],
   [
     'Does it work in the terminal and in code editors?',
-    'Yes. Hold fn wherever your cursor is: the terminal, your code editor, the chat with your coding agent, mail, notes or a doc in the browser.',
+    'Yes. Your words land wherever your cursor is: the terminal, your code editor, the chat with your coding agent, mail, notes or a doc in the browser.',
   ],
   [
     'Does it make sounds?',
@@ -451,8 +454,7 @@ export default function Home() {
             </h1>
             <div className="hero-copy">
               <p className="t-lead">
-                Hold <span className="kbd">fn</span>, speak, let go. Your words land in any app about 0.1 s later, and your voice stays on your
-                Mac.
+                Press one key. Your words appear wherever you speak, about 0.1 s after you finish, and your voice stays on your Mac.
               </p>
               <div className="cta-row" id="hero-cta">
                 <SignInButton redirectTo="/account" className="btn btn-lg">
@@ -527,46 +529,20 @@ export default function Home() {
         </ul>
       </div>
 
-      {/* How it works */}
-      <section id="how" className="sec" aria-labelledby="how-title">
+      {/* Every app */}
+      <section id="apps" className="sec" aria-labelledby="apps-title">
         <div className="wrap">
           <div className="head">
-            <h2 id="how-title" className="t-h1">
-              Hold fn, speak, let go.
+            <h2 id="apps-title" className="t-h1">
+              Press one key. Your words appear wherever you speak.
             </h2>
-            <p className="t-lead muted">One key in every app. The text lands where your cursor is, in the app you were already using.</p>
+            <p className="t-lead muted">
+              Mail, chat, your code editor, the terminal and docs in the browser. The text lands where your cursor is, in the app you were
+              already using.
+            </p>
           </div>
-          <ol className="steps">
-            <li>
-              <span className="kbd kbd-lg">fn</span>
-              <h3 className="t-h4">Hold fn</h3>
-              <p>
-                <Ind state="rec" className="static" /> The ring around the indicator turns red while you speak.
-              </p>
-            </li>
-            <li>
-              <span className="step-said" aria-hidden="true">
-                “the twenty-sixth of July”
-              </span>
-              <h3 className="t-h4">Speak</h3>
-              <p>Say it the way you would say it to a person. A date you say lands as numbers, like 26.07.26.</p>
-            </li>
-            <li>
-              <span className="step-land" aria-hidden="true">
-                26.07.26
-              </span>
-              <h3 className="t-h4">Let go</h3>
-              <p>
-                <Ind state="write" className="static" /> The ring pulses blue for a moment, and the text is where your cursor was.
-              </p>
-            </li>
-          </ol>
 
           <div className="apps">
-            <div className="apps-head">
-              <h3 className="t-h3">Wherever your cursor is</h3>
-              <p className="t-body muted">Mail, chat, your code editor, the terminal and docs in the browser. Any field you can type in.</p>
-            </div>
             <Cycle label="Apps" tabs={APP_TABS} panels={APP_SCENES} ms={7000} />
           </div>
 
@@ -599,7 +575,7 @@ export default function Home() {
             </h2>
             <p className="t-lead">
               From letting go of <span className="kbd">fn</span> to the text in your app, measured on an M4 Pro.
-              <Ref n={3} first /> Speech recognition runs on your Mac, so the text is ready as you let go.
+              <Ref n={3} first /> Speech recognition runs on your Mac, so the text is ready the moment you finish speaking.
             </p>
             <figure className="ruler" aria-label="A timeline from 0 to 1 second. You let go at 0. The text is there between 57 and 89 milliseconds, 69 on average.">
               <div className="ruler-track" aria-hidden="true">
@@ -628,7 +604,7 @@ export default function Home() {
                 Instant, real-time, 4x faster.
                 <Ref n={4} first />
               </h3>
-              <p className="t-body muted">Speaking is about 4x faster than typing. Most people speak about 150 words a minute and type about 40.</p>
+              <p className="t-body muted">Speaking is about 4x faster than typing: about 150 words a minute against about 40.</p>
             </div>
             <div className="rates">
               <div className="rate">
@@ -650,7 +626,11 @@ export default function Home() {
                 <a href={NCVS} rel="noopener">
                   US National Center for Voice and Speech
                 </a>
-                . Typing at about 40 words a minute is a common average for keyboard typing. Your own gain depends on how fast you type.
+                . Typing rate of the fast typists in a study of everyday computer users (
+                <a href={KARAT} rel="noopener">
+                  Karat et al., CHI 1999
+                </a>
+                ). Your own gain depends on how fast you type.
               </p>
             </div>
           </InView>
@@ -854,7 +834,7 @@ export default function Home() {
             <div className="reading">
               <p>
                 You probably write the same kind of reply over and over during the day, and you already know what you want to say long before
-                your hands catch up. I have built shepetal so you can just hold fn and say it, and the text lands wherever your cursor is.
+                your hands catch up. I have built shepetal so you can press one key and just say it, and the text lands wherever your cursor is.
               </p>
               <p>
                 It all runs on your Mac, because I wanted my own voice to stay on mine, and it makes no sound. The little indicator in the
@@ -975,7 +955,7 @@ export default function Home() {
         <div className="wrap">
           <img className="final-mark" src="/brand/shepetal-wordmark-on-dark.svg" alt="shepetal" width={320} height={86} loading="lazy" />
           <h2 id="final-title" className="t-h1">
-            Hold fn and say the first thing you were about to type.
+            Instant dictation that stays on your Mac.
           </h2>
           <p className="t-lead">
             Dictation and meetings in one app on your Mac. 30 days free, no card. Then $4.99 once, with updates. Be one of the first to use it.
@@ -1012,7 +992,7 @@ export default function Home() {
             <li id="note-3">
               About 0.1 s from letting go of fn to the text: 57 to 89 ms (69 ms on average) on six synthesized clips of 4.5 to 10.7 s, with
               the default speech recognition, on an M4 Pro, network blocked, October 20, 2026. Longer dictations, other Macs and the
-              alternative speech recognition take longer. Real-time means the text is ready as you let go, with nothing uploaded.{' '}
+              alternative speech recognition take longer. Real-time means the text is ready the moment you finish speaking, with nothing uploaded.{' '}
               <a href="#ref-3">Back</a>
             </li>
             <li id="note-4">
@@ -1020,8 +1000,18 @@ export default function Home() {
               <a href={NCVS} rel="noopener">
                 US National Center for Voice and Speech
               </a>
-              ). Typing runs at about 40 words per minute, a common average for keyboard typing. 150 ÷ 40 = 3.75, rounded to 4x. Your own gain
-              depends on how fast you type and how much you correct. <a href="#ref-4">Back</a>
+              ). In a study of everyday computer users, people typed 32.5 words per minute when they copied text, 40 for the fast typists among them, and
+              19 when they wrote their own words (
+              <a href={KARAT} rel="noopener">
+                Karat et al., CHI 1999
+              </a>
+              ). We use 40: 150 ÷ 40 = 3.75, rounded to 4x. In a large online typing test, people copying sentences averaged about 52 words
+              per minute (
+              <a href={DHAKAL} rel="noopener">
+                Dhakal et al., CHI 2018
+              </a>
+              ), and next to that speaking is about 3x faster. Your own gain depends on how fast you type and how much you correct.{' '}
+              <a href="#ref-4">Back</a>
             </li>
           </ol>
         </div>

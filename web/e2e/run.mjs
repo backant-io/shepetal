@@ -216,10 +216,11 @@ async function main() {
     assert.equal(res.status, 200);
     assert.ok(html.includes('Try 30 days free') && /<form[^>]*action=/.test(html), 'the trial button is a sign-in form');
     // Assets (src, srcset, stylesheets, preloads) and visible links; the canonical <link> names the site's own domain.
+    // The only outside links are the cited speaking and typing rate sources.
     const outside = [
       ...html.matchAll(/\b(?:src|srcset)="(https?:\/\/[^"]+)"/g),
       ...html.matchAll(/<(?:a|link(?![^>]*rel="(?:canonical|alternate)"))\b[^>]*\bhref="(https?:\/\/[^"]+)"/g),
-    ].map((m) => m[1]).filter((u) => !u.startsWith('https://ncvs.org/'));
+    ].map((m) => m[1]).filter((u) => !u.startsWith('https://ncvs.org/') && !u.startsWith('https://doi.org/10.1145/'));
     assert.deepEqual(outside, [], 'no asset or link to another server');
     assert.match(res.headers.get('content-security-policy') ?? '', /font-src 'self' data:/);
     // The X card: a large image at an absolute URL, served as a static file.
