@@ -24,7 +24,14 @@ const WORD_MS = 330; // a calm speaking pace
 const WRITE_MS = 240; // long enough to see the blue ring; the app needs about 0.1 s
 const AUTO_LINES = 2; // plays two lines on its own, then waits for the visitor
 
-type Phase = 'rest' | 'talk' | 'wait' | 'free' | 'write';
+export type Phase = 'rest' | 'talk' | 'wait' | 'free' | 'write';
+
+/** The next phase after fn goes down, comes up after `heldMs`, or the double-tap window runs out ('settle'). */
+export function gesture(p: Phase, e: 'down' | 'up' | 'settle', heldMs = 0): Phase {
+  if (e === 'down') return p === 'rest' ? 'talk' : p === 'wait' ? 'free' : p === 'free' ? 'write' : p;
+  if (e === 'up') return p !== 'talk' ? p : heldMs >= HOLD_MS ? 'write' : 'wait';
+  return p === 'wait' ? 'rest' : p;
+}
 const RING: Record<Phase, IndState> = { rest: 'idle', talk: 'rec', wait: 'rec', free: 'free', write: 'write' };
 const STATE: Record<Phase, string> = { rest: '', talk: 'Recording', wait: 'Recording', free: 'Hands-free', write: 'Writing' };
 const LISTENING: Phase[] = ['talk', 'wait', 'free'];
@@ -67,13 +74,13 @@ export function HeroDemo({ wallpaper }: { wallpaper: React.ReactNode }) {
   };
 
   const press = () => {
-    const p = phaseRef.current;
-    if (p === 'wait') {
+    const next = gesture(phaseRef.current, 'down');
+    if (next === 'free') {
       clearTimeout(waitTimer.current); // the second press: hands-free, and the words keep coming
       return go('free');
     }
-    if (p === 'free') return write();
-    if (p !== 'rest') return;
+    if (next === 'write') return write();
+    if (next !== 'talk') return;
     clear();
     setHint(false);
     heardRef.current = 0;
@@ -84,13 +91,14 @@ export function HeroDemo({ wallpaper }: { wallpaper: React.ReactNode }) {
   };
 
   const release = () => {
-    if (phaseRef.current !== 'talk') return;
-    if (Date.now() - downAt.current >= HOLD_MS) return write();
+    const next = gesture(phaseRef.current, 'up', Date.now() - downAt.current);
+    if (next === 'write') return write();
+    if (next !== 'wait') return;
     go('wait');
     waitTimer.current = setTimeout(() => {
       // Too short, and no second press: nothing is written, the hint shows.
       clear();
-      go('rest');
+      go(gesture('wait', 'settle'));
       setHint(true);
       later(HINT_MS, () => setHint(false));
     }, DOUBLE_MS);
@@ -235,15 +243,17 @@ export function HeroDemo({ wallpaper }: { wallpaper: React.ReactNode }) {
                 <i aria-hidden="true" />
                 {STATE[phase]}
               </span>
-              <span className="said-text">
-                “
-                {said.slice(0, heard).map((w, i) => (
-                  <span key={`${line}-${i}`} className="said-word">
-                    {w}{' '}
-                  </span>
-                ))}
-                ”
-              </span>
+              {heard > 0 && (
+                <span className="said-text">
+                  “
+                  {said.slice(0, heard).map((w, i) => (
+                    <span key={`${line}-${i}`} className="said-word">
+                      {w}{' '}
+                    </span>
+                  ))}
+                  ”
+                </span>
+              )}
             </>
           ) : (
             <span className="said-hint">Hold the fn key here to try it, or double-tap it for hands-free.</span>
