@@ -66,7 +66,8 @@ final class Pipeline {
         }
         run.entry.model = engine.name
         do {
-            run.entry.rawText = try await engine.transcribe(samples, wav: URL(fileURLWithPath: run.entry.audioPath))
+            let heard = await Task.detached { VoiceIsolation.apply(samples) }.value  // the kept WAV stays raw
+            run.entry.rawText = try await engine.transcribe(heard, wav: URL(fileURLWithPath: run.entry.audioPath))
         } catch {
             if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"

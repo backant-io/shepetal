@@ -141,11 +141,18 @@ final class ParakeetEngine: SpeechEngine {
         let engine = ParakeetEngine(asr: asr, decoderLayers: models.version.decoderLayers)
         // The first inference compiles and warms the CoreML graph; do it before the user speaks.
         _ = try? await engine.transcribe([Float](repeating: 0, count: 16_000), wav: URL(fileURLWithPath: "/dev/null"))
+        _ = await Task.detached { VoiceIsolation.apply([Float](repeating: 0, count: 16_000)) }.value  // the same for the effect
         return engine
     }
 
+    /// FluidAudio deletes a model folder it cannot load and downloads it again on its own, unless its offline
+    /// mode is on (#78). main.swift turns it on before anything loads; only `download()` lifts it.
+    static func stayOffline() { ModelHub.offlineMode = true }
+
     /// User action only: about 470 MB from Hugging Face into FluidAudio's cache.
     static func download() async throws {
+        ModelHub.offlineMode = false
+        defer { stayOffline() }
         _ = try await AsrModels.download(version: .v3)
     }
 
