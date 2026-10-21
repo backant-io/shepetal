@@ -3,6 +3,8 @@
 #   - cargo test (the daemon's socket and the states it sends) and the indicator's unit tests
 #   - a real X11 run under Xvfb and a real wlr-layer-shell run in headless Sway, each with
 #     screenshots checked pixel by pixel (test_indicator.py shot/pulse)
+#   - the meeting transcript window (shepetal-transcript) under Mutter, i3 and xfwm4 on Xvfb: it
+#     must not take the focus from the app being typed in
 #   - eslint (recommended rules) on the GNOME Shell extension
 # From the repo root: linux/indicator/check.sh [OUT_DIR]   (screenshots go to OUT_DIR, default a
 # new temporary dir)
@@ -15,7 +17,8 @@ if [ "${1:-}" != --in-docker ]; then
 FROM ubuntu:24.04
 RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
     ca-certificates cargo python3 python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-gtklayershell-0.1 \
-    fonts-noto-color-emoji fonts-dejavu-core xvfb x11-utils xdotool imagemagick sway grim gjs >/dev/null \
+    fonts-noto-color-emoji fonts-dejavu-core xvfb x11-utils xdotool imagemagick sway grim gjs \
+    mutter i3-wm xfwm4 dbus-x11 >/dev/null \
  && rm -rf /var/lib/apt/lists/*
 EOF
     docker run --rm -v "$PWD":/src:ro -v "$out":/out -w /src/linux -e CARGO_TARGET_DIR=/tmp/target -e CARGO_BUILD_JOBS=4 \
@@ -149,6 +152,98 @@ grab="import -window root"
 steps x11
 stop x11
 kill "$x11_cover" "$xvfb"
+
+# The transcript window under the window manager $1 on its own Xvfb. A text field ("work") has
+# the focus and is being typed in when the window shows: the typing must go on into it.
+transcript() {
+    wm=$1 && export DISPLAY=:98
+    Xvfb :98 -screen 0 1280x720x24 -nolisten tcp 2>/dev/null &
+    xvfb=$!
+    until xdpyinfo >/dev/null 2>&1; do sleep 0.1; done
+    eval "$(dbus-launch --sh-syntax)"
+    case $wm in
+        mutter) mutter --x11 --replace --sm-disable ;;
+        i3) printf 'font pango:DejaVu Sans 10\n' > /tmp/i3.cfg && i3 -c /tmp/i3.cfg ;;
+        xfwm4) xfwm4 --replace ;;
+    esac > "/out/transcript-$wm-wm.log" 2>&1 &
+    wm_pid=$!
+    for _ in $(seq 100); do xprop -root _NET_SUPPORTING_WM_CHECK 2>/dev/null | grep -q 'window id' && break; sleep 0.1; done
+    sleep 1
+    python3 -B -c '
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+w = Gtk.Window(title="work"); w.set_default_size(1200, 650)  # under the transcript window
+e = Gtk.Entry(); w.add(e)
+e.connect("changed", lambda e: open("/tmp/typed", "w").write(e.get_text()))
+w.connect("destroy", Gtk.main_quit); w.show_all(); Gtk.main()' 2>/dev/null &
+    work_pid=$!
+    # By pid: Mutter's frames client has a window with the same title.
+    for _ in $(seq 50); do work=$(xdotool search --all --pid $work_pid --name '^work$' | head -1) && [ -n "$work" ] && break; sleep 0.1; done
+    at() { xwininfo -id "$1" | sed -n "s/.*Absolute upper-left $2: *//p"; }
+    for _ in $(seq 20); do  # a click, as a user would: Mutter refuses activation without a timestamp
+        [ "$(xdotool getwindowfocus)" = "$work" ] && break
+        xdotool mousemove $(($(at "$work" X) + 100)) $(($(at "$work" Y) + 100)) click 1; sleep 0.3
+    done
+    [ "$(xdotool getwindowfocus)" = "$work" ] || fail "$wm: the text field did not get the focus"
+    xdotool type --delay 20 "before "
+
+    rm -f /tmp/to /tmp/from && mkfifo /tmp/to
+    shepetal-transcript < /tmp/to > /tmp/from 2> "/out/transcript-$wm-stderr.log" &
+    window_pid=$!
+    exec 4> /tmp/to
+    printf '%s\n' '{"head": "Zoom, 21.10.26 17:30, 12 min", "text": "[00:00:01] Me: Hello.\n\n[00:00:02] Others: Hi.", "copy": true, "folder": "/tmp"}' >&4
+    for _ in $(seq 100); do grep -q shown /tmp/from && break; sleep 0.1; done
+    grep -q shown /tmp/from || fail "$wm: no transcript window: $(cat "/out/transcript-$wm-stderr.log")"
+    sleep 1
+    win=$(xdotool search --all --pid $window_pid --name '^Meeting transcript$' | head -1)
+    # GTK puts the time on a _NET_WM_USER_TIME_WINDOW when the window manager supports one.
+    utw=$(xprop -id "$win" _NET_WM_USER_TIME_WINDOW | grep -o '0x[0-9a-f]*' || echo "$win")
+    { xprop -id "$win" _NET_WM_USER_TIME; xprop -id "$utw" _NET_WM_USER_TIME; } | grep -q '= 0$' || fail "$wm: _NET_WM_USER_TIME is not 0"
+    [ "$(xdotool getwindowfocus)" = "$work" ] || fail "$wm: the transcript window took the focus"
+    xdotool type --delay 20 "after"
+    sleep 0.5
+    [ "$(cat /tmp/typed)" = "before after" ] || fail "$wm: the typing went elsewhere: '$(cat /tmp/typed)'"
+    if [ "$wm" != i3 ]; then  # i3 tiles it next to the app
+        stack=$(xprop -root _NET_CLIENT_LIST_STACKING | sed 's/.*# //; s/,//g' | tr ' ' '\n')
+        [ "$(echo "$stack" | grep -n -e "$(printf 0x%x "$win")" -e "$(printf 0x%x "$work")" | tail -1 | cut -d: -f2)" = "$(printf 0x%x "$win")" ] ||
+            fail "$wm: the transcript window is not in front of the app"
+    fi
+    import -window root "/out/transcript-$wm-shown.png"
+    echo "ok $wm: the transcript window showed in front without the focus, and the typing went on into the app"
+    # A click on Copy transcript focuses it and asks the daemon to copy; the answer shows inline.
+    x=$(at "$win" X) y=$(at "$win" Y) h=$(xwininfo -id "$win" | sed -n 's/.*Height: *//p')
+    xdotool mousemove $((x + 70)) $((y + h - 30)) click 1
+    sleep 0.7
+    [ "$(grep -c '^copy$' /tmp/from)" = 1 ] || fail "$wm: no copy on the click: $(cat /tmp/from)"
+    [ "$(xdotool getwindowfocus)" = "$win" ] || fail "$wm: a click did not focus the transcript window"
+    printf '%s\n' '{"copied": true}' >&4
+    sleep 0.5
+    import -window root "/out/transcript-$wm-copied.png"
+    # Ctrl+C on a selection copies just that (a double-clicked word), the GTK way.
+    xdotool mousemove $((x + 30)) $((y + 60)) click --repeat 2 1
+    sleep 0.3
+    xdotool key ctrl+c
+    sleep 0.3
+    got=$(timeout 2 python3 -B -c '
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gdk, Gtk
+print(Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text())' 2>/dev/null || true)
+    case "$got" in ""|None|*Hello*Hi*) fail "$wm: Ctrl+C on a selected word copied '$got'" ;; esac
+    echo "ok $wm: a click on Copy transcript printed copy and focused it; Ctrl+C copied the selection '$got'"
+    exec 4>&-  # the daemon is gone, and copying goes through it
+    sleep 0.7
+    import -window root "/out/transcript-$wm-daemon-gone.png"
+    kill "$window_pid" "$work_pid" "$wm_pid" "$DBUS_SESSION_BUS_PID" 2>/dev/null || true
+    kill "$xvfb"
+    wait "$xvfb" 2>/dev/null || true
+}
+for wm in mutter i3 xfwm4; do
+    echo "== the transcript window under $wm (Xvfb)"
+    transcript "$wm"
+done
+unset DISPLAY DBUS_SESSION_BUS_ADDRESS DBUS_SESSION_BUS_PID
 
 echo "== Wayland (headless Sway 1280x720, wlr-layer-shell)"
 export XDG_RUNTIME_DIR=/tmp/rt-sway WAYLAND_DISPLAY=wayland-1 XDG_SESSION_TYPE=wayland XDG_CURRENT_DESKTOP=sway
