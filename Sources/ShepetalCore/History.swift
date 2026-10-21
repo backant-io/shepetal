@@ -179,6 +179,23 @@ public final class History {
         bind(stmt, 1, "%" + Self.escapeLike(query) + "%")
         sqlite3_bind_int64(stmt, 2, includeArchived ? 1 : 0)
         sqlite3_bind_int64(stmt, 3, Int64(limit))
+        return entries(stmt)
+    }
+
+    /// The delivered dictations (inserted and paste_failed, archived rows included) made at or after `since`,
+    /// oldest first: what the streak (F61) and Insights (F62) count, the same rows as `stats`.
+    public func rows(since: Date = .distantPast) throws -> [HistoryEntry] {
+        let stmt = try prepare("""
+            SELECT \(Self.columns) FROM history
+            WHERE outcome IN ('\(Outcome.inserted.rawValue)', '\(Outcome.pasteFailed.rawValue)') AND created_at >= ?
+            ORDER BY created_at
+            """)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+        return entries(stmt)
+    }
+
+    private func entries(_ stmt: OpaquePointer?) -> [HistoryEntry] {
         var rows: [HistoryEntry] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             func text(_ i: Int32) -> String { String(cString: sqlite3_column_text(stmt, i)) }
