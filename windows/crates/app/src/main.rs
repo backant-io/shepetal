@@ -11,6 +11,7 @@ mod license;
 mod loopback;
 mod meeting;
 mod system;
+mod transcript;
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
