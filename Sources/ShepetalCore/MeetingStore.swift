@@ -200,6 +200,23 @@ public final class MeetingStore: MeetingStoring {
         }
     }
 
+    public func shortlist(_ terms: [String], limit: Int) throws -> [String] {
+        // The trigram index needs 3 characters a term; each term is a quoted phrase, so any substring matches.
+        let phrases = Set(terms.filter { $0.count >= 3 }).sorted().map { "\"" + $0.replacingOccurrences(of: "\"", with: "\"\"") + "\"" }
+        guard !phrases.isEmpty else { return [] }
+        // rank is FTS5's BM25 of each indexed row (lower is better); a meeting's rows add up, so saying more counts.
+        let stmt = try prepare("""
+            SELECT meeting_id FROM meeting_text WHERE meeting_text MATCH ?2
+            GROUP BY meeting_id ORDER BY sum(rank), meeting_id LIMIT ?1
+            """)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, Int64(limit))
+        bind(stmt, 2, phrases.joined(separator: " OR "))
+        var ids: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW { ids.append(text(stmt, 0)) }
+        return ids
+    }
+
     // MARK: - SQLite
 
     private func index(_ id: String, _ kind: String, _ texts: [String]) throws {

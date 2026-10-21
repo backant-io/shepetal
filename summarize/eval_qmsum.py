@@ -6,6 +6,11 @@ Data (text only, fetched once into .cache, which is gitignored):
     git clone -q --depth 1 --filter=blob:none --sparse https://github.com/Yale-LILY/QMSum.git .cache/qmsum
     git -C .cache/qmsum sparse-checkout set data/ALL/train data/ALL/val data/ALL/test
 Usage: .venv/bin/python -I eval_qmsum.py [APPROACH]    (default textrank-tfidf)
+
+Ask about meetings (F73) is scored on the same data, by the Swift code the app runs: span recall of the quoted
+passages against QMSum's specific queries and their relevant_text_span (MeetingAnswersTests.testQMSumSpanRecall):
+  SHEPETAL_QMSUM=$PWD/summarize/.cache/qmsum/data/ALL swift test -c release -Xswiftc -enable-testing --filter testQMSumSpanRecall
+(run from the repo root, where the data is summarize/.cache/qmsum/data/ALL). Without the variable that test is skipped.
 """
 import glob, json, os, re, sys, time, resource
 

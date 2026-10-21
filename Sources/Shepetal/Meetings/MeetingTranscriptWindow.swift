@@ -106,6 +106,7 @@ struct MeetingTranscriptView: View {
                         .disabled(r.segments.isEmpty)
                     Button { model.copySummary() } label: { Label("Copy summary", systemImage: "doc.on.doc") }
                         .disabled(!model.canCopySummary)
+                    if model.canShowLatin { LatinToggle(model: model) }  // F123
                     Spacer(minLength: 8)
                     Button("Open in Meetings") { open(r.meeting.id) }
                 }
@@ -117,12 +118,13 @@ struct MeetingTranscriptView: View {
                                        description: Text("Nothing was transcribed in this meeting."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
+                let shown = model.shown(r)  // in Latin letters when the toggle is on (F123)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
-                        summary(r)
+                        summary(shown)
                         Divider()
                         LazyVStack(spacing: 12) {
-                            ForEach(Array(r.segments.enumerated()), id: \.offset) { _, s in Bubble(segment: s) }
+                            ForEach(Array(shown.segments.enumerated()), id: \.offset) { _, s in Bubble(segment: s) }
                         }
                     }
                     .padding(16)

@@ -110,6 +110,23 @@ public protocol MeetingStoring: AnyObject {
     func get(_ id: String) throws -> MeetingRecord?
     /// Removes the meeting with its segments, summary and notes (its audio files are the caller's).
     func delete(_ id: String) throws
+    /// The ids of the meetings that say most about `terms` (any of them, each a substring), best first (F73).
+    func shortlist(_ terms: [String], limit: Int) throws -> [String]
+}
+
+public extension MeetingStoring {
+    /// Without a ranked index: the meetings that contain the most of the terms, newest first among equals.
+    func shortlist(_ terms: [String], limit: Int) throws -> [String] {
+        var hits: [String: Int] = [:], order: [String] = []
+        for t in Set(terms) {
+            for m in try search(t, limit: Int.max) {
+                if hits[m.id] == nil { order.append(m.id) }
+                hits[m.id, default: 0] += 1
+            }
+        }
+        let newest = try list(limit: Int.max).map(\.id)
+        return Array(order.sorted { (hits[$0]!, newest.firstIndex(of: $1) ?? 0) > (hits[$1]!, newest.firstIndex(of: $0) ?? 0) }.prefix(limit))
+    }
 }
 
 /// Local, non-LLM summarizer (rule 6). Pure: no network, no I/O.
