@@ -329,6 +329,19 @@ Setup: as in M-MTG-1. For steps 2 and 3, Shepetal needs screen recording access 
 3. In a Slack message box, record an audio clip without a huddle. Expected: no card, and nothing records.
 4. Turn screen recording access off for Shepetal, quit and reopen it, and start a huddle again. Expected: no card. 🤫 > Start meeting recording still records it by hand, listed as "Manual"; stop it from the menu.
 
+### M-MTG-8: the transcript window after a meeting (F69, F120)
+Setup: as in M-MTG-1. Before the meeting, select the word `canary` in TextEdit and press Cmd+C.
+1. Record a Zoom meeting and say a few sentences, as in M-MTG-1 steps 1 to 5. Leave the meeting, click into TextEdit at once, and keep typing.
+2. Expected a few seconds after "Meeting recording saved": a "Meeting transcript" window comes to the front. Its first line reads "Zoom · DD.MM.YY HH:MM · N min" (for example "Zoom · 21.10.26 15:00 · 12 min"). Below that is the whole transcript, with each Me and Others line and its time, and "Summarizing…" above it. Your typing keeps landing in TextEdit: the window did not take the keyboard. There is no sound, and no model name appears anywhere. Cmd+V in TextEdit still pastes `canary`, because the window never writes the clipboard by itself.
+3. Expected: "Summarizing…" is replaced by the overview and the action items. Copy summary is greyed out until then.
+4. Click Copy transcript. Expected: "Transcript copied" appears next to the first line, with no sound. Cmd+V in TextEdit pastes the first line, an empty line, then one line per segment, such as `Me (0:05): I will send the slides by Friday.`, with no Markdown. Click Copy summary and paste. Expected: the summary, without the transcript.
+5. Click into the window, select a few words in one line, and press Cmd+C. Paste. Expected: only those words.
+6. Click Open in Meetings. Expected: the Shepetal window opens on the Meetings tab, with this meeting open. Its Copy transcript button, next to Copy summary, copies the same text as in step 4.
+7. Record a second meeting and end it while the window is still open. Expected: the same window now shows the second meeting, and no second window opens. Close the window: it stays closed until the next meeting ends.
+8. No speech: choose 🤫 > Start meeting recording, stay silent for 20 s, then choose Stop meeting recording. Expected: the window says "No speech was recorded". The first line has no app name ("DD.MM.YY HH:MM · < 1 min"). Copy transcript and Copy summary are greyed out, and Open in Meetings opens the meeting.
+9. Choose 🤫 > Start meeting recording and say a sentence. Put Safari in full screen and click into its address bar. Then choose 🤫 > Stop meeting recording. Expected: the window shows over full-screen Safari, and typing still goes into the address bar.
+10. After Settings > Recordings > Delete recordings after 24 hours has removed a meeting's audio (as in M-HUB-3 step 2, with `touch -t` on its folder), open that meeting in the Meetings tab. Expected: its transcript and summary are still there, and Copy transcript still works.
+
 ### M-ACC-1: first launch, sign-in and the free trial
 Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
 0. Without `ShepetalRequiresSignIn` or the variable, signed out: expected the menu still offers Sign in, but no sign-in hint shows at launch and fn dictates normally.

@@ -46,14 +46,18 @@ final class MeetingTranscriber {
     func poll() async throws -> [Segment] { try await pass(final: false) }
 
     /// After the recording stopped: the rest of both files, then the summary of the whole meeting.
-    func finish() async throws -> MeetingRecord {
+    /// `transcribed` runs once the whole transcript is stored, before the summary (the transcript window).
+    func finish(transcribed: () -> Void = {}) async throws -> MeetingRecord {
         live?.cancel()
         await live?.value  // a pass in flight completes first; two passes never overlap
         live = nil
         defer { try? FileManager.default.removeItem(at: scratchDir.appendingPathComponent(".utterance.wav")) }
         try await pass(final: true)
         guard var record = try store.get(meeting.id) else { throw SpeechError("Meeting \(meeting.id) is not saved") }
-        let summary = summarizer.summarize(record.segments)
+        transcribed()
+        // Off the main thread: a long meeting's summary must not hold up fn, the indicator or the window.
+        let segments = record.segments
+        let summary = await Task.detached { [summarizer] in summarizer.summarize(segments) }.value
         try store.setSummary(summary, for: meeting.id)
         record.summary = summary
         return record

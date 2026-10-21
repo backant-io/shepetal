@@ -105,6 +105,23 @@ final class MeetingsViewTests: XCTestCase {
         XCTAssertTrue(md.contains("## Transcript\n\n- **Others** (0:04)"))
     }
 
+    func testHeadlineReadsDayMonthYearAndNamesNoAppForAMeetingRecordedByHand() {
+        XCTAssertEqual(MeetingFormat.headline(record.meeting, timeZone: utc), "Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min")
+        XCTAssertEqual(MeetingFormat.headline(meeting("m", MeetingRecorder.manualApp, at: t0), timeZone: utc),
+                       "20.10.26 15:00 · 42 min")
+    }
+
+    // Pasted into a chat or a doc, it must read without Markdown and keep who said what when; no summary.
+    func testCopiedTranscriptIsPlainTextWithSpeakersAndTimes() {
+        XCTAssertEqual(MeetingFormat.transcript(record, timeZone: utc), """
+        Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min
+
+        Others (0:04): Shall we ship the beta on Friday?
+        Me (4:07): Yes, I will send the notes.
+
+        """)
+    }
+
     func testFilenameHasNoPathSeparators() {
         XCTAssertEqual(MeetingFormat.filename(meeting("a", "Teams: Web/Edge", at: t0), timeZone: utc),
                        "Teams- Web-Edge 2026-10-20 1500.md")
