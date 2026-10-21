@@ -212,9 +212,7 @@ async function d1(sql) {
 async function main() {
   const wrangler = (args) => execFileSync(join(BIN, 'wrangler'), args, { cwd: WEB, stdio: ['ignore', 'pipe', 'pipe'] });
   if (!process.env.E2E_SKIP_BUILD) {
-    // The flag: @opennextjs/cloudflare refuses Next 15.5 as past its support window. A test build only;
-    // npm run deploy keeps refusing until Next is upgraded.
-    execFileSync(join(BIN, 'opennextjs-cloudflare'), ['build', '--dangerouslyUseUnsupportedNextVersion'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
+    execFileSync(join(BIN, 'opennextjs-cloudflare'), ['build'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
     ok('opennextjs-cloudflare build');
   }
   const state = join(tmp, 'state');
