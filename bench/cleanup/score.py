@@ -2,6 +2,7 @@
 
 python3 bench/cleanup/score.py [results/*.jsonl]   prints the docs/models.md Cleanup table
 python3 bench/cleanup/score.py --context            the text-around-the-cursor table (F24, results/context/)
+python3 bench/cleanup/score.py --voice              the My voice table (F38, results/voice/)
 python3 bench/cleanup/score.py --self-test
 
 Per run, two outputs are scored: `model` (the model alone on every fixture, after the rules) and `app` (the
@@ -13,6 +14,7 @@ import json, os, statistics, sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIXTURES = os.path.join(HERE, "fixtures", "dictation.jsonl")
 CONTEXT = os.path.join(HERE, "fixtures", "context.jsonl")
+VOICE = os.path.join(HERE, "fixtures", "voice.jsonl")
 LONG_WORDS = 24  # about 10 s of speech
 
 
@@ -89,6 +91,25 @@ def context_table(paths):
     return "\n".join(lines)
 
 
+def voice_table(paths):
+    """fixtures/voice.jsonl on the app's path without My voice (`app`) and with it (`app_voice`). `expected` is the
+    text in the fixture's voice, so "Exact, off" shows what the voice changes and "Exact, on" whether it lands."""
+    fixtures = [json.loads(l) for l in open(VOICE) if l.strip()]
+    lines = ["| Model | Exact, off | Exact, on | CER, off | CER, on | Model text used, on | Mean / max ms per model call, on |",
+             "|---|---|---|---|---|---|---|"]
+    for p in paths:
+        rows = [json.loads(l) for l in open(p) if l.strip()]
+        name = next(l for l in rows if l.get("summary"))["model"]
+        rows = {l["id"]: l for l in rows if "id" in l}
+        assert all(f["id"] in rows for f in fixtures), (p, "missing fixtures")
+        off, on = score(fixtures, rows, "app"), score(fixtures, rows, "app_voice")
+        t = [rows[f["id"]]["model_voice_ms"] for f in fixtures if "model_voice_ms" in rows[f["id"]]]
+        lines.append("| {} | {:.0%} | {:.0%} | {:.1%} | {:.1%} | {} of {} | {} |".format(
+            name, off[0], on[0], off[1], on[1], sum(rows[f["id"]]["used_model_voice"] for f in fixtures), len(fixtures),
+            f"{statistics.mean(t):.0f} / {max(t):.0f}" if t else "-"))
+    return "\n".join(lines)
+
+
 def self_test():
     assert lev("kitten", "sitting") == 3 and lev("", "ab") == 2 and lev("a\nb", "a b") == 1
     fx = [{"id": "a", "raw": "x", "expected": "Hello."}, {"id": "b", "raw": "y", "expected": "1. A\n2. B"}]
@@ -101,6 +122,10 @@ def self_test():
 if __name__ == "__main__":
     if sys.argv[1:] == ["--self-test"]:
         self_test()
+        sys.exit()
+    if sys.argv[1:2] == ["--voice"]:
+        d = os.path.join(HERE, "results", "voice")
+        print(voice_table(sys.argv[2:] or sorted(os.path.join(d, p) for p in os.listdir(d) if p.endswith(".jsonl"))))
         sys.exit()
     if sys.argv[1:2] == ["--context"]:
         d = os.path.join(HERE, "results", "context")
