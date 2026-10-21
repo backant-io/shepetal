@@ -246,8 +246,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let run = await pipeline.process(samples, engine: engine, app: app, context: { [weak self] in
                 self?.inserting = true
                 return FocusedText.context()
-            }, selection: FocusedText.selected,
-               focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
+            }, focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
                secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV,
                decided: { [weak self] in shown = $0; self?.finish($0) })
             busy = false

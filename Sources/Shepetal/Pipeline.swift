@@ -40,23 +40,23 @@ final class Pipeline {
         dictionary = root.appendingPathComponent("dictionary.txt")
     }
 
-    /// `app` is the frontmost app at dictation start (history only). `selection` is the text the paste replaces.
+    /// `app` is the frontmost app at dictation start (history only). `context` is the text around the cursor and
+    /// the selection the paste replaces.
     /// `focusKept` says whether the window focused when the dictation started is still focused (nil: unknown),
     /// and `secureInput` names the app holding secure input. When focus moved or secure input is on, nothing is
     /// pasted and the text is left on the clipboard (rule 8). Focus is never moved back. The defaults skip them.
     /// `decided` gets the outcome (an error message, or nil when the text landed) as soon as it is known; the
     /// WAV and the history row can still be waiting on the disk then. `process` returns once both are written.
     func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
-                 context: () -> (before: String, after: String),
-                 selection: () -> String = { "" }, focusKept: () -> Bool? = { nil }, secureInput: () -> String? = { nil },
+                 context: () -> FocusedText.Context,
+                 focusKept: () -> Bool? = { nil }, secureInput: () -> String? = { nil },
                  sendPaste: (CGEvent) -> Void, decided: (String?) -> Void = { _ in }) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
                                           durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
         let id = run.entry.id, write = writeAudio
         let saving = Task.detached { try write(samples, id) }  // first, so the audio survives anything below
-        let error = await transcribeAndInsert(samples, engine, t0, saving, context, selection, focusKept, secureInput,
-                                              sendPaste, &run)
+        let error = await transcribeAndInsert(samples, engine, t0, saving, context, focusKept, secureInput, sendPaste, &run)
         decided(error)
         let saveError = await saved(saving, &run)
         run.error = saveError ?? error
@@ -67,7 +67,7 @@ final class Pipeline {
     /// Returns an error message, or nil when the text landed.
     private func transcribeAndInsert(_ samples: [Float], _ engine: SpeechEngine?, _ t0: TimeInterval,
                                      _ saving: Task<URL, Error>,
-                                     _ context: () -> (before: String, after: String), _ selection: () -> String,
+                                     _ context: () -> FocusedText.Context,
                                      _ focusKept: () -> Bool?, _ secureInput: () -> String?,
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
         guard let engine else { return "Speech model is not loaded" }
@@ -92,8 +92,8 @@ final class Pipeline {
         // Rule 8 before the field is read: when the text is not pasted, the field that has focus now is not
         // where it goes. And again right before the paste: focus or secure input can change during the read.
         if let message = blocked(focusKept, secureInput, &run) { return message }
-        let (before, after) = context()
-        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selection())
+        let (before, after, selected) = context()
+        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selected)
         if let message = blocked(focusKept, secureInput, &run) { return message }
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
         run.paste = paste
