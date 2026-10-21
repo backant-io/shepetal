@@ -100,6 +100,23 @@ final class LinksTests: XCTestCase {
         }
     }
 
+    // Review of #250: a copied link that is never offered still takes the newest place, so "insert link" stays as
+    // words and never pastes a different link, copied up to 24 h before. Zoom and Dropbox share links carry
+    // "pwd" and "rlkey". Copying it again (the Inserter's restore) keeps one place; text that is not a link
+    // changes nothing.
+    func testALinkNeverOfferedBlocksTheNewestPlace() {
+        var m = LinkMemory()
+        let t = Date(timeIntervalSince1970: 1_000_000), zoom = "https://us02web.zoom.us/j/123?pwd=abc"
+        m.add(a, at: t); m.add(zoom, at: t + 1); m.add("see \(b)", at: t + 2); m.add("hunter2", at: t + 3)
+        m.add(zoom, at: t + 4)
+        let links = m.links(now: t + 5)
+        XCTAssertEqual(links, [nil, a])
+        XCTAssertEqual(Links.insert("Join here: insert link.", links: links, said: "Join here: insert link."), "Join here: insert link.")
+        XCTAssertEqual(Links.insert("insert link two", links: links, said: "insert link two"), a)
+        m.add("https://www.dropbox.com/scl/fi/x/f.pdf?rlkey=abc&dl=0", at: t + 6); m.add(b, at: t + 7)
+        XCTAssertEqual(m.links(now: t + 8), [b, nil, nil, a], "a different blocked link takes its own place")
+    }
+
     // A command whose link is not there stays as said, so nothing silently disappears.
     func testMissingLinkKeepsTheWords() {
         XCTAssertEqual(insert("insert link", links: []), "insert link")

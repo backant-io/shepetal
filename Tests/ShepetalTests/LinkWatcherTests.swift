@@ -49,25 +49,18 @@ final class LinkWatcherTests: XCTestCase {
         XCTAssertEqual(w.links(), [])
     }
 
-    // The system's URL check passes these, so the watcher's own parse must drop them: a sign-in code in the query,
-    // and text around a link.
+    // The system's URL check passes these, so the watcher's own parse must drop them: a link with a sign-in code
+    // in the query only blocks the newest place (nil), and text around a link is not a link.
     func testASecretOrTextAroundALinkIsNotRemembered() async {
         let w = LinkWatcher(pasteboard: pasteboard)
         copy("https://example.com/login/callback?code=4f9a2c&state=xyz"); await w.check()
         copy("see https://example.com/a"); await w.check()
-        XCTAssertEqual(w.links(), [])
+        XCTAssertEqual(w.links(), [nil])
     }
 
     // Shepetal's own paste is a promised item: an app pulling its data is the paste-landed signal (Inserter), so
     // the watcher must never pull it.
     func testOurOwnPromisedPasteIsNeverPulled() async {
-        final class Promise: NSObject, NSPasteboardItemDataProvider {
-            var pulled = false
-            func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
-                pulled = true
-                item.setString("https://example.com/dictated", forType: type)
-            }
-        }
         let w = LinkWatcher(pasteboard: pasteboard), promise = Promise()
         pasteboard.clearContents()
         let item = NSPasteboardItem()
@@ -87,11 +80,76 @@ final class LinkWatcherTests: XCTestCase {
         XCTAssertEqual(w.links(), ["https://example.com/a"])
     }
 
+    // `.default` is read, and on an enforcing macOS that first read raises the paste alert (NSPasteboard.h), after
+    // which the state is `.ask`. Ask and Deny stop the reads.
     @available(macOS 15.4, *)
     func testAskOrDenyInSystemSettingsStopsTheReads() {
-        XCTAssertTrue(LinkWatcher.mayRead(.default))
-        XCTAssertTrue(LinkWatcher.mayRead(.alwaysAllow))
-        XCTAssertFalse(LinkWatcher.mayRead(.ask))
-        XCTAssertFalse(LinkWatcher.mayRead(.alwaysDeny))
+        XCTAssertTrue(LinkWatcher.allows(.default))
+        XCTAssertTrue(LinkWatcher.allows(.alwaysAllow))
+        XCTAssertFalse(LinkWatcher.allows(.ask))
+        XCTAssertFalse(LinkWatcher.allows(.alwaysDeny))
+    }
+
+    /// Writes a link as promised data, and says whether anyone pulled it, which is what a read is.
+    final class Promise: NSObject, NSPasteboardItemDataProvider {
+        var pulled = false
+        func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+            pulled = true
+            item.setString("https://example.com/promised", forType: type)
+        }
+    }
+
+    func promise() -> Promise {
+        let promise = Promise(), item = NSPasteboardItem()
+        pasteboard.clearContents()
+        item.setDataProvider(promise, forTypes: [.string])
+        pasteboard.writeObjects([item])
+        return promise
+    }
+
+    // Review of #250: the macOS 15.4+ gates in check itself. When reads are not allowed, or the system's check says
+    // the copy is not a web URL, nothing is read at all, so no paste alert. With both open the same copy is read,
+    // so the promise does tell a read.
+    func testTheGatesStopTheReadItself() async {
+        for (allowed, url) in [(false, true), (true, false), (true, true)] {
+            let w = LinkWatcher(pasteboard: pasteboard)
+            w.mayRead = { allowed }
+            w.looksLikeURL = { url }
+            let p = promise()
+            await w.check()
+            XCTAssertEqual(p.pulled, allowed && url, "mayRead \(allowed), looksLikeURL \(url)")
+            XCTAssertEqual(w.links(), allowed && url ? ["https://example.com/promised"] : [])
+        }
+    }
+
+    // A copy made while the system checked the one before is not read on that poll: it was not checked. The next
+    // poll checks it.
+    func testACopyDuringTheURLCheckWaitsForTheNextPoll() async {
+        let w = LinkWatcher(pasteboard: pasteboard)
+        var checks = 0
+        w.looksLikeURL = { [self] in
+            checks += 1
+            if checks == 1 { copy("https://example.com/unchecked") }
+            return true
+        }
+        copy("https://example.com/a"); await w.check()
+        XCTAssertEqual(w.links(), [])
+        await w.check()
+        XCTAssertEqual(checks, 2)
+        XCTAssertEqual(w.links(), ["https://example.com/unchecked"])
+    }
+
+    // The real gates on this Mac: a named pasteboard is always allowed (NSPasteboard.h), and the system tells a
+    // link from other text.
+    func testTheSystemCheckTellsALinkFromText() async {
+        let w = LinkWatcher(pasteboard: pasteboard)
+        XCTAssertTrue(w.mayRead())
+        guard #available(macOS 15.4, *) else { return }
+        copy("hunter2")
+        let text = await w.looksLikeURL()
+        XCTAssertFalse(text)
+        copy("https://example.com/a")
+        let link = await w.looksLikeURL()
+        XCTAssertTrue(link)
     }
 }
