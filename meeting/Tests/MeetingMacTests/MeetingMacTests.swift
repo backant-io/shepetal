@@ -1,5 +1,6 @@
 #if canImport(CoreAudio)
 import AVFoundation
+import CoreMediaIO
 import Foundation
 import MeetingCore
 import Testing
@@ -25,6 +26,50 @@ import Testing
     let zoom = MicUser(pid: getpid() + 2, bundleID: "us.zoom.xos", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us")
     #expect(d.app(in: Snapshot(micUsers: [app, zoom])) == "zoom.us")
     #expect(d.app(in: Snapshot(micUsers: [MicUser(pid: getpid(), path: "/usr/local/bin/shepetal-meeting")])) == nil)
+}
+
+/// A fake property graph keyed by [object, selector]: what Core Audio or CoreMediaIO would answer, and nothing else.
+func fixture(ids: [[UInt32]: [UInt32]], numbers: [[UInt32]: UInt32] = [:], strings: [[UInt32]: String] = [:]) -> PropertyReader {
+    PropertyReader(ids: { ids[[$0, $1]] ?? [] }, number: { numbers[[$0, $1]] }, string: { strings[[$0, $1]] })
+}
+
+@Test func theMicProbeListsOnlyProcessesCapturingInputWithTheirPidAndBundleID() {
+    // #62: micUsers() is the main meeting trigger. This fixture is the process list Core Audio gives during a Zoom
+    // call with music playing and the Shepetal app dictating. Pids are above macOS's PID_MAX (99999), so the path
+    // lookup finds no real process.
+    let system = AudioObjectID(kAudioObjectSystemObject)
+    let (zoom, music, shepetal, unreadable): (UInt32, UInt32, UInt32, UInt32) = (0x70, 0x71, 0x72, 0x73)
+    var numbers: [[UInt32]: UInt32] = [:]
+    for (id, pid, input, output) in [(zoom, 100_070, 1, 1), (music, 100_071, 0, 1), (shepetal, 100_072, 1, 0)] {
+        numbers[[id, kAudioProcessPropertyPID]] = UInt32(pid)
+        numbers[[id, kAudioProcessPropertyIsRunningInput]] = UInt32(input)
+        numbers[[id, kAudioProcessPropertyIsRunningOutput]] = UInt32(output)
+    }
+    let r = fixture(ids: [[system, kAudioHardwarePropertyProcessObjectList]: [zoom, music, shepetal, unreadable]],
+                    numbers: numbers,
+                    strings: [[zoom, kAudioProcessPropertyBundleID]: "us.zoom.xos",
+                              [music, kAudioProcessPropertyBundleID]: "com.apple.Music",
+                              [shepetal, kAudioProcessPropertyBundleID]: "io.backant.shepetal"])
+    let users = Probes.micUsers(r)
+    // Music only plays (output), and a process whose state cannot be read is not a mic user.
+    #expect(users.map(\.pid) == [100_070, 100_072])
+    #expect(users.map(\.bundleID) == ["us.zoom.xos", "io.backant.shepetal"])
+    // The bundle ID is how the CLI skips the Shepetal app's own dictation: without Zoom nothing is a meeting.
+    #expect(Probes.detector().app(in: Snapshot(micUsers: users.filter { $0.pid != 100_070 })) == nil)
+    #expect(Probes.detector().app(in: Snapshot(micUsers: users)) != nil)
+}
+
+@Test func theCameraProbeSeesARunningCameraAmongIdleOnes() {
+    // #62: a camera alone is a meeting (Pavel's rule), from CMIO IsRunningSomewhere on any device, not only the first.
+    let system = CMIOObjectID(kCMIOObjectSystemObject)
+    let devices = [system, CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices)]
+    let running = CMIOObjectPropertySelector(kCMIODevicePropertyDeviceIsRunningSomewhere)
+    let (facetime, external, unreadable): (UInt32, UInt32, UInt32) = (0x30, 0x31, 0x32)
+    #expect(Probes.cameraInUse(fixture(ids: [devices: [facetime, unreadable, external]],
+                                       numbers: [[facetime, running]: 0, [external, running]: 1])))
+    #expect(!Probes.cameraInUse(fixture(ids: [devices: [facetime, unreadable, external]],
+                                        numbers: [[facetime, running]: 0, [external, running]: 0])))
+    #expect(!Probes.cameraInUse(fixture(ids: [devices: []])))
 }
 
 /// Two mono buffers (mic, tap) as the aggregate device delivers them.

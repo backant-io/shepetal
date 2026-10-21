@@ -169,6 +169,16 @@ final class InsertionRulesTests: XCTestCase {
         XCTAssertEqual(fit("Wait for it.", "Please ", ""), "wait for it.")
         XCTAssertEqual(fit("The cursor.", "leave ", "the cursor"), "the cursor" + nbsp)
     }
+
+    // F35: the cleanup model's numbered list must reach the cursor as lines. Fit may touch only the first line's
+    // first letter and space and the last line's end; it never joins lines or adds a period to an item.
+    func testNumberedListKeepsItsLines() {
+        let list = "Things to buy:\n1. Milk\n2. Eggs\n3. Bread"
+        XCTAssertEqual(fit(list, "", ""), list)
+        XCTAssertEqual(fit(list, "Done.", ""), " " + list)
+        XCTAssertEqual(fit(list, "Note: ", ""), "things to buy:\n1. Milk\n2. Eggs\n3. Bread")
+        XCTAssertEqual(fit(list + ".", "", "and more"), list + nbsp, "only the last line's end changes")
+    }
 }
 
 final class PasteCheckTests: XCTestCase {
@@ -191,8 +201,14 @@ final class PasteCheckTests: XCTestCase {
 
 final class CleanupTests: XCTestCase {
     func testDropsFillersAndStutters() {
-        XCTAssertEqual(Cleanup.apply("Um, so the the build is, uh, green."), "So the build is, green.")
+        XCTAssertEqual(Cleanup.apply("Um, so the the build is, uh, green."), "So the build is green.")
         XCTAssertEqual(Cleanup.apply("  We ship   today .  "), "We ship today.")
+    }
+
+    // The commas around a mid-sentence filler were the pause, not punctuation the user wanted.
+    func testDropsTheCommasAroundAFiller() {
+        XCTAssertEqual(Cleanup.apply("I think we should, uh, push the launch."), "I think we should push the launch.")
+        XCTAssertEqual(Cleanup.apply("Send me the, um, the slides."), "Send me the slides.")
     }
 
     func testKeepsWordsThatContainFillers() {

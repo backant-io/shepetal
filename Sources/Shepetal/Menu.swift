@@ -3,7 +3,7 @@ import ShepetalCore
 
 /// What a 🤫 menu item does. The app delegate performs it.
 enum MenuAction: Equatable {
-    case permissions, download, signIn, cancelSignIn, buy
+    case permissions, download, downloadCleanup, downloadDictionarySupport, signIn, cancelSignIn, buy
     case meeting, showMeeting(String), openMeetings
     case openApp, checkForUpdates
     case pasteLast, copy(String)
@@ -32,6 +32,13 @@ struct MenuState {
     /// Only while speech recognition is not ready: "Loading…", "Download failed: …".
     var engineProblem: String?
     var canDownloadEngine = false
+    /// The local cleanup model's size while this Mac can run it and has not downloaded it. Optional: the rules
+    /// clean up without it, so the offer has no yellow mark.
+    var cleanupDownloadMB: Int?
+    var downloadingCleanup = false
+    var cleanupDownloadFailed = false
+    /// F39: the keyword model's download (`SpeechMenu.dictionarySupport`), nil when there is nothing to offer.
+    var dictionarySupport: DictionarySupport?
     var access: Access = .lifetime
     var signingIn = false
     var recordingMeeting = false
@@ -74,6 +81,17 @@ enum MenuModel {
         if let problem = s.engineProblem { e.append(MenuEntry(title: problem, enabled: false)) }
         if s.canDownloadEngine {
             e.append(MenuEntry(title: "Download on-device speech recognition (about 470 MB)", action: .download, attention: true))
+        }
+        if s.downloadingCleanup {  // no download item meanwhile, so a second click cannot start a second download
+            e.append(MenuEntry(title: "Downloading the cleanup model…", enabled: false))
+        } else if let mb = s.cleanupDownloadMB {
+            if s.cleanupDownloadFailed { e.append(MenuEntry(title: "Cleanup model download failed. Try again later.", enabled: false)) }
+            e.append(MenuEntry(title: "Download cleanup model (about \(String(format: "%.1f", Double(mb) / 1000)) GB)", action: .downloadCleanup))
+        }
+        switch s.dictionarySupport {
+        case .offered: e.append(MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport))
+        case .downloading: e.append(MenuEntry(title: "Downloading dictionary support…", enabled: false))
+        case nil: break
         }
         return e + account(s.access, signingIn: s.signingIn)
     }

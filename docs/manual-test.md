@@ -36,6 +36,15 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. Open Shepetal and use other apps for an hour, including full-screen apps and Space switches.
 2. Expected: 🤫 is still in the bottom-left corner and in the menu bar, there was never a Dock icon, and fn still dictates. Quit shepetal from the 🤫 menu (or press ⌘Q while the menu is open): both 🤫 disappear.
 
+### M-CRASH-1: crash recovery (F99)
+Setup: shepetal installed from the .pkg and running (🤫 in the menu bar), with a TextEdit window in front.
+1. In Terminal, run `pkill -9 -f 'Shepetal.app/Contents/MacOS/Shepetal$'`. This ends only the app: `pkill -x Shepetal` would also end its watchdog. Click back into TextEdit. Expected: 🤫 comes back within about 5 s, TextEdit keeps focus, and fn dictates again. (This assumes a license that allows dictation. Otherwise Home opens at every launch, the reopen included, as it already does.)
+2. A real crash: wait a minute, then run `pkill -ABRT -f 'Shepetal.app/Contents/MacOS/Shepetal$'`. Expected: macOS shows "Shepetal quit unexpectedly", and 🤫 comes back within about 5 s. Click Reopen in that dialog. Expected: `pgrep -fl Shepetal` still shows exactly two lines, the app and `... --watchdog <that app's pid>`.
+3. Choose Quit shepetal in the 🤫 menu and wait 10 s. Expected: 🤫 stays gone, and `pgrep -fl Shepetal` prints nothing.
+4. Open shepetal, then run `pkill -f 'Shepetal.app/Contents/MacOS/Shepetal$'` (SIGTERM, what the installer and the uninstaller send). Expected: it quits at once and stays quit, and `pgrep -fl Shepetal` prints nothing.
+5. Open shepetal. Run the command from step 1 four times, each time once 🤫 is back, all within a minute. Expected: after the fourth, 🤫 stays gone. Open shepetal: "shepetal kept quitting unexpectedly, so it stopped reopening itself" shows next to 🤫. Quit and open it again: the hint does not show.
+6. With shepetal running, install the .pkg again. Expected: after the installer finishes, `pgrep -fl Shepetal` shows exactly two lines: `/Applications/Shepetal.app/Contents/MacOS/Shepetal` and `/Applications/Shepetal.app/Contents/MacOS/Shepetal --watchdog <that app's pid>`.
+
 ### M-PERM-1: Microphone
 1. Quit Shepetal. Run `tccutil reset Microphone io.backant.shepetal`.
 2. Open Shepetal. The Permissions window lists Microphone with ⚠️.
@@ -64,6 +73,17 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 5. Tap fn once briefly. Expected: the hint shows to the right of 🤫, and 🤫 itself does not move. When the hint goes, 🤫 stays (idle has no ring).
 (The frame, the panel flags, the hint timing and the ring colours are covered by `IndicatorTests`. This step checks them on a real display, Space and full-screen app.)
 
+### M-CRT-1: creator mode label (F114)
+1. Choose Open shepetal in the 🤫 menu, then Settings, and turn on "Creator mode: show “Dictating with shepetal” next to 🤫 while recording".
+2. Start a QuickTime Player screen recording (File › New Screen Recording, record the entire screen).
+3. Click into a TextEdit document, hold fn and talk for about 5 s, then release.
+4. Expected: "Dictating with shepetal" shows to the right of 🤫 while you hold fn, 🤫 itself does not move, and the label goes away on release (the blue processing ring has no label). The text is inserted as usual.
+5. Double-tap fn for hands-free, talk, then tap fn to stop. Expected: the label shows for the whole hands-free recording and goes away when it stops. Hold fn again and press Esc. Expected: the creator label is replaced at once by "Cancelled" in the same place, and after 3 s nothing shows next to 🤫.
+6. Stop the QuickTime recording and play it back. Expected: the label is visible in the video while you dictated.
+7. Click on the label while it shows. Expected: the click goes to the app under it, and shepetal does not take focus.
+8. Turn the toggle off and hold fn again. Expected: no label, only the red ring.
+(The label's lifecycle, the frame and click-through are covered by `IndicatorTests`. This step checks it in a real screen recording.)
+
 ### M-FN-1: hold to talk
 1. Click into a TextEdit document. Hold fn, say "Testing one two three, this is a hold to talk check.", then release.
 2. Expected: a red ring while you hold, a pulsing blue ring after release, then the text appears at the cursor. Your earlier clipboard is back (Cmd+V elsewhere pastes what you had copied before).
@@ -86,6 +106,27 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Type a word, then press fn+Delete quickly a few times.
 4. Expected: characters after the cursor are deleted, nothing is inserted, and no hint shows. Recent in the 🤫 menu has a "(cancelled)" entry for each press, and each has a WAV in Settings > Open recordings folder.
 5. Hold fn for about 2 s, then press Down arrow while still holding and speaking. Expected: the dictation goes on and is inserted on release.
+
+### M-BLOCK-1: dictation off in one app (F102)
+1. Click into a TextEdit document, then open the 🤫 menu. Expected: "Turn off dictation in TextEdit" right after Shortcuts…, Microphone and Languages. Click it.
+2. In TextEdit, hold fn, say "This must not be typed.", and release. Expected: "Dictation is off in TextEdit" shows next to 🤫 for about 3 s. The ring never turns red, nothing is inserted, Recent in the 🤫 menu has no new entry, and Settings > Open recordings folder has no new WAV.
+3. Tap fn twice quickly. Expected: the same hint, and the ring never turns orange. In a long document, hold fn and press Down arrow. Expected: the view pages down (fn still reaches TextEdit).
+4. Switch to Notes, hold fn and dictate a sentence. Expected: it is inserted as usual (only TextEdit is off).
+5. With Notes in front, open the 🤫 menu. Expected: "Turn off dictation in Notes", and below it "Dictation is off in (click to turn back on)" with TextEdit in it. Leave it.
+6. Choose Quit shepetal in the 🤫 menu and open shepetal again. In TextEdit, hold fn. Expected: the hint again (the setting survives a restart).
+7. Open the 🤫 menu in TextEdit. Expected: "Turn on dictation in TextEdit". Click it, then hold fn and dictate. Expected: the text is inserted, and the "Dictation is off in" submenu is gone from the menu.
+
+### M-MEDIA-1: mute or pause media while dictating (F09)
+1. Play a song in Music.app. Choose Open shepetal > Settings: both "Mute other audio while dictating" and "Pause media while dictating" are off. Hold fn, say a sentence, release. Expected: the music keeps playing at the same volume the whole time.
+2. Turn on "Mute other audio while dictating" only. Hold fn and say a sentence. Expected: about half a second after the press, the music goes silent, and the menu bar's sound icon shows muted. On release the sound comes back, the text is inserted, and the song never stopped.
+3. Same toggle. Double-tap fn for hands-free, say a sentence, tap fn. Expected: silent while recording, sound back after the tap. Then press fn+Delete in a text field, and tap fn once briefly. Expected: the music never drops out. Then hold fn for about 0.7 s and, still holding it, press the left arrow. Expected: the music may drop out for a moment and comes back at once, and the cursor moves.
+4. Mute the Mac yourself (the mute key), then dictate. Expected: it stays muted afterwards. Unmute, start a dictation, press the mute key twice (muted, then unmuted) during it, and release. Expected: the sound is on at the end. Then set the volume to about half, start a dictation, and plug in headphones while recording. Expected: the speakers are unmuted at the end, and the headphones were never muted.
+5. Turn mute off and turn on "Pause media while dictating" only. Hold fn for 3 s with Music playing. Expected: Music pauses about one second after the press and resumes on release. Hold fn for about 0.7 s and, still holding it, press the left arrow. Expected: Music never pauses. Hold fn for about 1.2 s and say one word. Note whether Music resumes. If it stays paused, that is known limit (b) in #218, not a crash. Pause Music yourself, play a YouTube video in a browser tab, and hold fn for 3 s. Expected: YouTube pauses and resumes. Note how long a dictation must be for the tab to resume. A tab that stays paused after a short dictation is known limit (a).
+6. Pause everything and dictate with nothing playing. Expected: nothing starts playing, and Music.app does not open.
+7. Pause a song in Music.app (it stays in Control Center's Now Playing). In Terminal, make a silent minute and play it: `python3 -c "import wave;w=wave.open('/tmp/silence.wav','wb');w.setnchannels(1);w.setsampwidth(2);w.setframerate(16000);w.writeframes(bytes(16000*2*60))" && afplay /tmp/silence.wav`. While it plays, with pause on, hold fn for 4 s in a text field and say a sentence. Expected: Music may start for up to about a second, then pauses again. It is paused at the release and stays paused afterwards, and the text is inserted.
+8. Play a YouTube video in a browser tab, pause it yourself, and within 2 s hold fn for 3 s and say a sentence. Note whether the video starts and keeps playing after the release. If it does, that is known limit (a) in #218. The text is inserted either way.
+9. Quit Music.app and every other player, so Control Center shows nothing in Now Playing. Start the silent `afplay /tmp/silence.wav` from step 7, click into a TextEdit document, and with pause on hold fn for 3 s and say a sentence. Note whether Music.app opens. If it opens and takes focus, the paste is skipped with "The window changed while you spoke" and the text stays for Cmd+V: that is known limit (c) in #218. If Music starts playing, it pauses again within about a second.
+10. Join a test call in FaceTime or Zoom with music playing in Music, both toggles on, and dictate. Expected: no mute and no pause, and the call audio is never cut.
 
 ### M-INS-1: TextEdit
 1. Type "Please" in a TextEdit document, leave the cursor right after it, then hold fn and say "Send the report today."
@@ -205,6 +246,15 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Add the lines `GitHub` and `asap => as soon as possible`, save, and without restarting Shepetal dictate "push it to github asap".
 3. Expected: "Push it to GitHub as soon as possible." A word that only contains "asap" (for example "asaps") is left alone.
 
+### M-DICT-2: dictionary words with the default model (F39, #30)
+1. Keep 🤫 > Languages on Automatic. If `~/Library/Application Support/FluidAudio/Models/parakeet-ctc-110m-coreml` exists, move it out of that folder. Choose Open shepetal > Settings > Dictionary… and leave only the comment lines. Open the 🤫 menu. Expected: it has no dictionary support line, and the folder is still missing (nothing downloaded on its own).
+2. In the same `dictionary.txt`, add the lines `Postgres`, `Redis` and `useEffect`, and save. Open the 🤫 menu. Expected: "Download dictionary support (about 100 MB)" is in the first group at the top, above Record meeting, with no yellow mark. In TextEdit, dictate "we moved the cache from redis to postgres". Expected without the download: "Redis" is cased right, "Postgres" can come out misspelled (this Mac wrote "postgars").
+3. Choose "Download dictionary support (about 100 MB)" and open the 🤫 menu again while it runs. Expected: "Downloading dictionary support…" next to 🤫, and the menu line reads "Downloading dictionary support…" and is greyed out. Then "Dictionary support is ready" next to 🤫. The menu no longer has the line, and the folder from step 1 now holds `vocab.json`.
+4. Right after "Dictionary support is ready", dictate the sentence from step 2 again in TextEdit. Expected: exactly "We moved the cache from Redis to Postgres.", inserted as fast as before the download. Then dictate "then call the use effect hook inside the component". Expected: "Then call the useEffect hook inside the component."
+5. Dictate "I made a few edits and the build is ready for review". Expected: unchanged. No dictionary word takes the place of "edits" or "ready".
+6. If you speak Spanish, dictate "las redes sociales están llenas de ruido hoy" (or a sentence in another language you speak that has a word close to Redis or Postgres). Expected: the sentence as spoken, with "redes" kept. The dictionary does not change a dictation in another language.
+7. Turn Wi-Fi off, quit and relaunch shepetal, and dictate the sentence from step 2. Expected: the same text as in step 4.
+
 ### M-INS-5: space before the following word (F109)
 1. In TextEdit type "Hello world", then put the cursor right before "world". Hold fn, say "big", then release.
 2. Expected: "Hello big world", with one space on each side of "big".
@@ -233,6 +283,23 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. On a new line, say "Sechsundzwanzigster Juni sechsundzwanzig." Expected: "26.06.26."
 3. On a new line type "and then we rest", put the cursor at the start of the line, and say "We leave on the first of March." Expected: "We leave on 01.03. and then we rest". The date keeps its last dot.
 4. Say "May I ask a question?" Expected: it stays in words.
+
+### M-CLEAN-1: download the cleanup model (F32)
+1. On an Apple Silicon Mac without the model, open the 🤫 menu. Expected: at the top, the item "Download cleanup model (about 1.3 GB)" (about 0.5 GB on an 8 GB Mac), with no yellow mark and no grey Cleanup line. Open shepetal. Expected: Home's Cleanup line reads "Rules only (download the cleanup model from the 🤫 menu)". Neither shows a model or file name.
+2. Before downloading, in TextEdit, hold fn and say "Let's meet on Tuesday, actually Wednesday, at three." Release. Expected: the sentence as you said it, "actually" included. Without the model, the rules never guess which half you meant.
+3. Turn Wi-Fi off and click the download item. Expected: within a few seconds the 🤫 menu shows the grey line "Cleanup model download failed. Try again later." above the download item, and Home's Cleanup line reads "Rules only (the download failed; try again from the 🤫 menu)". Turn Wi-Fi back on.
+4. Click the download item, then open the 🤫 menu again while it downloads. Expected: the grey line "Downloading the cleanup model…" and no download item, so the download cannot start twice. Home's Cleanup line reads the same. While the file is checked, fn still works.
+5. Once the file is in `~/Library/Application Support/Shepetal/models`, open the 🤫 menu again. Expected: no cleanup line or item, and the menu starts with "Record meeting". Home's Cleanup line reads "On".
+
+### M-CLEAN-2: self-corrections and lists (F34, F35)
+1. In TextEdit, hold fn and say "Let's meet on Tuesday, actually Wednesday, at three." Release.
+2. Expected: "Let's meet on Wednesday at three." within a second of release.
+3. Hold fn and say "Book a table for four. Scratch that. Book a table for six." Release. Expected: "Book a table for six."
+4. Hold fn and say "Things to buy. First, milk. Second, eggs. Third, bread." Release.
+5. Expected: "Things to buy:" and then three numbered lines, "1. Milk", "2. Eggs" and "3. Bread", each on its own line.
+6. Hold fn and say "What is the capital of Australia?" Release. Expected: the question as you said it, not an answer.
+7. Hold fn and say "We ship on Friday, I mean it." Release. Expected: the sentence as you said it, "Friday" included.
+8. Recent in the 🤫 menu shows the cleaned text for each of these.
 
 ### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
 1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
@@ -263,14 +330,21 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 4. Turn Start at login off. Expected: the toggle is off, and Shepetal is gone from Login Items. The installer turns it on; builds signed with the same certificate keep it.
 
 ### M-MENU-1: the 🤫 menu
-Setup: all three permissions granted, speech recognition loaded, signed in with a trial of more than 7 days (or a build from source that does not require sign-in, signed in), and at least one meeting recorded.
-1. Click 🤫 in the menu bar. Expected, top to bottom with a separator between each group: Record meeting, Past meetings › | Open shepetal | Check for Updates… (greyed out) | Paste last transcript with ⌃⌘V right-aligned, Recent › | Shortcuts…, Microphone ›, Languages › | Help center, Send feedback… | Quit shepetal with ⌘Q right-aligned. Nothing above Record meeting, no grey status lines, no emoji besides 🤫 in the menu bar, and "shepetal" in lowercase.
+Setup: all three permissions granted, speech recognition loaded, the cleanup model downloaded on an Apple Silicon Mac (M-CLEAN-1), no words in `dictionary.txt` or dictionary support downloaded (M-DICT-2), signed in with a trial of more than 7 days (or a build from source that does not require sign-in, signed in), and at least one meeting recorded.
+1. Click 🤫 in the menu bar. Expected, top to bottom with a separator between each group: Record meeting, Past meetings › | Open shepetal | Check for Updates… (greyed out) | Paste last transcript with ⌃⌘V right-aligned, Recent › | Shortcuts…, Microphone ›, Languages ›, Turn off dictation in <the app you were in> (M-BLOCK-1) | Help center, Send feedback… | Quit shepetal with ⌘Q right-aligned. Nothing above Record meeting, no grey status lines, no emoji besides 🤫 in the menu bar, and "shepetal" in lowercase.
 2. Hover Recent. Expected: "Click to copy" above the last dictations. Click one, then ⌘V in TextEdit: its text.
 3. Choose Help center. Expected: https://shepetal.backant.io/help opens in the browser. Until the help pages from #84 are merged and deployed, that URL is a 404 page: the item works, the page does not exist yet. Choose Send feedback…. Expected: a new mail to founder@backant.io with the subject "shepetal feedback".
 4. In System Settings > Privacy & Security > Accessibility, turn Shepetal off. Open the menu. Expected: "Permissions needed…" at the very top with a yellow mark; choosing it opens the Permissions window. Turn Shepetal back on: the line is gone the next time the menu opens.
 5. Signed out (Home > Sign out): the top of the menu has "Sign in to start your free trial…". With a test account 7 days or less from the end of its trial, or after it: "Get shepetal for $4.99…" instead. With more than 7 days left, or Yours forever, neither.
 6. Open shepetal and check that nothing left the app: Home has the account line with Sign out, the speech recognition line and the Donate links (each opens its page); Settings has Recordings, Open recordings folder, Start at login, Dictionary… and Permissions….
 7. Without the speech model (move `~/Library/Application Support/FluidAudio/Models` aside and restart): the top of the menu has "Download on-device speech recognition (about 470 MB)" with a yellow mark. Choose it, then open the menu again while it downloads. Expected: no download item, only the grey line "Downloading on-device speech recognition…", so a second download cannot start. Turn Wi-Fi off during a download: "Download failed: …" shows and the download item is back. Move the folder back.
+
+### M-NEW-1: what's new after an update (F111)
+1. Install **Shepetal-0.1.0.pkg** from the v0.1.0-mac release, or keep the 0.1.0 that is already installed. Open it and dictate once. Stay signed in, in the trial or with a license: a sign-in or trial-ended hint would replace the update hint, on purpose.
+2. From main, build a newer installer with `VERSION=0.1.1 scripts/make-pkg.sh`, then install `dist/Shepetal-0.1.1.pkg` the same way. The installer reopens shepetal.
+3. Expected: next to the corner 🤫, **Updated to 0.1.1 · What's new… is on Home in the shepetal window** shows for about 6 s. No shepetal window opens. (Where the focus goes after an install is the installer's behaviour, M-SETUP-1, not this step.)
+4. Choose Open shepetal in the 🤫 menu, and on Home click **What's new…**. Expected: the window **What's new in shepetal** lists the release notes newest first, each under its version and a DD.MM.YY date. A 0.1.1 test build has no notes of its own, so 0.1.0 is at the top. The 🤫 menu has no What's new item.
+5. Choose Quit shepetal in the 🤫 menu and open it again. Expected: no hint.
 
 ### M-HUB-1: open the Shepetal window
 1. Before you install this build, run `sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite 'select count(*) from history'` and note the number. Install and open the new build. Run the command again. Expected: the same number. (`HistoryTests.testOldDatabaseUpgradesWithoutLosingRows` checks this on a copy of the old schema.)
@@ -300,6 +374,30 @@ Setup: all three permissions granted, speech recognition loaded, signed in with 
 ### M-HUB-6: settings
 1. In Settings, set Recordings to Delete recordings after 24 hours. Close and reopen the window. Expected: the same choice.
 2. Open recordings folder opens Finder at the audio folder. Dictionary… opens `dictionary.txt` (M-DICT-1). Permissions… opens the Permissions window. Start at login is M-LOGIN-1, and Restore 🌐 key setting (shown only after Shepetal changed the setting) is M-SETUP-4.
+
+### M-STATS-1: your stats (F60)
+1. Choose Open shepetal in the 🤫 menu and go to Home. Note the numbers under "Your stats".
+2. In TextEdit, hold fn, say "one two three four five" and release. In Notes, dictate a sentence of about ten words. Then tap fn once briefly (too short), and start one more dictation and press Esc (cancelled).
+3. Click back into the shepetal window, on Home. Expected: Words went up by the words that were pasted (about 15) in both Last 7 days and All time. Dictations went up by 2: the short tap and the cancelled one do not count. Top apps lists TextEdit and Notes with their words added.
+4. Check the math with the numbers shown. Words per minute is about Words divided by Speaking time in minutes. Time saved is Words / 40 minutes minus Speaking time, and never negative.
+5. In History, archive the TextEdit row and go back to Home. Expected: the numbers do not change, because archived dictations still count.
+6. Optional: run `defaults write io.backant.shepetal typingWpm 60`, then quit and reopen shepetal. Expected: the caption says 60 words per minute and Time saved is lower. Run `defaults delete io.backant.shepetal typingWpm` to reset it.
+
+### M-NOTICE-1: recent notices on Home (F100)
+1. Tap fn once briefly. Expected: "Hold fn to talk · double-tap for hands-free" shows next to 🤫 for about 3 s.
+2. Open a TextEdit document and Notes. Click into the TextEdit document, double-tap fn and say "notices check one two". Click into a Notes note, then tap fn once to stop. Expected: nothing is pasted, focus stays on Notes, and "The window changed while you spoke. The text is on the clipboard: press ⌘V to paste it." shows next to 🤫.
+3. Tap fn briefly three times, a few seconds apart.
+4. Choose Open shepetal in the 🤫 menu, on Home. Expected: under Recent notices, newest first: the short-press hint once (the three taps in step 3 are one row, at the time of the last tap), then the clipboard hint, then the short-press hint from step 1. Each row shows its time as DD.MM.YY HH:MM. No row contains "notices check one two".
+5. Leave the window open and tap fn briefly once more. Expected: the list updates within about 1 s.
+6. Choose Quit shepetal in the 🤫 menu, start it again, and open Home. Expected: Recent notices says "None yet" (the list is only in memory).
+
+### M-THEME-1: light, dark and auto (F93)
+1. In the 🤫 menu choose Open shepetal, and put the window next to System Settings › Appearance.
+2. Choose Dark. Expected: the shepetal window turns dark at once, without closing it: background, tabs, lists and buttons. Click through Home, History, Meetings and Settings: all dark, all text readable.
+3. Choose Light. Expected: it turns light at once, all text readable. Choose Auto. Expected: it matches the rest of macOS (Finder windows, the menu bar).
+4. Repeat 2 and 3 with Shortcuts… (🤫 menu), Permissions… (Settings tab) and What's new… (Home) open, and with the meeting transcript window open after a recorded meeting (M-MTG-1). Expected: each one follows at once.
+5. In Light, on a light wallpaper, tap fn briefly. Expected: the short-press hint next to 🤫 is white on a dark plate and readable for its 3 s. If the meeting card ("Meeting detected · …") shows, it is dark in Light too.
+6. Expected: there is no theme setting in shepetal. It follows the system on purpose.
 
 ### M-CTX-1: app and page URL
 1. Dictate into TextEdit, into a text field in Safari, and into a text field in Chrome (for example a GitHub comment box).

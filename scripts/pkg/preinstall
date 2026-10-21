@@ -9,6 +9,9 @@ as_user() {
   if [ "$(id -u)" = 0 ]; then launchctl asuser "$USER_ID" sudo -u "$USER_NAME" "$@"; else "$@"; fi
 }
 APP="$2/Shepetal.app"
+# The crash watchdog first, even with the app not running (after a crash it may be about to open it
+# again), so nothing opens the old app during the install.
+[ "$DRY" = 1 ] || pkill -f "^$APP/Contents/MacOS/Shepetal --watchdog" || true
 if pgrep -qf "^$APP/Contents/MacOS/Shepetal"; then
   as_user osascript -e 'quit app "Shepetal"' || true
   for _ in $(seq 1 40); do pgrep -qf "^$APP/Contents/MacOS/Shepetal" || break; sleep 0.25; done
