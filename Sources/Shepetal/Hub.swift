@@ -32,6 +32,14 @@ final class Hub {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
+
+    /// The Meetings tab with this meeting open (the transcript window's Open in Meetings).
+    func showMeeting(_ id: String) {
+        UserDefaults.standard.set("meetings", forKey: "hubTab")
+        meetings.query = ""  // a search could hide it
+        meetings.select(id)
+        show()
+    }
 }
 
 extension Pipeline {
@@ -40,7 +48,8 @@ extension Pipeline {
     func retranscribe(_ entry: HistoryEntry, with engine: SpeechEngine) async throws -> HistoryEntry {
         let wav = URL(fileURLWithPath: entry.audioPath)
         var e = entry
-        e.rawText = try await engine.transcribe(AudioStore.read(wav), wav: wav)
+        let samples = try AudioStore.read(wav)
+        e.rawText = try await engine.transcribe(await Task.detached { VoiceIsolation.apply(samples) }.value, wav: wav)
         e.text = Self.finishText(e.rawText, dictionary: dictionary)
         e.model = engine.name
         try history.update(e)

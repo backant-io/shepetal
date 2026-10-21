@@ -179,6 +179,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. With AirPods connected and preferred, dictate once. Expected: "Tip: the built-in mic records clearer than Bluetooth" shows once. Dictate again: it does not show again, not even after a relaunch.
 2. On the built-in mic, hold fn and say a sentence very quietly from about an arm's length away. Expected: after the text lands, "Speak closer or use a wired mic". A normal sentence at normal distance does not show it. If it shows too often or never, tune it with `defaults write io.backant.shepetal micQuietFloor -float 0.002` (RMS, default 0.003) and relaunch.
 
+### M-MIC-6: Voice Isolation in a loud room (#75)
+1. With music or a TV playing loudly near the Mac, or in a café, hold fn and dictate two sentences at a normal voice. Expected: the text has the sentences and none of the background speech or lyrics.
+2. During any dictation, open Control Center > Mic Mode. Expected: Shepetal is not listed there, and Shepetal never opens that menu itself.
+3. Open the dictation in the hub and play it. Expected: the recording plays back raw, with the background noise still in it. Only the text was made from the isolated voice.
+4. If words go missing in a quiet room, lower the effect with `defaults write io.backant.shepetal voiceIsolationMix -float 50` (percent, default 100; 0 turns it off) and relaunch.
+
 ### M-LANG-1: languages
 1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
 2. Check Deutsch and Français. Expected: the menu's model line stays "Model: parakeet-tdt-0.6b-v3" (no reload). Say a German sentence. Expected: German text.
@@ -207,6 +213,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. On a new line type "I went home." and put the cursor right before its period. Hold fn and say "Today." Expected: "I went home today." with one period.
 4. On a new line type "Hello. World." and put the cursor right before "World". Hold fn and say "Big news." Expected: "Hello. Big news. World." Between two sentences the dictation keeps its capital and its period.
 5. On a new line type "Please" and leave the cursor after it. Hold fn and say "Send it to John at NASA." Expected: "Please send it to John at NASA." Only the first letter is lowercased.
+
+### M-INS-8: mid-sentence in an Electron app (F109)
+1. In VS Code (or Slack, or Obsidian) type "leave the cursor right after it", then click right before "the cursor". Hold fn, say "The cursor.", then release.
+2. Expected: "leave the cursor the cursor right after it", with a lowercase "the cursor" and no period. Shepetal asks the app for its accessibility tree when the dictation starts. Note if VS Code then asks whether you use a screen reader, or turns on screen reader mode.
+3. If any dictation in M-INS-1 to M-INS-8 went in as dictated (capital and period), run `log show --last 10m --predicate 'eventMessage CONTAINS "shepetal: context"'` in Terminal and add the lines to the report. Each dictation logs one line: the field's role, its length and the selection, or which attribute could not be read and the AX error code. The text itself is never logged.
 
 ### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
 1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
@@ -317,6 +328,19 @@ Setup: as in M-MTG-1. For steps 2 and 3, Shepetal needs screen recording access 
 2. In the Slack app, start a huddle with someone. Expected about 5 s after the huddle opens the mic: "Meeting detected · Slack". Click Record, talk for at least 15 s, then leave the huddle. Expected: "Meeting recording saved" about 4 s after no Slack window title says "huddle" any more (up to about 30 s while one still does), and Meetings lists the meeting as "Slack".
 3. In a Slack message box, record an audio clip without a huddle. Expected: no card, and nothing records.
 4. Turn screen recording access off for Shepetal, quit and reopen it, and start a huddle again. Expected: no card. 🤫 > Start meeting recording still records it by hand, listed as "Manual"; stop it from the menu.
+
+### M-MTG-8: the transcript window after a meeting (F69, F120)
+Setup: as in M-MTG-1. Before the meeting, select the word `canary` in TextEdit and press Cmd+C.
+1. Record a Zoom meeting and say a few sentences, as in M-MTG-1 steps 1 to 5. Leave the meeting, click into TextEdit at once, and keep typing.
+2. Expected a few seconds after "Meeting recording saved": a "Meeting transcript" window comes to the front. Its first line reads "Zoom · DD.MM.YY HH:MM · N min" (for example "Zoom · 21.10.26 15:00 · 12 min"). Below that is the whole transcript, with each Me and Others line and its time, and "Summarizing…" above it. Your typing keeps landing in TextEdit: the window did not take the keyboard. There is no sound, and no model name appears anywhere. Cmd+V in TextEdit still pastes `canary`, because the window never writes the clipboard by itself.
+3. Expected: "Summarizing…" is replaced by the overview and the action items. Copy summary is greyed out until then.
+4. Click Copy transcript. Expected: "Transcript copied" appears next to the first line, with no sound. Cmd+V in TextEdit pastes the first line, an empty line, then one line per segment, such as `Me (0:05): I will send the slides by Friday.`, with no Markdown. Click Copy summary and paste. Expected: the summary, without the transcript.
+5. Click into the window, select a few words in one line, and press Cmd+C. Paste. Expected: only those words.
+6. Click Open in Meetings. Expected: the Shepetal window opens on the Meetings tab, with this meeting open. Its Copy transcript button, next to Copy summary, copies the same text as in step 4.
+7. Record a second meeting and end it while the window is still open. Expected: the same window now shows the second meeting, and no second window opens. Close the window: it stays closed until the next meeting ends.
+8. No speech: choose 🤫 > Start meeting recording, stay silent for 20 s, then choose Stop meeting recording. Expected: the window says "No speech was recorded". The first line has no app name ("DD.MM.YY HH:MM · < 1 min"). Copy transcript and Copy summary are greyed out, and Open in Meetings opens the meeting.
+9. Choose 🤫 > Start meeting recording and say a sentence. Put Safari in full screen and click into its address bar. Then choose 🤫 > Stop meeting recording. Expected: the window shows over full-screen Safari, and typing still goes into the address bar.
+10. After Settings > Recordings > Delete recordings after 24 hours has removed a meeting's audio (as in M-HUB-3 step 2, with `touch -t` on its folder), open that meeting in the Meetings tab. Expected: its transcript and summary are still there, and Copy transcript still works.
 
 ### M-ACC-1: first launch, sign-in and the free trial
 Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
