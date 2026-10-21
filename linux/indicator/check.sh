@@ -18,7 +18,7 @@ RUN apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq 
     fonts-noto-color-emoji fonts-dejavu-core xvfb x11-utils xdotool imagemagick sway grim gjs >/dev/null \
  && rm -rf /var/lib/apt/lists/*
 EOF
-    docker run --rm -v "$PWD/linux":/src:ro -v "$out":/out -w /src -e CARGO_TARGET_DIR=/tmp/target -e CARGO_BUILD_JOBS=4 \
+    docker run --rm -v "$PWD":/src:ro -v "$out":/out -w /src/linux -e CARGO_TARGET_DIR=/tmp/target -e CARGO_BUILD_JOBS=4 \
         shepetal-linux-indicator-test sh indicator/check.sh --in-docker
     echo "== GNOME Shell extension"
     docker run --rm -v "$PWD/linux/gnome-extension":/ext:ro node:22.11.0-slim sh -ec '
@@ -44,7 +44,7 @@ cargo build --release -q
 echo "== indicator unit tests"
 python3 -B indicator/test_indicator.py
 
-export PATH="/src/indicator:$PATH" NO_AT_BRIDGE=1
+export PATH="/src/linux/indicator:$PATH" NO_AT_BRIDGE=1
 hint="Hold fn to talk · double-tap for hands-free"
 check() { python3 -B indicator/test_indicator.py "$@"; }
 
