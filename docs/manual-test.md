@@ -669,8 +669,17 @@ In the L-SC steps the shortcuts have their defaults: Esc cancels, Shift+Alt+Z is
 
 ### L-SC-6: 20-minute cap
 1. Start a hands-free dictation (double-tap fn or Ctrl+Meta+Space) and leave it running for 20 min, speaking now and then.
-2. Expected: at 19 min next to 🤫 shows `Recording stops in 1 minute` (stderr: `shepetal: hint: Recording stops in 1 minute`). At 20 min the recording stops by itself and the text is typed. Write down how long the text took after the stop: the whole clip goes to the model at once.
+2. Expected: at 19 min next to 🤫 shows `Recording stops in 1 minute` (stderr: `shepetal: hint: Recording stops in 1 minute`), and a desktop notification says the same. At 20 min the recording stops by itself and the text is typed. Write down how long the text took after the stop: the whole clip goes to the model at once.
 (Automated: `warning_at_19_minutes_and_stop_at_20`, `a_20_minute_hold_stops_and_the_late_release_does_nothing`.)
+
+### L-LEN-1: a configurable cap (F10)
+1. `sudo apt install libnotify-bin` (for `notify-send`). Put `{"dictation": {"max_minutes": 2}}` in `~/.config/shepetal/config.json` and start `shepetal daemon`, with a text editor focused.
+2. Double-tap fn and keep talking. Expected: after 1 minute `Recording stops in 1 minute` shows next to 🤫 and as a desktop notification (on GNOME Wayland without the extension, only the notification). After 2 minutes the recording stops by itself and everything said is typed, as if you had tapped fn. No sound plays.
+3. Hold fn (no double-tap) and keep talking for over 2 minutes. Expected: the same warning at 1 minute; at 2 minutes the text is typed while fn is still down, and letting go of fn afterwards starts nothing and shows no hint.
+4. `ls -t ~/.local/share/shepetal/audio | head -2`. Expected: both recordings are there, not marked cancelled, each about 2 minutes long.
+5. Put `{"dictation": {"max_minutes": 0}}` in the file and start the daemon. Expected: it exits with `...config.json: dictation.max_minutes: expected whole minutes from 1 to 1440, got 0`.
+6. Remove `dictation` from the file and restart. Expected: the cap is back to 20 minutes (L-SC-6).
+(Automated: `the_cap_is_configurable_for_holds_double_taps_and_the_toggle`, `a_one_minute_cap_warns_at_the_start`, `max_minutes_must_be_whole_minutes_from_1_to_a_day`, `a_dictation_that_reaches_the_cap_is_warned_stopped_and_typed`, `warning_at_19_minutes_and_stop_at_20`, `a_20_minute_hold_stops_and_the_late_release_does_nothing`.)
 
 ### L-AUD-1: every recording is kept, owner-only
 1. After L-FN-1 to L-FN-4, run `stat -c '%a %U %n' ~/.local/share/shepetal/audio ~/.local/share/shepetal/audio/*`.
