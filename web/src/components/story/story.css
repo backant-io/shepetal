@@ -1,0 +1,227 @@
+/* The landing page's scroll story, from the approved design (board 5, "full scroll story", src.dc.html).
+   The first part is the design's own stylesheet, unchanged except for the font stacks (system.css) and the
+   canvas-only "a frame 1400 px or taller goes static" rule, which the real site does not need.
+   The second part holds the design's inline styles, as classes, with the same values.
+   The scroll timings are in choreography.ts (story.generated.css). Only transforms and opacity animate. */
+
+@property --p { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --don { syntax: '<number>'; inherits: true; initial-value: 0; }
+@property --pulse { syntax: '<number>'; inherits: true; initial-value: 1; }
+.kc { --signal: #FF4F12; --ink: #161512; --ink2: #57544E; --led-off: #4a1d0a; --led-on: #FFF6EC; --travel: 26px; --gut: clamp(1rem, calc(3.4 * var(--u)), 6.0rem);
+  /* one relative unit: 1vw, but never taller than the window allows, so the composition keeps its proportions */
+  --u: min(1vw, 1.6vh);
+  /* where the small key and the recording mark sit: top right bottom left (bottom-left) */
+  --corner: auto auto max(1rem, env(safe-area-inset-bottom)) max(var(--gut), env(safe-area-inset-left));
+  timeline-scope: --t0, --t1, --t2, --t3, --t4, --t5; }
+.kc *, .kc *::before, .kc *::after { box-sizing: border-box; }
+.kc-track { position: relative; --p: 0; }
+.kc-t0 { view-timeline: --t0 block; } .kc-t1 { view-timeline: --t1 block; } .kc-t2 { view-timeline: --t2 block; } .kc-t3 { view-timeline: --t3 block; } .kc-t4 { view-timeline: --t4 block; } .kc-t5 { view-timeline: --t5 block; }
+@supports (animation-timeline: view()) {
+  .kc-track { animation: kc-p linear both; animation-timeline: view(); animation-range: contain 0% contain 100%; }
+}
+@keyframes kc-p { from { --p: 0; } to { --p: 1; } }
+.kc-mono { font-family: var(--mono); font-size: .75rem; letter-spacing: .01em; line-height: 1.45; color: #57544E; }
+.kc-mark:focus-visible, .kc-cta:focus-visible { outline: 2px solid #FF4F12; outline-offset: 4px; }
+
+/* key */
+.kc-art { display: block; width: 100%; height: auto; overflow: visible; }
+.kc-k-legend, .kd-k-legend { font-family: 'Archivo Key', var(--sans); font-weight: 560; font-stretch: 106%; font-size: 84px; letter-spacing: -2px; }
+.kc-k-led { fill: var(--led-off); }
+.kc-k-glow, .kc-ks-d { opacity: 0; }
+.kc-key:focus-visible { outline: 2px solid #161512; outline-offset: -2rem; }
+.kc-k-idle { animation: kc-idle 4.6s cubic-bezier(.4,0,.2,1) 1.2s infinite; }
+@keyframes kc-idle { 0%, 88% { transform: translateY(0); } 91% { transform: translateY(3px); } 95%, 100% { transform: translateY(0); } }
+
+/* CTA: a small key */
+.kc-cta { transition: transform .12s cubic-bezier(.3,0,.2,1.4); }
+.kc-cta:hover { background-color: #24221f !important; }
+.kc-cta:active { transform: translateY(3px); }
+
+/* dictated words: .kc-wx/.kc-wy fly, ink fades in over the orange copy as each word lands */
+.kc-w { position: relative; display: inline-block; }
+.kc-wx, .kc-wy { display: inline-block; }
+.kc-wy { position: relative; }
+.kc-wo { position: absolute; left: 0; top: 0; color: var(--signal); opacity: 0; }
+.kc-w::after, .kc-w0::before { content: ''; position: absolute; top: .1em; bottom: .02em; width: .07em; background: var(--signal); transform-origin: 50% 100%; }
+.kc-w::after { right: -.14em; transform: scaleY(calc(clamp(0, (var(--p) - var(--l)) * 400, 1) * clamp(0, (var(--n) - var(--p)) * 400, 1))); }
+.kc-w0::before { left: -.02em; transform: scaleY(clamp(0, (var(--l) - var(--p)) * 400, 1)); }
+.kc-w0::before, .kc-w5::after { animation: kc-blink 1.06s steps(1) infinite; }
+@keyframes kc-blink { 0% { opacity: 1; } 55% { opacity: 0; } }
+
+.kc-cue { opacity: calc(1 - var(--p) * 16); }
+.kc-cue-line { animation: kc-cue 2.4s cubic-bezier(.6,0,.2,1) infinite; transform-origin: 50% 0; }
+@keyframes kc-cue { 0% { transform: scaleY(0); } 45% { transform: scaleY(1); transform-origin: 50% 0; } 46% { transform-origin: 50% 100%; } 90%, 100% { transform: scaleY(0); transform-origin: 50% 100%; } }
+.kc-rec { opacity: 0; }
+
+/* chapter carets: shown while var(--p) is between --l and --n of their track */
+.kc-car { display: inline-block; width: .07em; height: .95em; margin: 0 .04em 0 .05em; vertical-align: -.12em; background: var(--signal); transform: scaleY(calc(clamp(0, (var(--p) - var(--l, -1)) * 400, 1) * clamp(0, (var(--n, 9) - var(--p)) * 400, 1))); animation: kc-blink 1.06s steps(1) infinite; }
+.kc-car-ink { background: #161512; }
+.kc-h2 { text-wrap: balance; }
+.kc-tw { position: relative; display: inline-block; }
+.kc-tw::after { content: ''; position: absolute; right: -.13em; top: .1em; bottom: .02em; width: .07em; background: #161512; transform: scaleY(calc(clamp(0, (var(--p) - var(--l, -1)) * 400, 1) * clamp(0, (var(--n, 9) - var(--p)) * 400, 1))); animation: kc-blink 1.06s steps(1) infinite; }
+.kc-sp-led { opacity: .25; }
+.kc-net-a, .kc-net-b, .kc-net-l { opacity: 0; }
+.kc-recface { transform: translateY(4px); }
+.kc-rec-a { opacity: 0; }
+.kc a:focus-visible { outline: 2px solid #FF4F12; outline-offset: 3px; }
+@keyframes kc-in { 0% { opacity: 0; transform: translateY(.4em); animation-timing-function: cubic-bezier(.2,.7,.2,1); } 100% { opacity: 1; transform: none; } }
+@keyframes kc-pop { 0% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes kc-out { 0% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes kc-cut { 0% { opacity: 1; transform: translateX(0); } 20% { opacity: 1; transform: translateX(.6rem); animation-timing-function: cubic-bezier(.5,0,.8,.4); } 100% { opacity: 0; transform: translateX(9rem); } }
+@keyframes kc-shrink { 0% { opacity: 1; transform: scaleX(1); } 100% { opacity: 1; transform: scaleX(0); } }
+@keyframes kc-slide { 0% { opacity: 0; transform: translateY(1.5rem); animation-timing-function: cubic-bezier(.2,.7,.2,1); } 100% { opacity: 1; transform: none; } }
+@keyframes kc-btn { 0% { transform: translateY(0); animation-timing-function: cubic-bezier(.55,0,.9,.55); } 60% { transform: translateY(5px); } 80% { transform: translateY(3.5px); } 100% { transform: translateY(4px); } }
+@keyframes kc-speak { 0% { opacity: .2; } 8% { opacity: 1; } 20% { opacity: .35; } 34% { opacity: 1; } 48% { opacity: .3; } 62% { opacity: 1; } 76% { opacity: .4; } 92% { opacity: 1; } 100% { opacity: .2; } }
+
+/* ---------- scroll choreography (hero track t0) ---------- */
+/* held from the press (4-12%) until the last word lands (65%), released 70-78%, then it shrinks into the corner (80-98%) */
+@keyframes kc-press {
+  0%, 4% { transform: translateY(0); animation-timing-function: cubic-bezier(.55,0,.9,.55); }
+  10% { transform: translateY(var(--travel)); animation-timing-function: cubic-bezier(.2,.6,.4,1); }
+  11.5% { transform: translateY(calc(var(--travel) * .86)); animation-timing-function: cubic-bezier(.45,0,.6,1); }
+  13%, 70% { transform: translateY(var(--travel)); animation-timing-function: cubic-bezier(.2,.9,.3,1); }
+  74% { transform: translateY(calc(var(--travel) * -.15)); animation-timing-function: cubic-bezier(.4,0,.6,1); }
+  76.5% { transform: translateY(calc(var(--travel) * .05)); animation-timing-function: cubic-bezier(.4,0,.6,1); }
+  78%, 100% { transform: translateY(0); }
+}
+@keyframes kc-shR { 0%, 4% { opacity: 1; } 10%, 70% { opacity: 0; } 76%, 100% { opacity: 1; } }
+@keyframes kc-shD { 0%, 4% { opacity: 0; } 10%, 70% { opacity: 1; } 76%, 100% { opacity: 0; } }
+@keyframes kc-led { 0%, 9.5% { fill: var(--led-off); } 10%, 70% { fill: var(--led-on); } 70.5%, 100% { fill: var(--led-off); } }
+@keyframes kc-glow { 0%, 9.5% { opacity: 0; } 11% { opacity: 1; } 15% { opacity: .5; } 19% { opacity: 1; } 23% { opacity: .5; } 27% { opacity: 1; } 31% { opacity: .5; } 35% { opacity: 1; } 39% { opacity: .5; } 43% { opacity: 1; } 47% { opacity: .5; } 51% { opacity: 1; } 55% { opacity: .5; } 59% { opacity: 1; } 63% { opacity: .5; } 67% { opacity: 1; } 71%, 100% { opacity: 0; } }
+
+/* the docked key: flies from the hero key into the corner at 10% size, pressed once per writing window */
+.kd-art { display: block; width: 100%; height: auto; overflow: visible; }
+.kd-k-led { fill: var(--led-off); }
+.kd-ks-d { opacity: 0; }
+.kd-k-glow { opacity: calc(var(--don) * var(--pulse)); }
+.kc-dock { animation: kc-pulse 1.25s ease-in-out infinite; }
+.kc-dock-in { transform-origin: 0 0; }
+@keyframes kc-pulse { 0%, 100% { --pulse: .35; } 50% { --pulse: 1; } }
+@keyframes kc-dockin { 0% { opacity: 0; transform: translate(var(--kx, 0px), var(--ky, 0px)) scale(var(--ks, 10)); } .4% { opacity: 1; transform: translate(var(--kx, 0px), var(--ky, 0px)) scale(var(--ks, 10)); animation-timing-function: cubic-bezier(.6,0,.2,1); } 100% { opacity: 1; transform: none; } }
+@keyframes kc-dockout { 0% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(140%); } }
+@keyframes kc-hold { 0% { transform: translateY(0); animation-timing-function: cubic-bezier(.55,0,.9,.55); } 10% { transform: translateY(var(--travel)); animation-timing-function: cubic-bezier(.2,.6,.4,1); } 15% { transform: translateY(calc(var(--travel) * .86)); } 20%, 88% { transform: translateY(var(--travel)); animation-timing-function: cubic-bezier(.2,.9,.3,1); } 95% { transform: translateY(calc(var(--travel) * -.12)); } 100% { transform: translateY(0); } }
+@keyframes kc-hold-led { 0%, 9% { fill: var(--led-off); } 10%, 90% { fill: var(--led-on); } 91%, 100% { fill: var(--led-off); } }
+@keyframes kc-hold-shR { 0% { opacity: 1; } 10%, 90% { opacity: 0; } 97%, 100% { opacity: 1; } }
+@keyframes kc-hold-shD { 0% { opacity: 0; } 10%, 90% { opacity: 1; } 97%, 100% { opacity: 0; } }
+@keyframes kc-hold-on { 0%, 9% { --don: 0; } 14%, 88% { --don: 1; } 94%, 100% { --don: 0; } }
+@keyframes kc-hold-shh { 0%, 6% { opacity: 0; transform: scale(.7); } 12%, 90% { opacity: 1; transform: scale(1); } 96%, 100% { opacity: 0; transform: scale(.85); } }
+@keyframes kc-flow { 0% { opacity: 0; transform: translateY(.3em); } 100% { opacity: 1; transform: none; } }
+.kc-fw { position: relative; display: inline-block; }
+.kc-fw::after { content: ''; position: absolute; right: -.13em; top: .1em; bottom: .02em; width: .07em; background: var(--signal); transform: scaleY(calc(clamp(0, (var(--p) - var(--l, -1)) * 400, 1) * clamp(0, (var(--n, 9) - var(--p)) * 400, 1))); animation: kc-blink 1.06s steps(1) infinite; }
+@keyframes kc-wx { 0% { transform: translateX(var(--dx, 0px)); animation-timing-function: cubic-bezier(.2,.75,.25,1); } 100% { transform: translateX(0); } }
+@keyframes kc-wy {
+  0% { transform: translateY(var(--dy, 0px)) scale(.32); opacity: 0; animation-timing-function: cubic-bezier(.55,0,.25,1.08); }
+  8% { opacity: 1; }
+  100% { transform: translateY(0) scale(1); opacity: 1; }
+}
+.kc-wi { opacity: 1; }
+@keyframes kc-wi { 0%, 90% { opacity: 0; } 96%, 100% { opacity: 1; } }
+@keyframes kc-wo { 0%, 90% { opacity: 1; } 96%, 100% { opacity: 0; } }
+
+/* ---------- the design's inline styles, as classes ---------- */
+.kc { background: #E6E4DE; color: #161512; font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+.kc-stage { position: sticky; top: 0; height: max(37.5rem, 100vh); overflow: hidden; }
+.kc-chs { display: flex; align-items: center; }
+
+/* 0 · the key */
+.kc-head { position: absolute; z-index: 3; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 1.6rem var(--gut); }
+.kc-mark { font: italic 500 1.9rem/1 var(--serif); color: #161512; text-decoration: none; letter-spacing: -.01em; }
+.kc-mark-sm { font-size: 1.5rem; }
+.kc-grid { position: relative; z-index: 2; height: 100%; display: grid; grid-template-columns: minmax(0, 56fr) minmax(0, 44fr); padding-top: calc(10.5 * var(--u)); row-gap: 2.5rem; align-items: start; align-content: start; }
+.kc-h1 { grid-column: 1; grid-row: 1; margin: 0; padding-left: var(--gut); font-weight: 520; font-size: clamp(2.5rem, calc(5.3 * var(--u)), 10.0rem); line-height: .97; letter-spacing: -.043em; }
+.kc-stagekey { position: absolute; left: calc(-1 * var(--u)); bottom: calc(1.6 * var(--u)); width: calc(60 * var(--u)); z-index: 1; }
+.kc-key { display: block; width: 100%; padding: 0; margin: 0; border: 0; background: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.kc-lede { grid-column: 2; grid-row: 1; margin: 0; padding-right: var(--gut); font-weight: 520; font-size: clamp(2.5rem, calc(5.3 * var(--u)), 10.0rem); line-height: .97; letter-spacing: -.043em; text-wrap: balance; }
+.kc-ctarow { position: relative; z-index: 1; grid-column: 2; grid-row: 2; display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; padding-right: var(--gut); }
+/* The trial buttons are sign-in forms; the form takes no box, so the button sits where the design's link sits. */
+.kc-form { display: contents; }
+.kc-cta { display: inline-flex; align-items: center; background-color: #161512; color: #E6E4DE; text-decoration: none; font-family: inherit; font-weight: 600; font-size: 1.0625rem; line-height: normal; letter-spacing: -.005em; padding: 1.1rem 1.6rem; margin: 0; border: 0; border-radius: 4px; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,.12), 0 4px 0 #000, 0 9px 14px -6px rgba(22,21,18,.45); }
+.kc-cue { position: absolute; z-index: 3; left: 50%; bottom: 1.25rem; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: .6rem; }
+.kc-cue-line { display: block; width: 1px; height: 2.25rem; background: #161512; }
+
+/* the corner: the recording mark and the docked key */
+.kc-corner { position: fixed; z-index: 6; inset: var(--corner); display: flex; align-items: flex-end; gap: .7rem; pointer-events: none; }
+.kc-shf { flex: none; width: 1.75rem; height: 1.75rem; margin-bottom: .35rem; border-radius: 50%; box-shadow: 0 0 0 3px #FF4F12; opacity: 0; }
+.kc-shf img { display: block; width: 100%; height: 100%; }
+.kc-dock { flex: none; width: clamp(3.25rem, calc(6 * var(--u)), 12rem); }
+
+/* chapters 1 to 4 */
+.kc-cg { width: 100%; display: grid; grid-template-columns: minmax(0, 38fr) minmax(0, 62fr); column-gap: 4rem; align-items: center; padding: 0 var(--gut); }
+.kc-h2 { margin: 0; font-weight: 520; font-size: clamp(2.25rem, calc(4.6 * var(--u)), 9.0rem); line-height: .97; letter-spacing: -.042em; }
+.kc-h2-sub { display: block; color: #57544E; }
+.kc-rows { border-top: 1px solid rgba(22,21,18,.22); }
+.kc-row { display: grid; grid-template-columns: 6.5rem minmax(0, 1fr); column-gap: 1.5rem; align-items: baseline; padding: 1.2rem 0; border-bottom: 1px solid rgba(22,21,18,.22); }
+.kc-row-lg { padding: 1.6rem 0; }
+.kc-say { margin: 0; font-size: clamp(1.3rem, calc(2.3 * var(--u)), 4.2rem); font-weight: 420; letter-spacing: -.015em; }
+.kc-say-chat { font-weight: 520; letter-spacing: -.02em; }
+.kc-say-code { margin: 0; font-family: var(--mono); font-size: clamp(1.05rem, calc(1.75 * var(--u)), 3.1rem); }
+.kc-say-pre { color: #57544E; }
+.kc-say-doc { margin: 0; font: italic 500 clamp(1.5rem, calc(2.7 * var(--u)), 5.0rem)/1.15 var(--serif); }
+.kc-lane-label { display: flex; align-items: center; gap: .5rem; }
+.kc-sp-led { display: inline-block; width: .9rem; height: .3rem; border-radius: .15rem; background: #FF4F12; }
+.kc-lane { margin: 0; font-size: clamp(1.35rem, calc(2.3 * var(--u)), 4.0rem); font-weight: 520; line-height: 1.15; letter-spacing: -.025em; }
+.kc-lane-typed { color: #57544E; }
+.kc-sub { margin: 1.5rem 0 0; font-size: clamp(1.2rem, calc(1.9 * var(--u)), 3.2rem); font-weight: 520; letter-spacing: -.02em; color: #57544E; }
+.kc-net { display: flex; align-items: center; }
+.kc-box { position: relative; flex: 0 0 64%; border: 1px solid #161512; padding: 2.4rem 2rem 2rem; }
+.kc-box-label { position: absolute; left: 1rem; top: -.75rem; padding: 0 .5rem; background: #E6E4DE; color: #161512; }
+.kc-note { margin: 0; font-size: clamp(1.35rem, calc(2.3 * var(--u)), 4.2rem); font-weight: 520; line-height: 1.2; letter-spacing: -.025em; }
+.kc-wire { position: relative; flex: 1 1 auto; height: 1px; align-self: center; }
+.kc-net-a { position: absolute; left: 0; width: 50%; top: 0; height: 1px; background: #161512; transform-origin: 0 50%; }
+.kc-net-b { position: absolute; left: 50%; right: 0; top: 0; height: 1px; background: #161512; }
+.kc-net-l { position: absolute; right: 0; bottom: .6rem; color: #161512; }
+.kc-off { position: absolute; left: 1rem; bottom: .6rem; color: #161512; }
+.kc-rem { display: flex; justify-content: space-between; align-items: center; gap: 1rem; max-width: 30rem; padding: 1rem 1rem 1rem 1.2rem; border: 1px solid rgba(22,21,18,.35); border-radius: 4px; background: #EDEBE6; }
+.kc-rem-title { margin: .3rem 0 0; font-size: 1.25rem; font-weight: 560; letter-spacing: -.01em; }
+.kc-recbtn { position: relative; display: inline-block; flex: none; }
+.kc-recbase { position: absolute; left: 0; right: 0; top: 4px; bottom: -4px; border-radius: 4px; background: #9a2f08; }
+.kc-recface { position: relative; display: grid; border-radius: 4px; background: #FF4F12; color: #161512; font-weight: 600; font-size: 1rem; padding: .65rem 1.1rem; }
+.kc-rec-a, .kc-rec-b { grid-area: 1 / 1; }
+.kc-script { margin-top: 2.2rem; display: grid; row-gap: 1.1rem; border-top: 1px solid rgba(22,21,18,.22); padding-top: 1.6rem; }
+.kc-line { margin: 0; display: grid; grid-template-columns: 4.5rem minmax(0, 1fr); column-gap: 1.25rem; align-items: baseline; }
+.kc-line-text { font-size: clamp(1.25rem, calc(2.05 * var(--u)), 3.6rem); font-weight: 480; letter-spacing: -.015em; }
+
+/* 5 · the name */
+.kc-name { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2rem; padding: 0 var(--gut); text-align: center; }
+.kc-n0 { display: block; width: 3.25rem; height: 3.25rem; }
+.kc-name-h { margin: 0; font-weight: 400; }
+.kc-n1 { display: block; font: italic 500 clamp(5rem, calc(13 * var(--u)), 24.0rem)/.95 var(--serif); letter-spacing: -.02em; }
+.kc-n2 { display: block; margin-top: 2.4rem; font: italic 400 clamp(1.25rem, calc(2.2 * var(--u)), 3.8rem)/1.3 var(--serif); color: #57544E; }
+
+/* 6 · try it */
+.kc-try { padding: clamp(5rem, calc(10 * var(--u)), 16rem) var(--gut) 0; }
+.kc-cg-try { width: auto; grid-template-columns: minmax(0, 44fr) minmax(0, 56fr); align-items: end; padding: 0; }
+.kc-h2-try { white-space: nowrap; font-size: clamp(2.75rem, calc(5.6 * var(--u)), 10.5rem); line-height: .95; letter-spacing: -.045em; }
+.kc-cta-try { margin-top: 2.25rem; }
+.kc-plans { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 2rem; }
+.kc-plan { border-top: 1px solid #161512; padding-top: 1.25rem; }
+.kc-price { margin: 0; font-weight: 520; font-size: clamp(2.25rem, calc(4.2 * var(--u)), 7.5rem); line-height: 1; letter-spacing: -.04em; }
+.kc-price-line { margin: .6rem 0 0; font-size: 1.125rem; font-weight: 480; }
+.kc-foot { margin-top: clamp(5rem, calc(9 * var(--u)), 14rem); display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; padding: 1.4rem 0 1.6rem; border-top: 1px solid rgba(22,21,18,.22); }
+.kc-foot-nav { display: flex; gap: 1.5rem; }
+.kc-foot-nav a { color: #161512; }
+
+@media (max-width: 760px) {
+  .kc-grid { grid-template-columns: minmax(0, 1fr) !important; height: auto !important; padding-top: 6.2rem !important; row-gap: 0 !important; }
+  .kc-h1, .kc-lede, .kc-ctarow { grid-column: 1 !important; grid-row: auto !important; padding: 0 var(--gut) !important; }
+  .kc-h1, .kc-lede { font-size: clamp(2.2rem, calc(10.4 * var(--u)), 6.0rem) !important; }
+  .kc-stagekey { position: relative !important; left: auto !important; bottom: auto !important; width: 128% !important; margin: 1.1rem 0 -.5rem -14% !important; grid-row: auto !important; }
+  .kc-ctarow { margin-top: 1.4rem !important; }
+  .kc-fig { display: none !important; }
+  .kc-cg { grid-template-columns: minmax(0, 1fr) !important; row-gap: 2rem !important; }
+  .kc-chs { align-items: flex-start !important; padding-top: 4.5rem !important; }
+  .kc-row { grid-template-columns: minmax(0, 1fr) !important; row-gap: .35rem !important; padding: .85rem 0 !important; }
+  .kc-net { flex-direction: column !important; align-items: stretch !important; }
+  .kc-net > div:last-child { height: 4.5rem !important; flex: none !important; }
+  .kc-plans { margin-top: 3rem !important; }
+}
+/* Reduced motion: every chapter in its final state, nothing pinned. */
+@media (prefers-reduced-motion: reduce) {
+  .kc .kc-track { height: auto !important; animation: none !important; --p: 1 !important; }
+  .kc { --u: 1vw !important; }
+  .kc .kc-stage { position: relative !important; height: auto !important; min-height: calc(62.5 * var(--u)) !important; }
+  .kc .kc-grid { height: auto !important; min-height: calc(62.5 * var(--u)) !important; }
+  .kc .kc-corner { display: none !important; }
+  .kc *, .kc *::before, .kc *::after { animation: none !important; }
+  .kc .kc-cue { display: none !important; }
+}
