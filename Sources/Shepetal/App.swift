@@ -22,6 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var shortcuts: ShortcutsWindow?
+    private var notes: NotesWindow?
     private var whatsNew: WhatsNewWindow?
     private var transcription: Task<Void, Never>?
     private var inserting = false { didSet { syncTap() } }  // the paste is under way, too late for Esc
@@ -46,6 +47,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
     private lazy var meetingCard: MeetingCard = MeetingCard(onRecord: { [weak self] in self?.meetings.record() },
                                                             onNotNow: { [weak self] in self?.meetings.notNow() })
+    /// F13: the words so far next to 🤫 while recording (Settings, "Show words while you speak"). Never pasted.
+    private lazy var liveText = LiveCaption(recorded: { [mic] in mic.recorder.snapshot(last: LiveText.windowSamples) },
+                                            engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.status = Indicator.liveStatus($0) }
 
     static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder"),
                          ("GitHub Sponsors", "https://github.com/sponsors/backant-io")]
@@ -76,6 +80,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   startMic: { [weak self] in try self?.openMic() },
                                   stopMic: { [mic] in mic.stop() },
                                   transcribe: { [weak self] in self?.transcribe($0) })
+        }
+        if allowPrompts, let pipeline {  // F28: copied links for "insert link"; test launches never read the clipboard
+            let links = LinkWatcher(pasteboard: .general)
+            links.start()
+            pipeline.recentLinks = { links.links() }
         }
         let minutes = UserDefaults.standard.integer(forKey: "maxDictationMinutes")
         if minutes > 0 { dictation?.gesture.maxDuration = TimeInterval(minutes * 60) }
@@ -179,6 +188,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch input {
         case .pasteLast: pasteLast()
         case .copyLast: copyLast()
+        case .openNotes: openNotes()
         case .recorded(let chord): shortcuts?.recorded(chord)
         case .dismiss where idle:
             // Esc while transcribing: Pipeline inserts nothing and keeps the row as cancelled.
@@ -230,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             focusAtStart = FocusedText.window()
             indicator.set(.recording)
             indicator.status = Indicator.creatorStatus()  // creator mode; any mode but recording or hands-free clears it
+            liveText.start()  // F13: its words come after the creator label
             appAtStart = AppContext.capture()
             media.begin(mute: dictation?.gesture.holdThreshold ?? 0.5, pause: dictation?.gesture.chordWindow ?? 1) { [weak self] in
                 self?.fnHeldOrLocked == true
@@ -239,13 +250,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             media.begin(mute: 0, pause: 0) { [weak self] in self?.fnHeldOrLocked == true }
         case .tooShort:
             media.end()
+            liveText.stop()
             indicator.set(.idle)
             indicator.show(holdHint, seconds: Hint.seconds)
         case .cancel:
             media.end()
+            liveText.stop()
             indicator.set(.idle)
         case .warnDuration: indicator.show(Hint.oneMinuteLeft, seconds: 5)
-        case .stop: media.end()  // transcribe(_:) shows processing
+        case .stop: media.end(); liveText.stop()  // transcribe(_:) shows processing
         }
     }
 
@@ -296,13 +309,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                willPaste: { [weak self] in self?.inserting = true },
                focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
                secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV,
-               decided: { [weak self] in shown = $0; self?.finish($0) })
+               slow: { [weak self] in self?.indicator.show(SlowNotice.hint, seconds: 4) },  // F18
+               decided: { [weak self] in
+                   if self?.indicator.labelText == SlowNotice.hint { self?.indicator.show(SlowNotice.hint, seconds: 0) }  // the text is ready
+                   shown = $0; self?.finish($0)
+               })
             busy = false
             inserting = false
             transcription = nil
             if run.error != shown { finish(run.error) }  // the WAV or the history row failed afterwards
             // F12: Parakeet writes whatever language it heard; say so when that is not one of the chosen ones.
             if !Task.isCancelled, run.error == nil, let hint = Speech.wrongLanguageHint(run.entry.rawText, languages: speech.languages) { indicator.show(hint, seconds: 4) }
+            if !Task.isCancelled, run.error == nil, let hint = run.translationHint { indicator.show(hint, seconds: 4) }  // F41
             if !Task.isCancelled, Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
             if run.error == nil, !Task.isCancelled {  // F61: a milestone this dictation reached, once; after the quiet-mic hint, which would cover it
                 let history = pipeline.history, id = run.entry.id
@@ -390,6 +408,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Meeting audio follows the same choice; the meeting being recorded is never deleted.
         do { try meetingFlow?.store.applyRetention(retention, dir: meetings.dir, recording: meetings.current?.id) }
         catch { fail("Meeting retention: \(error.localizedDescription)") }
+
+        // F81: transcripts follow Settings > Meeting transcripts; the meeting being recorded is never touched.
+        do { try meetingFlow?.store.applyTranscriptRetention(days: TranscriptRetention.days, recording: meetings.current?.id) }
+        catch { fail("Transcript retention: \(error.localizedDescription)") }
     }
 
     /// What an update and Uninstall wait for.
@@ -450,6 +472,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { openTranscript(m) }
         case .openMeetings: openedHub()?.showMeetings()
         case .openApp: openHub()
+        case .notes: openNotes()
         case .checkForUpdates: updater.checkForUpdates()
         case .pasteLast: pasteLast()
         case .copy(let text): pipeline?.copy(text)
@@ -473,6 +496,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         shortcuts?.window?.center()
         shortcuts?.showWindow(nil)
+    }
+
+    /// F55: the notes window, from the open-notes shortcut and Notes… in the 🤫 menu.
+    private func openNotes() {
+        do { notes = try notes ?? NotesWindow.onDisk() } catch { return fail("Notes could not open: \(error.localizedDescription)") }
+        notes?.show()
     }
 
     /// Opening the app again while it runs (Finder, Spotlight, `open`) shows the hub.

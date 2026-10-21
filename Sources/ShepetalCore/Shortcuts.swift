@@ -1,8 +1,9 @@
 import Foundation
 
-/// What a shortcut does (docs/re/dictation-input.md 1 and 2.4).
+/// What a shortcut does (docs/re/dictation-input.md 1 and 2.4). Actions missing from `Shortcuts.defaults`
+/// (open notes) have no chord until the user records one.
 public enum ShortcutAction: String, CaseIterable {
-    case ptt, handsFree, dismiss, pasteLast, copyLast
+    case ptt, handsFree, dismiss, pasteLast, copyLast, openNotes
     case polish  // F45: rewrite the selected text with the active saved prompt
 
     /// Our own wording, for the Shortcuts window.
@@ -13,6 +14,7 @@ public enum ShortcutAction: String, CaseIterable {
         case .dismiss: "Cancel dictation"
         case .pasteLast: "Paste last transcript"
         case .copyLast: "Copy last transcript"
+        case .openNotes: "Open notes"
         case .polish: "Polish selected text"
         }
     }
@@ -188,7 +190,7 @@ public struct Shortcuts: Equatable {
 
 /// What the key router tells the app.
 public enum KeyInput: Equatable {
-    case pttDown, pttUp, toggle, dismiss, pasteLast, copyLast
+    case pttDown, pttUp, toggle, dismiss, pasteLast, copyLast, openNotes
     case polish               // F45
     case otherKey             // during a hold or a dictation, a key or button went down that completes no shortcut
     case recorded(Set<Int>)   // the chord the Shortcuts window asked for, as pressed
@@ -249,6 +251,7 @@ public struct KeyRouter {
         case .dismiss: return ([.dismiss], drop)
         case .pasteLast: return ([.pasteLast], drop)
         case .copyLast: return ([.copyLast], drop)
+        case .openNotes: return ([.openNotes], drop)
         case .polish: return ([.polish], drop)
         }
     }

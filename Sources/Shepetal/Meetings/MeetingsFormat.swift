@@ -72,6 +72,14 @@ enum MeetingFormat {
         return parts.joined(separator: "\n\n") + "\n"
     }
 
+    /// F81: the Transcript pane of a meeting whose transcript the retention setting deleted; nil while it is kept.
+    static func transcriptDeleted(_ r: MeetingRecord, timeZone: TimeZone = .current) -> (title: String, detail: String)? {
+        guard let at = r.transcriptDeletedAt else { return nil }
+        let days = max(1, Int(at.timeIntervalSince(r.meeting.endedAt ?? at) / 86_400))
+        return ("Transcript deleted after \(days) day\(days == 1 ? "" : "s")",
+                "Deleted on \(date(at, timeZone: timeZone, format: "dd.MM.yy")), as set in Settings under Meeting transcripts. The summary and your notes stay.")
+    }
+
     /// "Google Meet (Chrome) 2026-10-20 1500.md", with no path separators.
     static func filename(_ m: Meeting, timeZone: TimeZone = .current) -> String {
         let app = m.app.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
@@ -87,7 +95,11 @@ extension Summary {
 /// MeetingStoring kept in memory: previews, tests, and the tab until the app passes its on-disk store.
 final class InMemoryMeetingStore: MeetingStoring {
     struct UnknownMeeting: Error { let id: String }
-    private var records: [String: MeetingRecord] = [:]
+    private var records: [String: MeetingRecord] = [:] { didSet { changes += 1 } }
+    private var folderList: [String: MeetingFolder] = [:] { didSet { changes += 1 } }
+    private(set) var changes = 0
+    /// What the tab searched for, in order (the debounce test).
+    private(set) var asked: [String] = []
 
     init(_ records: [MeetingRecord] = []) {
         for r in records { self.records[r.meeting.id] = r }
@@ -123,19 +135,68 @@ final class InMemoryMeetingStore: MeetingStoring {
         Array(records.values.map(\.meeting).sorted { $0.startedAt > $1.startedAt }.prefix(limit))
     }
 
-    func search(_ query: String, limit: Int) throws -> [Meeting] {
-        let hits = records.values.filter { r in
-            var text: [String] = [r.meeting.app, r.notes] + r.segments.map(\.text)
+    /// Newest first: no rank in memory.
+    func search(_ query: String, folder: String?, limit: Int) throws -> [MeetingHit] {
+        asked.append(query)
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hits = records.values.compactMap { r -> MeetingHit? in
+            if let folder, folderList[folder]?.meetingIDs.contains(r.meeting.id) != true { return nil }
+            if q.isEmpty { return MeetingHit(meeting: r.meeting) }
+            var text: [String] = [r.notes] + r.segments.map(\.text)
             if let s = r.summary {
                 text += [s.overview] + s.keyPoints + s.decisions
                 text += s.actionItems.flatMap { [$0.owner, $0.task, $0.due] }
             }
-            return text.contains { $0.localizedCaseInsensitiveContains(query) }
+            if let t = text.first(where: { $0.localizedCaseInsensitiveContains(q) }) {
+                return MeetingHit(meeting: r.meeting, snippet: MeetingHit.snippet(t, around: q))
+            }
+            return r.meeting.app.localizedCaseInsensitiveContains(q) ? MeetingHit(meeting: r.meeting) : nil
         }
-        return Array(hits.map(\.meeting).sorted { $0.startedAt > $1.startedAt }.prefix(limit))
+        return Array(hits.sorted { $0.meeting.startedAt > $1.meeting.startedAt }.prefix(limit))
     }
 
     func get(_ id: String) throws -> MeetingRecord? { records[id] }
 
-    func delete(_ id: String) throws { records[id] = nil }
+    func delete(_ id: String) throws {
+        records[id] = nil
+        for f in folderList.keys { folderList[f]?.meetingIDs.remove(id) }
+    }
+
+    func deleteTranscripts(endedBefore cutoff: Date, recording: String?, now: Date) throws -> [String] {
+        let ids = records.values.filter {
+            $0.meeting.id != recording && ($0.meeting.endedAt.map { $0 < cutoff } ?? false) && $0.transcriptDeletedAt == nil && !$0.segments.isEmpty
+        }.map(\.meeting.id).sorted()
+        for id in ids {
+            records[id]!.segments = []
+            records[id]!.transcriptDeletedAt = now
+        }
+        return ids
+    }
+
+    func folders() throws -> [MeetingFolder] { Array(folderList.values).byName }
+
+    func createFolder(_ name: String) throws -> MeetingFolder {
+        let f = MeetingFolder(id: UUID().uuidString, name: try MeetingFolder.clean(name), createdAt: Date())
+        folderList[f.id] = f
+        return f
+    }
+
+    func renameFolder(_ id: String, to name: String) throws {
+        guard folderList[id] != nil else { throw UnknownMeeting(id: id) }
+        folderList[id]!.name = try MeetingFolder.clean(name)
+    }
+
+    func deleteFolder(_ id: String) throws { folderList[id] = nil }
+
+    func setFolders(_ folderIDs: Set<String>, for meetingID: String) throws {
+        guard records[meetingID] != nil else { throw UnknownMeeting(id: meetingID) }
+        if let unknown = folderIDs.first(where: { folderList[$0] == nil }) { throw UnknownMeeting(id: unknown) }
+        for f in folderList.keys {
+            if folderIDs.contains(f) { folderList[f]!.meetingIDs.insert(meetingID) } else { folderList[f]!.meetingIDs.remove(meetingID) }
+        }
+    }
+
+    func list(inFolder folderID: String, limit: Int) throws -> [Meeting] {
+        Array(try list(limit: Int.max).filter { folderList[folderID]?.meetingIDs.contains($0.id) == true }.prefix(limit))
+    }
 }

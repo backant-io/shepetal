@@ -78,6 +78,17 @@ public struct License: Codable, Equatable, Sendable {
     public init(status: LicenseStatus, trialEndsAt: Date?, email: String) {
         self.status = status; self.trialEndsAt = trialEndsAt; self.email = email
     }
+
+    /// What was paid for, nil for a trial or an expired license. The service has one paid kind today: "active",
+    /// the one-time purchase that never expires (web/API.md), so it is the lifetime plan.
+    public var plan: Plan? { status == .active ? .lifetime : nil }
+}
+
+/// A paid plan. A subscription would add `case subscription(paidThrough: Date)` from the license answer, and
+/// `AccountPolicy.access` has to say how long it holds offline: the switch there does not compile until it does.
+public enum Plan: Equatable, Sendable {
+    /// Bought once: works offline for good.
+    case lifetime
 }
 
 public enum LicenseReply: Equatable, Sendable {
@@ -185,7 +196,8 @@ public enum Access: Equatable, Sendable {
     case trial(daysLeft: Int)
     case lifetime
     case expired
-    /// Signed in, but no good license check in the last 7 days (or none yet).
+    /// Signed in, but no license the service confirmed: none yet, a trial not checked in the last 7 days, or a cache
+    /// whose seal does not match.
     case unchecked
 
     public var allowsDictation: Bool {
@@ -230,9 +242,37 @@ public struct AccountState: Codable, Equatable, Sendable {
     public var lastGoodCheck: Date?
     /// When a check was last tried, answered or not.
     public var lastAttempt: Date?
+    /// HMAC-SHA256 of `license` and `lastGoodCheck`, keyed by the account token, set only from a service answer
+    /// (`AccountPolicy.apply`). The token is in the Keychain, not in this file, so an edit here does not keep a seal.
+    public var seal: String?
 
     public init(license: License? = nil, lastGoodCheck: Date? = nil, lastAttempt: Date? = nil) {
         self.license = license; self.lastGoodCheck = lastGoodCheck; self.lastAttempt = lastAttempt
+    }
+
+    /// This state with its seal for `token`.
+    public func sealed(with token: String) -> AccountState {
+        var s = self
+        s.seal = Data(HMAC<SHA256>.authenticationCode(for: sealedBytes, using: SymmetricKey(data: Data(token.utf8))))
+            .base64EncodedString()
+        return s
+    }
+
+    /// Whether the seal is this license's and check time's under `token`.
+    public func isSealed(with token: String) -> Bool {
+        guard let seal, let code = Data(base64Encoded: seal) else { return false }
+        return HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: sealedBytes, using: SymmetricKey(data: Data(token.utf8)))
+    }
+
+    /// The sealed fields, one per line. Dates are in whole seconds, as the file has them, so a seal made in memory
+    /// still matches after a round trip through the file. The bytes are built by hand rather than with JSONEncoder,
+    /// so an OS update that changes the encoder's output cannot break every seal; `AccountTests` pins them. The
+    /// email comes last because it is the only field that can contain a newline.
+    private var sealedBytes: Data {
+        let iso = ISO8601DateFormatter()
+        let fields = ["shepetal-license-v1", license?.status.rawValue ?? "", license?.trialEndsAt.map(iso.string) ?? "",
+                      lastGoodCheck.map(iso.string) ?? "", license?.email ?? ""]
+        return Data(fields.joined(separator: "\n").utf8)
     }
 
     public static func load(_ url: URL) -> AccountState {
@@ -258,24 +298,24 @@ public struct AccountState: Codable, Equatable, Sendable {
 }
 
 public enum AccountPolicy {
-    /// A license stays valid this long without reaching the service.
+    /// A trial stays valid this long without reaching the service. A lifetime license has no limit.
     public static let offlineGrace: TimeInterval = 7 * 86_400
     public static let checkEvery: TimeInterval = 86_400
     /// After a failed check, try again this much later.
     public static let retryAfterFailure: TimeInterval = 3_600
 
-    public static func access(signedIn: Bool, state: AccountState, now: Date) -> Access {
-        guard signedIn else { return .signedOut }
-        guard let license = state.license, let checked = state.lastGoodCheck,
-              now.timeIntervalSince(checked) <= offlineGrace else { return .unchecked }
-        switch license.status {
-        case .active: return .lifetime
-        case .expired: return .expired
-        case .trial:
-            // The cached end date counts even offline: a trial does not outlive its end by staying offline.
-            guard let end = license.trialEndsAt, end > now else { return .expired }
-            return .trial(daysLeft: Int((end.timeIntervalSince(now) / 86_400).rounded(.up)))
+    /// `token` is the account token, nil when signed out. Only a cache sealed with it counts.
+    public static func access(token: String?, state: AccountState, now: Date) -> Access {
+        guard let token else { return .signedOut }
+        guard let license = state.license, state.isSealed(with: token) else { return .unchecked }
+        switch license.plan {
+        case .lifetime?: return .lifetime  // "Yours forever" and "Works offline", however long it is offline (#254)
+        case nil: break  // a trial or an expired license: the offline grace below
         }
+        guard let checked = state.lastGoodCheck, now.timeIntervalSince(checked) <= offlineGrace else { return .unchecked }
+        // The cached end date counts even offline: a trial does not outlive its end by staying offline.
+        guard license.status == .trial, let end = license.trialEndsAt, end > now else { return .expired }
+        return .trial(daysLeft: Int((end.timeIntervalSince(now) / 86_400).rounded(.up)))
     }
 
     /// A check is due at launch (no attempt yet), 24 h after the last good one, or an hour after a failed one.
@@ -287,15 +327,17 @@ public enum AccountPolicy {
     }
 
     /// Folds a check result into the cache. A 401 signs out (the caller drops the token); a failed
-    /// check keeps the cached license, so the 7-day grace counts from the last good check.
-    public static func apply(_ result: Result<LicenseReply, Error>, to state: AccountState, now: Date) -> (AccountState, signedOut: Bool) {
+    /// check keeps the cached license, so a trial's 7-day grace counts from the last good check. An answer is
+    /// sealed with `token`, the one the check was sent with.
+    public static func apply(_ result: Result<LicenseReply, Error>, to state: AccountState, now: Date,
+                             token: String) -> (AccountState, signedOut: Bool) {
         var s = state
         s.lastAttempt = now
         switch result {
         case let .success(.license(license)):
             s.license = license
             s.lastGoodCheck = now
-            return (s, false)
+            return (s.sealed(with: token), false)
         case .success(.unauthorized):
             return (AccountState(), true)
         case .failure:

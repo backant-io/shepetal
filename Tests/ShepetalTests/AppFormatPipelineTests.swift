@@ -99,7 +99,7 @@ final class AppFormatPipelineTests: XCTestCase {
         XCTAssertTrue(tab.contains("Text(e.shownText.isEmpty ? \"Nothing transcribed\" : e.shownText)"))
         XCTAssertTrue(hub.contains("pipeline.copy(e.shownText)"), "Copy follows the shown text")
         XCTAssertTrue(hub.contains("try pipeline.history.setReverted(e.id, reverted)"))
-        XCTAssertTrue(hub.contains("let text = await finishText(e.rawText, bundleId: e.bundleId, url: e.url).text"), "re-transcribe uses the row's app")
+        XCTAssertTrue(hub.contains("let finished = await finishText(e.rawText, bundleId: e.bundleId, url: e.url)"), "re-transcribe uses the row's app")
     }
 
     func testSettingsShowsFormattingPerApp() throws {

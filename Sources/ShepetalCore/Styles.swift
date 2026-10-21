@@ -12,12 +12,14 @@ public enum Style: String, CaseIterable, Sendable {
 }
 
 public enum Styles {
-    /// Lowercased bundle ids. Work messages: Slack and Teams. Email: Mail, Outlook, Superhuman and Spark.
+    /// Lowercased bundle ids. Work messages: Slack and Teams. Email: Mail, Outlook, Superhuman, Spark, Mimestream,
+    /// Thunderbird and Airmail.
     /// Personal messages: Messages, WhatsApp, Telegram, Signal, WeChat and Messenger.
     static let apps: [String: AppCategory] = [
         "com.tinyspeck.slackmacgap": .work, "com.microsoft.teams2": .work, "com.microsoft.teams": .work,
         "com.apple.mail": .email, "com.microsoft.outlook": .email, "com.superhuman.electron": .email,
-        "com.readdle.smartemail-mac": .email, "com.readdle.sparkdesktop": .email,
+        "com.readdle.smartemail-mac": .email, "com.readdle.sparkdesktop": .email, "com.mimestream.mimestream": .email,
+        "org.mozilla.thunderbird": .email, "it.bloop.airmail2": .email,
         "com.apple.mobilesms": .personal, "net.whatsapp.whatsapp": .personal, "desktop.whatsapp": .personal,
         "ru.keepcoder.telegram": .personal, "com.tdesktop.telegram": .personal,
         "org.whispersystems.signal-desktop": .personal, "com.tencent.xinwechat": .personal,
@@ -29,6 +31,7 @@ public enum Styles {
         "slack.com": .work, "teams.microsoft.com": .work, "teams.live.com": .work, "teams.cloud.microsoft": .work,
         "mail.google.com": .email, "outlook.live.com": .email, "outlook.office.com": .email,
         "outlook.office365.com": .email, "outlook.cloud.microsoft": .email, "mail.superhuman.com": .email,
+        "mail.proton.me": .email, "app.fastmail.com": .email,
         "web.whatsapp.com": .personal, "web.telegram.org": .personal, "messenger.com": .personal,
     ]
 

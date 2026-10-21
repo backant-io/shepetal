@@ -4,34 +4,78 @@ import ShepetalSummary
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Meetings tab: the list on the left, the open meeting's summary, notes and live transcript on the right.
+/// The Meetings tab: All or one folder's meetings on the left, the open meeting's summary, notes and live transcript
+/// on the right.
 @MainActor
 final class MeetingsModel: ObservableObject {
+    enum Tab: String, CaseIterable { case all = "All", folders = "Folders" }
+
     let store: MeetingStoring
     private let copy: (String) -> Void
+    private let pause: () async throws -> Void
+    private var pending: Task<Void, Never>?
+    /// What the list was searched for: `query` once typing pauses. The poll searches for this, never a half-typed word.
+    private var searched = ""
+    /// The store's write count, the tab, folder and query the list was read for; the poll skips the ranked search
+    /// while none of them changed.
+    private var listed: [String]?
 
-    @Published var query = "" { didSet { refresh() } }
+    @Published var query = "" { didSet { searchSoon() } }
+    @Published var tab = Tab.all { didSet { refresh() } }
+    /// The folder the Folders tab shows; its first folder until one is picked.
+    @Published private(set) var folderID: String?
+    @Published private(set) var folders: [MeetingFolder] = []
     @Published private(set) var selectedID: String?
     @Published private(set) var meetings: [Meeting] = []
+    /// The text around each search match, by meeting id; "" with no query.
+    @Published private(set) var snippets: [String: String] = [:]
     @Published private(set) var record: MeetingRecord?
     @Published private(set) var message = ""
 
     /// `copy` writes the general pasteboard; tests pass their own. It runs only from the Copy summary button.
+    /// `pause` is how long typing in the search field has to stop before the store is asked; tests pass their own.
     init(store: MeetingStoring, copy: @escaping (String) -> Void = { text in
-        NSPasteboard.general.clearContents()
+        NSPasteboard.general.clearOnThisMac()
         NSPasteboard.general.setString(text, forType: .string)
-    }) {
+    }, pause: @escaping () async throws -> Void = { try await Task.sleep(for: .milliseconds(250)) }) {
         self.store = store
         self.copy = copy
+        self.pause = pause
     }
 
-    /// Re-reads the list and the open meeting. It publishes only what changed, so the view can poll it.
+    /// F120: each keystroke restarts the pause, so typing a word asks the store once, not once per letter.
+    private func searchSoon() {
+        pending?.cancel()
+        pending = Task { [weak self, pause] in
+            guard (try? await pause()) != nil, !Task.isCancelled else { return }
+            self?.searchNow()
+        }
+    }
+
+    /// Searches for what is in the field now: the pause is over.
+    func searchNow() {
+        searched = query
+        refresh()
+    }
+
+    /// Re-reads the folders, the list and the open meeting. It publishes only what changed, so the view can poll it.
     func refresh() {
         do {
-            let q = query.trimmingCharacters(in: .whitespaces)
-            let list = try q.isEmpty ? store.list(limit: 200) : store.search(q, limit: 200)
-            if list != meetings { meetings = list }
-            if selectedID == nil || !list.contains(where: { $0.id == selectedID }) { selectedID = list.first?.id }
+            let f = try store.folders()
+            if f != folders { folders = f }
+            if tab == .folders, !f.contains(where: { $0.id == folderID }) { folderID = f.first?.id }
+            let folder = tab == .folders ? folderID : nil
+            // The count is read before the search, so a write during it shows on the next poll.
+            let key = [String(store.changes), tab.rawValue, folder ?? "", searched]
+            if key != listed {
+                let hits = tab == .folders && folder == nil ? [] : try store.search(searched, folder: folder, limit: 200)
+                let list = hits.map(\.meeting)
+                if list != meetings { meetings = list }
+                let s = Dictionary(hits.map { ($0.meeting.id, $0.snippet) }, uniquingKeysWith: { a, _ in a })
+                if s != snippets { snippets = s }
+                listed = key
+            }
+            if selectedID == nil || !meetings.contains(where: { $0.id == selectedID }) { selectedID = meetings.first?.id }
             var r = try selectedID.flatMap(store.get)
             // Shown, copied and exported: the summary with the notes merged in. The store keeps the summary as it
             // was written, so the merge reruns whenever the notes change, also after the meeting.
@@ -44,9 +88,53 @@ final class MeetingsModel: ObservableObject {
 
     func select(_ id: String?) {
         guard let id, id != selectedID else { return }
+        // Open in Meetings can ask for a meeting the open folder or the search hides: All, unfiltered, then.
+        // Hub.showMeeting empties the field first, so the search to undo is the one the list shows.
+        if !meetings.contains(where: { $0.id == id }) {
+            if !query.isEmpty { query = "" }
+            pending?.cancel()
+            searched = ""
+            if tab != .all { tab = .all }
+        }
         selectedID = id
         message = ""  // "copied" was about the other meeting
         refresh()
+    }
+
+    func openFolder(_ id: String) {
+        folderID = id
+        refresh()
+    }
+
+    /// F78. A new folder opens in the Folders tab.
+    func createFolder(_ name: String) {
+        change("Folder not created") {
+            folderID = try store.createFolder(name).id
+            tab = .folders
+        }
+    }
+
+    func renameFolder(_ id: String, to name: String) { change("Folder not renamed") { try store.renameFolder(id, to: name) } }
+
+    /// Its meetings stay in All and in their other folders.
+    func deleteFolder(_ id: String) { change("Folder not deleted") { try store.deleteFolder(id) } }
+
+    /// Puts the meeting in the folder, or takes it out when it is in it already; its other folders stay.
+    func toggle(_ meetingID: String, in folderID: String) {
+        change("Folders not saved") {
+            var ids = Set(folders.filter { $0.meetingIDs.contains(meetingID) }.map(\.id))
+            if ids.remove(folderID) == nil { ids.insert(folderID) }
+            try store.setFolders(ids, for: meetingID)
+        }
+    }
+
+    private func change(_ failure: String, _ body: () throws -> Void) {
+        do {
+            try body()
+            refresh()
+        } catch {
+            message = "\(failure): \(error.localizedDescription)"
+        }
     }
 
     /// The non-LLM merge (rule 6). Without the bundled weights the summary stays as written; the notes still show.
@@ -116,6 +204,13 @@ struct MeetingsView: View {
 
     private var sidebar: some View {
         VStack(spacing: 0) {
+            Picker("Show", selection: $model.tab) {
+                ForEach(MeetingsModel.Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: .infinity)
+            .padding(.horizontal, 10).padding(.top, 10)
+            if model.tab == .folders { FolderBar(model: model).padding(.horizontal, 10).padding(.top, 8) }
+
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search meetings", text: $model.query).textFieldStyle(.plain)
@@ -128,10 +223,29 @@ struct MeetingsView: View {
             .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             .padding(10)
 
-            List(selection: Binding(get: { model.selectedID }, set: { model.select($0) })) {
-                ForEach(model.meetings, id: \.id) { MeetingRow(meeting: $0).tag($0.id) }
+            if model.tab == .folders && model.folders.isEmpty {
+                ContentUnavailableView("No folders yet", systemImage: "folder",
+                                       description: Text("Make one with New folder, then add meetings to it from their right-click menu."))
+            } else {
+                List(selection: Binding(get: { model.selectedID }, set: { model.select($0) })) {
+                    ForEach(model.meetings, id: \.id) { m in
+                        MeetingRow(meeting: m, snippet: model.snippets[m.id] ?? "", query: model.query).tag(m.id)
+                            .contextMenu { folderMenu(m.id) }
+                    }
+                }
+                .listStyle(.sidebar)
             }
-            .listStyle(.sidebar)
+        }
+    }
+
+    /// A meeting's right-click menu: a check for each folder it is in. A meeting can be in several.
+    @ViewBuilder private func folderMenu(_ id: String) -> some View {
+        if !model.folders.isEmpty {
+            Menu("Add to folder") {
+                ForEach(model.folders) { f in
+                    Toggle(f.name, isOn: Binding(get: { f.meetingIDs.contains(id) }, set: { _ in model.toggle(id, in: f.id) }))
+                }
+            }
         }
     }
 
@@ -140,6 +254,9 @@ struct MeetingsView: View {
             MeetingDetail(record: r, model: model).id(r.meeting.id)
         } else if !model.query.isEmpty {
             ContentUnavailableView.search(text: model.query)
+        } else if model.tab == .folders {
+            ContentUnavailableView("No meetings in this folder", systemImage: "folder",
+                                   description: Text("Right-click a meeting in All and choose Add to folder."))
         } else {
             ContentUnavailableView("No meetings yet", systemImage: "person.2.wave.2",
                                    description: Text("Recorded calls show up here with a live transcript and a summary written on this Mac."))
@@ -147,8 +264,58 @@ struct MeetingsView: View {
     }
 }
 
+/// The Folders tab's folder picker, with New folder, Rename and Delete.
+private struct FolderBar: View {
+    @ObservedObject var model: MeetingsModel
+    @State private var naming = ""  // the id of the folder being renamed, "" for a new one
+    @State private var asking = false
+    @State private var name = ""
+    @State private var deleting = false
+
+    private var open: MeetingFolder? { model.folders.first { $0.id == model.folderID } }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if !model.folders.isEmpty {
+                Picker("Folder", selection: Binding(get: { model.folderID ?? "" }, set: { model.openFolder($0) })) {
+                    ForEach(model.folders) { Text("\($0.name) (\($0.meetingIDs.count))").tag($0.id) }
+                }
+                .labelsHidden()
+            }
+            Button { name = ""; naming = ""; asking = true } label: {
+                // Its title only while there is no folder picker beside it.
+                if model.folders.isEmpty { Label("New folder", systemImage: "folder.badge.plus") } else { Image(systemName: "folder.badge.plus") }
+            }
+            .help("New folder")
+            if let f = open {
+                Menu {
+                    Button("Rename…") { name = f.name; naming = f.id; asking = true }
+                    Button("Delete…", role: .destructive) { deleting = true }
+                } label: { Image(systemName: "ellipsis.circle") }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Rename or delete this folder")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // The id is captured when the alert opens: the buttons never read state that dismissing it may change.
+        .alert(naming.isEmpty ? "New folder" : "Rename folder", isPresented: $asking, presenting: naming) { id in
+            TextField("Name", text: $name)
+            Button(id.isEmpty ? "Create" : "Rename") { id.isEmpty ? model.createFolder(name) : model.renameFolder(id, to: name) }
+            .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            Button("Cancel", role: .cancel) {}
+        }
+        .confirmationDialog("Delete the folder “\(open?.name ?? "")”?", isPresented: $deleting) {
+            Button("Delete folder", role: .destructive) { if let f = open { model.deleteFolder(f.id) } }
+        } message: {
+            Text("Its meetings are not deleted: they stay in All and in their other folders.")
+        }
+    }
+}
+
 private struct MeetingRow: View {
     let meeting: Meeting
+    /// F120: the text around the search match, its match in bold; "" with no search.
+    var snippet = ""
+    var query = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -161,8 +328,21 @@ private struct MeetingRow: View {
                 Text("\(meeting.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(MeetingFormat.duration(meeting, now: t.date))")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
+            if !snippet.isEmpty {
+                Text(highlighted).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
         }
         .padding(.vertical, 4)
+    }
+
+    private var highlighted: AttributedString {
+        var a = AttributedString(snippet)
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !q.isEmpty, let r = a.range(of: q, options: .caseInsensitive) {
+            a[r].inlinePresentationIntent = .stronglyEmphasized
+            a[r].foregroundColor = .primary
+        }
+        return a
     }
 }
 
@@ -225,7 +405,7 @@ private struct MeetingDetail: View {
             switch pane {
             case .summary: SummaryPane(summary: record.summary, notes: noteLines(record.notes), live: live)
             case .notes: NotesPane(record: record, model: model)
-            case .transcript: TranscriptPane(segments: record.segments, live: live)
+            case .transcript: TranscriptPane(segments: record.segments, live: live, deleted: MeetingFormat.transcriptDeleted(record))
             }
         }
     }
@@ -365,9 +545,13 @@ private struct NotesPane: View {
 private struct TranscriptPane: View {
     let segments: [Segment]
     let live: Bool
+    /// F81: the retention setting deleted it.
+    var deleted: (title: String, detail: String)?
 
     var body: some View {
-        if segments.isEmpty {
+        if segments.isEmpty, let deleted {
+            ContentUnavailableView(deleted.title, systemImage: "clock.badge.xmark", description: Text(deleted.detail))
+        } else if segments.isEmpty {
             ContentUnavailableView(live ? "Listening…" : "No transcript", systemImage: "waveform",
                                    description: Text(live ? "What is said appears here as the call goes on."
                                                           : "Nothing was transcribed in this meeting."))
@@ -406,6 +590,27 @@ struct Bubble: View {
         }
         .frame(maxWidth: 480, alignment: me ? .trailing : .leading)
         .frame(maxWidth: .infinity, alignment: me ? .trailing : .leading)
+    }
+}
+
+/// Settings' "Meeting transcripts" (F81): keep them, or delete them some days after the meeting. A change applies at
+/// once; App's hourly retention keeps applying it. A meeting still recording has no end yet, so no choice reaches it.
+struct TranscriptRetentionPicker: View {
+    let store: MeetingStoring
+    @AppStorage(TranscriptRetention.key) private var days = 0
+    @State private var problem = ""
+
+    var body: some View {
+        Picker("Meeting transcripts", selection: $days) {
+            ForEach(TranscriptRetention.choices, id: \.self) { Text(TranscriptRetention.label($0)).tag($0) }
+        }
+        .onChange(of: days) {
+            do { try store.applyTranscriptRetention(days: days, recording: nil); problem = "" }
+            catch { problem = "Transcripts not deleted: \(error.localizedDescription)" }
+        }
+        Text("Only what was said goes. The summary, your notes and folders stay, and the audio follows Recordings.")
+            .font(.caption).foregroundStyle(.secondary)
+        if !problem.isEmpty { Text(problem).font(.caption).foregroundStyle(.orange) }
     }
 }
 

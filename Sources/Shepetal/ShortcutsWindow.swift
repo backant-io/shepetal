@@ -16,7 +16,7 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
 
     init(tap: FnTap) {
         self.tap = tap
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 325),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 357),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Shepetal shortcuts"
         window.isReleasedWhenClosed = false
@@ -102,7 +102,8 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
     private func refresh() {
         for action in ShortcutAction.allCases {
             let isRecording = recording == action
-            chords[action]?.stringValue = isRecording ? "Press the keys…" : Key.label(tap.router.shortcuts.chord(action))
+            let chord = tap.router.shortcuts.chord(action)
+            chords[action]?.stringValue = isRecording ? "Press the keys…" : chord.isEmpty ? "Not set" : Key.label(chord)
             buttons[action]?.isEnabled = recording == nil || isRecording
         }
         if !tap.isRunning {

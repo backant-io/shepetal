@@ -19,6 +19,14 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Open the DMG copy again. Expected: no question this time (asked once).
 4. With a NEWER build in /Applications, open an older DMG's copy and click Move. Expected: the newer copy opens and nothing is replaced.
 
+### M-MOVE-2: asked once per version, ~/Applications, no downgrade (F124)
+1. Choose Quit shepetal. Move /Applications/Shepetal.app to the Trash. Download `Shepetal-<version>.dmg` in Safari (so it has the quarantine flag; a DMG copied from elsewhere also works, without App Translocation), open it, and drag Shepetal.app from its window into ~/Downloads.
+2. Open ~/Downloads/Shepetal.app from Finder. Expected: "Move Shepetal to Applications?" with Move to Applications and Not Now. Click **Not Now**. Expected: shepetal keeps starting (onboarding or the 🤫 menu) and works from Downloads.
+3. Quit shepetal and open the same copy again. Expected: no question (Not Now is remembered for this build).
+4. Run `defaults delete io.backant.shepetal movePromptVersion`, then open the Downloads copy again and click **Move to Applications**. Expected: shepetal quits and opens again from /Applications (`ps -o comm= -p $(pgrep -x Shepetal)` shows /Applications/Shepetal.app/…), ~/Downloads/Shepetal.app is in the Trash, and the macOS permission prompts (or System Settings › Privacy & Security) name the copy in /Applications.
+5. Optional, the root-owned copy the old .pkg left: `sudo chown -R root:wheel /Applications/Shepetal.app`, drag Shepetal.app from the DMG into ~/Downloads again, run `defaults delete io.backant.shepetal movePromptVersion`, open the Downloads copy and click Move. Expected: it moves to ~/Applications/Shepetal.app and opens from there, and an alert says "shepetal is now in your own Applications folder" and that the copy in /Applications must go to the Trash in Finder. Reset: quit shepetal, move ~/Applications/Shepetal.app to the Trash and run `sudo chown -R $USER:staff /Applications/Shepetal.app`.
+6. Optional, no downgrade: with the newest build in /Applications, drag Shepetal.app from an older release's DMG into ~/Downloads, run `defaults delete io.backant.shepetal movePromptVersion`, open the Downloads copy and click Move. Expected: the /Applications copy opens (`defaults read /Applications/Shepetal.app/Contents/Info CFBundleVersion` is the newer build, and `ps -o comm= -p $(pgrep -x Shepetal)` shows /Applications/Shepetal.app/…), nothing appears in ~/Applications, and ~/Downloads/Shepetal.app stays.
+
 ### M-ONB-1: first-run onboarding
 1. On a fresh macOS user account (or after `tccutil reset All io.backant.shepetal` and `defaults delete io.backant.shepetal onboardingDone`), open Shepetal.
 2. Expected: the "Welcome to Shepetal" window. Microphone, Accessibility and Input Monitoring each show ⚠️ with an Open button, and System Audio Recording (optional) too. Continue is disabled.
@@ -128,6 +136,18 @@ Setup: shepetal installed from the .pkg and running (🤫 in the menu bar), with
 8. Turn the toggle off and hold fn again. Expected: no label, only the red ring.
 (The label's lifecycle, the frame and click-through are covered by `IndicatorTests`. This step checks it in a real screen recording.)
 
+### M-LIVE-1: words while you speak (F13)
+1. Choose Open shepetal in the 🤫 menu, then Settings, and turn on "Show words while you speak".
+2. Click into a TextEdit document, hold fn and talk for about 10 s.
+3. Expected: within about 1.5 s of your first words, they show to the right of 🤫 and keep updating about once a second: only the last few words, after "…" once there are more. 🤫 itself does not move, and nothing is typed into TextEdit while you talk.
+4. Release fn. Expected: the words next to 🤫 go away at once (the blue processing ring has no label), and only the final text is inserted: the whole dictation, about as fast as with the setting off.
+5. Double-tap fn for hands-free and talk. Expected: the words show the same way. Tap fn to stop. Expected: the same as step 4.
+6. Hold fn, talk for about 3 s, then press Esc. Expected: the words are replaced at once by "Cancelled", nothing is inserted, and after 3 s nothing shows next to 🤫.
+7. Hold fn, talk, and click into another window before you release. Expected: nothing is pasted into the other window (the note next to 🤫 says the text is on the clipboard), and the words never took focus.
+8. Turn on creator mode as well, hold fn and talk. Expected: "Dictating with shepetal" shows the whole time, with the words after it ("Dictating with shepetal · …"). Release fn and turn creator mode off again.
+9. Turn "Show words while you speak" off and hold fn again. Expected: only the red ring, no words.
+(The throttle, the 10 s window, the cancel at release, late partials, the creator label and the label's lifecycle are covered by `LiveTextTests`, `LiveCaptionTests` and `IndicatorTests`, and `scripts/e2e-mac.sh` checks partials, a partial running at release and the latency bars with live text on. This step checks real speech from a real mic.)
+
 ### M-FN-1: hold to talk
 1. Click into a TextEdit document. Hold fn, say "Testing one two three, this is a hold to talk check.", then release.
 2. Expected: a red ring while you hold, a pulsing blue ring after release, then the text appears at the cursor. Your earlier clipboard is back (Cmd+V elsewhere pastes what you had copied before).
@@ -201,6 +221,15 @@ Setup: shepetal installed from the .pkg and running (🤫 in the menu bar), with
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
 3. Meetings follow the same choice. Record a short meeting (M-MTG-1, or start and stop one by hand) and leave Shepetal running. Expected about 25 h later: its folder (Me.wav, Others.wav) is gone from `~/Library/Application Support/Shepetal/meetings/`, but the meeting is still in Meetings with its transcript and summary, and search still finds it. Only the audio is deleted, as with dictation. A meeting recorded in the last 24 h keeps its folder, and so does one that is still recording. (The timing is covered by `MeetingStoreTests.testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording`.)
 
+### M-RET-2: meeting transcripts deleted after N days (F81)
+Setup: as in M-MTG-1, with at least one recorded meeting that has a summary and ended before today. Recordings is "Keep recordings".
+1. In Open shepetal > Settings, under Recordings, set Meeting transcripts to "Delete transcripts after 1 day". Expected: the caption under it says only what was said goes, and the summary, your notes and folders stay, while the audio follows Recordings. There is no sound.
+2. Open Meetings and open a meeting that ended more than a day ago, then click Transcript. Expected right away: "Transcript deleted after N days" and "Deleted on DD.MM.YY (today), as set in Settings under Meeting transcripts. The summary and your notes stay." Its Summary and Notes are unchanged, and Copy summary still pastes the summary. Its transcript window (🤫 > Past meetings) shows the summary, then the same line.
+3. In the Meetings search, type a word that was only said in that meeting, and not in its summary or notes. Expected: the meeting is not found. A word from its summary still finds it. Its `Me.wav` and `Others.wav` are still in `~/Library/Application Support/Shepetal/meetings/`.
+4. Record a short meeting (M-MTG-1 steps 1 to 6) and leave shepetal running. Expected while it records and right after: its transcript stays. About 25 h after it ended: the Transcript pane says "Transcript deleted after 1 day", the summary is still there, and its audio files are still in its folder.
+5. Set Meeting transcripts back to Keep transcripts. Expected: new meetings keep their transcripts. Deleted ones stay deleted.
+(The timing is covered by `MeetingStoreTests.testTranscriptRetentionDeletesOnlyTheTranscriptsOfMeetingsEndedBeforeTheCutoff`.)
+
 ### M-ESC-1: Esc cancels and keeps the audio
 1. In TextEdit choose File > Open… so a dialog is open. Hold fn, say a sentence, and press Esc while still holding fn. Release fn.
 2. Expected: nothing is inserted, the ring goes away, and "Cancelled" shows next to 🤫 for about 2 s. The Open dialog is still open, because Shepetal kept that Esc from the app (with Accessibility on).
@@ -211,6 +240,13 @@ Setup: shepetal installed from the .pkg and running (🤫 in the menu bar), with
 ### M-ESC-2: Esc while transcribing
 1. Double-tap fn in TextEdit and talk for about a minute (a longer recording takes longer to transcribe). Tap fn and press Esc right after it, while the ring pulses blue.
 2. Expected: nothing is inserted and "Cancelled" shows. Recent has the entry with its text, marked cancelled in `history.sqlite` (`sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite "select outcome, text from history order by created_at desc limit 1"`). If the text was already inserted, Esc came too late. Try again with a longer recording.
+
+### M-SLOW-1: slow-processing notice (F18)
+1. Run `defaults write io.backant.shepetal slowNoticeSeconds 0.1`, then quit and reopen shepetal.
+2. In TextEdit, hold fn, say a sentence of about ten words and release. Expected: "Still transcribing · long recordings take a moment" shows next to 🤫 while it works, then goes away when the text is pasted. The text is pasted once, into TextEdit.
+3. Start another dictation, release, and press Esc right away. Expected: nothing is pasted and no notice stays.
+4. Run `defaults write io.backant.shepetal slowNoticeSeconds 0`, quit and reopen, and dictate again. Expected: no notice.
+5. Reset: `defaults delete io.backant.shepetal slowNoticeSeconds`, quit and reopen. A normal short dictation shows no notice (default 3 s).
 
 ### M-KEY-1: fn+Space hands-free toggle
 1. In TextEdit, with nothing recording, press fn+Space (fn first) and release both. Expected: the ring turns orange and stays. No space character is typed.
@@ -223,7 +259,7 @@ Setup: shepetal installed from the .pkg and running (🤫 in the menu bar), with
 3. Tap fn once. Expected: the whole dictation is inserted.
 
 ### M-KEY-3: Shortcuts window
-1. In the 🤫 menu choose Shortcuts…. Expected: hold to talk fn, hands-free fn Space, cancel Esc, paste last ⌃ ⌘ V, copy last ⌃ ⌘ C.
+1. In the 🤫 menu choose Shortcuts…. Expected: hold to talk fn, hands-free fn Space, cancel Esc, paste last ⌃ ⌘ V, copy last ⌃ ⌘ C, open notes Not set.
 2. Click Change… next to Paste last transcript and press ⌘Tab. Expected: "⌘ Tab: macOS or most apps already use these keys." and the chord stays ⌃ ⌘ V.
 3. Click Change… again and press A alone, then ⌘ with both Command keys plus A, then fn. Expected, in turn: "Add fn, ⌃, ⌥, ⇧, ⌘ or a mouse button.", "Use one side of a modifier, not both.", "Another action already uses these keys."
 4. Click Change… and press ⌃⌥P. Expected: the row shows ⌃ ⌥ P. Quit and reopen Shepetal. Expected: still ⌃ ⌥ P, and ⌃⌥P now pastes the last text.
@@ -288,6 +324,16 @@ Setup: for steps 4 and 5, the alternative engine's file from `docs/models.md` (L
 5. Mixed language: with English and Japanese checked, say an English sentence, then in a second dictation a Japanese one (or play `say -v Kyoko "明日の会議の資料を、金曜日までに送ってください。"` into the mic). Expected: the English text in English and the Japanese text in Japanese script, each pasted into TextEdit, with no hint next to 🤫. The second dictation is not slower than the first: the engine is not reloaded.
 6. Choose Automatic. Expected: the line goes back to the standard engine.
 
+### M-TRN-1: translate while dictating (F41)
+Setup: macOS 15 or later. German is not downloaded in System Settings > General > Language & Region > Translation Languages (remove it if it is).
+1. Open 🤫 > Languages. Expected: the first item is "Translate to English", unchecked, above Automatic.
+2. Check Translate to English. In TextEdit, dictate "Bitte schick mir den Bericht bis Freitag." Expected: the German is pasted, and "Not translated: download German for translation in 🤫 > Languages" shows next to 🤫 for 4 s. No download prompt opens during the dictation.
+3. Open 🤫 > Languages. Expected: "Download German for translation…" right under Translate to English. Choose it. Expected: a small "shepetal" window that says "Getting German ready for on-device translation…" and the system's download prompt. Approve the download. Expected: "German is ready for translation" shows next to 🤫, the window closes, and the Download item is gone.
+4. Turn Wi-Fi off. Dictate the same German sentence into TextEdit, and time it with a stopwatch from releasing the key to the English landing. Expected: English lands in TextEdit ("Please send me the report by Friday." or close), and TextEdit stays the active app the whole time, with no window showing. Write the time into docs/models.md, Translation (F41) > Latency. In Open shepetal > History, the row's text is the English and its raw text (Show raw) is the German. Turn Wi-Fi back on.
+5. Dictate "Send the report to Anna by Friday." Expected: it lands as said, with no hint.
+6. In History, re-transcribe the row from step 4. Expected: its text is English again.
+7. Uncheck Translate to English, and dictate the German sentence. Expected: the German lands, with no hint.
+
 ### M-DICT-1: personal dictionary
 1. Choose Open shepetal > Settings > Dictionary…. Expected: `dictionary.txt` opens in your default text editor, holding only comment lines that explain the format. `ls -l ~/Library/Application\ Support/Shepetal/dictionary.txt` shows `-rw-------`.
 2. Add the lines `GitHub` and `asap => as soon as possible`, save, and without restarting Shepetal dictate "push it to github asap".
@@ -302,16 +348,47 @@ Setup: for steps 4 and 5, the alternative engine's file from `docs/models.md` (L
 6. If you speak Spanish, dictate "las redes sociales están llenas de ruido hoy" (or a sentence in another language you speak that has a word close to Redis or Postgres). Expected: the sentence as spoken, with "redes" kept. The dictionary does not change a dictation in another language.
 7. Turn Wi-Fi off, quit and relaunch shepetal, and dictate the sentence from step 2. Expected: the same text as in step 4.
 
+### M-SNIP-1: snippets (F40)
+1. Choose Open shepetal > Settings > Snippets…. Expected: `snippets.toml` opens in your text editor (TextEdit when no app opens .toml files), holding only comment lines that explain the format. `ls -l ~/Library/Application\ Support/Shepetal/snippets.toml` shows `-rw-------`.
+2. Add these two lines and save:
+   `"my address" = "221B Baker Street\nLondon"`
+   `"my signature" = "**Ada Lovelace**\n[backant.io](https://backant.io)"`
+3. Without restarting shepetal, click into the middle of a sentence in a TextEdit rich-text document and dictate "My address." Expected: two lines, "221B Baker Street" and "London", exactly as written: no added space, no lowercase, no period.
+4. Dictate "Send it to my address please". Expected: the sentence with the address in place of "my address".
+5. In a new Mail message, dictate "my signature". Expected: "Ada Lovelace" in bold, a new line, then "backant.io" as a link to https://backant.io, in the message's own font. Do the same in the TextEdit rich-text document: bold and a link.
+6. In TextEdit, choose Format > Make Plain Text and dictate "my signature". Expected: "Ada Lovelace" and "backant.io" on two lines, with no `**`, brackets or tags.
+7. In Terminal, run `cat`, dictate "my signature", then press Ctrl+C. Expected: the same two plain lines, with no markup.
+8. Edit "my address" in the file, save, and dictate it again. Expected: the new text, without restarting.
+
 ### M-STYLE-1: styles per app category (F37)
 1. Open shepetal > Settings > Dictionary… and add the line `GitHub` if it is not there yet. Save.
 2. Open shepetal > Settings. Expected: a Styles group with four pickers: Work messages, Personal messages, Email and Other apps. Each one is on Formal and has an example sentence under it. Switch Work messages through Casual, Very casual and Excited. Expected: the example under it changes each time: no comma after the greeting and no final period, then all lowercase, then a "!" at the end. Set Work messages to Casual and Personal messages to Very casual. Leave Email and Other apps on Formal.
 3. In TextEdit, dictate "Hey Anna, I pushed the fix to GitHub." Expected: the same text as before styles, with the comma and the final period (TextEdit is Other, which is on Formal).
 4. In the Slack app, click into a message box and dictate the same sentence. Expected: "Hey Anna I pushed the fix to GitHub": capitals kept, no comma after "Anna" (when the speech engine wrote one), no final period. If the speech engine wrote "Hey, Anna, …", the comma after "Hey" goes and the one after "Anna" may stay; note what you got. Then dictate "Can you review it today?". Expected: it ends in "?".
 5. In Messages, dictate the same sentence. Expected: "hey anna i pushed the fix to GitHub": all lowercase, "i" too, no final period, and "GitHub" as in the dictionary.
-6. In Mail, in a new message's body, dictate the same sentence. Expected: unchanged from TextEdit (Email is on Formal). Set Email to Excited and dictate "The contract is signed." Expected: "The contract is signed!"
+6. In Mail, in a new message's body, dictate the same sentence. Expected: the words as in TextEdit (Email is on Formal), laid out as an email (F36): "Hey Anna,", a blank line, then "I pushed the fix to GitHub." Set Email to Excited and dictate "The contract is signed." Expected: "The contract is signed!"
 7. In Safari or Chrome, open Slack at app.slack.com, click into a message box, and dictate the sentence from step 3. Expected: Casual, as in step 4.
 8. In Open shepetal > History, choose Re-transcribe on the Messages row from step 5. Expected: the row's text is very casual again, even though the shepetal window is the app in front.
 9. Quit shepetal from the 🤫 menu and open it again. Expected: Settings still shows the picks from steps 2 and 6. Set all four back to Formal and dictate in Slack. Expected: the text has the comma and the final period again.
+
+### M-EMAIL-1: email layout and signature (F36)
+1. Open shepetal > Settings. Expected: an Email section with an empty Signature field and a note that lists the email apps. Leave the field empty.
+2. In Mail, open a new message and click into the body. Hold fn and say "Hi Anna, thanks for the update. Best regards." Expected: "Hi Anna,", a blank line, "Thanks for the update.", a blank line, then "Best regards," with nothing under it.
+3. Type "Pavel" into Settings > Email > Signature. Dictate the same sentence into Mail again. Expected: the same layout, with "Pavel" on the line under "Best regards,". Then say "Thanks for the call. Cheers, Anna". Expected: "Thanks for the call.", a blank line, "Cheers,", then "Anna" below it, not Pavel.
+4. In Safari, open Gmail (mail.google.com), start a new message, click into the body and dictate the sentence from step 2. Expected: the same layout as in step 3.
+5. In Notes, dictate the sentence from step 2. Expected: one line, as dictated, with no line breaks and no signature.
+6. In Mail, say "Hallo Anna, wie geht es dir? Viele Grüße". Expected: "Hallo Anna,", a blank line, "wie geht es dir?", a blank line, "Viele Grüße" (no comma), then "Pavel".
+7. In Settings > Formatting per app, set Mail to Raw and dictate the sentence from step 2 into Mail. Expected: one line, as heard. Set Mail back to Default, then clear the signature.
+
+### M-VOICE-1: My voice (F38)
+Needs the cleanup model ("Cleanup: On" on Home).
+1. Open shepetal > Settings. Expected: a My voice group with one field for how your text should read and three Writing sample fields, a Save button (it can be clicked only after a change), and a note under them.
+2. Type `Never use exclamation marks. Always use contractions.` in the first field, and `Can't make it today, I'll send the notes tonight.` and `I don't think it's ready yet, let's wait for the review.` as samples 1 and 2. Click Save. Expected: Save can no longer be clicked. In Finder, `~/Library/Application Support/Shepetal/voice.json` exists, and `ls -l` on it shows `-rw-------`.
+3. In TextEdit, hold fn and say "I do not think we can make the demo on Friday!" Release. Expected: "I don't think we can make the demo on Friday." without "!", within about a second of release. On a Mac with less than 16 GB, which uses the smaller model, the "!" may stay.
+4. Hold fn and say "Send it to John, I mean Jane, it is urgent." Release. Expected: the correction is made ("Send it to Jane, ..."); "it is" may become "it's".
+5. Hold fn and say "What is the capital of Australia?" Release. Expected: the question as you said it, never an answer. Say "Can you translate this into German?". Expected: that sentence in English, never a German one.
+6. Set Settings > Styles > Other apps to Excited. Dictate "We are done." in TextEdit. Expected: it ends with "!" (the style runs after My voice). Set Other apps back to Formal.
+7. Clear the field and every sample, then click Save. Expected: voice.json is gone. Dictate "I do not think so." Expected: "I do not think so." as before F38.
 
 ### M-FMT-1: formatting per app (F33)
 1. Hold fn and say "um, on the fifth of march" into a TextEdit document, then do the same at a Terminal prompt. Do not press Return in Terminal. Expected: both get "On 05.03.". In Terminal the first letter may be lowercase ("on 05.03."): the cursor fit lowercases the first word after a shell prompt when shepetal can read the line. Both are a pass.
@@ -362,6 +439,17 @@ Setup: for steps 4 and 5, the alternative engine's file from `docs/models.md` (L
 4. Say only "press enter". Expected: nothing is pasted or sent; the note says "Say the text first, then “press enter”."
 5. Say "press enter to continue" (mid-sentence): it is pasted as text and nothing is sent.
 6. Turn the setting off and say "see you soon press enter": the phrase is pasted as text and nothing is sent.
+
+### M-LINK-1: insert a copied link by voice (F28)
+1. Quit shepetal from the 🤫 menu and open it again. Only links copied after launch are kept.
+2. In Safari, open https://example.com. Click the address bar and press ⌘C. If macOS asks whether shepetal may paste, that is the pasteboard-privacy limit (#259): note the macOS version and what you chose. After that alert, F28 works only once shepetal is set to Always Allow in System Settings.
+3. In an empty TextEdit document, hold fn, say "here it is insert link" and release. Expected: "Here it is https://example.com/", with the link where the command was and no "insert link". A comma after "is" is fine if the engine wrote one.
+4. In Safari, open https://www.apple.com and copy the address the same way. Say "the first one was insert link two". Expected: the example.com link. Then say "insert the last link". Expected: the apple.com link.
+5. Say "send me that link". Expected: pasted as text, with no link. Say "insert link five". Expected: the words stay as text, since only two links are kept.
+6. In a password manager (Passwords, 1Password or Bitwarden), copy a password. Then say "insert link" in TextEdit. Expected: the apple.com link, never the password.
+7. In TextEdit, type `https://us02web.zoom.us/j/123?pwd=abc123`, select it and press ⌘C. Say "insert link". Expected: the words "insert link" stay as text. Neither the Zoom link nor the apple.com link is pasted. A link with a password, code or token in it is never kept, but it still counts as the last link copied. Then say "insert link two". Expected: the apple.com link.
+8. Open shepetal > History. Expected: the row from step 3 reads "Here it is, insert link." (or as heard). The link never goes into the history. Choose Re-transcribe on that row. Expected: "insert link" stays as words.
+9. Quit shepetal and open it again. Say "insert link". Expected: the words stay as text, because links are kept in memory only.
 
 ### M-DATE-1: spoken dates become numbers (F32, docs/text-rules.md)
 1. In an empty TextEdit document, hold fn and say "Twenty sixth of July twenty twenty-six." Expected: "26.07.26."
@@ -416,7 +504,7 @@ Setup: for steps 4 and 5, the alternative engine's file from `docs/models.md` (L
 
 ### M-MENU-1: the 🤫 menu
 Setup: all three permissions granted, speech recognition loaded, the cleanup model downloaded on an Apple Silicon Mac (M-CLEAN-1), no words in `dictionary.txt` or dictionary support downloaded (M-DICT-2), signed in with a trial of more than 7 days (or a build from source that does not require sign-in, signed in), at least one meeting recorded and at least one dictation.
-1. Click 🤫 in the menu bar. Expected, top to bottom with a separator between each group: Record meeting, Past meetings › | Open shepetal | Paste last transcript with ⌃⌘V right-aligned, Recent › | Shortcuts…, Microphone ›, Languages ›, Turn off dictation in <the app you were in> (M-BLOCK-1) | Help center, Send feedback… | Quit shepetal with ⌘Q right-aligned. Check for Updates… is there, enabled, only in a release build (Sparkle), in its own group after Open shepetal; a build from source has none. Nothing above Record meeting, no emoji besides 🤫 in the menu bar, and "shepetal" in lowercase. No item is greyed out anywhere, in the submenus too: every line can be clicked and does something.
+1. Click 🤫 in the menu bar. Expected, top to bottom with a separator between each group: Record meeting, Past meetings › | Open shepetal, Notes… | Paste last transcript with ⌃⌘V right-aligned, Recent › | Shortcuts…, Microphone ›, Languages ›, Turn off dictation in <the app you were in> (M-BLOCK-1) | Help center, Send feedback… | Quit shepetal with ⌘Q right-aligned. Check for Updates… is there, enabled, only in a release build (Sparkle), in its own group after Open shepetal and Notes…; a build from source has none. Nothing above Record meeting, no emoji besides 🤫 in the menu bar, and "shepetal" in lowercase. No item is greyed out anywhere, in the submenus too: every line can be clicked and does something.
 2. Hover Recent. Expected: the last dictations that have text, with no heading and no "(too short)" lines. Click one, then ⌘V in TextEdit: its text. With nothing dictated yet, the menu has no Recent.
 3. Choose Help center. Expected: https://shepetal.backant.io/help opens in the browser. Until the help pages from #84 are merged and deployed, that URL is a 404 page: the item works, the page does not exist yet. Choose Send feedback…. Expected: a new mail to founder@backant.io with the subject "shepetal feedback".
 4. In System Settings > Privacy & Security > Accessibility, turn Shepetal off. Open the menu. Expected: "Permissions needed…" at the very top with a yellow mark; choosing it opens the Permissions window. Turn Shepetal back on: the line is gone the next time the menu opens.
@@ -520,6 +608,14 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 3. Hover a square from an earlier day you dictated on. Expected: that day's date and words. A day without dictations shows "0 words".
 4. Switch System Settings › Appearance between Light and Dark. Expected: the empty and filled squares stay visible in both.
 
+### M-SHARE-1: share stats card (F118)
+1. Dictate a few times in TextEdit. Choose Open shepetal in the 🤫 menu and go to Home. Click **Share stats…** (under Insights).
+2. Expected: a sheet with a dark card that shows 🤫 shepetal, your words, words per minute and (if you have one) the day streak, matching Your stats › All time and Insights. It names no model. The caption says nothing is uploaded.
+3. Click **Copy**, then paste in Messages (or Notes). Expected: the card appears as an image.
+4. Click **Save…** and save to the Desktop. Expected: `shepetal-stats.png`, 1200 × 630 px, opens in Preview.
+5. Click **Post…**. Expected: the browser opens an x.com post with the text "I've dictated N words with shepetal at W words per minute…" filled in. Nothing is posted until you send it there. Close the tab.
+6. Opening the sheet alone opens no browser and leaves the clipboard unchanged.
+
 ### M-NOTICE-1: recent notices on Home (F100)
 1. Tap fn once briefly. Expected: "Hold fn to talk · double-tap for hands-free" shows next to 🤫 for about 3 s.
 2. Open a TextEdit document and Notes. Click into the TextEdit document, double-tap fn and say "notices check one two". Click into a Notes note, then tap fn once to stop. Expected: nothing is pasted, focus stays on Notes, and "The window changed while you spoke. The text is on the clipboard: press ⌘V to paste it." shows next to 🤫.
@@ -535,6 +631,18 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 4. Repeat 2 and 3 with Shortcuts… (🤫 menu), Permissions… (Settings tab) and What's new… (Home) open, and with the meeting transcript window open after a recorded meeting (M-MTG-1). Expected: each one follows at once.
 5. In Light, on a light wallpaper, tap fn briefly. Expected: the short-press hint next to 🤫 is white on a dark plate and readable for its 3 s. If the meeting card ("Meeting detected · …") shows, it is dark in Light too.
 6. Expected: there is no theme setting in shepetal. It follows the system on purpose.
+
+### M-NOTE-1: scratchpad notes (F55)
+1. Choose Shortcuts… in the 🤫 menu. Expected: an "Open notes" row reading "Not set". Click its Change… and press ⌃⌥N. Expected: the row reads ⌃⌥N.
+2. Click into TextEdit and press ⌃⌥N. Expected: shepetal's notes window comes to the front with an empty "Untitled" note, and the cursor is in its text. TextEdit gets no "n". Press ⌃⌥N again. Expected: the same window and the same note, with no second note.
+3. Type "Shopping" as the title. Expected: the tab is named Shopping. Click into the text, hold fn and dictate a sentence. Expected: the text lands in the note (rule 8: the note kept focus), and ⌘Z undoes it.
+4. Click + in the tab bar, or New note under the list. Expected: a second note opens as a second tab of the same window, and the list shows both. In the list, click the first note. Expected: its tab is selected, with no third tab.
+5. In the second note, click the pin. Expected: a Pinned section at the top of the list holds that note, and the other note is under Notes.
+6. Click into TextEdit and choose Notes… in the 🤫 menu. Expected: the notes window comes back to the front.
+7. Type a word into a note and, within a second, choose Quit shepetal in the 🤫 menu. Open shepetal again and press ⌃⌥N. Expected: both notes are there, the pinned one first, and the last word was saved. `ls -l ~/Library/Application\ Support/Shepetal/notes.sqlite` shows `-rw-------`.
+8. Click the trash on a note and confirm. Expected: its tab closes and the note is gone from the list, and still gone after a relaunch.
+9. Shortcuts… › Reset to defaults. Expected: Open notes reads "Not set", and ⌃⌥N in TextEdit does nothing in shepetal.
+(The store, the order, the 0600 file, tabs, pinning, autosave and the editing keys are covered by `NotesTests`, `NotesWindowTests` and `ShortcutsTests.testOpenNotesFiresOnlyOnceBoundAndIsKept`. This step checks real windows, real keys and a real dictation.)
 
 ### M-CTX-1: app and page URL
 1. Dictate into TextEdit, into a text field in Safari, and into a text field in Chrome (for example a GitHub comment box).
@@ -566,6 +674,7 @@ Setup: quit Shepetal, run `scripts/make-app.sh --install` from main, and open `/
 10. Not now: join a Zoom meeting and click Not now on the card. Expected: the card goes, nothing records (no red ring, "🤫" in the menu bar, "Record meeting" in the menu), no new meeting appears under Meetings, and the card does not come back while you stay in that meeting. Leave it.
 11. Timeout: join again and leave the card alone. Expected: it goes away by itself after about 20 s and nothing records. 🤫 > Record meeting still records the rest of this meeting by hand (listed as "Manual"); stop it from the menu.
 12. Always record: in Open shepetal > Settings, turn on "Always record meetings automatically". Join a Zoom meeting. Expected: no card; about 5 s after Zoom opens the mic, "Meeting detected · recording" next to 🤫, the red ring, "🤫●", and "Stop meeting recording" in the menu. Stop meeting recording ends it. Turn the setting off again.
+13. Silence end (F67): run `defaults write io.backant.shepetal meeting.silenceEnd 40`, then quit shepetal from the 🤫 menu and open it again. Wait until a dictation works (the speech model is loaded). Join a Zoom meeting and click Record on the card. Then everyone stays silent: no one speaks on either side, and no one types. The model can write typing or room noise as words, such as "(keyboard clicking)", "*typing*" or "Thank you.", and words keep the meeting going. If it does not end, open the meeting in Meetings and write down any line in the transcript from the silent part: that line kept it going. Expected within about 70 s, while you are still in the call: "Meeting ended · no one spoke for 40 s" shows next to 🤫, then "Meeting notes ready · open Shepetal → Meetings". The red ring goes away, the menu bar shows "🤫", the menu shows "Record meeting", and the card does not come back for this call. The meeting is listed in Meetings, and its folder still holds Me.wav and Others.wav. Next, choose 🤫 > Record meeting and talk with the other side for 2 min, never silent for 40 s. Expected: it keeps recording until you choose Stop meeting recording, and the hint is "Meeting recording saved". Last, run `defaults delete io.backant.shepetal meeting.silenceEnd` and restart shepetal (the default is 2 min again).
 
 ### M-MTG-2: Google Meet in a browser
 Setup: as in M-MTG-1. Shepetal needs no Screen Recording access; if you added it for an older build, you can leave it or remove it.
@@ -624,6 +733,23 @@ Setup: as in M-MTG-1.
 4. In the Meetings tab, open the meeting's Notes, add the line `I'll book the retro tomorrow`, then click Summary. Expected: "book the retro" (Me, tomorrow) is now among the action items, without recording again.
 5. Click Copy summary and paste into TextEdit. Expected: `## Your notes` comes right after the first line, with each note as `- ` plus the line, and before `## Overview`. Click Export Markdown…, save, and open the file. Expected: the same notes section, with the transcript at the end.
 6. Type `Kate` in the Meetings search field. Expected: the meeting is listed, found by its notes.
+
+### M-MTG-12: folders and search in Meetings (F78, F120)
+Setup: as in M-MTG-1, with at least three recorded meetings, one of which said "budget" (M-MTG-1 step 5). Steps 1 to 7 are folders (F78), steps 8 to 13 search (F120).
+1. Open shepetal > Meetings. Expected: an All | Folders switch above the search field. All is selected and lists every meeting newest first, as before.
+2. Click Folders. Expected: "No folders yet" and a New folder button. Click New folder, type `Clients` and click Create. Expected: Clients opens, and the detail says "No meetings in this folder".
+3. Click All. Right-click the newest meeting > Add to folder > Clients, then do the same for the oldest one. Expected: each one's Add to folder menu shows Clients checked. Click Folders. Expected: "Clients (2)" lists those two, newest first.
+4. Click the new-folder button (the folder with a +) and make `Launch`. In All, add the oldest meeting to Launch too. Expected: its Add to folder menu has both folders checked.
+5. With Launch open in Folders, use ⋯ > Rename… to rename it `Beta launch`. Then use ⋯ > Delete…. Expected: the dialog says its meetings are not deleted. Confirm. Expected: Clients opens, and the oldest meeting is still in Clients and in All.
+6. Quit shepetal from the 🤫 menu and open it again. Expected: Clients still holds its two meetings.
+7. In All, right-click one of Clients' meetings > Add to folder > Clients, to uncheck it. Expected: it leaves Clients and stays in All.
+Search (F120), with Clients holding one or more meetings and some meetings outside it:
+8. In All, type `budget` quickly. Expected: the list updates once, shortly after you stop typing, not after each letter. Under each result is a grey line with the words around "budget", in bold, cut at whole words with "…".
+9. Expected: the meeting where "budget" matters most (for example, in its summary or several times) is first. Equal matches are newest first.
+10. Type a 2-letter word from a transcript, for example `Q3`. Expected: found, with the text around it under the row.
+11. Type `zoom`. Expected: the zoom.us meetings are listed, with no grey line, because the match is the app name the row already shows.
+12. Click Folders, open Clients, and type `budget`. Expected: only Clients' meetings that match are listed, and a matching meeting outside Clients is not. Clear the search. Expected: all of Clients' meetings are listed again.
+13. With Clients open, open the transcript window of a meeting that is not in Clients (🤫 > Past meetings) and click Open in Meetings. Expected: Meetings switches to All with the search cleared and opens that meeting.
 
 ### M-EXP-1: export my data (F64)
 1. Have a few dictations (archive one in History, and dictate one sentence with a comma and a quote in it), one meeting with a summary, and a word in Settings › Dictionary…. In Settings, click "Export my data…". Expected: a folder panel with an Export button. Click Cancel. Expected: nothing is written anywhere.

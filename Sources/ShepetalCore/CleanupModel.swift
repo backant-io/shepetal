@@ -11,10 +11,13 @@ public protocol CleanupModel: AnyObject, Sendable {
     /// The same, with the text around the cursor for reference (F24). A model that cannot use it gets the
     /// default, which ignores it.
     func rewrite(_ text: String, context: CleanupContext) throws -> String
+    /// The same, written in the user's voice (F38). A model that cannot use it gets the default, which ignores it.
+    func rewrite(_ text: String, context: CleanupContext, voice: MyVoice) throws -> String
 }
 
 extension CleanupModel {
     public func rewrite(_ text: String, context: CleanupContext) throws -> String { try rewrite(text) }
+    public func rewrite(_ text: String, context: CleanupContext, voice: MyVoice) throws -> String { try rewrite(text, context: context) }
 }
 
 /// The text around the cursor that the model may look at, when Settings' "Use the text around the cursor to clean
@@ -83,11 +86,15 @@ public enum SmartCleanup {
     /// text would overrun the model's context.
     public static let maxModelWords = 150
 
-    /// `context` is the text around the cursor (F24); `.none` unless the user turned it on.
-    public static func apply(_ raw: String, model: CleanupModel?, context: CleanupContext = .none) -> Result {
-        let ruled = Cleanup.apply(raw), list = context.listNumber
-        guard let model, needsModel(ruled) || (list > 0 && has(nextItem, ruled)), words(ruled).count <= maxModelWords,
-              let out = try? model.rewrite(ruled, context: context), accepts(out, for: ruled, list: list) else {
+    /// `context` is the text around the cursor (F24); `.none` unless the user turned it on. `voice` is My voice
+    /// (F38): with one, every dictation goes to the model, since any of them may need the user's voice, and the
+    /// guard lets contractions change.
+    public static func apply(_ raw: String, model: CleanupModel?, context: CleanupContext = .none,
+                             voice: MyVoice = .none) -> Result {
+        let ruled = Cleanup.apply(raw), list = context.listNumber, voiced = !voice.isEmpty
+        guard let model, (voiced && !ruled.isEmpty) || needsModel(ruled) || (list > 0 && has(nextItem, ruled)),
+              words(ruled).count <= maxModelWords, let out = try? model.rewrite(ruled, context: context, voice: voice),
+              accepts(out, for: ruled, list: list, contractions: voiced) else {
             return Result(text: ruled, usedModel: false)
         }
         return Result(text: out, usedModel: true)
@@ -133,7 +140,16 @@ public enum SmartCleanup {
     /// So a rewrite that keeps the taken-back words ("Send it to John"), swaps the halves, drops a cue but keeps
     /// what it took back, answers a question, or drops a clause elsewhere is rejected and the rules' text is used.
     /// `list` is the list number on the line above the cursor (`CleanupContext.listNumber`): numbering may go on from it.
-    public static func accepts(_ out: String, for input: String, list: Int = 0) -> Bool {
+    /// With `contractions` (My voice, F38), both texts are compared with their contractions spelled out, so "do not"
+    /// may become "don't" and back. "I mean it's" keeps a comma when spelled out ("I mean, it is"), so it stays a
+    /// cue, as above, and "I mean it is" stays emphasis.
+    public static func accepts(_ out: String, for input: String, list: Int = 0, contractions: Bool = false) -> Bool {
+        if contractions {
+            let spell = { (s: String) in
+                MyVoice.spellOut(s.replacingOccurrences(of: #"(?i)\b(i mean) (?=it['’])"#, with: "$1, ", options: .regularExpression))
+            }
+            return accepts(spell(out), for: spell(input), list: list)
+        }
         guard out.contains(where: \.isLetter) else { return false }
         let said = tokens(input)
         let written = tokens(replace(listNumber, in: out)).map(\.word)
