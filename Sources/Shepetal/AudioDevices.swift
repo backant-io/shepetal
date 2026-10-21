@@ -56,8 +56,10 @@ enum AudioDevices {
         var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioObjectPropertyScopeInput,
                                                  mElement: kAudioObjectPropertyElementMain)
         var size: UInt32 = 0
+        // CADefaultDeviceAggregate-<pid>-<n> is the device AVAudioEngine makes of the default input and output while
+        // it runs (ours too): not a mic, and a new one at every launch ("New mic: CADefaultDeviceAggregate-…").
         guard AudioObjectGetPropertyDataSize(id, &address, 0, nil, &size) == noErr, size > 0,
-              let uid = string(id, kAudioDevicePropertyDeviceUID) else { return nil }
+              let uid = string(id, kAudioDevicePropertyDeviceUID), !uid.hasPrefix("CADefaultDeviceAggregate-") else { return nil }
         var transport: UInt32 = 0
         var tsize = UInt32(MemoryLayout<UInt32>.size)
         var taddress = Self.address(kAudioDevicePropertyTransportType)

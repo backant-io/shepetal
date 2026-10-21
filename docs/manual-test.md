@@ -185,6 +185,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Open the dictation in the hub and play it. Expected: the recording plays back raw, with the background noise still in it. Only the text was made from the isolated voice.
 4. If words go missing in a quiet room, lower the effect with `defaults write io.backant.shepetal voiceIsolationMix -float 50` (percent, default 100; 0 turns it off) and relaunch.
 
+### M-MIC-7: every dictation records (21.10.26 retest: empty WAVs)
+1. With the system input on MacBook Pro Microphone and Microsoft Teams (or Zoom, BlackHole) installed, hold fn, say a sentence, release. Expected: the text is inserted, no "No audio from the microphone", and the newest WAV in Open recordings folder is longer than 44 bytes.
+2. Set System Settings > Sound > Input to Microsoft Teams Audio. Open 🤫 > Microphone. Expected: "Automatic (MacBook Pro Microphone)", and a dictation records your voice. Set the input back.
+3. Choose the iPhone or a USB mic in 🤫 > Microphone (not the system input) and dictate. Expected: it records, and the menu lists no CADefaultDeviceAggregate device.
+4. The mic's log, without any audio or text: `/usr/bin/log show --last 10m --predicate 'process == "Shepetal" AND eventMessage BEGINSWITH "shepetal: mic"'` (zsh's own `log` command shadows /usr/bin/log). Expected: one "opened <mic>" line per dictation, at most one "configuration change" line after it, and no "dictation ended" line.
+
 ### M-LANG-1: languages
 1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
 2. Check Deutsch and Français. Expected: the menu's model line stays "Model: parakeet-tdt-0.6b-v3" (no reload). Say a German sentence. Expected: German text.
