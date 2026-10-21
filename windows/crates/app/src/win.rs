@@ -238,7 +238,6 @@ pub fn run() {
     let t0 = Instant::now();
     let ms = |at: Instant| at.saturating_duration_since(t0).as_millis() as u64;
     let mut paused = false;
-    let mut meeting_app = String::new();
     let card = card.map_err(|e| flow.error(&format!("Shepetal can't offer to record meetings: {e}"), 0)).ok();
     loop {
         let msg = rx.recv_timeout(Duration::from_millis(50));
@@ -277,7 +276,7 @@ pub fn run() {
             }
             Ok(Msg::Meeting(notice)) => {
                 match notice {
-                    meetings::Notice::Event(e) => match (meeting::show(&e, &mut meeting_app), &card) {
+                    meetings::Notice::Event(e) => match (meeting::show(&e), &card) {
                         (Show::Offer(label), Some(card)) => card.offer(&label),
                         (Show::Withdraw, Some(card)) => card.hide(),
                         (Show::Hint(text), _) => flow.show.show_hint(text, HINT),
