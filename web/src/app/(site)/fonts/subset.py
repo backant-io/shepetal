@@ -1,6 +1,6 @@
 # Instance and subset the brand fonts for the website, renamed as the OFL and identity.md ask for modified fonts.
 # From the repo root, with fontTools and brotli installed:
-#   python3 web/src/app/'(site)'/fonts/subset.py brand/fonts/desktop/Newsreader-Variable.ttf web/src/app/'(site)'/fonts/shepetal-serif.woff2 "shepetal Serif" "{'wght': (300, 440), 'opsz': (16, 72)}"
+#   python3 web/src/app/'(site)'/fonts/subset.py brand/fonts/desktop/Newsreader-Variable.ttf web/public/fonts/shepetal-serif.woff2 "shepetal Serif" "{'wght': (300, 440), 'opsz': (16, 72)}"
 #   python3 web/src/app/'(site)'/fonts/subset.py brand/fonts/desktop/HankenGrotesk-Variable.ttf web/src/app/'(site)'/fonts/shepetal-sans.woff2 "shepetal Sans" "{'wght': (400, 700)}"
 import sys
 from fontTools.ttLib import TTFont
