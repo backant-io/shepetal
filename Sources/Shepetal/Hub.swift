@@ -314,7 +314,7 @@ private struct SettingsTab: View {
     @AppStorage(MediaControl.pauseKey) private var pauseWhileDictating = false
     @AppStorage(PressEnter.key) private var pressEnterCommand = false
     @AppStorage(Streak.noticesKey) private var milestoneNotices = true
-    @AppStorage(CleanupContext.settingKey) private var useTextAroundCursor = false
+    @AppStorage(CleanupContext.settingKey) private var useTextAroundCursor = true
 
     var body: some View {
         Form {

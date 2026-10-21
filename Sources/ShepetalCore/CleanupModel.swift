@@ -18,13 +18,16 @@ extension CleanupModel {
 }
 
 /// The text around the cursor that the model may look at, when Settings' "Use the text around the cursor to clean
-/// up dictation" is on (F24, off by default; Wispr's `useAxContext`): the last 500 characters before the cursor,
-/// the first 500 after it and the selection, each cut at a word boundary. Reference only: the word guard still
-/// rejects any word the user did not say. Never logged or stored, so `description` gives only the lengths.
+/// up dictation" is on (F24, on by default since Pavel's call of 2026-10-21; Wispr's `useAxContext`): the last 500
+/// characters before the cursor, the first 500 after it and the selection, each cut at a word boundary. Reference
+/// only: the word guard still rejects any word the user did not say. Never logged or stored, so `description` gives
+/// only the lengths.
 public struct CleanupContext: Equatable, Sendable, CustomStringConvertible {
     public static let settingKey = "cleanup.textAroundCursor"
     public static let limit = 500
     public static let none = CleanupContext(before: "", after: "", selected: "")
+    /// The setting, on unless the user switched it off.
+    public static func isOn(_ defaults: UserDefaults) -> Bool { defaults.object(forKey: settingKey) as? Bool ?? true }
 
     public let before: String
     public let after: String

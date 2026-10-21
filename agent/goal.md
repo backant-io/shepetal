@@ -118,7 +118,7 @@ On Pavel's Mac: Apple M4 Pro, 24 GB, macOS 15.7, Xcode 26.3 with the iOS 26.3 si
   - Run from a clean clone, with the exact commands in each README and the real output in the PR.
 - **Headless end-to-end on Mac.** The app has a debug entry point that runs the real pipeline on an audio file (`say`-generated): STT → cleanup → history + audio file → insertion into a test text field the app owns. The test checks the inserted text and the saved audio.
 - **Visible UI.** Launch the built Mac app and take a screenshot (screencapture) to show the 🤫 indicator in the bottom-left corner and the short-press hint. If screen capture isn't permitted, the cell becomes `hand-test`.
-- **Accuracy and speed.** On the dictation fixtures, the default model on this Mac reaches WER ≤ 8%, with text ready ≤ 700 ms after release for a 10 s utterance. The numbers go in docs/models.md.
+- **Accuracy and speed.** On the dictation fixtures, the default model on this Mac reaches WER ≤ 8%, with text ready ≤ 700 ms after release for a 10 s utterance (≤ 800 ms when the text around the cursor is read, F24: Pavel, 2026-10-21). The numbers go in docs/models.md.
 - **Meeting detection fixtures** (Core Audio process lists, pw-dump JSON): the detector starts and ends within the docs/re/meetings.md thresholds, ignores shepetal's own dictation, and handles flapping and two meeting apps at once.
 - **Summaries:** on meeting fixtures and real corpora, at least 80% of action items are recovered with the right owner.
 - **Raw audio:** a test per platform checks that every recording's history entry points to an owner-only file holding the samples the model got, cancelled and too-short ones included, and that the 24 h option deletes on time.

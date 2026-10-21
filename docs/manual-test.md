@@ -543,7 +543,7 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
 
 ### M-CTX-2: the text around the cursor reaches the cleanup model (F24)
-Setup: the cleanup model is downloaded, and Home's Cleanup line says "On". Open shepetal > Settings: "Use the text around the cursor to clean up dictation" is off (the default).
+Setup: the cleanup model is downloaded, and Home's Cleanup line says "On". Open shepetal > Settings: "Use the text around the cursor to clean up dictation" is on (the default). Turn it off for step 2.
 1. In TextEdit, make a new document and type "Packing list:", Return, "1. Passport", Return, "2. Charger", Return. Leave the cursor on the empty third line.
 2. Hold fn and say "number three, headphones". Expected with the setting off: the line is not numbered (for example "Number three, headphones.").
 3. Undo it (⌘Z), turn the setting on, click back to the same place in TextEdit, and dictate the same. Expected: "3. Headphones".

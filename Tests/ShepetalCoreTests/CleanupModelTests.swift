@@ -247,12 +247,25 @@ final class SmartCleanupTests: XCTestCase {
 }
 
 /// F24: the text around the cursor reaches the model only when the caller passes it (Settings' "Use the text around
-/// the cursor to clean up dictation", off by default), cut down to 500 characters a side, and the word guard still
+/// the cursor to clean up dictation", on by default), cut down to 500 characters a side, and the word guard still
 /// decides: the field may fix case, punctuation and list numbers, never add a word the user did not say.
 final class CleanupContextTests: XCTestCase {
     let field = CleanupContext(before: "To: Ksenia Petrova\n\n", after: "", selected: "")
 
-    // Off by default: a caller that passes nothing sends the model nothing from the field.
+    // Pavel's call (2026-10-21): on until the user switches it off in Settings, with 500 characters a side.
+    func testTheSettingIsOnUntilSwitchedOffAndKeeps500CharactersASide() throws {
+        let name = "shepetal-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        XCTAssertTrue(CleanupContext.isOn(defaults), "a user who never touched the setting gets the field")
+        defaults.set(false, forKey: CleanupContext.settingKey)
+        XCTAssertFalse(CleanupContext.isOn(defaults), "switched off stays off")
+        defaults.set(true, forKey: CleanupContext.settingKey)
+        XCTAssertTrue(CleanupContext.isOn(defaults))
+        XCTAssertEqual(CleanupContext.limit, 500)
+    }
+
+    // A caller that passes nothing (the setting off) sends the model nothing from the field.
     func testTheModelGetsTheContextOnlyWhenItIsPassed() {
         let model = FakeCleanupModel { _ in "Tell Ksenia the draft is ready." }
         _ = SmartCleanup.apply("tell ksenia the draft is ready", model: model)
