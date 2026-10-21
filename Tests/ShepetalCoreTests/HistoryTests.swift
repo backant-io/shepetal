@@ -50,10 +50,75 @@ final class HistoryTests: XCTestCase {
         XCTAssertEqual(try History(path: dbURL).recent(), expected, "second open must not migrate again")
     }
 
+    // F48: a history.sqlite from the build before Show raw (schema 2) opens with every row, app and archive
+    // flag intact, and nothing reverted.
+    func testSchema2DatabaseUpgradesAndKeepsItsRows() throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(db, History.migrations[0] + History.migrations[1] + """
+            PRAGMA user_version = 2;
+            INSERT INTO history VALUES ('a', 1000, 'inserted', '/old/a.wav', 1500, 'parakeet', 'um hi there', 'Hi there',
+                                        'Notes', 'com.apple.Notes', '', 1);
+            """, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+
+        let expected = [HistoryEntry(id: "a", createdAt: Date(timeIntervalSince1970: 1000), outcome: .inserted,
+                                     audioPath: "/old/a.wav", durationMs: 1500, model: "parakeet", rawText: "um hi there",
+                                     text: "Hi there", app: "Notes", bundleId: "com.apple.Notes", archived: true)]
+        XCTAssertEqual(try History(path: dbURL).recent(), expected, "first open migrates")
+        XCTAssertEqual(try History(path: dbURL).recent(), expected, "second open must not migrate again")
+        XCTAssertEqual(expected[0].shownText, "Hi there")
+    }
+
+    // F48: Show raw and Show cleaned only flip the flag, so the cleaned text survives any number of switches,
+    // and a re-transcription keeps the user's choice.
+    func testRevertAndUnrevertKeepTheCleanedText() throws {
+        let history = try History(path: dbURL)
+        try history.add(entry("a", text: "On 05.03.", raw: "[BLANK_AUDIO] um, on the fifth of march"))
+        try history.add(entry("b", at: 900, text: "Other", raw: "other"))
+
+        try history.setReverted("a", true)
+        var row = try XCTUnwrap(history.recent().first)
+        XCTAssertTrue(row.reverted)
+        XCTAssertEqual(row.shownText, "um, on the fifth of march", "the raw words, without the non-speech tag")
+        XCTAssertEqual(row.text, "On 05.03.", "the cleaned text is kept")
+        XCTAssertEqual(try history.recent().last?.reverted, false, "only that row")
+
+        row.rawText = "um, on the sixth of march"; row.text = "On 06.03."
+        try history.update(row)
+        XCTAssertEqual(try history.recent().first?.shownText, "um, on the sixth of march", "re-transcribe keeps Show raw")
+
+        try history.setReverted("a", false)
+        row = try XCTUnwrap(history.recent().first)
+        XCTAssertFalse(row.reverted)
+        XCTAssertEqual(row.shownText, "On 06.03.")
+        XCTAssertThrowsError(try history.setReverted("missing", true))
+
+        // A tag mid-sentence leaves one space, so Copy, paste last and Recent never give "Send it   to Jane.".
+        row.rawText = "Send it (music) to [MUSIC] Jane."; row.reverted = true
+        XCTAssertEqual(row.shownText, "Send it to Jane.")
+    }
+
+    // F33: Formatting per app lists each app once, by bundle id, under its newest name, sorted by name.
+    func testAppsAreListedOncePerBundleIdUnderTheNewestName() throws {
+        let history = try History(path: dbURL)
+        for (id, t, app, bundle) in [("1", 1.0, "TextEdit", "com.apple.TextEdit"), ("2", 2, "terminal", "com.apple.Terminal"),
+                                     ("3", 3, "Terminal", "com.apple.Terminal"), ("4", 4, "", ""), ("5", 5, "Arc", "company.thebrowser.Browser"),
+                                     ("6", 6, "TextEdit", "com.apple.TextEdit")] {
+            var e = entry(id, at: t, text: "x")
+            e.app = app; e.bundleId = bundle
+            try history.add(e)
+        }
+        XCTAssertEqual(try history.apps().map { "\($0.name) \($0.bundleId)" },
+                       ["Arc company.thebrowser.Browser", "Terminal com.apple.Terminal", "TextEdit com.apple.TextEdit"])
+        XCTAssertTrue(try History(path: root.appendingPathComponent("empty.sqlite")).apps().isEmpty)
+    }
+
     func testAppBundleAndUrlRoundTrip() throws {
         let history = try History(path: dbURL)
         var e = entry("a", text: "hello")
         e.app = "Safari"; e.bundleId = "com.apple.Safari"; e.url = "https://example.com/a"
+        e.reverted = true  // add is INSERT OR REPLACE: re-adding a row must keep Show raw (F48)
         try history.add(e)
         try history.add(entry("b", at: 900))
         XCTAssertEqual(try history.recent(), [e, entry("b", at: 900)])

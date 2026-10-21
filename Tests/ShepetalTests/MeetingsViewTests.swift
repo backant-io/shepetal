@@ -101,6 +101,41 @@ final class MeetingsViewTests: XCTestCase {
         XCTAssertTrue(md.contains("## Transcript\n\n- **Others** (0:04)"))
     }
 
+    // F71: the user's own notes lead the export and the copied summary, as typed but without list markers.
+    func testMarkdownPutsYourNotesFirst() {
+        var r = record
+        r.notes = "- Kate owns the beta\n\n* check the two bugs\n"
+        XCTAssertEqual(MeetingFormat.markdown(r, transcript: false, timeZone: utc), """
+        # Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min
+
+        ## Your notes
+
+        - Kate owns the beta
+        - check the two bugs
+
+        ## Overview
+
+        The beta ships on Friday.
+
+        ## Key points
+
+        - Two bugs are open
+
+        ## Decisions
+
+        - Ship the beta on Friday
+
+        ## Action items
+
+        - [ ] **Pavel**: Send the notes (due tomorrow)
+        - [ ] **Unassigned**: Fix the two bugs
+
+        """)
+        // No summary yet (or none at all): the notes are still exported.
+        r.summary = nil
+        XCTAssertTrue(MeetingFormat.markdown(r, timeZone: utc).hasPrefix("# Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min\n\n## Your notes\n\n- Kate owns the beta\n"))
+    }
+
     func testHeadlineReadsDayMonthYearAndNamesNoAppForAMeetingRecordedByHand() {
         XCTAssertEqual(MeetingFormat.headline(record.meeting, timeZone: utc), "Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min")
         XCTAssertEqual(MeetingFormat.headline(meeting("m", MeetingRecorder.manualApp, at: t0), timeZone: utc),
@@ -183,5 +218,42 @@ final class MeetingsViewTests: XCTestCase {
         model.query = ""
         model.select("live")
         XCTAssertEqual(model.record?.meeting.id, "live")
+    }
+
+    // F71: notes typed while the call records are saved as typed, and once the summary lands they are merged into
+    // it without an LLM: shown first, my typed task first among the action items, and the merge follows later edits.
+    func testNotesTypedDuringTheMeetingAreSavedAndMergedIntoTheSummary() throws {
+        let store = InMemoryMeetingStore()
+        var copied: [String] = []
+        let model = MeetingsModel(store: store, copy: { copied.append($0) })
+        try store.save(meeting("live", "Zoom", at: t0, minutes: nil))
+        model.refresh()
+
+        model.setNotes("Send the deck to Kate by Friday", for: "live")
+        XCTAssertEqual(try store.get("live")?.notes, "Send the deck to Kate by Friday", "saved as typed")
+        XCTAssertEqual(model.record?.notes, "Send the deck to Kate by Friday")
+        XCTAssertNil(model.record?.summary, "no summary while it records")
+        XCTAssertTrue(model.canCopySummary, "the notes alone are worth copying")
+
+        try store.save(meeting("live", "Zoom", at: t0, minutes: 3))
+        let written = Summary(overview: "Deck review.", actionItems: [ActionItem(owner: "Others", task: "review the deck")])
+        try store.setSummary(written, for: "live")
+        model.refresh()
+        XCTAssertEqual(model.record?.summary?.actionItems, [ActionItem(owner: "Me", task: "Send the deck to Kate", due: "Friday"),
+                                                            ActionItem(owner: "Others", task: "review the deck")])
+        XCTAssertEqual(try store.get("live")?.summary, written, "the store keeps the summary as written")
+
+        // Edited after the meeting: the merge reruns at once.
+        model.setNotes("TODO: book the retro", for: "live")
+        XCTAssertEqual(model.record?.summary?.actionItems.first, ActionItem(owner: "Me", task: "book the retro"))
+        XCTAssertFalse(model.record?.summary?.actionItems.contains { $0.task.contains("Kate") } ?? true)
+        XCTAssertEqual(copied, [], "typing never writes the clipboard")
+        model.copySummary()
+        XCTAssertTrue(copied.last?.contains("## Your notes\n\n- TODO: book the retro") ?? false)
+        XCTAssertTrue(copied.last?.contains("- [ ] **Me**: book the retro") ?? false)
+
+        // A store that refuses says so instead of losing the notes silently.
+        model.setNotes("x", for: "gone")
+        XCTAssertTrue(model.message.hasPrefix("Notes not saved"))
     }
 }

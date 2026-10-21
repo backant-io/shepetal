@@ -168,13 +168,13 @@ The 🤫 menu's Languages setting picks the model (`speechRoute` in `Sources/She
 |---|---|---|
 | none (automatic) | Parakeet TDT 0.6B v3, which detects the language itself | Whisper base.en |
 | only Parakeet v3's 25 (bg hr cs da nl en et fi fr de el hu it lv lt mt pl pt ro sk sl es sv ru uk, from the model card) | Parakeet TDT 0.6B v3 | base.en for English only, else large-v3-turbo |
-| one other language | Whisper large-v3-turbo q5_0, `-l <code>` | the same |
-| several, at least one outside Parakeet's | Whisper large-v3-turbo q5_0, `-l auto` | the same |
+| one other language | Whisper large-v3-turbo q5_0, told that language | the same |
+| several, at least one outside Parakeet's | Whisper large-v3-turbo q5_0, told the likeliest chosen language (`pickLanguage`) | the same |
 
-- When the selection needs Whisper and its files are missing, the app does not fall back to Parakeet (it would write the
-  wrong language). The 🤫 menu names the missing file and where it goes. The large-v3-turbo route has not been run on
-  this Mac, and `-l auto` is not limited to the selected languages yet (#31).
-- The personal dictionary reaches whisper.cpp as `--prompt` ("Glossary: …", starred entries last because whisper.cpp
+- When the selection needs Whisper and its file is missing, the app does not fall back to Parakeet (it would write the wrong language). The 🤫 menu names the languages that are not installed. The file is `~/Library/Application Support/Shepetal/models/ggml-large-v3-turbo-q5_0.bin` (or `SHEPETAL_WHISPER_MODEL`). whisper.cpp runs in process from the b5454 xcframework (Metal), and the model stays loaded. On an M4 Pro it loads in about 2 s. One chosen language is ready in 0.8 to 1.0 s for a 4 to 11 s clip. With several chosen it takes 1.3 to 2.0 s, because language detection costs one extra encoder pass, as whisper's own `auto` mode does.
+- With several languages chosen, whisper's language probabilities (`whisper_lang_auto_detect`) pick the likeliest chosen language, and whisper is told that one, even when a language outside the set ranks first (#31). Told English, large-v3-turbo still writes a Japanese clip in Japanese: the told language decides between close languages (Japanese and Chinese, Spanish and Portuguese), not what was said.
+- Parakeet takes no language. When languages are chosen and Apple's text recognizer reads the text as another language (0.9 or more, 3 words or more), a hint shows next to 🤫. The recognizer cannot tell Estonian (it reads it as Finnish, 0.98), Maltese (Norwegian, 0.94), Slovenian (Croatian, 0.88), Latvian or Lithuanian, so with one of those chosen there is no hint (`languagesTextCannotTell`).
+- The personal dictionary reaches whisper.cpp as its initial prompt ("Glossary: …", starred entries last because whisper.cpp
   keeps the end of a long prompt). With a bare lowercase word list as the prompt, base.en dropped casing and
   punctuation on one e2e clip; the sentence form fixed it. Parakeet gets the dictionary through the keyword model's rescoring once the user downloads it from the 🤫 menu, in English dictations only (F39, see the Parakeet notes above).
 
@@ -371,3 +371,21 @@ bench/cleanup/run.sh Qwen3.5-2B-Q4_K_M.gguf              # one model (fetched in
 python3 bench/cleanup/score.py                           # the table above from bench/cleanup/results
 python3 bench/cleanup/score.py --self-test
 ```
+
+### Text around the cursor (F24)
+
+Off by default. When Settings' "Use the text around the cursor to clean up dictation" is on, `Pipeline` reads the focused field once, before cleanup (after the rule 8 check), and `SmartCleanup.apply` passes a `CleanupContext` to the model: the last 500 characters before the cursor, the first 500 after it and the selection (up to 500 characters), each cut at a word boundary. `LlamaCleanup` keeps a second cached prompt for it: the same instructions and examples, plus a paragraph and four examples with a `<field>` block in front of the dictation, marked as reference only. The prompt without context is unchanged; on the 63 fixtures above, both Qwen3.5 models gave the same model text as before. The rules still decide whether the model runs, so punctuated text with no correction or list cue never reaches it, field or not. The word guard is unchanged, except that list numbering may go on from a list on the line above the cursor, and "Number three, ..." under such a list counts as a cue. So the field can change case, punctuation and list numbers, never add a word. The field's text is never logged or written to History. It is tokenized as plain text, so chat-template markers in it stay text (`LlamaCleanupTests.testTheFieldCannotInjectControlTokens`).
+
+There are 8 fixtures in `bench/cleanup/fixtures/context.jsonl`: names and terms spelled in the field, two lists that go on, a question in the field that must not be answered, and two dictations under a full 500/500-character field. `python3 bench/cleanup/score.py --context` scores the app path with the context off and on, and prints:
+
+| Model | Exact, off | Exact, on | CER, off | CER, on | Model text used, on | Mean / max ms per model call, off | on |
+|---|---|---|---|---|---|---|---|
+| Qwen3.5-0.8B-Q4_K_M | 50% | 62% | 28.9% | 18.6% | 7 | 75 / 148 | 113 / 242 |
+| Qwen3.5-2B-Q4_K_M | 62% | 88% | 23.9% | 4.6% | 8 | 117 / 246 | 187 / 405 |
+| rules | 0% | 0% | 37.2% | 37.2% | 0 | - | - |
+
+- Qwen3.5 2B: the context fixes a term's case and the two lists that go on. It breaks one fixture, a correction under a full field ("Send it to John, I mean Jane, ..."), which it then keeps as said. Qwen3.5 0.8B also breaks one correction under a full field.
+- The scores are optimistic. The prompt was tuned against these fixtures: with the field after the dictation, both models wrote the field back, and with the field in front but no examples, they did no cleanup. Five of the eight fixtures are lowercase text with no punctuation, which Parakeet v3 seldom produces.
+- End to end, `scripts/e2e-mac.sh` clip c05 is c04 dictated into a field with 596 characters on each side of the cursor, with the setting on. In seven runs on the M4 Pro (load average 4 to 20 from other work), c05 was ready 726 to 800 ms after the end of the audio, against 548 to 577 ms for c04 in the same runs. **A 10 s dictation under a full field misses the 700 ms bar on this Mac.** The correction was made in every run. With the setting off (the default), the bar holds as above.
+- The second prompt is decoded at load: Qwen3.5 2B loaded in 1.8 to 3.6 s over three runs.
+

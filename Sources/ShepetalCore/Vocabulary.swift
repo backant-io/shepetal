@@ -10,7 +10,14 @@ public struct Vocabulary {
         public var spoken: String   // what to find, case-insensitive, whole words
         public var written: String  // what goes in its place
         public var starred: Bool
-        var isReplacement: Bool { spoken != written }
+        public var isReplacement: Bool { spoken != written }
+
+        public init(spoken: String, written: String, starred: Bool = false) {
+            self.spoken = spoken; self.written = written; self.starred = starred
+        }
+
+        /// The entry as its dictionary.txt line.
+        public var line: String { (starred ? "*" : "") + (isReplacement ? "\(spoken) => \(written)" : written) }
     }
 
     /// At most this many entries go to the model as a hint.
@@ -28,19 +35,22 @@ public struct Vocabulary {
     public var entries: [Entry]
 
     public init(_ text: String = "") {
-        entries = text.split(whereSeparator: \.isNewline).compactMap { line in
-            var s = line.trimmingCharacters(in: .whitespaces)
-            guard !s.isEmpty, !s.hasPrefix("#") else { return nil }
-            let starred = s.hasPrefix("*")
-            if starred { s = s.dropFirst().trimmingCharacters(in: .whitespaces) }
-            var (spoken, written) = (s, s)
-            if let arrow = s.range(of: "=>") {
-                spoken = s[..<arrow.lowerBound].trimmingCharacters(in: .whitespaces)
-                written = s[arrow.upperBound...].trimmingCharacters(in: .whitespaces)
-            }
-            guard !spoken.isEmpty, !written.isEmpty else { return nil }
-            return Entry(spoken: spoken, written: written, starred: starred)
+        entries = text.split(whereSeparator: \.isNewline).compactMap(Self.entry)
+    }
+
+    /// One line's entry; nil for a comment, a blank line or a half-written replacement.
+    private static func entry(_ line: Substring) -> Entry? {
+        var s = line.trimmingCharacters(in: .whitespaces)
+        guard !s.isEmpty, !s.hasPrefix("#") else { return nil }
+        let starred = s.hasPrefix("*")
+        if starred { s = s.dropFirst().trimmingCharacters(in: .whitespaces) }
+        var (spoken, written) = (s, s)
+        if let arrow = s.range(of: "=>") {
+            spoken = s[..<arrow.lowerBound].trimmingCharacters(in: .whitespaces)
+            written = s[arrow.upperBound...].trimmingCharacters(in: .whitespaces)
         }
+        guard !spoken.isEmpty, !written.isEmpty else { return nil }
+        return Entry(spoken: spoken, written: written, starred: starred)
     }
 
     /// The file's entries; a missing or unreadable file is an empty dictionary. Keeps the file owner-only.
@@ -58,6 +68,32 @@ public struct Vocabulary {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])
         }
         try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    /// The hub's Dictionary tab (F91): `old`'s line becomes `new`'s, or goes when `new` is nil; with no `old`,
+    /// `new` is added at the end. Comments, blank lines and every other line stay as they are. nil when `old`
+    /// is no longer in `text` (the file was edited meanwhile), so nothing is written over that edit.
+    public static func edit(_ text: String, replacing old: Entry?, with new: Entry?) -> String? {
+        var lines = text.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline).map(String.init)
+        if let old {
+            guard let i = lines.firstIndex(where: { entry(Substring($0)) == old }) else { return nil }
+            if let new { lines[i] = new.line } else { lines.remove(at: i) }
+        } else if let new {
+            if lines.last == "" { lines.removeLast() }
+            lines += [new.line, ""]
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    /// `edit` on the file, which is created with the header first if it is missing and stays owner-only.
+    /// False, and the file untouched, when `old` is no longer in it.
+    @discardableResult
+    public static func update(_ url: URL, replacing old: Entry?, with new: Entry?) throws -> Bool {
+        try create(url)
+        guard let text = edit(String(decoding: try Data(contentsOf: url), as: UTF8.self), replacing: old, with: new)
+        else { return false }
+        try Data(text.utf8).write(to: url, options: .atomic)  // keeps the mode, which `create` just set to 0600
+        return true
     }
 
     /// Replaces every entry in one pass: case-insensitive, whole words only, longest phrase first,

@@ -35,7 +35,7 @@ The rule is one function, the text in and the text out. It runs on the cleaned t
 
 | Platform | Insertion point |
 |---|---|
-| Mac | `Pipeline.finishText` in `Sources/Shepetal/Pipeline.swift`: the output of `Cleanup.apply` (of `SmartCleanup.apply` once #44 lands) goes through the date rule, then to the `Vocabulary` (#39) and `InsertionRules.fit`. `finishText` also serves re-transcription from the Hub. The rule goes in `ShepetalCore`, next to `Cleanup`. |
+| Mac | `AppFormat.finish` in `Sources/ShepetalCore/AppFormat.swift`, called from `Pipeline.finishText` (`Sources/Shepetal/Pipeline.swift`), which also serves re-transcription from the Hub. The output of `SmartCleanup.apply` goes through the date rule, then to the `Vocabulary` (#39), and then `InsertionRules.fit`. An app set to Raw in Settings > Formatting per app (F33) skips `SmartCleanup` and the date rule. The tags are still removed and the dictionary still runs. |
 | Linux | `transcribe()` in `linux/src/main.rs`, its last line: `vocab.apply(&dates(&cleanup(...)))`. The rule goes in `linux/src/text_rules.rs`. Linux does not call `fit`. |
 | Windows | The rule is `dates` in `windows/crates/core/src/text.rs`. `flow::rules` in `windows/crates/app/src/flow.rs` runs `cleanup`, then `dates`, and `Flow` always calls it before inserting. Windows does not call `fit` (it does not read the text around the cursor). |
 

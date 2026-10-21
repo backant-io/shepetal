@@ -38,23 +38,61 @@ final class LanguageTests: XCTestCase {
         XCTAssertEqual(speechRoute(languages: ["de", "fr"], tier: intel), SpeechRoute(model: .whisperLargeV3Turbo, language: "auto"))
     }
 
-    func testWhisperArguments() {
-        let base = ["-m", "/m.bin", "-f", "/a.wav"]
-        XCTAssertEqual(whisperArguments(model: "/m.bin", wav: "/a.wav", language: "ja", vocabulary: Vocabulary()),
-                       base + ["-l", "ja", "-nt", "-np"], "no --prompt for an empty dictionary")
-        XCTAssertEqual(whisperArguments(model: "/m.bin", wav: "/a.wav", language: "auto", vocabulary: Vocabulary("# only a comment")),
-                       base + ["-l", "auto", "-nt", "-np"])
-
-        let args = whisperArguments(model: "/m.bin", wav: "/a.wav", language: "auto",
-                                    vocabulary: Vocabulary("Kubernetes\n*Shepetal\nk eight s => k8s"))
-        XCTAssertEqual(Array(args.prefix(8)), base + ["-l", "auto", "-nt", "-np"])
-        // whisper.cpp keeps the end of a long prompt, so the highest priority entry goes last.
-        XCTAssertEqual(Array(args.suffix(2)), ["--prompt", "Glossary: k eight s, Kubernetes, Shepetal."])
+    // The dictionary reaches whisper as its prompt. whisper.cpp keeps the end of a long prompt, so the highest
+    // priority entry goes last; a sentence shape keeps whisper's casing and punctuation.
+    func testWhisperPrompt() {
+        XCTAssertNil(whisperPrompt(Vocabulary()), "no prompt for an empty dictionary")
+        XCTAssertNil(whisperPrompt(Vocabulary("# only a comment")))
+        XCTAssertEqual(whisperPrompt(Vocabulary("Kubernetes\n*Shepetal\nk eight s => k8s")), "Glossary: k eight s, Kubernetes, Shepetal.")
 
         let many = Vocabulary((0..<300).map { "word\($0)" }.joined(separator: "\n"))
-        let prompt = whisperArguments(model: "m", wav: "w", language: "auto", vocabulary: many).last!
+        let prompt = whisperPrompt(many)!
         XCTAssertEqual(prompt.components(separatedBy: ", ").count, 200)
         XCTAssertTrue(prompt.hasSuffix(" word0."))
         XCTAssertFalse(prompt.contains("word200"))
+    }
+
+    func testLanguageCodesKeepTheChosenOrderOnce() {
+        XCTAssertEqual(languageCodes(["ja-JP", "EN-gb", "ja", "pt-BR"]), ["ja", "en", "pt"])
+        XCTAssertEqual(languageCodes([]), [])
+    }
+
+    // #31: with English and Japanese chosen, whisper alone writes Chinese when it hears Chinese as likeliest.
+    // It must be told the likeliest chosen language instead.
+    func testPickLanguageKeepsTheBestChosenOneWhenAnotherRanksFirst() {
+        let probs: [String: Float] = ["zh": 0.62, "ja": 0.30, "en": 0.05, "ko": 0.03]
+        XCTAssertEqual(pickLanguage(probs: probs, allowed: ["en", "ja"]), "ja")
+        XCTAssertEqual(pickLanguage(probs: probs, allowed: ["ja", "en"]), "ja", "the order chosen does not beat the probabilities")
+        XCTAssertEqual(pickLanguage(probs: probs, allowed: ["en", "ko"]), "en")
+        XCTAssertEqual(pickLanguage(probs: probs, allowed: ["zh", "en"]), "zh", "the top language when it is chosen")
+    }
+
+    func testPickLanguageTieGoesToTheFirstChosen() {
+        XCTAssertEqual(pickLanguage(probs: ["de": 0.4, "fr": 0.4, "it": 0.2], allowed: ["fr", "de"]), "fr")
+        XCTAssertEqual(pickLanguage(probs: ["de": 0.4, "fr": 0.4, "it": 0.2], allowed: ["de", "fr"]), "de")
+        XCTAssertEqual(pickLanguage(probs: [:], allowed: ["uk", "ru"]), "uk", "no probabilities: the first chosen")
+    }
+
+    func testPickLanguageWithOneOrNoneChosen() {
+        XCTAssertEqual(pickLanguage(probs: ["zh": 0.9, "ja": 0.1], allowed: ["ja"]), "ja", "one chosen language is always it")
+        XCTAssertNil(pickLanguage(probs: ["zh": 0.9], allowed: []), "none chosen: whisper detects on its own")
+    }
+
+    // Parakeet takes no language, so a dictation in another one comes out in it; the hint says so.
+    func testWrongLanguageWhenTheTextIsClearlyInAnother() {
+        XCTAssertEqual(wrongLanguage(hypotheses: ["es": 0.99, "pt": 0.01], words: 9, chosen: ["de", "fr"]), "es")
+        XCTAssertEqual(wrongLanguage(hypotheses: ["zh-Hans": 0.97], words: 5, chosen: ["de"]), "zh", "the tag's language")
+    }
+
+    func testNoWrongLanguageWhenItFitsOrCannotBeTold() {
+        XCTAssertNil(wrongLanguage(hypotheses: ["de": 0.99], words: 9, chosen: ["de", "fr"]), "a chosen language")
+        XCTAssertNil(wrongLanguage(hypotheses: ["pt": 0.99], words: 9, chosen: ["pt-BR"]), "a chosen tag's language")
+        XCTAssertNil(wrongLanguage(hypotheses: ["es": 0.99], words: 9, chosen: []), "Automatic")
+        XCTAssertNil(wrongLanguage(hypotheses: ["fr": 0.95], words: 2, chosen: ["en"]), "too short to tell")
+        XCTAssertNil(wrongLanguage(hypotheses: ["es": 0.6, "pt": 0.4], words: 9, chosen: ["de"]), "not sure")
+        XCTAssertNil(wrongLanguage(hypotheses: [:], words: 9, chosen: ["de"]))
+        // The recognizer reads Estonian as Finnish, so an Estonian speaker would always see the hint.
+        XCTAssertNil(wrongLanguage(hypotheses: ["fi": 0.98], words: 7, chosen: ["et", "en"]))
+        XCTAssertTrue(languagesTextCannotTell.isSubset(of: parakeetLanguages))
     }
 }

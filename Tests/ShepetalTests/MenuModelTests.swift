@@ -425,23 +425,36 @@ final class MenuModelTests: XCTestCase {
             return rest[..<(rest.range(of: "\n    }\n")?.lowerBound ?? rest.endIndex)]
                 .components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         }
-        let state = try lines(of: "func menuNeedsUpdate(_ menu: NSMenu) {")
-        for line in ["let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,",
-                     "canDownloadEngine: engine == nil && !downloading && !ParakeetEngine.isInstalled,",
-                     "access: Account.shared.access, signingIn: Account.shared.signingIn,",
-                     "recordingMeeting: meetings.current != nil,",
-                     "meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],",
-                     "recent: (try? pipeline?.history.recent(limit: 10)) ?? [],",
-                     "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
-                     "canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)",
-                     "cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,", "downloadingCleanup: pipeline?.downloadingCleanup == true,"] {
-            XCTAssertTrue(state.contains(line), "menuNeedsUpdate: \(line)")
-        }
+        // The whole body, so a line added straight into the menu here (a greyed status line, say) fails (#239):
+        // every item comes from MenuModel, plus the submenus and the F102 off switch.
+        XCTAssertEqual(try lines(of: "func menuNeedsUpdate(_ menu: NSMenu) {"), [
+            "Account.shared.refresh()",
+            "let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,",
+            "canDownloadEngine: engine == nil && !downloading && !ParakeetEngine.isInstalled,",
+            "cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,",
+            "downloadingCleanup: pipeline?.downloadingCleanup == true,",
+            "dictionarySupport: speech.dictionarySupport(),",
+            "access: Account.shared.access, signingIn: Account.shared.signingIn,",
+            "recordingMeeting: meetings.current != nil,",
+            "meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],",
+            "recent: (try? pipeline?.history.recent(limit: 10)) ?? [],",
+            "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
+            "canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)",
+            "MenuModel.build(MenuModel.groups(state), into: menu, target: self, action: #selector(menuAction(_:))) { [mic, speech] in",
+            "switch $0 {",
+            "case .microphone: mic.menuItem()",
+            "case .languages: speech.languagesItem()",
+            "default: nil",
+            "}",
+            "}",
+            "let input = menu.items.firstIndex { $0.representedObject as? MenuAction == .helpCenter }.map { $0 - 1 } ?? menu.numberOfItems",
+            "for (n, i) in dictationOff.menuItems().enumerated() { menu.insertItem(i, at: input + n) }",
+        ])
         XCTAssertTrue(app.contains("Task { await pipeline?.loadCleanup() }"), "the cleanup model loads at launch")
         XCTAssertEqual(try lines(of: "@objc private func menuAction(_ sender: NSMenuItem) {").filter { $0.hasPrefix("case .") }, [
             "case .permissions: showOnboarding()",
             "case .download: downloadModel()",
-            "case .downloadCleanup: Task { await pipeline?.downloadCleanup() }",
+            "case .downloadCleanup: Task { if let failed = await pipeline?.downloadCleanup() { fail(failed) } }",
             "case .downloadDictionarySupport: speech.downloadBoost()",
             "case .signIn: Account.shared.signIn()",
             "case .cancelSignIn: Account.shared.cancelSignIn()",
@@ -465,6 +478,11 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(Array(download.prefix(2)), ["guard !downloading else { return }", "downloading = true"],
                        "a second click while it downloads starts nothing")
         XCTAssertTrue(download.contains("defer { downloading = false }"), "and after a failed download the item is back")
+        XCTAssertTrue(download.contains(#"fail("Speech recognition download failed: " + reason)  // the menu's Download item is back, so say why (#239)"#),
+                      "a failed download says so next to 🤫, not only on Home (#239)")
+        XCTAssertTrue(try lines(of: "private func loadEngine() async {")
+            .contains(#"fail(couldNotStart ? "No speech recognition. See Home in the shepetal window." : "No speech recognition. Open the 🤫 menu.")"#),
+                      "a model that is installed but cannot start points at Home: the menu has nothing for it (#239)")
     }
 
     @objc private func noop(_ sender: NSMenuItem) {}

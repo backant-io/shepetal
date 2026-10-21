@@ -32,9 +32,18 @@ final class Pipeline {
     private(set) var downloadingCleanup = false
     let models: URL  // the downloaded cleanup model's dir
     let dictionary: URL  // dictionary.txt in this pipeline's data dir
+    /// Formatted or Raw per app (F33), read on every dictation. Tests pass their own UserDefaults suite.
+    var appFormat = AppFormat()
     /// Writes a recording's WAV. Runs off the main thread: on Pavel's nearly full disk, while macOS purged
     /// space, one such write took 86 s, and fn, the menu and rule 8 froze with it (M-NS-1). Tests stall it.
     var writeAudio: @Sendable (_ samples: [Float], _ id: String) throws -> URL
+    /// Settings' "Use the text around the cursor to clean up dictation" (F24, off by default), read at each
+    /// dictation. Tests set it.
+    var useFieldContext: () -> Bool = { UserDefaults.standard.bool(forKey: CleanupContext.settingKey) }
+    /// F42's Settings toggle: a dictation that ends with "press enter" presses Return after a landed paste.
+    var pressEnterCommand: () -> Bool = { UserDefaults.standard.bool(forKey: PressEnter.key) }
+    /// Where Settings' style picks are read (F37). Tests pass a throwaway suite.
+    var styleDefaults = UserDefaults.standard
 
     /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
     /// Tests pass a temp `root` and a private named pasteboard.
@@ -49,15 +58,17 @@ final class Pipeline {
         models = root.appendingPathComponent("models")
     }
 
-    /// `app` is the frontmost app at dictation start (history only). `context` is the text around the cursor and
-    /// the selection the paste replaces.
+    /// `app` is the frontmost app at dictation start (history, and the app's format, style and paste mode).
+    /// `context` is the text around the cursor and the selection the paste replaces, read once: after cleanup, or
+    /// before it when the text around the cursor is on (F24). `willPaste` runs right before the paste's own read of
+    /// the field, after the last cancel check.
     /// `focusKept` says whether the window focused when the dictation started is still focused (nil: unknown),
     /// and `secureInput` names the app holding secure input. When focus moved or secure input is on, nothing is
     /// pasted and the text is left on the clipboard (rule 8). Focus is never moved back. The defaults skip them.
     /// `decided` gets the outcome (an error message, or nil when the text landed) as soon as it is known; the
     /// WAV and the history row can still be waiting on the disk then. `process` returns once both are written.
     func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
-                 context: () -> FocusedText.Context,
+                 context: () -> FocusedText.Context, willPaste: () -> Void = {},
                  focusKept: () -> Bool? = { nil }, secureInput: () -> String? = { nil },
                  sendPaste: (CGEvent) -> Void, decided: (String?) -> Void = { _ in }) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
@@ -65,7 +76,7 @@ final class Pipeline {
                                           durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
         let id = run.entry.id, write = writeAudio
         let saving = Task.detached { try write(samples, id) }  // first, so the audio survives anything below
-        let error = await transcribeAndInsert(samples, engine, t0, saving, context, focusKept, secureInput, sendPaste, &run)
+        let error = await transcribeAndInsert(samples, engine, t0, context, willPaste, focusKept, secureInput, sendPaste, &run)
         decided(error)
         let saveError = await saved(saving, &run)
         run.error = saveError ?? error
@@ -91,8 +102,7 @@ final class Pipeline {
 
     /// Returns an error message, or nil when the text landed.
     private func transcribeAndInsert(_ samples: [Float], _ engine: SpeechEngine?, _ t0: TimeInterval,
-                                     _ saving: Task<URL, Error>,
-                                     _ context: () -> FocusedText.Context,
+                                     _ context: () -> FocusedText.Context, _ willPaste: () -> Void,
                                      _ focusKept: () -> Bool?, _ secureInput: () -> String?,
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
         guard let engine else { return "Speech model is not loaded" }
@@ -103,26 +113,39 @@ final class Pipeline {
         run.entry.model = engine.name
         do {
             let heard = await Task.detached { VoiceIsolation.apply(samples) }.value  // the kept WAV stays raw
-            // Only an engine that reads the file waits for the disk; the others start on the samples at once.
-            let wav = engine.readsWav ? try await saving.value : store.url(run.entry.id)
+            let wav = store.url(run.entry.id)  // still being written: every engine works on the samples
             run.entry.rawText = try await engine.transcribe(heard, wav: wav)
         } catch {
             if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"
         }
-        let cleaned = await finishText(run.entry.rawText)
-        run.entry.text = cleaned.text
+        // F24: with the text around the cursor on, the field is read now, once, so the cleanup model sees it. Rule 8
+        // first: a field that no longer has the dictation's focus, or sits under secure input, is not read.
+        var field: FocusedText.Context?
+        if useFieldContext(), PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) == nil { field = context() }
+        let cleaned = await finishText(run.entry.rawText, bundleId: run.entry.bundleId, url: run.entry.url, context: field.map {
+            CleanupContext(before: $0.before, after: $0.after, selected: $0.selected)
+        } ?? .none)
+        let command = pressEnterCommand() ? PressEnter.split(cleaned.text, raw: run.entry.rawText) : (text: cleaned.text, enter: false)
+        run.entry.text = command.text
         run.cleanupModel = cleaned.usedModel ? cleanup?.name : nil
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
-        guard !run.entry.text.isEmpty else { return noSpeech(&run) }
+        guard !run.entry.text.isEmpty else {
+            let message = noSpeech(&run)
+            return command.enter ? PressEnter.nothingToSend : message  // only "press enter" was said
+        }
         // Rule 8 before the field is read: when the text is not pasted, the field that has focus now is not
         // where it goes. And again right before the paste: focus or secure input can change during the read.
         if let message = blocked(focusKept, secureInput, &run) { return message }
-        let (before, after, selected) = context()
+        willPaste()
+        let (before, after, selected) = field ?? context()
         run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selected)
         if let message = blocked(focusKept, secureInput, &run) { return message }
-        let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
+        // F22: the app's paste mode. Rule 8 is asked again wherever the mode waits, and before Return (F42).
+        let paste = await inserter.insert(run.inserted, mode: PasteMode.current(for: run.entry.bundleId), sendPaste: sendPaste,
+                                          stillFocused: { PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) == nil },
+                                          pressReturn: command.enter)
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
         return paste.landed ? nil : PasteGate.notLanded
@@ -144,15 +167,17 @@ final class Pipeline {
         return "No speech heard"
     }
 
-    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub): tags
-    /// stripped, the rules, the local cleanup model when it is loaded, spoken dates as numbers
-    /// (docs/text-rules.md), then the personal dictionary (F39), whose text is inserted as written.
-    /// InsertionRules fits the result to the cursor afterwards. Runs off the main thread.
-    func finishText(_ raw: String) async -> (text: String, usedModel: Bool) {
-        let model = cleanup, dictionary = dictionary
+    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub), in the
+    /// mode `appFormat` gives the app: `AppFormat.finish` (F33), with the style picked for the app's category (F37)
+    /// and `context`, the text around the cursor for the cleanup model (F24; re-transcription has none). `bundleId`
+    /// and `url` are the run's or the row's. InsertionRules fits the result to the cursor afterwards. Runs off the
+    /// main thread.
+    func finishText(_ raw: String, bundleId: String = "", url: String = "",
+                    context: CleanupContext = .none) async -> (text: String, usedModel: Bool) {
+        let model = cleanup, dictionary = dictionary, mode = appFormat.mode(for: bundleId)
+        let style = Styles.chosen(bundleId: bundleId, url: url, styleDefaults)
         return await Task.detached {
-            let cleaned = SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model)
-            return (Vocabulary.load(dictionary).apply(Dates.apply(cleaned.text)), cleaned.usedModel)
+            AppFormat.finish(raw, mode: mode, model: model, vocabulary: Vocabulary.load(dictionary), style: style, context: context)
         }.value
     }
 
@@ -192,9 +217,11 @@ final class Pipeline {
     }
 
     /// User action only (the 🤫 menu): this Mac's cleanup model from Hugging Face into <data>/models, checked
-    /// against its SHA-256, then loaded. A second call while one runs does nothing.
-    func downloadCleanup() async {
-        guard !downloadingCleanup, let m = currentCleanupModel() else { return }
+    /// against its SHA-256, then loaded. A second call while one runs does nothing. Returns the notice for 🤫
+    /// when the download fails.
+    @discardableResult
+    func downloadCleanup() async -> String? {
+        guard !downloadingCleanup, let m = currentCleanupModel() else { return nil }
         downloadingCleanup = true
         cleanupStatus = "Downloading the cleanup model…"
         defer { downloadingCleanup = false }
@@ -207,9 +234,10 @@ final class Pipeline {
         } catch {
             FileHandle.standardError.write(Data("cleanup model download: \(error)\n".utf8))
             cleanupStatus = "Rules only (the download failed; try again from the 🤫 menu)"
-            return
+            return "Cleanup model download failed: check the internet connection and try again"  // the detail went to stderr
         }
         await loadCleanup()
+        return nil
     }
 
     private func saved(_ saving: Task<URL, Error>, _ run: inout Run) async -> String? {

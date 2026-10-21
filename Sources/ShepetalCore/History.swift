@@ -24,14 +24,20 @@ public struct HistoryEntry: Equatable {
     public var bundleId: String
     public var url: String
     public var archived: Bool
+    /// The user switched this row back to what was heard (F48, Wispr's hasRevertedAI). `text` is kept.
+    public var reverted: Bool
 
     public init(id: String, createdAt: Date, outcome: Outcome, audioPath: String,
                 durationMs: Int, model: String = "", rawText: String = "", text: String = "",
-                app: String = "", bundleId: String = "", url: String = "", archived: Bool = false) {
+                app: String = "", bundleId: String = "", url: String = "", archived: Bool = false, reverted: Bool = false) {
         self.id = id; self.createdAt = createdAt; self.outcome = outcome; self.audioPath = audioPath
         self.durationMs = durationMs; self.model = model; self.rawText = rawText; self.text = text
-        self.app = app; self.bundleId = bundleId; self.url = url; self.archived = archived
+        self.app = app; self.bundleId = bundleId; self.url = url; self.archived = archived; self.reverted = reverted
     }
+
+    /// What History shows and copies, and what paste last and copy last use: the raw transcript without its
+    /// non-speech tags once the row is reverted, else the cleaned text.
+    public var shownText: String { reverted ? AppFormat.asHeard(rawText) : text }
 
     /// Play and re-transcribe need the kept WAV. It is gone after the 24 h retention ran, or when saving it failed.
     public func canReplay(fileExists: (String) -> Bool = FileManager.default.fileExists(atPath:)) -> Bool {
@@ -72,7 +78,7 @@ public enum Browser {
 public final class History {
     private var db: OpaquePointer?
     private static let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-    private static let columns = "id, created_at, outcome, audio_path, duration_ms, model, raw_text, text, app, bundle_id, url, archived"
+    private static let columns = "id, created_at, outcome, audio_path, duration_ms, model, raw_text, text, app, bundle_id, url, archived, reverted"
 
     /// Schema steps; `PRAGMA user_version` counts how many ran. Append only: a file from an older build
     /// runs just the steps it is missing, and keeps its rows.
@@ -91,6 +97,8 @@ public final class History {
         ALTER TABLE history ADD COLUMN url TEXT NOT NULL DEFAULT '';
         ALTER TABLE history ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
         """,
+        // 3: undo cleanup (F48)
+        "ALTER TABLE history ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0;",
     ]
 
     public init(path: URL) throws {
@@ -124,7 +132,7 @@ public final class History {
     }
 
     public func add(_ e: HistoryEntry) throws {
-        let stmt = try prepare("INSERT OR REPLACE INTO history(\(Self.columns)) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)")
+        let stmt = try prepare("INSERT OR REPLACE INTO history(\(Self.columns)) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)")
         defer { sqlite3_finalize(stmt) }
         bind(stmt, 1, e.id)
         sqlite3_bind_double(stmt, 2, e.createdAt.timeIntervalSince1970)
@@ -138,6 +146,7 @@ public final class History {
         bind(stmt, 10, e.bundleId)
         bind(stmt, 11, Browser.historyURL(e.url))
         sqlite3_bind_int64(stmt, 12, e.archived ? 1 : 0)
+        sqlite3_bind_int64(stmt, 13, e.reverted ? 1 : 0)
         guard sqlite3_step(stmt) == SQLITE_DONE else { throw error("insert") }
     }
 
@@ -161,6 +170,15 @@ public final class History {
         try stepChangingOneRow(stmt, "archive")
     }
 
+    /// Show raw / Show cleaned (F48). Only the flag changes, so switching back gives the cleaned text again.
+    public func setReverted(_ id: String, _ reverted: Bool) throws {
+        let stmt = try prepare("UPDATE history SET reverted = ? WHERE id = ?")
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, reverted ? 1 : 0)
+        bind(stmt, 2, id)
+        try stepChangingOneRow(stmt, "revert")
+    }
+
     /// Newest first, archived rows included.
     public func recent(limit: Int = 20) throws -> [HistoryEntry] {
         try search("", includeArchived: true, limit: limit)
@@ -179,6 +197,23 @@ public final class History {
         bind(stmt, 1, "%" + Self.escapeLike(query) + "%")
         sqlite3_bind_int64(stmt, 2, includeArchived ? 1 : 0)
         sqlite3_bind_int64(stmt, 3, Int64(limit))
+        return entries(stmt)
+    }
+
+    /// The delivered dictations (inserted and paste_failed, archived rows included) made at or after `since`,
+    /// oldest first: what the streak (F61) and Insights (F62) count, the same rows as `stats`.
+    public func rows(since: Date = .distantPast) throws -> [HistoryEntry] {
+        let stmt = try prepare("""
+            SELECT \(Self.columns) FROM history
+            WHERE outcome IN ('\(Outcome.inserted.rawValue)', '\(Outcome.pasteFailed.rawValue)') AND created_at >= ?
+            ORDER BY created_at
+            """)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+        return entries(stmt)
+    }
+
+    private func entries(_ stmt: OpaquePointer?) -> [HistoryEntry] {
         var rows: [HistoryEntry] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             func text(_ i: Int32) -> String { String(cString: sqlite3_column_text(stmt, i)) }
@@ -187,9 +222,25 @@ public final class History {
                 id: text(0), createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1)),
                 outcome: Outcome(rawValue: text(2)) ?? .failed, audioPath: text(3), durationMs: int(4),
                 model: text(5), rawText: text(6), text: text(7),
-                app: text(8), bundleId: text(9), url: text(10), archived: int(11) != 0))
+                app: text(8), bundleId: text(9), url: text(10), archived: int(11) != 0, reverted: int(12) != 0))
         }
         return rows
+    }
+
+    /// Every app dictated into, by bundle id, under the name of its newest row, sorted by name: the rows of
+    /// Formatting per app (F33). Rows without a bundle id are left out.
+    public func apps() throws -> [(name: String, bundleId: String)] {
+        // A bare column next to MAX() comes from the row holding the max (SQLite), so the newest name wins.
+        let stmt = try prepare("""
+            SELECT app, bundle_id, MAX(created_at) FROM history WHERE bundle_id != ''
+            GROUP BY bundle_id ORDER BY app COLLATE NOCASE, bundle_id
+            """)
+        defer { sqlite3_finalize(stmt) }
+        var apps: [(name: String, bundleId: String)] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            apps.append((String(cString: sqlite3_column_text(stmt, 0)), String(cString: sqlite3_column_text(stmt, 1))))
+        }
+        return apps
     }
 
     /// Totals over the delivered dictations (inserted and paste_failed, archived rows included) made at

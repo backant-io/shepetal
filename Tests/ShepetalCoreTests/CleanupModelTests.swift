@@ -6,9 +6,12 @@ final class FakeCleanupModel: CleanupModel, @unchecked Sendable {
     let name = "fake"
     var answer: (String) throws -> String
     var calls: [String] = []
+    var contexts: [CleanupContext] = []
     init(_ answer: @escaping (String) throws -> String) { self.answer = answer }
-    func rewrite(_ text: String) throws -> String {
+    func rewrite(_ text: String) throws -> String { try rewrite(text, context: .none) }
+    func rewrite(_ text: String, context: CleanupContext) throws -> String {
         calls.append(text)
+        contexts.append(context)
         return try answer(text)
     }
 }
@@ -240,6 +243,95 @@ final class SmartCleanupTests: XCTestCase {
                      "Nobody knows.", ""] {
             XCTAssertFalse(SmartCleanup.needsModel(text), text)
         }
+    }
+}
+
+/// F24: the text around the cursor reaches the model only when the caller passes it (Settings' "Use the text around
+/// the cursor to clean up dictation", off by default), cut down to 500 characters a side, and the word guard still
+/// decides: the field may fix case, punctuation and list numbers, never add a word the user did not say.
+final class CleanupContextTests: XCTestCase {
+    let field = CleanupContext(before: "To: Ksenia Petrova\n\n", after: "", selected: "")
+
+    // Off by default: a caller that passes nothing sends the model nothing from the field.
+    func testTheModelGetsTheContextOnlyWhenItIsPassed() {
+        let model = FakeCleanupModel { _ in "Tell Ksenia the draft is ready." }
+        _ = SmartCleanup.apply("tell ksenia the draft is ready", model: model)
+        XCTAssertEqual(model.contexts, [.none], "no context unless the setting is on")
+        _ = SmartCleanup.apply("tell ksenia the draft is ready", model: model, context: field)
+        XCTAssertEqual(model.contexts.last, field)
+        XCTAssertEqual(model.calls, ["tell ksenia the draft is ready", "tell ksenia the draft is ready"],
+                       "the dictation still goes alone; the context is a separate argument")
+    }
+
+    // The field fixes the case of a name the speech model wrote in lowercase.
+    func testContextMayChangeCaseAndPunctuation() {
+        let model = FakeCleanupModel { _ in "Tell Ksenia the draft is ready." }
+        XCTAssertEqual(SmartCleanup.apply("tell ksenia the draft is ready", model: model, context: field),
+                       .init(text: "Tell Ksenia the draft is ready.", usedModel: true))
+    }
+
+    // A small model copies what it sees. Words from the field are not what the user said, so the rules' text is used.
+    func testRewriteThatCopiesWordsFromTheContextIsRejected() {
+        let said = "tell ksenia the draft is ready"
+        for copied in ["Tell Ksenia Petrova the draft is ready.", "To: Ksenia Petrova\n\nTell Ksenia the draft is ready."] {
+            XCTAssertEqual(SmartCleanup.apply(said, model: FakeCleanupModel { _ in copied }, context: field),
+                           .init(text: said, usedModel: false), copied)
+        }
+        let question = CleanupContext(before: "Can you send me the address of the venue?\n\n", after: "", selected: "")
+        XCTAssertFalse(SmartCleanup.apply("yes i will send it tonight", model: FakeCleanupModel { _ in "Yes, I will send you the address tonight." },
+                                          context: question).usedModel, "an answer built from the field is rejected")
+    }
+
+    // "Number three" under "1. ... 2. ..." goes on with that list. Without the list above the cursor, "3." is a
+    // number the user did not say, and the guard still rejects it.
+    func testListNumberingGoesOnFromTheListAboveTheCursor() {
+        let said = "number three headphones"
+        let three = FakeCleanupModel { _ in "3. Headphones" }
+        let list = CleanupContext(before: "Packing list:\n1. Passport\n2. Charger\n", after: "", selected: "")
+        XCTAssertEqual(SmartCleanup.apply(said, model: three, context: list), .init(text: "3. Headphones", usedModel: true))
+        XCTAssertFalse(SmartCleanup.apply(said, model: three).usedModel, "no list above the cursor")
+        let sameLine = CleanupContext(before: "Packing list:\n1. Passport\n2. Charger", after: "", selected: "")
+        XCTAssertEqual(sameLine.listNumber, 0, "the cursor is not on a new line, so no list goes on")
+        XCTAssertFalse(SmartCleanup.apply(said, model: three, context: sameLine).usedModel, "the cursor is not on a new line")
+        XCTAssertFalse(SmartCleanup.apply(said, model: FakeCleanupModel { _ in "4. Headphones" }, context: list).usedModel,
+                       "numbering may go on from 2, not skip to 4")
+        // Speech models punctuate: "Number three, ..." under a list is a cue too, and only there.
+        let punctuated = FakeCleanupModel { _ in "3. The office move" }
+        XCTAssertEqual(SmartCleanup.apply("Number three, the office move.", model: punctuated, context: list),
+                       .init(text: "3. The office move", usedModel: true))
+        XCTAssertEqual(SmartCleanup.apply("Number three, the office move.", model: punctuated).usedModel, false)
+        XCTAssertEqual(punctuated.calls.count, 1, "without the list above, the sentence skips the model")
+        XCTAssertEqual(list.listNumber, 2)
+        XCTAssertEqual(CleanupContext(before: "1. Passport\r2. Charger\r", after: "", selected: "").listNumber, 2, "Word ends lines with \\r")
+        XCTAssertEqual(CleanupContext(before: "1. Passport\r\n2. Charger\r\n", after: "", selected: "").listNumber, 2)
+        XCTAssertEqual(CleanupContext(before: "1. Passport\n2. Charger\n\n", after: "", selected: "").listNumber, 0, "a blank line ends the list")
+    }
+
+    // 500 characters a side, never half a word: a cut word would be a word the user never wrote.
+    func testLongContextIsCutAtWordBoundaries() {
+        let words = (0..<200).map { "w\($0)" }.joined(separator: " ")  // over 500 characters
+        let c = CleanupContext(before: words, after: words, selected: words)
+        for (part, text) in [("before", c.before), ("after", c.after), ("selected", c.selected)] {
+            XCTAssertLessThanOrEqual(text.count, CleanupContext.limit, part)
+            XCTAssertGreaterThan(text.count, CleanupContext.limit - 10, part)
+        }
+        let trim = { (s: String) in s.trimmingCharacters(in: .whitespaces) }
+        XCTAssertTrue((" " + words).hasSuffix(" " + trim(c.before)), "before: the end of the text, from a whole word")
+        XCTAssertTrue((words + " ").hasPrefix(trim(c.after) + " "), "after: the start of the text, up to a whole word")
+        XCTAssertTrue((words + " ").hasPrefix(trim(c.selected) + " "), "selected: the start of the selection, up to a whole word")
+        // A space exactly at the cut keeps the whole window; one 600-character word gives nothing.
+        let exact = String(repeating: "a", count: 10) + " " + String(repeating: "b", count: 500)
+        XCTAssertEqual(CleanupContext(before: exact, after: "", selected: "").before, String(repeating: "b", count: 500))
+        let one = String(repeating: "x", count: 600)
+        XCTAssertEqual(CleanupContext(before: one, after: one, selected: one), .none)
+        let short = "Hi Ksenia, "
+        XCTAssertEqual(CleanupContext(before: short, after: short, selected: short).before, short, "short text is kept as it is")
+    }
+
+    // The field's text is never logged: printing a context shows only its lengths.
+    func testDescriptionShowsNoText() {
+        XCTAssertFalse("\(field)".contains("Ksenia"))
+        XCTAssertEqual("\(field)", "CleanupContext(20 + 0 + 0 characters)")
     }
 }
 

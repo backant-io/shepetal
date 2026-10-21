@@ -6,7 +6,7 @@ What is on main after iteration 1 (60cc333). On each platform, shepetal is a thi
 
 | Path | What | Language, build | Tests |
 |---|---|---|---|
-| `Package.swift`, `Sources/`, `Tests/` | Mac app: `ShepetalCore` (logic), `ShepetalCleanup` (the local cleanup model on llama.cpp) and `Shepetal` (AppKit shell) | Swift 6 / SwiftPM, macOS 14+ | `swift build && swift test`, `scripts/e2e-mac.sh` |
+| `Package.swift`, `Sources/`, `Tests/` | Mac app: `ShepetalCore` (logic), `ShepetalCleanup` (the local cleanup model on llama.cpp), `ShepetalWhisper` (whisper.cpp in process, for the languages Parakeet lacks) and `Shepetal` (AppKit shell) | Swift 6 / SwiftPM, macOS 14+ | `swift build && swift test`, `scripts/e2e-mac.sh` |
 | `meeting/` | Meeting detection and capture: `MeetingCore` (portable), `MeetingMac` (Core Audio, CoreMediaIO), CLI `shepetal-meeting` | Swift / SwiftPM, macOS 14.4+; MeetingCore also builds on Linux | `cd meeting && swift test`, plus MeetingCore in `swift:6.2` on Linux |
 | `ios/` | iPhone: `ShepetalSessionCore` (framework), `Shepetal` (app), `ShepetalKeyboard` (keyboard extension) | Swift, XcodeGen `project.yml`, iOS 17+ | `xcodegen generate && xcodebuild ... test` on the iOS simulator |
 | `summarize/` | Meeting summarizer: extractive TextRank plus rules (not an LLM), and the QMSum/AMI eval | Python, numpy only on the default path | `python -m unittest` |
@@ -46,7 +46,7 @@ No code is shared across platforms yet. Each platform implements the same rules 
 - `Indicator.swift`: borderless, non-activating `NSPanel`, 18 pt, 8 pt from the bottom-left corner, on all Spaces, click-through.
 - `FnTap.swift`: listen-only `CGEventTap` for fn (63, flagsChanged), re-enabled when macOS disables it. The Globe key's extra keycode 179 key events are ignored.
 - `Audio.swift`: `AVAudioEngine` capture, resampled to 16 kHz mono.
-- `Speech.swift`: FluidAudio Parakeet TDT 0.6B v3 from its local cache, with whisper.cpp `whisper-cli` as the fallback.
+- `Speech.swift`: FluidAudio Parakeet TDT 0.6B v3 from its local cache, with whisper.cpp in process (`ShepetalWhisper`, the model kept loaded) for the languages Parakeet lacks and as the fallback.
 - `Inserter.swift`: promised pasteboard item, Cmd+V, paste check, clipboard restore, and the text around the cursor read through Accessibility.
 - `Permissions.swift`: Microphone, Input Monitoring and Accessibility status, with Grant buttons.
 - `Pipeline.swift` and `E2E.swift`: the real pipeline, and `--e2e <wav>` for the headless end-to-end test.

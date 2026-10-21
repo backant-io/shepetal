@@ -82,11 +82,14 @@ public struct MeetingRecord: Equatable, Sendable {
     public var segments: [Segment]
     /// nil until the summary is written.
     public var summary: Summary?
+    /// What the user typed in the Notes pane, as typed; "" when none.
+    public var notes: String
 
-    public init(meeting: Meeting, segments: [Segment] = [], summary: Summary? = nil) {
+    public init(meeting: Meeting, segments: [Segment] = [], summary: Summary? = nil, notes: String = "") {
         self.meeting = meeting
         self.segments = segments
         self.summary = summary
+        self.notes = notes
     }
 }
 
@@ -98,12 +101,14 @@ public protocol MeetingStoring: AnyObject {
     /// Removes these segments (one stored copy each), e.g. the call's echo on the mic channel.
     func remove(_ segments: [Segment], from meetingID: String) throws
     func setSummary(_ summary: Summary, for meetingID: String) throws
+    /// Replaces the meeting's notes; works while it records too.
+    func setNotes(_ notes: String, for meetingID: String) throws
     /// Newest first.
     func list(limit: Int) throws -> [Meeting]
-    /// Meetings whose app, segment text or summary contains `query` (case-insensitive), newest first.
+    /// Meetings whose app, segment text, summary or notes contains `query` (case-insensitive), newest first.
     func search(_ query: String, limit: Int) throws -> [Meeting]
     func get(_ id: String) throws -> MeetingRecord?
-    /// Removes the meeting with its segments and summary (its audio files are the caller's).
+    /// Removes the meeting with its segments, summary and notes (its audio files are the caller's).
     func delete(_ id: String) throws
 }
 

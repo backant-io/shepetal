@@ -128,7 +128,7 @@ enum MenuModel {
 
     /// Each click copies; a dictation without text has nothing to copy and is left out.
     static func recent(_ rows: [HistoryEntry]) -> [MenuEntry] {
-        rows.filter { !$0.text.isEmpty }.map { MenuEntry(title: String($0.text.prefix(60)), action: .copy($0.text)) }
+        rows.filter { !$0.shownText.isEmpty }.map { MenuEntry(title: String($0.shownText.prefix(60)), action: .copy($0.shownText)) }  // Show raw (F48)
     }
 
     /// Fills `menu` with `groups`. Every item calls `action` on `target` with its MenuAction as representedObject;

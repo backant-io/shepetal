@@ -250,6 +250,19 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertNil(lastText(in: [row(1, .tooShort, "")]))
     }
 
+    // F48: after Show raw, paste last and copy last give the raw words; after Show cleaned, the cleaned text again.
+    func testLastTextFollowsShowRaw() {
+        var row = HistoryEntry(id: "a", createdAt: Date(timeIntervalSince1970: 2), outcome: .inserted, audioPath: "", durationMs: 0,
+                               rawText: "[BLANK_AUDIO] um, on the fifth of march", text: "On 05.03.")
+        let older = HistoryEntry(id: "b", createdAt: Date(timeIntervalSince1970: 1), outcome: .inserted, audioPath: "", durationMs: 0,
+                                 rawText: "older", text: "Older")
+        XCTAssertEqual(lastText(in: [row, older]), "On 05.03.")
+        row.reverted = true
+        XCTAssertEqual(lastText(in: [row, older]), "um, on the fifth of march")
+        row.reverted = false
+        XCTAssertEqual(lastText(in: [row, older]), "On 05.03.")
+    }
+
     private func routed(_ out: (inputs: [KeyInput], swallow: Bool), _ inputs: [KeyInput], _ swallow: Bool,
                         _ message: String = "", file: StaticString = #filePath, line: UInt = #line) {
         XCTAssertEqual(out.inputs, inputs, message, file: file, line: line)

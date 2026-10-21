@@ -18,10 +18,17 @@ let package = Package(
                       url: "https://github.com/ggml-org/llama.cpp/releases/download/b11450/llama-b11450-xcframework.zip",
                       checksum: "a435ce4d51fd3cb17a3aca04f378dcc8391d2d220dc69771e11b266df27015fa"),
         .target(name: "ShepetalCleanup", dependencies: ["ShepetalCore", "llama"]),
+        // whisper.cpp (Metal) in process, for the languages Parakeet does not know (F12). Its own target, so its
+        // ggml headers never meet llama's in one module.
+        .binaryTarget(name: "whisper",
+                      url: "https://github.com/ggml-org/whisper.cpp/releases/download/b5454/whisper-b5454-xcframework.zip",
+                      checksum: "e57f8c48933000acabc13bb913fbe82805d483a2deff692cc6738836bd92393b"),
+        .target(name: "ShepetalWhisper", dependencies: ["ShepetalCore", "whisper"]),
         // AppKit shell: menu bar, indicator, fn tap, capture, STT, insertion, permissions.
         .executableTarget(name: "Shepetal", dependencies: [
             "ShepetalCore",
             "ShepetalCleanup",
+            "ShepetalWhisper",
             "ShepetalSummary",
             .product(name: "FluidAudio", package: "FluidAudio"),
             .product(name: "MeetingCore", package: "meeting"),
@@ -37,6 +44,8 @@ let package = Package(
         .testTarget(name: "ShepetalSummaryTests", dependencies: ["ShepetalSummary"]),
         // Runs the real cleanup model when SHEPETAL_CLEANUP_MODEL names a GGUF; skipped otherwise.
         .testTarget(name: "ShepetalCleanupTests", dependencies: ["ShepetalCleanup"]),
+        // Runs the real whisper model when SHEPETAL_WHISPER_MODEL names one; skipped otherwise.
+        .testTarget(name: "ShepetalWhisperTests", dependencies: ["ShepetalWhisper"]),
     ],
     swiftLanguageModes: [.v5]
 )

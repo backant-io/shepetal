@@ -40,6 +40,7 @@ final class AppearanceTests: XCTestCase {
                       loginItem: LoginItem(say: { _ in }), openDictionary: {}, restoreFnKey: {})
         let window = try XCTUnwrap(Mirror(reflecting: hub).descendant("window") as? NSWindow,
                                    "Hub's window was renamed: update this test")
+        XCTAssertEqual(window.title, "shepetal", "the brand is written in lowercase, the window title too")
         assertFollowsTheSystem(window, "the Shepetal window")
     }
 

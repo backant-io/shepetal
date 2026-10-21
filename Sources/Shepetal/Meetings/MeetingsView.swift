@@ -1,9 +1,10 @@
 import AppKit
 import ShepetalCore
+import ShepetalSummary
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// The Meetings tab: the list on the left, the open meeting's summary and live transcript on the right.
+/// The Meetings tab: the list on the left, the open meeting's summary, notes and live transcript on the right.
 @MainActor
 final class MeetingsModel: ObservableObject {
     let store: MeetingStoring
@@ -31,7 +32,10 @@ final class MeetingsModel: ObservableObject {
             let list = try q.isEmpty ? store.list(limit: 200) : store.search(q, limit: 200)
             if list != meetings { meetings = list }
             if selectedID == nil || !list.contains(where: { $0.id == selectedID }) { selectedID = list.first?.id }
-            let r = try selectedID.flatMap(store.get)
+            var r = try selectedID.flatMap(store.get)
+            // Shown, copied and exported: the summary with the notes merged in. The store keeps the summary as it
+            // was written, so the merge reruns whenever the notes change, also after the meeting.
+            if let s = r?.summary, let notes = r?.notes { r?.summary = Self.merge(s, notes) }
             if r != record { record = r }
         } catch {
             message = "Meetings: \(error.localizedDescription)"
@@ -45,8 +49,22 @@ final class MeetingsModel: ObservableObject {
         refresh()
     }
 
-    /// Copy summary is greyed out until there is a summary with something in it.
-    var canCopySummary: Bool { !(record?.summary?.isEmpty ?? true) }
+    /// The non-LLM merge (rule 6). Without the bundled weights the summary stays as written; the notes still show.
+    private static let summarizer = try? MeetingSummarizer()
+    static func merge(_ summary: Summary, _ notes: String) -> Summary { summarizer?.merge(summary, notes: notes) ?? summary }
+
+    /// The Notes pane, saved as it is typed, while the meeting records too.
+    func setNotes(_ notes: String, for id: String) {
+        do {
+            try store.setNotes(notes, for: id)
+            refresh()  // the merged summary follows at once
+        } catch {
+            message = "Notes not saved: \(error.localizedDescription)"
+        }
+    }
+
+    /// Copy summary is greyed out until there is a summary or a note with something in it.
+    var canCopySummary: Bool { !(record?.summary?.isEmpty ?? true) || !noteLines(record?.notes ?? "").isEmpty }
 
     func copySummary() {
         guard let r = record, canCopySummary else { return }
@@ -161,7 +179,7 @@ private struct LiveBadge: View {
 }
 
 private struct MeetingDetail: View {
-    enum Pane: String, CaseIterable { case summary = "Summary", transcript = "Transcript" }
+    enum Pane: String, CaseIterable { case summary = "Summary", notes = "Notes", transcript = "Transcript" }
 
     let record: MeetingRecord
     @ObservedObject var model: MeetingsModel
@@ -205,7 +223,8 @@ private struct MeetingDetail: View {
 
             Divider()
             switch pane {
-            case .summary: SummaryPane(summary: record.summary, live: live)
+            case .summary: SummaryPane(summary: record.summary, notes: noteLines(record.notes), live: live)
+            case .notes: NotesPane(record: record, model: model)
             case .transcript: TranscriptPane(segments: record.segments, live: live)
             }
         }
@@ -225,12 +244,13 @@ private struct MeetingDetail: View {
 
 private struct SummaryPane: View {
     let summary: Summary?
+    let notes: [String]
     let live: Bool
 
     var body: some View {
         if let s = summary {
             ScrollView {
-                SummarySections(summary: s)
+                SummarySections(summary: s, notes: notes)
                     .textSelection(.enabled)
                     .frame(maxWidth: 680, alignment: .leading)
                     .padding(24)
@@ -244,13 +264,17 @@ private struct SummaryPane: View {
     }
 }
 
-/// Overview, key points, decisions and action items, empty ones left out: the sections Copy summary copies.
+/// Your notes, overview, key points, decisions and action items, empty ones left out: the sections Copy summary copies.
 struct SummarySections: View {
     let summary: Summary
+    var notes: [String] = []
 
     var body: some View {
         let s = summary
         VStack(alignment: .leading, spacing: 26) {
+            if !notes.isEmpty {
+                section("Your notes") { bullets(notes, icon: "pencil", size: 11, tint: .accentColor) }
+            }
             if !s.overview.isEmpty {
                 section("Overview") { Text(s.overview).lineSpacing(3) }
             }
@@ -308,6 +332,33 @@ struct ActionRow: View {
             }
         }
         .padding(.vertical, 2)
+    }
+}
+
+/// A notepad for the open meeting, saved as you type, also while it records. Its lines are merged into the summary.
+private struct NotesPane: View {
+    let id: String
+    @ObservedObject var model: MeetingsModel
+    @State private var text: String
+
+    init(record: MeetingRecord, model: MeetingsModel) {
+        id = record.meeting.id
+        self.model = model
+        _text = State(initialValue: record.notes)
+    }
+
+    var body: some View {
+        TextEditor(text: $text)
+            .font(.body)
+            .scrollContentBackground(.hidden)
+            .padding(20)
+            .overlay(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("Type your notes here. They are saved as you type and merged into the summary.")
+                        .foregroundStyle(.tertiary).padding(.leading, 25).padding(.top, 20).allowsHitTesting(false)
+                }
+            }
+            .onChange(of: text) { model.setNotes(text, for: id) }
     }
 }
 

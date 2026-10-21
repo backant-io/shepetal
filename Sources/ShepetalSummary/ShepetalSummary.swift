@@ -364,3 +364,41 @@ extension String {
         return String(s)
     }
 }
+
+// MARK: notes (F71)
+
+extension MeetingSummarizer {
+    /// The summary with the user's notes merged in, without an LLM (rule 6), and apart from summarize(), which must
+    /// keep saying what summarize.py says. A note line with an action cue ("TODO:", "[ ]", a deadline, "I'll", "we
+    /// need to") goes through the action-item extractor as said by "Me", and those items come first; a key point
+    /// that a note already says is dropped. The notes themselves are shown first, as "Your notes", by whoever
+    /// renders the summary. No notes: the summary unchanged.
+    public func merge(_ summary: Summary, notes: String) -> Summary {
+        let lines = noteLines(notes)
+        guard !lines.isEmpty else { return summary }
+        let cued = lines.compactMap { l -> String? in
+            if TODO.has(l) { return TODO.replace(l, "") }
+            return COMMIT.has(l) || DUE.has(l) || CUES.contains(where: { $0.1.has(l) }) ? l : nil
+        }
+        // The cue picks the lines, not the score: the weights were trained on speech and rate a typed
+        // "Send the deck by Friday" far below the threshold.
+        let typed = MeetingSummarizer(model: Model(bias: model.bias, threshold: 0, weights: model.weights))
+        let me = Speaker.me.rawValue
+        let mine = typed.actionItems(cued.map { Sent(spk: me, text: $0) }).map { ActionItem(owner: me, task: $0.task, due: $0.due) }
+        var s = summary
+        // ponytail: a note of three words or fewer repeats no key point; similar() alone would drop every key point
+        // that shares the one word of a note like "budget".
+        s.keyPoints.removeAll { k in lines.contains { words($0).count > 3 && similar(k, $0) } }
+        s.actionItems = mine + s.actionItems.filter { a in !mine.contains { $0.owner == a.owner && sameTask($0.task, a.task) } }
+        return s
+    }
+}
+
+/// The lines of the notes as shown under "Your notes": blank lines and list markers ("- ", "* ", "• ", "1. ") dropped.
+public func noteLines(_ notes: String) -> [String] {
+    notes.components(separatedBy: .newlines)
+        .map { NOTE_MARKER.replace($0, "").trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+}
+
+let NOTE_MARKER = Re("^\\s*(?:[-*•]|\\d+[.)])\\s+")
+let TODO = Re("^(?:\\[ ?\\]|todo\\b:?|to-?do:|action(?: item)?:)\\s*", .caseInsensitive)
