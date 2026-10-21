@@ -640,13 +640,36 @@ In the L-SC steps the shortcuts have their defaults: Esc cancels, Shift+Alt+Z is
 (Automated: `hands_free_toggle_starts_stops_and_cancels`, `hands_free_is_reported_for_the_toggle_and_the_double_tap`, `the_hotkey_stops_a_toggled_dictation_without_starting_another`, `the_toggle_ends_a_double_tap_dictation`.)
 
 ### L-SC-5: shortcut settings
-1. Put `{"shortcuts": {"paste_last": "z"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon; echo $?`. Expected: `shepetal: /home/<you>/.config/shepetal/config.json: paste_last: "z" needs a modifier: ctrl, alt, shift or meta` and `1`.
+1. Put `{"shortcuts": {"paste_last": "z"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon; echo $?`. Expected: `shepetal: /home/<you>/.config/shepetal/config.json: paste_last: "z" needs a modifier: ctrl, alt, shift, meta or a mouse button` and `1`.
 2. With `{"shortcuts": {"paste_last": "ctrl+alt+shift+z"}}`. Expected: `... paste_last: "ctrl+alt+shift+z" has 4 keys, at most 3 are allowed` and `1`.
 3. With `{"shortcuts": {"hands_free": "shift+alt+z"}}`. Expected: `... hands_free: "shift+alt+z" is already paste_last` and `1`.
 4. With `{"shortcuts": {"paste_last": "ctrl+alt+v"}}` the daemon starts. Dictate a sentence and press Ctrl+Alt+V. Expected: the sentence is typed again, Shift+Alt+Z does nothing, and Shift+Alt+X still copies (a shortcut left out keeps its default).
 5. With `{"shortcuts": {"copy_last": "rightalt+x"}}`, run `SHEPETAL_KEY=rightalt shepetal daemon`. Expected: `... copy_last: "rightalt+x" uses rightalt, the dictation hotkey` and exit code 1. Remove the file and run `SHEPETAL_KEY=rightalt shepetal daemon` again. Dictate with Right Alt, then press Shift+Left Alt+Z. Expected: the sentence is typed again (a generic `alt` means Left Alt when Right Alt is the hotkey).
 6. Remove `~/.config/shepetal/config.json`.
 (Automated: `validation_rejects_what_wispr_rejects`, `combos_that_clash_with_the_hotkey_are_rejected`, `config_errors_name_the_shortcut_and_place`, `config_overrides_and_other_settings_are_skipped`, `config_file_location_and_missing_file`, `key_names_map_to_evdev_codes`.)
+
+### L-SC-7: a combo as the dictation key
+1. Put `{"shortcuts": {"dictation": "ctrl+alt"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon` without `SHEPETAL_KEY`. Expected: `hold ctrl+alt to talk`, and the keyboards that have Ctrl or Alt.
+2. In a text editor hold Ctrl, then Alt, and speak; let go. Expected: the text is typed once the keys are up. Do it again pressing Right Alt first, then Right Ctrl: the same.
+3. Hold Ctrl+Alt, let go of Alt and press it again within half a second while Ctrl stays down, then let go of both. Expected: hands-free (🤫 orange). Press Ctrl+Alt again: the text is typed.
+4. Tap Ctrl+Alt quickly. Expected: nothing is typed and `Hold ctrl+alt to talk · double-tap for hands-free` shows next to 🤫 for about 3 s.
+5. Press Ctrl+Alt+T (or any Ctrl+Alt+key your desktop uses). Expected: the desktop's action happens and nothing is typed (a chord, kept as `*.cancelled.wav`).
+6. Hold only Ctrl for 2 s. Expected: no recording.
+7. Each of these, one at a time, makes `shepetal daemon; echo $?` exit with `1` and the reason after `config.json: dictation:`: `"a"` (`needs a modifier`), `"7"` (the same), `"shift+a"` (`types a character`), `"ctrl+alt+shift+meta"` (`has 4 keys, at most 3 are allowed`), `"leftctrl"` (`a key you press all the time`), `"alt+tab"` (`a shortcut the desktop or apps already use`), `"mouse1"` (`left and right click cannot be shortcuts`).
+8. With `{"shortcuts": {"dictation": "ctrl+alt"}}` still in the file, run `SHEPETAL_KEY=rightctrl shepetal daemon`. Expected: `hold rightctrl to talk`: `SHEPETAL_KEY` wins over the file.
+9. Remove `~/.config/shepetal/config.json`.
+(Automated: `a_combo_is_a_dictation_key_held_in_any_order`, `dictation_validation_matches_the_mac`, `other_shortcuts_may_not_overlap_a_combo_dictation_key`, `shepetal_key_still_picks_one_key_and_wins_over_the_config`, `a_combo_or_mouse_dictation_key_reads_every_device_that_sends_part_of_it`.)
+
+### L-SC-8: mouse buttons
+Needs a mouse with back and forward side buttons.
+1. `sudo evtest`, pick the mouse, and press its back and forward buttons. Write down the names it prints (`BTN_SIDE`/`BTN_EXTRA`, or `BTN_BACK`/`BTN_FORWARD`). Quit evtest.
+2. Put `{"shortcuts": {"dictation": "mouse4", "hands_free": "mouse5"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon`. Expected: `hold mouse4 to talk`, and the mouse among the input devices.
+3. Hold the back button and speak in a text editor; while still holding it, left-click in the editor once. Let go. Expected: the text is typed (the click did not cancel), and the browser or file manager under the pointer may also go back, since nothing is swallowed.
+4. Double-click the back button, speak, press it again. Expected: hands-free, then the text is typed.
+5. Press the forward button, speak, press it again. Expected: the text is typed (the hands-free key). Pressed twice within half a second: nothing is typed and a `*.cancelled.wav` is kept.
+6. Set `{"shortcuts": {"dictation": "ctrl+mouse4"}}`: holding Ctrl and the back button records; the back button alone does nothing.
+7. Unplug the mouse and start the daemon with step 6's file. Expected: `no input device reports "ctrl+mouse4" (evdev code 275)` and exit code 1. Remove `~/.config/shepetal/config.json`.
+(Automated: `a_mouse_button_is_a_dictation_key_and_clicks_do_not_cancel_it`, `a_combo_or_mouse_dictation_key_reads_every_device_that_sends_part_of_it`.)
 
 ### L-SC-6: 20-minute cap
 1. Start a hands-free dictation (double-tap fn or Ctrl+Meta+Space) and leave it running for 20 min, speaking now and then.
