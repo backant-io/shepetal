@@ -63,9 +63,8 @@ final class NotesModel: ObservableObject {
         write(id)
     }
 
-    /// A save still waiting for the note is dropped with it, so it cannot write the note back.
+    /// A save still waiting for the note finds it gone (`write`), so it cannot write the note back.
     func delete(_ id: String) {
-        pending.removeValue(forKey: id)?.cancel()
         notes.removeAll { $0.id == id }
         do { try store.delete(id) } catch { problem = "Not deleted: \(error.localizedDescription)" }
     }
