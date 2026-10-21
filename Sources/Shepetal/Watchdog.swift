@@ -6,7 +6,7 @@ import ShepetalCore
 /// any `exit`, and SIGTERM (the installer, the uninstaller, `kill`) write the marker, so the app stays quit.
 enum Watchdog {
     static let flag = "--watchdog"
-    private static var marker: URL?  // read by the atexit handler, which cannot capture
+    private static var home: URL?  // read by the atexit handler, which cannot capture
     private static var sigterm: DispatchSourceSignal?
     private static var child: Process?
 
@@ -19,6 +19,9 @@ enum Watchdog {
     /// The app side, first thing at launch. Returns `Relaunch.gaveUpHint` once, at the launch after a give-up.
     @MainActor static func start(args: [String] = CommandLine.arguments, dir: URL = Paths.root) -> String? {
         guard wanted(args: args, bundle: Bundle.main.bundleURL), let exe = Bundle.main.executableURL else { return nil }
+        // The crash count and the marker live here. Without the folder every crash would look like the first
+        // and every Quit like a crash, so a watchdog that cannot write it would reopen the app forever.
+        guard (try? AudioStore.makeOwnerOnlyDirectory(dir)) != nil else { return nil }
         let p = Process()
         p.executableURL = exe
         p.arguments = [flag, String(getpid())]  // scripts/pkg/preinstall and uninstall-mac.sh match this command line
@@ -26,15 +29,25 @@ enum Watchdog {
             NSLog("shepetal: watchdog did not start: %@", String(describing: error))
             return takeGaveUp(dir: dir)
         }
-        marker = dir.appendingPathComponent("clean-quit")
-        atexit { if let m = Watchdog.marker { try? String(getpid()).write(to: m, atomically: true, encoding: .utf8) } }
-        signal(SIGTERM, SIG_IGN)  // handled below instead: exit(0) runs the atexit handler
-        // Off the main thread, so SIGTERM still ends an app whose main thread hangs, as it did before.
+        home = dir
+        atexit { Watchdog.quitting() }  // any exit() that did not go through applicationWillTerminate
+        signal(SIGTERM, SIG_IGN)  // handled below instead
+        // Off the main thread, so SIGTERM still ends an app whose main thread hangs, and at once (_exit runs no
+        // exit handlers), as it did before.
         let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
-        source.setEventHandler { exit(0) }
+        source.setEventHandler { quitting(); _exit(0) }
         source.resume()
         sigterm = source
         return takeGaveUp(dir: dir)
+    }
+
+    /// Quit calls this first in applicationWillTerminate, before any teardown that could crash. It does
+    /// nothing when no watchdog runs (the test and installer modes).
+    static func quitting() { if let home { markCleanQuit(dir: home) } }
+
+    /// Tells the watchdog that `pid` is quitting on purpose, so its exit is not a crash.
+    static func markCleanQuit(dir: URL, pid: pid_t = getpid()) {
+        try? String(pid).write(to: dir.appendingPathComponent("clean-quit"), atomically: true, encoding: .utf8)
     }
 
     /// `Shepetal --watchdog <pid>`, from main.swift. Never returns.

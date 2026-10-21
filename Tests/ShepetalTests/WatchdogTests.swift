@@ -56,7 +56,7 @@ final class WatchdogTests: XCTestCase {
     }
 
     func testMarkerThenExitStaysQuit() throws {
-        try String(sleeper.processIdentifier).write(to: dir.appendingPathComponent("clean-quit"), atomically: true, encoding: .utf8)
+        Watchdog.markCleanQuit(dir: dir, pid: sleeper.processIdentifier)  // what Quit, exit and SIGTERM call
         try JSONEncoder().encode(Relaunch(crashes: 2)).write(to: dir.appendingPathComponent("relaunch.json"))
         let source = watch()
         kill(sleeper.processIdentifier, SIGTERM)  // what the installer sends; the app writes the marker first
@@ -70,7 +70,7 @@ final class WatchdogTests: XCTestCase {
     }
 
     func testAnotherProcessesMarkerIsStillACrash() throws {
-        try "1".write(to: dir.appendingPathComponent("clean-quit"), atomically: true, encoding: .utf8)  // an earlier copy's quit
+        Watchdog.markCleanQuit(dir: dir, pid: 1)  // an earlier copy's quit
         let source = watch()
         kill(sleeper.processIdentifier, SIGKILL)
         spin(3) { relaunches > 0 }
