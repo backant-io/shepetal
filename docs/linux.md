@@ -55,7 +55,11 @@ The colors are Apple's system red, orange, blue and yellow, which the Mac indica
 | GNOME Wayland | `linux/gnome-extension/`, a GNOME Shell extension (GNOME 45 and later), because Mutter has no layer-shell and lets no app place an overlay. It adds 🤫 as top chrome (above all windows, also full-screen ones), not part of the input region and not reactive, so clicks go through. |
 
 `shepetal daemon` starts `shepetal-indicator` from PATH, except on GNOME Wayland, where it says
-that 🤫 comes from the extension. If the program is missing, the daemon says so once on stderr.
+that 🤫 comes from the extension. The daemon looks the program up on PATH before each start,
+because Rust 1.75 (Ubuntu 24.04) spawns a missing program as a child that exits 127 instead of
+failing (#130). If it is missing (or exits 127, which `env` does when python3 is missing), the
+daemon says so once on stderr and looks again with the same backoff as below, so installing it
+brings 🤫 up without a restart.
 Whenever the indicator exits while the daemon runs (a crash, an X server or compositor restart, a
 display that was not ready yet), the daemon reports it on stderr, reaps it and starts it again
 after 2 s, doubling the wait up to 64 s while it keeps exiting within 30 s (goal rule 3: 🤫 is
@@ -176,7 +180,7 @@ text is ready (`linux/src/focus.rs`):
 
 - Same window at both ends: the text is typed. The clipboard is not touched.
 - Another window has focus: nothing is typed. The text goes to the clipboard (`wl-copy` on
-  Wayland, else `xclip`), and the hint next to 🤫 says
+  Wayland, else `xclip` or `xsel`), and the hint next to 🤫 says
   `Focus moved. The text is on the clipboard: press Ctrl+V (Ctrl+Shift+V in a terminal).`
 - Focus unreadable at either end: there is nothing to compare, so the text is typed.
 - Typing fails (the tool exits non-zero): the text goes to the clipboard with the hint
@@ -230,8 +234,8 @@ is gone. A missing, broken or unknown setting keeps everything. There is no "nev
 
 ## Security
 
-- Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`
-  and `xclip` over stdin. It never goes in argv, which every local user can read with `ps`.
+- Dictated text goes to `wtype -`, `xdotool type --file -`, `ydotool type --file -`, `wl-copy`,
+  `xclip` and `xsel` over stdin. It never goes in argv, which every local user can read with `ps`.
 - Every dictation's raw audio is kept, the exact 16 kHz mono WAV the model received, in
   `$XDG_DATA_HOME/shepetal/audio/` (default `~/.local/share/shepetal/audio/`; an empty or relative
   `XDG_DATA_HOME` is ignored, as the XDG spec says). The directory is created 0700. If it is a

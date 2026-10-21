@@ -27,6 +27,15 @@ final class InsertionRulesTests: XCTestCase {
     }
 
     // The space before following text is a non-breaking space now (see testTrailingBoundarySpaceIsNBSP).
+    // The final dot of a DD.MM. date is the date's (docs/text-rules.md); after DD.MM.YY it is the sentence's.
+    func testDayMonthDateKeepsItsDotBeforeFollowingText() {
+        XCTAssertEqual(fit("on 26.07.", "", "and then"), "on 26.07." + nbsp)
+        XCTAssertEqual(fit("on 26.07.", "", "", selected: "tomorrow"), "on 26.07.")
+        XCTAssertEqual(fit("on 26.07.?", "", "and then"), "on 26.07." + nbsp)
+        XCTAssertEqual(fit("on 26.07.26.", "", "and then"), "on 26.07.26" + nbsp)
+        XCTAssertEqual(fit("version 1.2.", "", "and then"), "version 1.2" + nbsp)
+    }
+
     func testFollowingTextDropsSentenceEndAndAddsSpace() {
         XCTAssertEqual(fit("The report.", "", "is due"), "The report" + nbsp)
         XCTAssertEqual(fit("The report.", "", ", which"), "The report")

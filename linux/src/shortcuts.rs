@@ -1,6 +1,6 @@
-//! Every shepetal key, and the 20 min cap. Pure: feed it evdev key events (code, value) with
-//! millisecond timestamps. It owns the dictation key's `Gesture` too, so a recording started by
-//! either path has one owner.
+//! Every shepetal key, and the length cap (20 min unless config.json says). Pure: feed it evdev
+//! key events (code, value) with millisecond timestamps. It owns the dictation key's `Gesture`
+//! too, so a recording started by either path has one owner.
 //!
 //! - The dictation key: fn, one key from `SHEPETAL_KEY`, or a combo of up to 3 keys or mouse
 //!   buttons from config.json (hold to talk, double-tap for hands-free).
@@ -11,13 +11,16 @@
 //!   every key is up, so the held Shift and Alt do not change the typed text.
 //! - A dedicated hands-free toggle (Wispr's Windows default Ctrl+Win+Space): one press starts,
 //!   the next stops, a second press within 500 ms of the start cancels. The hotkey stops it too.
-//! - A warning at 19 min and a stop (transcribed as usual) at 20 min, as Wispr
-//!   (docs/re/dictation-input.md, section 2.3).
+//! - A warning one minute before the cap and a stop (transcribed as usual) at the cap: 19 and
+//!   20 min by default, as Wispr (docs/re/dictation-input.md, section 2.3). The cap is a setting,
+//!   as on the Mac (`maxDictationMinutes`).
 //!
-//! The combos live in `~/.config/shepetal/config.json`, the one settings file of the daemon:
+//! The combos and the cap live in `~/.config/shepetal/config.json`, the one settings file of the
+//! daemon:
 //!
 //! ```json
-//! {"shortcuts": {"dictation": "fn", "paste_last": "shift+alt+z", "copy_last": "shift+alt+x", "hands_free": "ctrl+meta+space"}}
+//! {"shortcuts": {"dictation": "fn", "paste_last": "shift+alt+z", "copy_last": "shift+alt+x", "hands_free": "ctrl+meta+space"},
+//!  "dictation": {"max_minutes": 20}}
 //! ```
 
 use crate::gesture::{Action, Event, Gesture, DOUBLE_TAP_MS};
@@ -25,9 +28,12 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub const KEY_ESC: u16 = 1;
-pub const WARN_MS: u64 = 19 * 60_000;
+/// The default cap, and how long before the cap the warning comes.
 pub const MAX_MS: u64 = 20 * 60_000;
-/// Shown next to 🤫 at 19 min. Our own wording.
+pub const WARN_LEAD_MS: u64 = 60_000;
+/// The longest cap config.json may set: a day.
+const MAX_MINUTES: u64 = 24 * 60;
+/// Shown next to 🤫 and as a desktop notification one minute before the cap. Our own wording.
 pub const WARNING: &str = "Recording stops in 1 minute";
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -100,6 +106,8 @@ pub struct Config {
     pub paste_last: Combo,
     pub copy_last: Combo,
     pub hands_free: Combo,
+    /// The length cap: a dictation is stopped and transcribed when it has run this long.
+    pub max_ms: u64,
 }
 
 pub const DEFAULTS: [(&str, &str); 4] = [
@@ -314,10 +322,10 @@ fn env_key(k: &str) -> Result<(Combo, String), String> {
     Ok((Combo(vec![vec![code]]), name))
 }
 
-/// Read the `shortcuts` object of config.json (an empty or missing file means the defaults).
-/// Other keys belong to other features and are skipped; an unknown name in `shortcuts` is an
-/// error, so a typo is not silently ignored. `shepetal_key`, the SHEPETAL_KEY variable, wins
-/// over `dictation`.
+/// Read the `shortcuts` and `dictation` objects of config.json (an empty or missing file means
+/// the defaults). Other keys belong to other features and are skipped; an unknown name in either
+/// object is an error, so a typo is not silently ignored. `shepetal_key`, the SHEPETAL_KEY
+/// variable, wins over `shortcuts.dictation`.
 pub fn parse(json: &str, shepetal_key: Option<&str>) -> Result<Config, String> {
     let mut vals = DEFAULTS.map(|(k, v)| (k, v.to_string()));
     let v: serde_json::Value = if json.trim().is_empty() { Default::default() } else { serde_json::from_str(json).map_err(|e| e.to_string())? };
@@ -342,7 +350,23 @@ pub fn parse(json: &str, shepetal_key: Option<&str>) -> Result<Config, String> {
     }
     let mut it = combos.into_iter().skip(1).map(|(_, c)| c);
     let mut next = || it.next().unwrap();
-    Ok(Config { dictation, dictation_name, paste_last: next(), copy_last: next(), hands_free: next() })
+    Ok(Config { dictation, dictation_name, paste_last: next(), copy_last: next(), hands_free: next(), max_ms: max_ms(&v)? })
+}
+
+/// `dictation.max_minutes`: whole minutes from 1 to a day, else the 20 min default.
+fn max_ms(v: &serde_json::Value) -> Result<u64, String> {
+    let Some(d) = v.get("dictation") else { return Ok(MAX_MS) };
+    let d = d.as_object().ok_or("\"dictation\" must be an object")?;
+    if let Some(k) = d.keys().find(|k| *k != "max_minutes") {
+        return Err(format!("unknown dictation setting {k:?} (max_minutes)"));
+    }
+    match d.get("max_minutes") {
+        None => Ok(MAX_MS),
+        Some(m) => match m.as_u64() {
+            Some(n @ 1..=MAX_MINUTES) => Ok(n * 60_000),
+            _ => Err(format!("dictation.max_minutes: expected whole minutes from 1 to {MAX_MINUTES}, got {m}")),
+        },
+    }
 }
 
 /// The same keys, sides ignored: Left Alt and Right Alt are both alt.
@@ -392,9 +416,10 @@ impl Shortcuts {
         }
         self.gesture(Event::Tick(now), now, &mut out);
         if let Some((t0, _)) = self.rec {
-            if now - t0 >= MAX_MS {
+            // A cap of a minute or less warns at once.
+            if now - t0 >= self.cfg.max_ms {
                 self.end(Action::Stop, &mut out);
-            } else if now - t0 >= WARN_MS && !self.warned {
+            } else if now - t0 >= self.cfg.max_ms.saturating_sub(WARN_LEAD_MS) && !self.warned {
                 self.warned = true;
                 out.push(Cmd::MaxLengthWarning);
             }
@@ -492,7 +517,7 @@ impl Shortcuts {
     }
 
     /// The dictation ended without a key (its mic was unplugged): forget it, so the next press
-    /// starts a new one, and neither Esc, the toggle nor the 20 min cap acts on it.
+    /// starts a new one, and neither Esc, the toggle nor the length cap acts on it.
     pub fn reset(&mut self) {
         self.rec = None;
         self.gesture = Gesture::default();
@@ -650,25 +675,25 @@ mod tests {
     fn warning_at_19_minutes_and_stop_at_20() {
         let mut s = Shortcuts::new(defaults());
         assert_eq!(run(&mut s, &press(&[LCTRL, LMETA, SPACE], 1000)), [d(Start)]);
-        assert_eq!(s.feed(None, 1000 + WARN_MS - 1), []);
-        assert_eq!(s.feed(None, 1000 + WARN_MS), [Cmd::MaxLengthWarning]);
-        assert_eq!(s.feed(None, 1000 + WARN_MS + 50), [], "warned once");
+        assert_eq!(s.feed(None, 1000 + MAX_MS - WARN_LEAD_MS - 1), []);
+        assert_eq!(s.feed(None, 1000 + MAX_MS - WARN_LEAD_MS), [Cmd::MaxLengthWarning]);
+        assert_eq!(s.feed(None, 1000 + MAX_MS - WARN_LEAD_MS + 50), [], "warned once");
         assert_eq!(s.feed(None, 1000 + MAX_MS - 1), []);
         assert_eq!(s.feed(None, 1000 + MAX_MS), [d(Stop)], "stopped and transcribed, not cancelled");
         assert_eq!(s.feed(None, 1000 + 2 * MAX_MS), []);
-        assert_eq!((WARN_MS, MAX_MS), (1_140_000, 1_200_000));
+        assert_eq!((MAX_MS - WARN_LEAD_MS, MAX_MS), (1_140_000, 1_200_000), "19 and 20 min when config.json sets nothing");
     }
 
     #[test]
     fn a_20_minute_hold_stops_and_the_late_release_does_nothing() {
         let mut s = Shortcuts::new(defaults());
         assert_eq!(s.feed(Some((FN, 1)), 0), [d(Start)]);
-        assert_eq!(s.feed(None, WARN_MS), [Cmd::MaxLengthWarning]);
+        assert_eq!(s.feed(None, MAX_MS - WARN_LEAD_MS), [Cmd::MaxLengthWarning]);
         assert_eq!(s.feed(None, MAX_MS), [d(Stop)]);
         assert_eq!(run(&mut s, &[(FN, 0, MAX_MS + 5000), (0, 0, MAX_MS + 9000)]), []);
         // The next dictation gets its own warning.
         assert_eq!(s.feed(Some((FN, 1)), 2 * MAX_MS), [d(Start)]);
-        assert_eq!(s.feed(None, 2 * MAX_MS + WARN_MS), [Cmd::MaxLengthWarning]);
+        assert_eq!(s.feed(None, 2 * MAX_MS + MAX_MS - WARN_LEAD_MS), [Cmd::MaxLengthWarning]);
     }
 
     #[test]
@@ -677,6 +702,52 @@ mod tests {
         assert_eq!(c.paste_last, Combo(vec![vec![42, 54], vec![56, 100], vec![Z]]));
         assert_eq!(c.copy_last, Combo(vec![vec![42, 54], vec![56, 100], vec![X]]));
         assert_eq!(c.hands_free, Combo(vec![vec![29, 97], vec![125, 126], vec![SPACE]]));
+    }
+
+    #[test]
+    fn the_cap_is_configurable_for_holds_double_taps_and_the_toggle() {
+        // As the Mac's FnGestureTests.testCapIsConfigurable: a 5 min cap warns at 4 and stops at 5.
+        let min = 60_000;
+        let cfg = parse(r#"{"dictation": {"max_minutes": 5}}"#, None).unwrap();
+        assert_eq!(cfg.max_ms, 5 * min);
+        let starts: [&[(u16, i32, u64)]; 3] = [&[(FN, 1, 0)], &[(FN, 1, 0), (FN, 0, 100), (FN, 1, 300), (FN, 0, 400)], &press(&[LCTRL, LMETA, SPACE], 0)];
+        for (i, start) in starts.into_iter().enumerate() {
+            let mut s = Shortcuts::new(cfg.clone());
+            assert_eq!(run(&mut s, start), [d(Start)], "start {i}");
+            assert_eq!(s.feed(None, 4 * min - 1), [], "start {i}");
+            assert_eq!(s.feed(None, 4 * min), [Cmd::MaxLengthWarning], "start {i}: one minute before the cap");
+            assert_eq!(s.feed(None, 5 * min - 1), [], "start {i}: warned once");
+            assert_eq!(s.feed(None, 5 * min), [d(Stop)], "start {i}: stopped and transcribed");
+            assert_eq!(s.feed(None, 20 * min), [], "start {i}: the default cap does not act too");
+        }
+        // A longer cap: nothing at 19 or 20 min.
+        let mut s = Shortcuts::new(parse(r#"{"dictation": {"max_minutes": 45}}"#, None).unwrap());
+        assert_eq!(s.feed(Some((FN, 1)), 0), [d(Start)]);
+        assert_eq!(s.feed(None, 20 * min), []);
+        assert_eq!(s.feed(None, 44 * min), [Cmd::MaxLengthWarning]);
+        assert_eq!(s.feed(None, 45 * min), [d(Stop)]);
+    }
+
+    #[test]
+    fn a_one_minute_cap_warns_at_the_start() {
+        let mut s = Shortcuts::new(parse(r#"{"dictation": {"max_minutes": 1}}"#, None).unwrap());
+        assert_eq!(s.feed(Some((FN, 1)), 1000), [d(Start), Cmd::MaxLengthWarning]);
+        assert_eq!(s.feed(None, 60_999), []);
+        assert_eq!(s.feed(None, 61_000), [d(Stop)]);
+    }
+
+    #[test]
+    fn max_minutes_must_be_whole_minutes_from_1_to_a_day() {
+        let e = |t: &str| parse(t, None).unwrap_err();
+        assert_eq!(parse(r#"{"dictation": {}}"#, None).unwrap().max_ms, MAX_MS);
+        assert_eq!(parse(r#"{"dictation": {"max_minutes": 1440}}"#, None).unwrap().max_ms, 1440 * 60_000);
+        for bad in ["0", "-5", "2.5", "\"10\"", "1441", "null"] {
+            assert_eq!(e(&format!(r#"{{"dictation": {{"max_minutes": {bad}}}}}"#)),
+                       format!("dictation.max_minutes: expected whole minutes from 1 to 1440, got {bad}"));
+        }
+        assert_eq!(e(r#"{"dictation": {"max_minute": 5}}"#), "unknown dictation setting \"max_minute\" (max_minutes)");
+        assert_eq!(e(r#"{"dictation": 5}"#), "\"dictation\" must be an object");
+        assert!(load(Path::new("/nonexistent/shepetal/config.json"), None).is_ok_and(|c| c.max_ms == MAX_MS));
     }
 
     #[test]
