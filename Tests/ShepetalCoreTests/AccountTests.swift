@@ -163,22 +163,25 @@ final class AccountTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 2_000_000_000)
 
+    private let token = "tok-1"
+
+    /// A cache as a check the service answered leaves it: sealed with the token.
     private func state(_ status: LicenseStatus, ends: Date? = nil, checkedAgo: TimeInterval) -> AccountState {
         AccountState(license: License(status: status, trialEndsAt: ends, email: "a@example.com"),
-                     lastGoodCheck: now - checkedAgo, lastAttempt: now - checkedAgo)
+                     lastGoodCheck: now - checkedAgo, lastAttempt: now - checkedAgo).sealed(with: token)
     }
 
     func testAccessForEachStatus() {
-        XCTAssertEqual(AccountPolicy.access(signedIn: false, state: state(.active, checkedAgo: 0), now: now), .signedOut)
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: AccountState(), now: now), .unchecked)
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.active, checkedAgo: 0), now: now), .lifetime)
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.expired, checkedAgo: 0), now: now), .expired)
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.trial, ends: now + 12 * day - 60, checkedAgo: 0), now: now),
+        XCTAssertEqual(AccountPolicy.access(token: nil, state: state(.active, checkedAgo: 0), now: now), .signedOut)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: AccountState(), now: now), .unchecked)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.active, checkedAgo: 0), now: now), .lifetime)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.expired, checkedAgo: 0), now: now), .expired)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: now + 12 * day - 60, checkedAgo: 0), now: now),
                        .trial(daysLeft: 12))
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.trial, ends: now + 3600, checkedAgo: 0), now: now),
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: now + 3600, checkedAgo: 0), now: now),
                        .trial(daysLeft: 1))
         // The cached end date counts offline too: the trial ends on time without a check.
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.trial, ends: now - 1, checkedAgo: day), now: now), .expired)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: now - 1, checkedAgo: day), now: now), .expired)
 
         XCTAssertTrue(Access.trial(daysLeft: 3).allowsDictation)
         XCTAssertTrue(Access.lifetime.allowsDictation)
@@ -195,31 +198,96 @@ final class AccountTests: XCTestCase {
         XCTAssertNil(Access.trial(daysLeft: 2).blockedHint)
     }
 
-    func testSevenDayOfflineGrace() {
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.active, checkedAgo: 7 * day), now: now), .lifetime,
-                       "exactly 7 days still counts")
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.active, checkedAgo: 7 * day + 1), now: now), .unchecked)
-        let active = state(.active, checkedAgo: 7 * day - 60)
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: active, now: now), .lifetime, "6.9 days offline still works")
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.active, checkedAgo: 7 * day + 60), now: now), .unchecked)
-        XCTAssertEqual(AccountPolicy.access(signedIn: true, state: state(.trial, ends: now + 20 * day, checkedAgo: 8 * day), now: now),
-                       .unchecked)
+    /// #254: "Yours forever" and "Works offline". A lifetime license the service confirmed keeps dictating however
+    /// long the Mac stays offline; before, it stopped after 7 days. "active" is the one-time purchase (web/API.md).
+    func testALifetimeLicenseWorksOfflineForGood() {
+        XCTAssertEqual(License(status: .active, trialEndsAt: nil, email: "").plan, .lifetime)
+        for status in [LicenseStatus.trial, .expired] { XCTAssertNil(License(status: status, trialEndsAt: nil, email: "").plan) }
+        for ago in [0, 7 * day + 1, 8 * day, 365 * day, 10 * 365 * day] {
+            XCTAssertEqual(AccountPolicy.access(token: token, state: state(.active, checkedAgo: ago), now: now), .lifetime,
+                           "\(ago / day) days offline")
+        }
+        // Failed checks offline keep it, and keep its seal.
+        var s = state(.active, checkedAgo: 30 * day)
+        for _ in 0..<3 { s = AccountPolicy.apply(.failure(URLError(.notConnectedToInternet)), to: s, now: now, token: token).0 }
+        XCTAssertEqual(AccountPolicy.access(token: token, state: s, now: now), .lifetime)
+        // Online, the check still runs every 24 h, so a refunded license ends at the next answer.
+        XCTAssertTrue(AccountPolicy.checkDue(state: state(.active, checkedAgo: 30 * day), now: now))
+        let refunded = AccountPolicy.apply(.success(.license(License(status: .expired, trialEndsAt: nil, email: "a@example.com"))),
+                                           to: s, now: now, token: token).0
+        XCTAssertEqual(AccountPolicy.access(token: token, state: refunded, now: now), .expired)
+    }
+
+    /// The 7-day offline grace is for trials only (and a cached "expired", which dictates either way).
+    func testTrialsKeepTheSevenDayOfflineGrace() {
+        let ends = now + 20 * day
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 7 * day), now: now),
+                       .trial(daysLeft: 20), "exactly 7 days still counts")
+        let trial = state(.trial, ends: ends, checkedAgo: 7 * day - 60)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: trial, now: now), .trial(daysLeft: 20), "6.9 days offline still works")
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 7 * day + 1), now: now), .unchecked)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 8 * day), now: now), .unchecked)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.expired, checkedAgo: 8 * day), now: now), .unchecked)
 
         // A failed check keeps the cached license and the time of the last good one.
-        let (failed, out) = AccountPolicy.apply(.failure(URLError(.notConnectedToInternet)), to: active, now: now)
+        let (failed, out) = AccountPolicy.apply(.failure(URLError(.notConnectedToInternet)), to: trial, now: now, token: token)
         XCTAssertFalse(out)
-        XCTAssertEqual(failed.license, active.license)
-        XCTAssertEqual(failed.lastGoodCheck, active.lastGoodCheck)
+        XCTAssertEqual(failed.license, trial.license)
+        XCTAssertEqual(failed.lastGoodCheck, trial.lastGoodCheck)
         XCTAssertEqual(failed.lastAttempt, now)
 
         // A good one moves it.
-        let fresh = License(status: .active, trialEndsAt: nil, email: "a@example.com")
-        let (good, _) = AccountPolicy.apply(.success(.license(fresh)), to: active, now: now)
+        let fresh = License(status: .trial, trialEndsAt: ends, email: "a@example.com")
+        let (good, _) = AccountPolicy.apply(.success(.license(fresh)), to: trial, now: now, token: token)
         XCTAssertEqual(good.lastGoodCheck, now)
     }
 
+    /// No offline limit for a lifetime license makes account.json worth editing. Only a cache sealed from a service
+    /// answer with this account's token counts; anything else is "not checked" until the next check.
+    func testAnEditedCacheGrantsNoLicense() throws {
+        let trial = state(.trial, ends: now + 5 * day, checkedAgo: day)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: trial, now: now), .trial(daysLeft: 5))
+
+        var edited = trial
+        edited.license?.status = .active
+        XCTAssertEqual(AccountPolicy.access(token: token, state: edited, now: now), .unchecked, "status edited to active")
+        edited = trial
+        edited.license?.trialEndsAt = now + 300 * day
+        XCTAssertEqual(AccountPolicy.access(token: token, state: edited, now: now), .unchecked, "trial end pushed out")
+        edited = trial
+        edited.lastGoodCheck = now + 3650 * day
+        XCTAssertEqual(AccountPolicy.access(token: token, state: edited, now: now), .unchecked, "check time pushed out")
+        edited = state(.active, checkedAgo: 0)
+        edited.seal = nil
+        XCTAssertEqual(AccountPolicy.access(token: token, state: edited, now: now), .unchecked, "no seal")
+        edited.seal = "not base64!"
+        XCTAssertEqual(AccountPolicy.access(token: token, state: edited, now: now), .unchecked, "garbage seal")
+        XCTAssertEqual(AccountPolicy.access(token: "tok-2", state: state(.active, checkedAgo: 0), now: now), .unchecked,
+                       "another account's cache, or any token typed into the Keychain")
+
+        // The seal comes from the service's answer, for the token the check was sent with.
+        let paid = License(status: .active, trialEndsAt: nil, email: "a@example.com")
+        let (answered, _) = AccountPolicy.apply(.success(.license(paid)), to: AccountState(), now: now + 0.75, token: token)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: answered, now: now), .lifetime)
+        XCTAssertEqual(AccountPolicy.access(token: "tok-2", state: answered, now: now), .unchecked)
+
+        // The seal survives the file, whose dates have whole seconds; an edit to the file does not.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-account-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("account.json")
+        try answered.save(url)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: AccountState.load(url), now: now + 400 * day), .lifetime)
+        try trial.save(url)
+        let json = try String(contentsOf: url, encoding: .utf8)
+        XCTAssertTrue(json.contains("\"trial\""), json)
+        try json.replacingOccurrences(of: "\"trial\"", with: "\"active\"").write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: AccountState.load(url), now: now), .unchecked,
+                       "account.json edited to active")
+    }
+
     func testUnauthorizedSignsOutAndClearsTheCache() {
-        let (s, signedOut) = AccountPolicy.apply(.success(.unauthorized), to: state(.active, checkedAgo: 0), now: now)
+        let (s, signedOut) = AccountPolicy.apply(.success(.unauthorized), to: state(.active, checkedAgo: 0), now: now, token: token)
         XCTAssertTrue(signedOut)
         XCTAssertNil(s.license)
         XCTAssertNil(s.lastGoodCheck)
