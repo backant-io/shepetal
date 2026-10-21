@@ -214,6 +214,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 4. On a new line type "Hello. World." and put the cursor right before "World". Hold fn and say "Big news." Expected: "Hello. Big news. World." Between two sentences the dictation keeps its capital and its period.
 5. On a new line type "Please" and leave the cursor after it. Hold fn and say "Send it to John at NASA." Expected: "Please send it to John at NASA." Only the first letter is lowercased.
 
+### M-INS-8: mid-sentence in an Electron app (F109)
+1. In VS Code (or Slack, or Obsidian) type "leave the cursor right after it", then click right before "the cursor". Hold fn, say "The cursor.", then release.
+2. Expected: "leave the cursor the cursor right after it", with a lowercase "the cursor" and no period. Shepetal asks the app for its accessibility tree when the dictation starts. Note if VS Code then asks whether you use a screen reader, or turns on screen reader mode.
+3. If any dictation in M-INS-1 to M-INS-8 went in as dictated (capital and period), run `log show --last 10m --predicate 'eventMessage CONTAINS "shepetal: context"'` in Terminal and add the lines to the report. Each dictation logs one line: the field's role, its length and the selection, or which attribute could not be read and the AX error code. The text itself is never logged.
+
 ### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
 1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
 2. Click into a Notes note, then tap fn once to stop.
