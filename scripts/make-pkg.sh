@@ -9,6 +9,7 @@
 #                                 (installer -target CurrentUserHomeDirectory) and its scripts only print
 #                                 what they would do
 #   VERSION=0.1.1 ...             version (default 0.1.0)
+#   REQUIRE_SIGNIN=0 ...          a package whose app dictates without sign-in (default 1, see make-app.sh)
 #   INSTALLER_IDENTITY=<name>     sign the package (needs a "Developer ID Installer" identity; unsigned without)
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,6 +17,7 @@ TEST=0
 [ "${1:-}" = --test ] && TEST=1
 VERSION=${VERSION:-0.1.0}
 export VERSION
+export REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-1}  # the release requires sign-in
 [ "${SKIP_APP:-0}" = 1 ] || scripts/make-app.sh
 
 WORK=.cache/pkg

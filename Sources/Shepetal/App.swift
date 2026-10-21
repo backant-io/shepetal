@@ -98,7 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
         Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
-                             hint: { [weak self] in self?.indicator.show($0, seconds: 6) })
+                             hint: { [weak self] in self?.indicator.show($0, seconds: 6) },
+                             showHome: { [weak self] in if self?.allowPrompts == true { self?.openedHub()?.showHome() } })
         permissions = PermissionMonitor(revoked: { [weak self] message in
             self?.fail(message)
             if self?.allowPrompts == true { self?.showOnboarding() }
