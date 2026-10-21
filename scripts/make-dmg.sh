@@ -23,7 +23,9 @@ swift scripts/mac/dmg-background.swift "$W"
 tiffutil -cathidpicheck "$W/background.png" "$W/background@2x.png" -out "$W/background.tiff" >/dev/null
 OUT=dist/Shepetal-$VERSION.dmg
 rm -f "$OUT"
-uvx --from dmgbuild==1.6.7 dmgbuild -s scripts/mac/dmg-settings.py -D app="$APP" -D background="$W/background.tiff" \
+# A private uv cache: uvx waits forever for the global cache lock (~/.cache/uv/.lock) while any long-running uvx
+# (an MCP server, for example) holds it.
+UV_CACHE_DIR=.cache/uv uvx --from dmgbuild==1.6.7 dmgbuild -s scripts/mac/dmg-settings.py -D app="$APP" -D background="$W/background.tiff" \
   -D icon="$APP/Contents/Resources/AppIcon.icns" Shepetal "$OUT"
 
 ID=$(codesign -dvv "$APP" 2>&1 | awk -F= '/^Authority=/ && !n++ { print $2 }')  # no early exit: pipefail + SIGPIPE
