@@ -4,6 +4,12 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### mac80 wave 2 (integration PR #242)
+
+- **Merged:** #230 (F91), #238 (F12), #229 (F71), #235 (F24), #234 (F42, F22), #233 (F48, F33), #236 (F86, F64), #232 (F61, F62) and #231 (F37). Their hot-file wiring, wiring tests, manual steps and ledger rows came in #242, with the #239 follow-ups (a failed model download says so next to 🤫, the whole menuNeedsUpdate body is pinned) and the window title in lowercase.
+- **Mac column:** 56 of 124 cells counted before, 68 after. All 12 new cells are `hand-test`, waiting on M-LANG-1, M-HUB-2, M-HUB-6, M-HUB-7, M-HUB-8, M-STREAK-1, M-STYLE-1, M-FMT-1, M-INS-9, M-ENTER-1, M-MTG-9, M-EXP-1 and M-MCP-1.
+- **F24 stays todo:** the code is in, behind a setting that is off by default, but `scripts/e2e-mac.sh` c05 (`FIELD=1`) is ready 726 to 800 ms after the release on the M4 Pro, over the 700 ms bar. Pavel decides: keep 500 characters each side, or try 250 (675 to 683 ms, accuracy not measured).
+
 ### mac80 wave 1 (integration PR #225)
 
 - **Merged:** #209 (F66), #221 (F32, F34, F35; lands #44), #220 (F99), #222 (F39), #211 (F60), #216 (F114), #212 (F100), #217 (F93), #213 (F102), #218 (F09) and #219 (F111). Their hot-file wiring, wiring tests, manual steps and ledger rows came in #225.
