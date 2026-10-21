@@ -3,8 +3,11 @@
 # staple → Sparkle appcast (generate_appcast) → check the appcast against the key inside the built app. It never
 # publishes anything: .github/workflows/mac-release.yml makes a DRAFT release from dist/, and Pavel publishes it.
 #
-#   TAG=v0.2.0-mac scripts/mac/release.sh   the release (CI on a v*-mac tag, or Pavel by hand on main)
+#   TAG=v0.2.0-mac scripts/mac/release.sh   the release by hand on main (Pavel, when CI is down)
 #   scripts/mac/release.sh --dry-run        everything that needs no credential; VERSION defaults to 0.0.0
+#   TAG=v0.2.0-mac scripts/mac/release.sh --unsigned   CI's build job: the guard and an ad-hoc DMG, nothing else.
+#                                           Signing secrets never meet this script in CI: mac-release.yml signs,
+#                                           notarizes and makes the appcast inline, in jobs of their own (#227).
 #
 # Credentials, from the environment (CI) or this Mac's login Keychain. A missing one makes it a dry run that says
 # what it skipped; dist/release.env then says MODE=dry-run and the workflow makes no draft.
@@ -14,7 +17,8 @@
 #   Sparkle        SPARKLE_KEY_FILE (generate_keys -x format), or the private key in the login Keychain
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-DRY_RUN=0; [ "${1:-}" = --dry-run ] && DRY_RUN=1
+DRY_RUN=0; UNSIGNED=0
+case ${1:-} in --dry-run) DRY_RUN=1 ;; --unsigned) UNSIGNED=1 ;; esac
 SKIPPED=()
 skip() { SKIPPED+=("$1"); echo "DRY RUN: $1" >&2; }
 [ "$DRY_RUN" = 1 ] && skip "--dry-run: no credential is used"
@@ -37,6 +41,12 @@ else
 fi
 export VERSION; VERSION=$(python3 scripts/mac/release_guard.py "${GUARD[@]}")
 echo "Release $VERSION, build $BUILD"
+
+if [ "$UNSIGNED" = 1 ]; then  # the committed Sparkle key, signed ad-hoc whatever this Mac's keychain holds
+  unset SPARKLE_PUBLIC_KEY; SIGN_IDENTITY=- scripts/make-dmg.sh
+  printf 'MODE=unsigned\nTAG=%s\nVERSION=%s\nBUILD=%s\n' "$TAG" "$VERSION" "$BUILD" > dist/release.env
+  exit 0
+fi
 
 # 2. Build and sign. A Developer ID build must have the pinned designated requirement, or users lose their permissions.
 ID=${SIGN_IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/"Developer ID Application/ && !n++ { print $2 }')}

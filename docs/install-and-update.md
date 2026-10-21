@@ -91,7 +91,7 @@ Clicking it opens a **sheet**:
 > - stop starting at login
 > - put back your 🌐 key setting (*Change Input Source*). Only shown when `FnKeySetting.restorable` has a value.
 > - sign out on this Mac
-> - move Shepetal and its speech model (about 1 GB) to the Trash
+> - move Shepetal and the models it downloaded (1 GB or more) to the Trash
 > - quit
 >
 > Your recordings, transcripts and history stay in ~/Library/Application Support/Shepetal.
@@ -108,14 +108,14 @@ Clicking it opens a **sheet**:
   2. `FnKeySetting.restore` if there is a stored value;
   3. `TokenStore.delete()` (the account token in the login Keychain);
   4. `tccutil reset All io.backant.shepetal`, best effort, so no stale rows stay in Privacy & Security;
-  5. move to the Trash: the speech model folder `parakeet-tdt-0.6b-v3` (only that folder, because other apps can share `FluidAudio/`), `~/Library/Caches/io.backant.shepetal` (including Sparkle's downloads), and **only when the box is ticked** `~/Library/Application Support/Shepetal` and the defaults domain;
+  5. move to the Trash: the model folders `parakeet-tdt-0.6b-v3` and the dictionary model (only those folders, because other apps can share `FluidAudio/`), the cleanup model in `~/Library/Application Support/Shepetal/models` (even when the recordings stay), `~/Library/Caches/io.backant.shepetal` (including Sparkle's downloads), and **only when the box is ticked** `~/Library/Application Support/Shepetal` and the defaults domain;
   6. move `Bundle.main.bundleURL` and any other `Shepetal.app` with our bundle ID in `/Applications` or `~/Applications` to the Trash (`NSWorkspace.recycle`). A root-owned copy from the old .pkg falls back to the admin prompt;
   7. quit.
 - **Everything goes to the Trash, nothing is `rm`'d**, so an accidental uninstall is fully undone by dragging the app back out of the Trash, until the Trash is emptied. Only the sign-out, the login item and the TCC reset need redoing, and the onboarding does that.
 
 ## 2. First-run onboarding
 
-One window, in SwiftUI like the Hub. It replaces the AppKit `Onboarding` window and shows the same three steps every time. It opens at the first launch (no `onboardingDone` in defaults) and when a required permission is missing (as today). **Settings › Permissions…** and the menu's **Permissions needed…** open it at step 1. A pure `OnboardingFlow` in ShepetalCore decides the steps and when Continue is enabled.
+One window, in SwiftUI like the Hub. It replaces the AppKit `Onboarding` window and shows the same three steps every time. It opens at the first launch (no `onboardingDone` in defaults) and when a required permission is missing (as today). Closing it counts as seen (`onboardingDone`), so it never takes the focus again at every login. **Settings › Permissions…** and the menu's **Permissions needed…** open it at step 1. A pure `OnboardingFlow` in ShepetalCore decides the steps and when Continue is enabled.
 
 1. **Permissions.** One row each, with live status (the existing 1 s refresh) and an **Open** button. On the first click the button asks macOS, so the app appears in the pane, then it opens the pane (today's `grant`).
 
@@ -137,7 +137,7 @@ Not in scope here: the language and shortcut steps of F89. They stay in the 🤫
 ## 3. Auto-updates with Sparkle 2
 
 - **Dependency:** `.package(url: "https://github.com/sparkle-project/Sparkle", exact: "<newest 2.x>")`, pinned exactly like FluidAudio. `make-app.sh` already copies `$BIN/*.framework` into `Contents/Frameworks` and adds the rpath. This is a non-sandboxed app, so Sparkle's XPC services are removed from the framework. Its `Autoupdate` and `Updater.app` are signed with `-o runtime --timestamp` before the framework, as Sparkle's docs for Developer ID apps say. The tools `generate_keys` and `sign_update` come from `.build/artifacts/sparkle/Sparkle/bin/`.
-- **Only release builds update.** `make-dmg.sh` writes the Sparkle keys into Info.plist. A plain `make-app.sh [--install]` build has no `SUFeedURL`, so the app keeps `NoUpdateChecker` and Check for Updates… stays greyed out. This also means a release never overwrites a dev build that an agent installed on Pavel's Mac.
+- **Only release builds update.** `make-dmg.sh` writes the Sparkle keys into Info.plist. A plain `make-app.sh [--install]` build has no `SUFeedURL`, so the app keeps `NoUpdateChecker` and the 🤫 menu has no Check for Updates… (Pavel, 21.10.26: no grey items). This also means a release never overwrites a dev build that an agent installed on Pavel's Mac.
 
 | Info.plist key | Value |
 |---|---|
@@ -149,7 +149,7 @@ Not in scope here: the language and shortcut steps of F89. They stay in the 🤫
 
   If the pinned Sparkle supports signed feeds (`SURequireSignedFeed`), turn it on and have `sign_update` sign the appcast too.
 
-- **App side:** `SparkleUpdater: UpdateChecking` wraps `SPUStandardUpdaterController`. `canCheckForUpdates` is the updater's (KVO) value, and `checkForUpdates()` shows Sparkle's standard dialog. That makes the existing 🤫 menu item live. The menu keeps its 12 items (`MenuModelTests`). Settings gains **☑ Install updates automatically** (bound to `automaticallyDownloadsUpdates`) and "Version 0.2.0 (512)". `SPUStandardUserDriverDelegate.supportsGentleScheduledUpdateReminders = true`: when the user has turned automatic install off, a found update renames the menu item to "Update to 0.2.1…" (same item count), instead of opening a window at a random moment.
+- **App side:** `SparkleUpdater: UpdateChecking` wraps `SPUStandardUpdaterController`. `canCheckForUpdates` is always true, so the 🤫 menu item shows, enabled; `checkForUpdates()` shows Sparkle's standard dialog, or, while Sparkle downloads in the background (its own `canCheckForUpdates` is false), says "Shepetal is downloading an update" next to 🤫. The menu keeps its 12 items (`MenuModelTests`). Settings gains **☑ Install updates automatically** (bound to `automaticallyDownloadsUpdates`) and "Version 0.2.0 (512)". `SPUStandardUserDriverDelegate.supportsGentleScheduledUpdateReminders = true`: when the user has turned automatic install off, a found update renames the menu item to "Update to 0.2.1…" (same item count), instead of opening a window at a random moment.
 - **Idle only, never during a dictation or meeting.** `SPUUpdaterDelegate.updater(_:willInstallUpdateOnQuit:immediateInstallationBlock:)` returns `true` and keeps the block. A pure `UpdateGate` in ShepetalCore calls it once every minute, and on screen sleep or lock, when all of these hold:
   - no dictation (the `isDictating` closure that `Account.shared.start` already gets, plus `inserting`);
   - no meeting recording, transcription or summary;
@@ -184,24 +184,20 @@ The feed URL is baked into every app ever shipped, so it must not depend on the 
 
 ## 4. Release pipeline
 
-`.github/workflows/mac-release.yml` triggers on `push: tags: ['v*-mac']` and runs on `macos-26` with the Xcode 26.3 pin from ci.yml. Its job uses the environment `mac-release`: the secrets live only there, and the environment deploys only from `v*-mac` tags, so no PR or branch run can read them.
+`.github/workflows/mac-release.yml` triggers on `push: tags: ['v*-mac']` and runs on `macos-26` with the Xcode 26.3 pin from ci.yml. The secrets live only in the environment `mac-release`, which deploys only from `v*-mac` tags and needs Pavel's approval. **They never meet repository code (#227):** the build runs without them, and the jobs that hold them run only Apple's tools and Sparkle's own, written inline in the workflow. Every action is pinned to a commit SHA, and every job has the least `permissions:`.
 
-1. `actions/checkout` with **`fetch-depth: 0`**. A shallow clone makes `git rev-list --count HEAD` return 1, which would ship build 1 and never update anyone.
-2. **Guard** (`scripts/mac/release-guard.sh`), which fails loudly:
-   - the tag matches `^v(\d+\.\d+\.\d+)-mac$`, which gives `VERSION`;
-   - the tagged commit is an ancestor of `origin/main`;
-   - the clone is not shallow;
-   - `VERSION` and the build number are both **greater** than those of the newest published Mac release, read from its `appcast.xml`.
-3. `scripts/ci/run-checks.sh --only swift`.
-4. Import the certificate into the temporary keychain. Then `make-dmg.sh` runs, with `VERSION` and `SIGN_IDENTITY` set, `REQUIRE_SIGNIN=1` and the Sparkle keys: it builds, signs inside-out with the hardened runtime, checks the DR against the pinned file, and builds and signs the DMG.
-5. Notarize the DMG with the API key, staple it and validate the staple, then run the `spctl` checks from 1. A rejected notarization prints `notarytool log <id>`.
-6. **After stapling** (stapling changes the file, which would break a signature made before it): `sign_update` over the DMG gives `sparkle:edSignature` and `length`. `scripts/mac/make-appcast.sh` writes a one-item `appcast.xml` with `sparkle:version` = build, `sparkle:shortVersionString` = VERSION, `sparkle:minimumSystemVersion` = 14.4 and the GitHub enclosure URL. `scripts/mac/verify-appcast.swift` (CryptoKit, about 10 lines) verifies that signature and length against the **`SUPublicEDKey` read from the built app's Info.plist**. A wrong or rotated key is the one mistake that silently strands every user, so this check never gets skipped.
-7. `gh release create v0.2.0-mac --draft` with `Shepetal-0.2.0.dmg`, `.sha256` and `appcast.xml`.
-8. `always()`: delete the keychain and the key files.
+1. **provenance** (no secrets, no repo code): the tag matches `^v(\d+\.\d+\.\d+)-mac$` (that gives `VERSION`), it is annotated, and its commit is an ancestor of `origin/main`. A tag's commit brings its own copy of the workflow, so this catches a mistaken tag; against a malicious one, the tag ruleset and Pavel's review on `mac-release` are what hold.
+2. **build** (no secrets, no cache): `actions/checkout` with **`fetch-depth: 0`** (a shallow clone makes `git rev-list --count HEAD` return 1, which would ship build 1 and never update anyone), `scripts/ci/run-checks.sh --only swift`, then `scripts/mac/release.sh --unsigned`: the guard (`scripts/mac/release_guard.py`: tag format, on main, not shallow, `VERSION` and the build number both **greater** than those of the newest published Mac release, read from its `appcast.xml`), then `make-dmg.sh` with an ad-hoc signature. The DMG is the job's artifact.
+3. **sign** (`mac-release`: the Developer ID .p12 and the notary key): the .p12 goes into a throwaway keychain. The app inside the DMG is signed inside-out with the hardened runtime, `--timestamp` and `scripts/mac/Shepetal.entitlements`, and its DR must equal `scripts/mac/designated-requirement.txt` (the job reads those two files and nothing else from the repo). Then the DMG is signed, notarized with the API key, stapled and validated, and the `spctl` checks from 1 run. A rejected notarization prints `notarytool log <id>`.
+4. **appcast** (`mac-release`: `SPARKLE_ED_PRIVATE_KEY`): Sparkle 2.10.0's release tarball, checked against its pinned SHA-256 (its `bin/` is byte-identical to the SwiftPM artifact), gives `generate_appcast`, which signs the stapled DMG (**after stapling**, since stapling changes the file) and writes a one-item `appcast.xml` with the GitHub enclosure URL.
+5. **verify** (no secrets): `scripts/mac/verify-update.swift` checks the appcast's signature and length against the **`SUPublicEDKey` read from the built app's Info.plist**, and the build number. A wrong or rotated key is the one mistake that silently strands every user, so this check never gets skipped.
+6. **draft** (`contents: write`, no repo code): `gh release create v0.2.0-mac --draft` with `Shepetal-0.2.0.dmg`, `.sha256` and `appcast.xml`. Every job deletes its keychain and key files in an `always()` step.
+
+A PR that touches the release path runs `release.sh --dry-run`, then the sign, appcast and verify steps themselves (YAML anchors), ad-hoc and with a throwaway Sparkle key, so the inline release commands are tested before a tag needs them.
 
 **Publishing is Pavel's step and the only trigger:** he downloads the DMG from the draft, tries it, writes the notes and clicks **Publish release** (a full release, not a pre-release). Agents never publish, approve or un-draft a release. The release notes surface in the app is the "What's new" window (#219), so the appcast carries no notes.
 
-Locally the same scripts run with the login Keychain and the notarytool profile `shepetal-notary`. That way Pavel can cut a release by hand if CI is down.
+Locally `scripts/mac/release.sh` does the whole release with the login Keychain and the notarytool profile `shepetal-notary`. That way Pavel can cut a release by hand if CI is down.
 
 ## 5. Uninstall and downgrade protection
 
@@ -276,7 +272,7 @@ Slices 1 to 4 can be built and tested before Pavel's certificate exists. Slice 5
 3. **A Developer ID Application certificate.** Create it in Xcode › Settings › Accounts › Manage Certificates › + › Developer ID Application, or at developer.apple.com › Certificates. It is installed in the **login Keychain** on his Mac. Export it with its private key as a password-protected .p12, then set it with `gh secret set MAC_DEVELOPER_ID_P12 --env mac-release` (base64 of the .p12) and `MAC_DEVELOPER_ID_P12_PASSWORD`, and delete the exported file. No Developer ID **Installer** certificate is needed (no .pkg).
 4. **An App Store Connect API key for notarytool.** Create it under App Store Connect › Users and Access › Integrations › Team Keys with the role Developer. Note its Key ID and Issuer ID; the .p8 can be downloaded only once. Locally, run `xcrun notarytool store-credentials shepetal-notary --key <p8> --key-id <id> --issuer <issuer>` (login Keychain). In GitHub, set `NOTARY_KEY_P8` (base64), `NOTARY_KEY_ID` and `NOTARY_ISSUER_ID` in `mac-release`. Keep the .p8 in the password manager and delete it from Downloads.
 5. **The Sparkle EdDSA key**, as in 3: run `generate_keys` once (login Keychain), set `SPARKLE_ED_PRIVATE_KEY` from `generate_keys -x` with `gh secret set --env mac-release`, keep a password-manager backup, and pass on the **public** key (it is safe to share) for make-app.sh.
-6. **The GitHub environment `mac-release`**, restricted to `v*-mac` tags. An agent can create it with `gh api`; Pavel sets its secret values himself (items 3 to 5). Agents never see the files.
+6. **The GitHub environment `mac-release`**, restricted to `v*-mac` tags, with Pavel as its required reviewer, and **a tag ruleset** so only he can create, move or delete `v*-mac` tags (#227; the exact steps are in PR #228). Pavel sets the secret values himself (items 3 to 5). Agents never see the files.
 7. **Production deploy of the web change** (`/appcast.xml`, `/download` → DMG) to shepetal.backant.io. Optionally, a fine-grained read-only `GITHUB_TOKEN` Worker secret (`wrangler secret put GITHUB_TOKEN`).
 8. **Brand:** an OK to commit the rendered DMG background (wordmark + palette) to the public repo, which is part of the open brand/ decision.
 9. **Each release:** try the draft's DMG, write the notes, click **Publish release**.

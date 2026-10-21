@@ -1,9 +1,15 @@
-# The Mac release (docs/install-and-update.md 4), all in scripts/mac/release.sh:
-# - a v*-mac tag: guard, build, sign, DMG, notarize, staple, appcast, check, then a DRAFT release. Pavel tries the
-#   DMG, writes the notes and publishes it (a full release); publishing is what switches /download and the update
-#   feed. Missing secrets make it a dry run, and then no draft is made.
-# - a PR that touches the release path, or a manual run: the same script with --dry-run and no secrets; the DMG and
-#   appcast are kept as a workflow artifact for 3 days.
+# The Mac release (docs/install-and-update.md 4). Signing secrets never meet repository code (#227):
+# - provenance (no secrets, no repo code): the v*-mac tag is annotated and its commit is on main;
+# - build (no secrets): the guard and an ad-hoc DMG (scripts/mac/release.sh --unsigned), never from a cache;
+# - sign (mac-release: Developer ID and notary key; no repo code): codesign, notarytool and stapler, inline;
+# - appcast (mac-release: SPARKLE_ED_PRIVATE_KEY; no repo code): Sparkle's own generate_appcast, pinned by checksum;
+# - verify (no secrets): the appcast's signature against the key inside the app (scripts/mac/verify-update.swift);
+# - draft (contents: write; no repo code): a DRAFT release. Pavel tries the DMG, writes the notes and publishes it
+#   (a full release); publishing is what switches /download and the update feed.
+# A tag's commit brings its own copy of this file, so the provenance job only catches a mistaken tag. Against a
+# malicious one, the tag ruleset and Pavel's review on the mac-release environment are what hold.
+# A PR that touches the release path, or a manual run: release.sh --dry-run with no secrets, then the sign, appcast
+# and verify steps below (the same YAML anchors), signed ad-hoc with a throwaway Sparkle key; kept for 3 days.
 name: Mac release
 on:
   push:
@@ -17,8 +23,7 @@ on:
       - Package.swift
       - Package.resolved
   workflow_dispatch:
-permissions:
-  contents: read
+permissions: {}
 
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -26,15 +31,279 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: 1
 
 jobs:
+  provenance:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - id: tag
+        run: |
+          set -euo pipefail
+          [[ $GITHUB_REF_NAME =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-mac$ ]] || { echo "::error::$GITHUB_REF_NAME is not v<x.y.z>-mac"; exit 1; }
+          V=${BASH_REMATCH[1]}
+          git fetch --no-tags origin "+$GITHUB_REF:$GITHUB_REF"  # the tag object as pushed
+          [ "$(git cat-file -t "$GITHUB_REF")" = tag ] || { echo "::error::$GITHUB_REF_NAME is not annotated (git tag -a)"; exit 1; }
+          [ "$(git rev-parse "$GITHUB_REF^{commit}")" = "$GITHUB_SHA" ] || { echo "::error::the tag moved after the push"; exit 1; }
+          git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/main || { echo "::error::$GITHUB_SHA is not on main"; exit 1; }
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: provenance
+    runs-on: macos-26
+    timeout-minutes: 60
+    permissions:
+      contents: read  # the previous release's appcast, for the guard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # the build number is the commit count; a shallow clone would ship build 1 (the guard refuses it)
+          persist-credentials: false
+      - run: git fetch --no-tags origin main  # the guard checks that the tag is on main
+      - run: brew install uv
+      - run: scripts/ci/run-checks.sh --only swift  # no actions/cache here: a release never builds from a cache
+      - run: scripts/mac/release.sh --unsigned
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: unsigned
+          path: dist/Shepetal-${{ needs.provenance.outputs.version }}.dmg
+          if-no-files-found: error
+          retention-days: 3
+
+  sign:
+    needs: [provenance, build]
+    runs-on: macos-26
+    timeout-minutes: 60
+    environment: mac-release  # Pavel approves each run; it deploys only from v*-mac tags
+    permissions:
+      contents: read  # the two data files below, nothing else
+    env:
+      VERSION: ${{ needs.provenance.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            scripts/mac/Shepetal.entitlements
+            scripts/mac/designated-requirement.txt
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: unsigned
+          path: dist
+      - name: Developer ID into a throwaway keychain
+        env:
+          MAC_DEVELOPER_ID_P12: ${{ secrets.MAC_DEVELOPER_ID_P12 }}
+          MAC_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MAC_DEVELOPER_ID_P12_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${MAC_DEVELOPER_ID_P12:?is not set in the mac-release environment}"
+          KC=$RUNNER_TEMP/release.keychain-db
+          KCPW=$(openssl rand -hex 24)  # random per run, so not a secret
+          security create-keychain -p "$KCPW" "$KC"
+          security set-keychain-settings -lut 3600 "$KC"
+          security unlock-keychain -p "$KCPW" "$KC"
+          echo "KEYCHAIN=$KC" >> "$GITHUB_ENV"
+          printf '%s' "$MAC_DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/id.p12"
+          # ponytail: security import takes the .p12 password only as -P; the runner is a single-use VM.
+          security import "$RUNNER_TEMP/id.p12" -k "$KC" -P "$MAC_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/id.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          ID=$(security find-identity -v -p codesigning "$KC" | awk -F'"' '/"Developer ID Application/ && !n++ { print $2 }')
+          [ -n "$ID" ] || { echo "::error::MAC_DEVELOPER_ID_P12 holds no Developer ID Application identity"; exit 1; }
+          echo "SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+      - &sign-dmg
+        name: Sign the app inside the DMG (nested code first, hardened runtime), check its DR, sign the DMG
+        run: |
+          set -euo pipefail
+          IN=dist/Shepetal-$VERSION.dmg OUT=signed/Shepetal-$VERSION.dmg RW=$RUNNER_TEMP/rw.dmg MNT=$RUNNER_TEMP/rw
+          mkdir -p signed "$MNT"
+          # The DMG keeps dmgbuild's Finder layout: only the app inside it changes.
+          hdiutil convert "$IN" -format UDRW -o "$RW" -quiet
+          hdiutil resize -size 1g "$RW"  # dmgbuild shrank it to fit; the signatures need room
+          hdiutil attach "$RW" -nobrowse -noautoopen -owners off -mountpoint "$MNT" -quiet
+          APP=$MNT/Shepetal.app
+          TS=--timestamp; [ "$SIGN_IDENTITY" = - ] && TS=--timestamp=none  # the dry run signs ad-hoc
+          SIGN=(--force --sign "$SIGN_IDENTITY" --options runtime "$TS")
+          B=$APP/Contents/Frameworks/Sparkle.framework/Versions/B
+          for n in "$B/Autoupdate" "$B/Updater.app" "$APP"/Contents/Frameworks/*; do codesign "${SIGN[@]}" "$n"; done
+          codesign "${SIGN[@]}" --entitlements scripts/mac/Shepetal.entitlements --identifier io.backant.shepetal "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          if [ "$SIGN_IDENTITY" != - ]; then  # a changed DR would cost every user their permissions
+            DR=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
+            [ "$DR" = "$(cat scripts/mac/designated-requirement.txt)" ] || { echo "::error::the designated requirement changed: $DR"; exit 1; }
+          fi
+          rm -rf "$MNT/.fseventsd" "$MNT/.Trashes"
+          hdiutil detach "$MNT" -quiet || { sleep 5; hdiutil detach "$MNT" -force -quiet; }
+          hdiutil resize -sectors min "$RW"
+          hdiutil convert "$RW" -format ULFO -o "$OUT" -quiet
+          codesign --force --sign "$SIGN_IDENTITY" "$TS" "$OUT"
+      - name: Notarize and staple the DMG, then check it the way Gatekeeper will
+        env:
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${NOTARY_KEY_P8:?is not set in the mac-release environment}" "${NOTARY_KEY_ID:?}" "${NOTARY_ISSUER_ID:?}"
+          DMG=signed/Shepetal-$VERSION.dmg MNT=$RUNNER_TEMP/check
+          printf '%s' "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          N=(--key "$RUNNER_TEMP/notary.p8" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER_ID")
+          xcrun notarytool submit "$DMG" "${N[@]}" --wait --timeout 30m --output-format json > "$RUNNER_TEMP/notary.json"
+          if [ "$(plutil -extract status raw "$RUNNER_TEMP/notary.json")" != Accepted ]; then
+            xcrun notarytool log "$(plutil -extract id raw "$RUNNER_TEMP/notary.json")" "${N[@]}" || true
+            echo "::error::Notarization was refused (log above)"; exit 1
+          fi
+          xcrun stapler staple "$DMG"
+          xcrun stapler validate "$DMG"
+          spctl -a -vv -t open --context context:primary-signature "$DMG"
+          mkdir -p "$MNT"
+          hdiutil attach "$DMG" -nobrowse -readonly -noautoopen -mountpoint "$MNT" -quiet
+          spctl -a -vv -t exec "$MNT/Shepetal.app"
+          hdiutil detach "$MNT" -quiet
+          (cd signed && shasum -a 256 "Shepetal-$VERSION.dmg" > "Shepetal-$VERSION.dmg.sha256")
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: signed
+          path: signed/
+          if-no-files-found: error
+          retention-days: 3
+      - if: always()
+        run: |
+          [ -z "${KEYCHAIN:-}" ] || security delete-keychain "$KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP/id.p12" "$RUNNER_TEMP/notary.p8"
+
+  appcast:
+    needs: [provenance, sign]
+    runs-on: macos-26
+    timeout-minutes: 20
+    environment: mac-release
+    permissions: {}
+    env:
+      VERSION: ${{ needs.provenance.outputs.version }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: signed
+          path: signed
+      - &sparkle
+        name: Sparkle's tools, the version in Package.swift, checked against the release's SHA-256
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle" ./bin
+      - name: The Sparkle key into a 0600 file
+        env:
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          : "${SPARKLE_ED_PRIVATE_KEY:?is not set in the mac-release environment}"
+          printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key"
+          echo "SPARKLE_KEY_FILE=$RUNNER_TEMP/sparkle.key" >> "$GITHUB_ENV"
+      - &appcast
+        name: The appcast, signed after stapling (stapling changes the file)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/archives"
+          cp "signed/Shepetal-$VERSION.dmg" "$RUNNER_TEMP/archives/"
+          "$RUNNER_TEMP/sparkle/bin/generate_appcast" --ed-key-file "$SPARKLE_KEY_FILE" --maximum-deltas 0 \
+            --download-url-prefix "https://github.com/backant-io/shepetal/releases/download/$TAG/" \
+            -o signed/appcast.xml "$RUNNER_TEMP/archives"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
+        with:
+          name: release
+          path: signed/
+          if-no-files-found: error
+          retention-days: 3
+      - if: always()
+        run: rm -f "$RUNNER_TEMP/sparkle.key"
+
+  verify:
+    needs: [provenance, appcast]
+    runs-on: macos-26
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.provenance.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: release
+          path: signed
+      - &verify
+        name: The appcast against the SUPublicEDKey inside the built app (a wrong key strands every user)
+        run: |
+          set -euo pipefail
+          DMG=signed/Shepetal-$VERSION.dmg MNT=$RUNNER_TEMP/verify
+          mkdir -p "$MNT"
+          hdiutil attach "$DMG" -nobrowse -readonly -noautoopen -mountpoint "$MNT" -quiet
+          cp "$MNT/Shepetal.app/Contents/Info.plist" "$RUNNER_TEMP/Info.plist"
+          hdiutil detach "$MNT" -quiet
+          swift scripts/mac/verify-update.swift signed/appcast.xml "$DMG" "$RUNNER_TEMP/Info.plist"
+          BUILD=$(plutil -extract CFBundleVersion raw "$RUNNER_TEMP/Info.plist")
+          grep -q "<sparkle:version>$BUILD</sparkle:version>" signed/appcast.xml || { echo "::error::appcast.xml is not for build $BUILD"; exit 1; }
+
+  draft:
+    needs: [provenance, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write  # the draft release
+    env:
+      VERSION: ${{ needs.provenance.outputs.version }}
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
+        with:
+          name: release
+          path: signed
+      - name: Draft release (never published here)
+        run: |
+          set -euo pipefail
+          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --verify-tag --title "Shepetal $VERSION for Mac" \
+            --notes "Draft. Try the DMG, write the notes, then click Publish release (a full release, not a pre-release)." \
+            "signed/Shepetal-$VERSION.dmg" "signed/Shepetal-$VERSION.dmg.sha256" signed/appcast.xml
+
   dry-run:
     if: github.event_name != 'push'
     runs-on: macos-26
     timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      VERSION: 0.0.0
+      TAG: v0.0.0-mac
+      SIGN_IDENTITY: '-'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           fetch-depth: 0  # the build number is the commit count
-      - uses: actions/cache@v6
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: |
             ~/Library/Caches/org.swift.swiftpm
@@ -44,8 +313,14 @@ jobs:
           key: swiftpm-release-${{ hashFiles('Package.resolved') }}
           restore-keys: swiftpm-release-
       - run: brew install uv
-      - run: VERSION=0.0.0 scripts/mac/release.sh --dry-run
-      - uses: actions/upload-artifact@v7
+      - run: scripts/mac/release.sh --dry-run
+      - name: The release jobs' own steps next, ad-hoc and with release.sh's throwaway Sparkle key
+        run: echo "SPARKLE_KEY_FILE=$PWD/.cache/release/throwaway.key" >> "$GITHUB_ENV"
+      - *sign-dmg
+      - *sparkle
+      - *appcast
+      - *verify
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: mac-release-dry-run
           path: |
@@ -53,80 +328,3 @@ jobs:
             dist/*.sha256
             dist/appcast.xml
           retention-days: 3
-
-  release:
-    if: github.event_name == 'push'
-    runs-on: macos-26
-    timeout-minutes: 90
-    environment: mac-release  # the secrets live only here, and it deploys only from v*-mac tags
-    permissions:
-      contents: write  # the draft release
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0  # a shallow clone would ship build 1; the guard refuses it
-      - run: git fetch origin main  # the guard checks that the tag is on main
-      - uses: actions/cache@v6
-        with:
-          path: |
-            ~/Library/Caches/org.swift.swiftpm
-            .build/repositories
-            .build/checkouts
-            .build/artifacts
-          key: swiftpm-release-${{ hashFiles('Package.resolved') }}
-          restore-keys: swiftpm-release-
-      - run: brew install uv
-      - run: scripts/ci/run-checks.sh --only swift
-      - name: Credentials into a throwaway keychain and 0600 files in RUNNER_TEMP
-        env:
-          MAC_DEVELOPER_ID_P12: ${{ secrets.MAC_DEVELOPER_ID_P12 }}
-          MAC_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MAC_DEVELOPER_ID_P12_PASSWORD }}
-          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
-          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
-        run: |
-          set -euo pipefail
-          umask 077
-          if [ -n "$MAC_DEVELOPER_ID_P12" ]; then
-            KC=$RUNNER_TEMP/release.keychain-db
-            KCPW=$(openssl rand -hex 24)  # random per run, so not a secret
-            security create-keychain -p "$KCPW" "$KC"
-            security set-keychain-settings -lut 3600 "$KC"
-            security unlock-keychain -p "$KCPW" "$KC"
-            printf '%s' "$MAC_DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/id.p12"
-            # ponytail: security import takes the .p12 password only as -P; the runner is a single-use VM.
-            security import "$RUNNER_TEMP/id.p12" -k "$KC" -P "$MAC_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
-            rm -f "$RUNNER_TEMP/id.p12"
-            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
-            security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
-            echo "KEYCHAIN=$KC" >> "$GITHUB_ENV"
-          fi
-          if [ -n "$NOTARY_KEY_P8" ]; then
-            printf '%s' "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
-            { echo "NOTARY_KEY_FILE=$RUNNER_TEMP/notary.p8"; echo "NOTARY_KEY_ID=$NOTARY_KEY_ID"; echo "NOTARY_ISSUER_ID=$NOTARY_ISSUER_ID"; } >> "$GITHUB_ENV"
-          fi
-          if [ -n "$SPARKLE_ED_PRIVATE_KEY" ]; then
-            printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key"
-            echo "SPARKLE_KEY_FILE=$RUNNER_TEMP/sparkle.key" >> "$GITHUB_ENV"
-          fi
-      - run: TAG="$GITHUB_REF_NAME" scripts/mac/release.sh
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: Draft release (never published here)
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          . dist/release.env
-          if [ "$MODE" != release ]; then
-            echo "::error::Dry run (a secret is missing in the mac-release environment): no draft release was made"
-            exit 1
-          fi
-          gh release create "$TAG" --draft --verify-tag --title "Shepetal $VERSION for Mac" \
-            --notes "Draft. Try the DMG, write the notes, then click Publish release (a full release, not a pre-release)." \
-            "dist/Shepetal-$VERSION.dmg" "dist/Shepetal-$VERSION.dmg.sha256" dist/appcast.xml
-      - if: always()
-        run: |
-          [ -z "${KEYCHAIN:-}" ] || security delete-keychain "$KEYCHAIN" || true
-          rm -f "$RUNNER_TEMP/id.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/sparkle.key"
