@@ -329,7 +329,7 @@ Not yet done. These are the steps:
    step 5 must fail with the fn message, and steps 6 to 9 then run with
    `SHEPETAL_KEY=rightalt ./target/release/shepetal daemon` and Right Alt in place of fn.
 4. Start a Zoom call or a Google Meet in Firefox and run `probe` again. It must list the app as
-   a mic user with `meeting=Some(..)`. Close the call, and it must disappear.
+   a `mic user:` (and as a `cam user:` with video on). Close the call, and it must disappear.
 5. `ydotoold &` (GNOME Wayland only), then run `probe` again: its `fn key:` line must not
    change, and it must never name `ydotoold virtual device`. Then `./target/release/shepetal daemon`.
    It must print the keyboards it listens on. If fn is not visible, it must exit non-zero with
@@ -421,8 +421,8 @@ and `mkdir -p ~/.local/bin && ln -s "$PWD/linux/indicator/shepetal-indicator" ~/
   which is then the only device that sends real keys.
 - Only keyboards that report the hotkey are read, so a key pressed on another keyboard while fn
   is held does not cancel.
-- Whether `pw-record -P '{ application.name = shepetal }'` really renames the stream is not
-  verified. If it does not, `probe` lists shepetal's own recording as a mic user.
+- `pw-record -P '{ application.name = shepetal }'` renames the stream (seen on PipeWire 1.0.5 in
+  Ubuntu 24.04). The daemon tells its own recorders apart by pid, not by that name.
 - Meeting detection only runs in `probe`. The daemon does not record meetings yet.
 - 🤫 on X11 re-raises itself once a second, so a window mapped above it (or an override-redirect
   menu) can cover it for up to a second. Watching the root window's restacking would close that.

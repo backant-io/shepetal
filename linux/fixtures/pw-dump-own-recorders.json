@@ -1,0 +1,29 @@
+[
+  {
+    "id": 40, "type": "PipeWire:Interface:Client", "version": 3,
+    "info": { "props": {
+      "application.name": "shepetal", "application.process.binary": "pacat", "application.process.id": 4161,
+      "application.process.user": "root", "client.api": "pipewire-pulse", "pipewire.protocol": "protocol-native",
+      "pipewire.sec.gid": 0, "pipewire.sec.pid": 4149, "pipewire.sec.socket": "pipewire-0", "pipewire.sec.uid": 0 } }
+  },
+  {
+    "id": 51, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "application.name": "shepetal", "application.process.binary": "pacat", "application.process.id": 4161,
+      "application.process.user": "root", "client.api": "pipewire-pulse", "client.id": 40,
+      "media.class": "Stream/Input/Audio", "node.name": "shepetal", "stream.is-live": true } }
+  },
+  {
+    "id": 50, "type": "PipeWire:Interface:Client", "version": 3,
+    "info": { "props": {
+      "application.name": "pw-cat", "application.process.binary": "pw-cat", "application.process.id": 4160,
+      "application.process.user": "root", "pipewire.protocol": "protocol-native",
+      "pipewire.sec.gid": 0, "pipewire.sec.pid": 4160, "pipewire.sec.socket": "pipewire-0", "pipewire.sec.uid": 0 } }
+  },
+  {
+    "id": 52, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "application.name": "shepetal", "client.id": 50,
+      "media.class": "Stream/Input/Audio", "node.name": "pw-record", "stream.is-live": true } }
+  }
+]

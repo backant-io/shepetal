@@ -6,19 +6,32 @@ Record on a Record? prompt, or always with auto-record on (see Settings). The co
 
 ## What it does
 
-1. Every 2 s it runs `pw-dump` and lists the meeting apps that are capturing the mic: running
-   `Stream/Input/Audio` nodes that are not on a sink monitor, matched to Zoom, Teams, Slack,
-   Discord, Chrome/Chromium or Firefox. shepetal's own streams never count. They are named
-   `shepetal`, and Others.wav records a monitor. If `pw-dump` is missing, or both `pw-record`
-   and `parecord` are, the daemon says so at startup and records no meetings.
-2. Once a meeting app has held the mic for the start grace, it asks first. A desktop
-   notification, "Record this meeting?", shows one Record button. It is sent through
+1. Every 2 s it runs `pw-dump` and reads /proc, and lists every other app that is using the mic
+   or the camera. There is no list of meeting apps and no window or tab matching: any app on
+   the mic or the camera is a possible meeting.
+   - Mic: running `Stream/Input/Audio` nodes that are not on a sink monitor.
+   - Camera: a running PipeWire camera (`Video/Source`, or `media.role` Camera) and the nodes
+     linked to it. When PipeWire shows none, the processes that have a `/dev/video*` open
+     (from `/proc/<pid>/fd`), which is how Zoom and most browsers use a camera.
+   - shepetal's own processes never count: the daemon and its children (the dictation recorder,
+     Me.wav and Others.wav), by pid. A pipewire-pulse stream (parecord) carries its pid on the
+     node, and a native one (pw-record) on its Client object. Names are never used for this, so
+     another app called shepetal or pw-record still counts.
+   - It needs no permission and shows no prompt for one. It never opens the camera.
+   If `pw-dump` is missing, or both `pw-record` and `parecord` are, the daemon says so at startup
+   and records no meetings.
+2. Once another app has used the mic or the camera for the start grace, it asks first. A desktop
+   notification, "Record this meeting?", shows one Record button. Its text names the apps and
+   what they use, for example "Zoom is using the microphone and camera.", or "An app is using
+   the camera." when nothing names the app. Only app names are shown and logged, never a window
+   title, tab or URL. It is sent through
    org.freedesktop.Notifications with `notify-send --action=record=Record`, which waits and
    prints `record` on a click.
    - Only a click on Record starts the recording. The click is seen at the next poll, so up to
      2 s later.
    - Dismissed, or Record not clicked within 20 s (`prompt`): nothing is recorded for that
-     meeting, and it does not ask again until the next one. An unanswered prompt is withdrawn
+     meeting, and it does not ask again until the mic and the camera have both been free for the
+     end thresholds and are used again. An unanswered prompt is withdrawn
      (notify-send gets SIGINT and closes it).
    - If the call ends first, the prompt is withdrawn too.
    - With auto-record on (`{"meetings": {"auto_record": true}}` in config.json) it records
@@ -34,7 +47,7 @@ Record on a Record? prompt, or always with auto-record on (see Settings). The co
    `pw-record -P '{ stream.capture.sink = true }'` lets WirePlumber link it to the default
    sink's monitor and move it when the default sink changes. `parecord` uses
    `--device=@DEFAULT_MONITOR@`.
-4. When every meeting app has let go of the mic, it waits out the end thresholds, stops both
+4. When no other app uses the mic or the camera any more, it waits out the end thresholds, stops both
    recorders with SIGINT (so the WAV header is written) and starts transcribing on another
    thread. Detection goes on meanwhile.
 5. It runs `whisper-cli` on each file, keeping the segment times, and writes `transcript.md` next
@@ -91,14 +104,14 @@ an error.
 | Name | Default | Meaning |
 | --- | --- | --- |
 | `poll` | 2 | Seconds between `pw-dump` reads |
-| `start_after` | 5 | How long a meeting app must hold the mic before the Record? prompt (or, with auto-record, the recording). A miss starts the count again |
+| `start_after` | 5 | How long another app must use the mic or the camera before the Record? prompt (or, with auto-record, the recording). A miss starts the count again |
 | `min_session` | 15 | No end in the first 15 s of a recording |
-| `end_with_evidence` | 3 | Wait after the last meeting app lets go of the mic (bound silence) |
-| `reacquire` | 4 | If the mic comes back within this time, it is the same meeting. The end waits for the longer of this and `end_with_evidence` |
+| `end_with_evidence` | 3 | Wait after the last app lets go of the mic and the camera (bound silence) |
+| `reacquire` | 4 | If the mic or the camera is used again within this time, it is the same meeting. The end waits for the longer of this and `end_with_evidence` |
 | `device_change` | 10 | A change of the default mic or speakers holds off an end this long |
 | `prompt` | 20 | An unanswered Record? prompt is withdrawn after this long, and nothing is recorded (docs/re/meetings.md: the card's 20 s timeout) |
 
-On Linux the mic holder is the only evidence, so every end is the bound kind. The 30 s unbound
+On Linux the mic and camera users are the only evidence, so every end is the bound kind. The 30 s unbound
 silence never applies.
 
 ## Speech-to-text
@@ -125,18 +138,26 @@ the error.
 
 ## Tests
 
-`cargo test` in `linux/` runs `meeting_rec::tests`:
-- The debounce over fake pw-dump snapshots: start, end, minimum session, flapping, two apps,
-  shepetal's own streams, device change, and tuned thresholds.
+`cargo test` in `linux/` runs `meeting::tests` and `meeting_rec::tests`:
+- Who is on the mic and the camera, over pw-dump fixtures and a fake /proc: any app counts,
+  idle streams, sink monitors, playback and screencasts do not, a running camera with no named
+  user counts unnamed, `/dev/video*` holders are the fallback, and shepetal's own processes are
+  told apart by pid. `fixtures/pw-dump-own-recorders.json` is captured from real PipeWire 1.0.5
+  (Ubuntu 24.04) running shepetal's pw-record and parecord.
+- The debounce over fake pw-dump snapshots: start (on the mic, or on the camera alone), end,
+  a new meeting after the end, minimum session, flapping, mic and camera together, shepetal's
+  own streams, device change, and tuned thresholds.
 - Folder and file permissions.
 - The recorder and whisper-cli arguments, and whisper output parsing.
 - Transcript formatting.
-- The `notify-send` arguments, the 20 s default, and that only `"auto_record": true` turns
+- The `notify-send` arguments, the app names and "An app", the 20 s default, and that only `"auto_record": true` turns
   auto-record on: a missing file, other features' keys, and `false` ask first, and a typo is an
   error.
 - Whole meetings against fake `pw-dump`, `pw-record`, `whisper-cli` and `notify-send`, each run
   in a child copy of the test binary so it can set its own PATH:
   - Record clicked: recorded and transcribed.
+  - The camera alone (a fake /proc where Zoom holds /dev/video0): offered, and recorded after
+    the click.
   - Dismissed: no recorder runs and no folder is made, and it is not asked again.
   - No answer: the prompt is withdrawn at the timeout, and nothing is recorded.
   - Call ended first: the prompt is withdrawn, and nothing is recorded.
@@ -155,15 +176,18 @@ click Record on the prompt.
    If whisper-cli or the model is missing, it must also print the
    `meetings are recorded but not transcribed` line.
 2. Join a Zoom test call (https://zoom.us/test) or a Google Meet in Firefox. Within about 8 s:
-   - A notification "Record this meeting?" with a Record button must show, and the daemon must
-     print `meeting (Zoom) detected, asking: Record this meeting?`.
+   - A notification "Record this meeting?" with a Record button must show, naming the app as
+     `probe` lists it, and the daemon must print
+     `meeting detected (<app> on the microphone), asking: Record this meeting?` (or `on the
+     microphone and camera` with video on). No window or tab title may show up in either.
    - `ls ~/.local/share/shepetal/meetings/` shows no new folder yet, and `pgrep -a pw-record`
      shows nothing.
-   - Click Record. Within about 2 s the daemon must print `meeting (Zoom) recording to
-     ~/.local/share/shepetal/meetings/<ms>, system audio Some("<sink>.monitor")`.
+   - Click Record. Within about 2 s the daemon must print `meeting (<app> on the microphone)
+     recording to ~/.local/share/shepetal/meetings/<ms>, system audio Some("<sink>.monitor")`.
 3. While it records, run `./target/release/shepetal probe`. It must list the call app as a mic
-   user. It must not list `shepetal` or `pw-record`. If it does, the `-P application.name`
-   rename does not work (docs/linux.md, known gaps).
+   user. The daemon's recorders are not children of `probe`, so `probe` lists them as
+   `"shepetal"` with their pids: `pgrep -a pw-record` must show the same pids. The daemon
+   itself never counts them.
 4. Talk for about a minute while the other side talks too. Mute yourself in the call for 20 s,
    then unmute. The recording must go on: no `meeting ended` line.
 5. Leave the call. About 4 to 6 s later (15 s after the start at the earliest) the daemon must
@@ -178,7 +202,8 @@ click Record on the prompt.
 8. During a call, `kill -9` the daemon. `pgrep -a pw-record` must show no shepetal recorder
    about a second later, and both WAVs must play up to the kill.
 9. With Zoom and a Meet tab both in a call, leave Zoom. The recording must go on until the Meet
-   call ends too, and the header must name both apps.
+   call ends too, and the header must name both apps. Then, in a call with video on, mute the
+   mic in the call app: the recording must go on while the camera is on.
 10. Join a call and close the notification without clicking Record. The daemon must print
     `the Record? prompt was dismissed`. For the rest of the call: no new folder in `meetings/`,
     no `pw-record` in `pgrep -a pw-record`, and no second prompt.
@@ -188,7 +213,11 @@ click Record on the prompt.
     SIGINT does not close it on this notify-send version (see the known gaps).
 12. Join a call and leave it within 10 s, before clicking. When the daemon prints
     `meeting ended before Record was clicked`, the notification must disappear.
-13. Put `{"meetings": {"auto_record": true}}` in `~/.config/shepetal/config.json` and restart
+13. With nothing on the mic, run `ffplay -f v4l2 /dev/video0` (package ffmpeg), which opens
+    the camera itself. `probe` must list `cam user:  "ffplay"`, and within about 8 s the
+    notification must say `ffplay is using the camera.` Close it, then close ffplay. Do the same
+    with GNOME Snapshot (Camera), which goes through PipeWire. No step may ask for a permission.
+14. Put `{"meetings": {"auto_record": true}}` in `~/.config/shepetal/config.json` and restart
     the daemon. The startup line must say `recording every meeting`. Join a call: it must
     record within about 8 s with no notification. With `"auto_record": "yes"` instead, the
     daemon must stop at startup with `...config.json: meetings.auto_record: expected true or
@@ -209,6 +238,13 @@ click Record on the prompt.
   pw-record gets the raw mic without echo cancellation. Their words then show up under Me too.
 - An app that closes its mic stream while muted ends the recording after `reacquire`. Step 4
   checks this. Raise `reacquire` if it happens.
+- Any app on the mic or the camera is offered as a meeting, also a voice recorder, another
+  dictation app or a camera app. That is the rule (Pavel, 2026-10-21), not a bug.
+- While PipeWire serves a camera, its own process holds `/dev/video*`. PipeWire's answer wins
+  then, but in the few seconds after the last app stops, before WirePlumber suspends the camera,
+  the `/proc` fallback still sees PipeWire on it, and the end comes that much later.
+- The `/proc` fallback sees only the user's own processes, so a camera held by another user's
+  process is not seen.
 - The Record? prompt is a plain desktop notification, not a card in 🤫 (docs/re/meetings.md
   draws a card in its own window).
 - The call before the click is not recorded, and a click is seen up to 2 s late.

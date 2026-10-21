@@ -1,6 +1,6 @@
 //! Meeting recording in `shepetal daemon` (goal rule 7, docs/re/meetings.md section 7).
-//! Every 2 s it reads `pw-dump`. Once a meeting app has held the mic for the start grace, it
-//! shows a Record? notification. Only a click on Record starts the recording of the mic and
+//! Every 2 s it reads `pw-dump` and /proc. Once any other app has used the mic or the camera for
+//! the start grace, it shows a Record? notification. Only a click on Record starts the recording of the mic and
 //! the default sink's monitor into two WAVs (`{"meetings": {"auto_record": true}}` in config.json
 //! records without asking). When the call ends, it stops them and writes a Me / Others transcript next to them.
 //! The audio is always kept (rule 4).
@@ -22,13 +22,13 @@ const OTHERS: &str = "Others.wav";
 struct Thresholds {
     /// How often pw-dump is read.
     poll: u64,
-    /// How long a meeting app must hold the mic before recording starts (grace).
+    /// How long another app must use the mic or the camera before the Record? prompt (grace).
     start_after: u64,
     /// No end in the first part of a recording.
     min_session: u64,
-    /// The wait after a meeting app lets go of the mic (bound silence) ...
+    /// The wait after the last app lets go of the mic and the camera (bound silence) ...
     end_with_evidence: u64,
-    /// ... and at least this long: if the mic comes back within it, it is the same meeting.
+    /// ... and at least this long: if either comes back within it, it is the same meeting.
     reacquire: u64,
     /// A change of the default mic or speakers holds off an end this long.
     device_change: u64,
@@ -96,27 +96,35 @@ fn load_auto_record(path: &Path) -> Result<bool, String> {
 /// notify-send) with one Record button. notify-send waits for the answer and prints `record`
 /// when Record is clicked. A dismissed or expired notification prints nothing. SIGINT makes
 /// notify-send close the notification.
-fn prompt_cmd(apps: &[&str], timeout_ms: u64) -> Command {
+fn prompt_cmd(who: &str, what: &str, timeout_ms: u64) -> Command {
     let mut c = Command::new("notify-send");
     c.args(["--app-name=shepetal", "--action=record=Record", &format!("--expire-time={timeout_ms}"), "Record this meeting?"])
-        .arg(format!("{} is using the microphone. Nothing is recorded unless you click Record.", apps.join(", ")))
+        .arg(format!("{who} is using the {what}. Nothing is recorded unless you click Record."))
         .stdout(Stdio::piped());
     die_with_parent(&mut c);
     c
 }
 
-/// What one pw-dump shows: the meeting apps on the mic and the default mic and speakers.
-/// shepetal's own recorders are never meeting apps (see `meeting::mic_streams`).
+/// What one poll shows: the apps on the mic and on the camera ("" for one nothing names), and
+/// the default mic and speakers. shepetal's own processes are never among them
+/// (`meeting::own_pids`).
 #[derive(Debug, Default, Clone, PartialEq)]
 struct Snapshot {
-    apps: Vec<&'static str>,
+    mic: Vec<String>,
+    cam: Vec<String>,
     devices: Vec<String>,
 }
 
-fn snapshot(dump: &Value) -> Snapshot {
-    let mut apps: Vec<_> = meeting::mic_streams(dump).into_iter().filter_map(|s| s.meeting).collect();
-    apps.sort();
-    apps.dedup();
+/// `proc` is /proc, for the camera fallback and for which processes are ours.
+fn snapshot(dump: &Value, proc: &Path) -> Snapshot {
+    let own = meeting::own_pids(proc, std::process::id());
+    let names = |v: Vec<meeting::Stream>| {
+        let mut n: Vec<_> = v.into_iter().map(|s| s.app).collect();
+        n.sort();
+        n.dedup();
+        n
+    };
+    let (mic, cam) = (names(meeting::mic_streams(dump, &own)), names(meeting::camera_users(dump, proc, &own)));
     let mut devices: Vec<_> = dump.as_array().into_iter().flatten()
         .filter(|o| o["type"] == "PipeWire:Interface:Metadata" && o["info"]["props"]["metadata.name"] == "default")
         .flat_map(|o| o["metadata"].as_array().into_iter().flatten())
@@ -124,7 +132,21 @@ fn snapshot(dump: &Value) -> Snapshot {
         .map(|e| format!("{}={}", e["key"], e["value"]))
         .collect();
     devices.sort();
-    Snapshot { apps, devices }
+    Snapshot { mic, cam, devices }
+}
+
+/// The apps for the prompt and the log ("Zoom, Firefox", or "An app" when none is named) and
+/// what they use. App names only, never a window title, tab or URL.
+fn who(s: &Snapshot) -> (String, &'static str) {
+    let mut names: Vec<&str> = s.mic.iter().chain(&s.cam).map(String::as_str).filter(|a| !a.is_empty()).collect();
+    names.sort();
+    names.dedup();
+    let what = match (s.mic.is_empty(), s.cam.is_empty()) {
+        (false, false) => "microphone and camera",
+        (false, true) => "microphone",
+        _ => "camera",
+    };
+    (if names.is_empty() { "An app".into() } else { names.join(", ") }, what)
 }
 
 #[derive(Debug, PartialEq)]
@@ -133,8 +155,8 @@ enum Step {
     Stop,
 }
 
-/// Debounced start and stop from snapshots. One recording covers every meeting app on the mic,
-/// because the mic and the system audio are shared. The caller supplies the clock (ms).
+/// Debounced start and stop from snapshots. One recording covers every app on the mic or the
+/// camera, because the mic and the system audio are shared. The caller supplies the clock (ms).
 #[derive(Default)]
 struct Detector {
     t: Thresholds,
@@ -151,7 +173,7 @@ impl Detector {
             self.hold_until = now + self.t.device_change;
         }
         self.devices = Some(s.devices.clone());
-        let held = !s.apps.is_empty();
+        let held = !s.mic.is_empty() || !s.cam.is_empty();
         match self.started {
             // A candidate that drops out before start_after starts over (flapping).
             None if !held => {
@@ -173,7 +195,7 @@ impl Detector {
             }
             Some(started) => {
                 let since = *self.lost_since.get_or_insert(now);
-                // Linux sees only mic holders, so a release is always the bound kind of end.
+                // Linux sees only mic and camera users, so a release is always the bound kind of end.
                 let wait = self.t.end_with_evidence.max(self.t.reacquire);
                 if now - since < wait || now - started < self.t.min_session || now < self.hold_until {
                     return None;
@@ -255,12 +277,12 @@ fn die_with_parent(c: &mut Command) {
 #[cfg(not(target_os = "linux"))]
 fn die_with_parent(_: &mut Command) {}
 
-/// A meeting being recorded: its folder, the two recorders and every meeting app seen.
+/// A meeting being recorded: its folder, the two recorders and every app seen on the mic or camera.
 struct Session {
     dir: PathBuf,
     me: Child,
     others: Child,
-    apps: Vec<&'static str>,
+    apps: Vec<String>,
 }
 
 fn start(data_home: &Path, pw_record: bool) -> Result<Session, String> {
@@ -316,7 +338,8 @@ fn segments(stdout: &str) -> Vec<(u64, String)> {
 fn transcript(apps: &[&str], channels: &[(&str, Vec<(u64, String)>)], notes: &[String]) -> String {
     let mut segs: Vec<_> = channels.iter().flat_map(|(who, s)| s.iter().map(move |(t, x)| (*t, *who, x.as_str()))).collect();
     segs.sort_by_key(|s| s.0); // stable, so the channel order breaks ties
-    let mut out = format!("# Meeting\n\n- Apps: {}\n- Audio: {ME} (microphone), {OTHERS} (system audio)\n", apps.join(", "));
+    let apps = if apps.is_empty() { "not named".into() } else { apps.join(", ") };
+    let mut out = format!("# Meeting\n\n- Apps: {apps}\n- Audio: {ME} (microphone), {OTHERS} (system audio)\n");
     for n in notes {
         out += &format!("- {n}\n");
     }
@@ -341,7 +364,7 @@ fn save(dir: &Path, md: &str) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
+fn write_transcript(dir: &Path, apps: &[String], model: &Path) {
     let mut channels = vec![];
     let mut notes = vec![];
     for (who, file) in [("Me", ME), ("Others", OTHERS)] {
@@ -353,7 +376,8 @@ fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
     for n in &notes {
         eprintln!("shepetal: meeting {}: {n}", dir.display());
     }
-    match save(dir, &transcript(apps, &channels, &notes)) {
+    let apps: Vec<_> = apps.iter().map(String::as_str).collect();
+    match save(dir, &transcript(&apps, &channels, &notes)) {
         Ok(p) => eprintln!("shepetal: meeting transcript {}", p.display()),
         Err(e) => eprintln!("shepetal: meeting transcript in {}: {e}", dir.display()),
     }
@@ -387,11 +411,11 @@ pub fn spawn(stt: &model::Choice) -> Result<(), String> {
     }
     let how = if auto { "recording every meeting (meetings.auto_record)" } else { "asking before each recording" };
     eprintln!("shepetal: meeting detection on, {how}, {t:?} ms (SHEPETAL_MEETING_THRESHOLDS)");
-    std::thread::spawn(move || run(&t, auto, &data_home, &model));
+    std::thread::spawn(move || run(&t, auto, &data_home, &model, Path::new("/proc")));
     Ok(())
 }
 
-fn run(t: &Thresholds, auto_record: bool, data_home: &Path, model: &Path) {
+fn run(t: &Thresholds, auto_record: bool, data_home: &Path, model: &Path, proc: &Path) {
     // ponytail: polls pw-dump; `pw-dump --monitor` or a registry listener reacts sooner. A click
     // on Record is also seen at the next poll, so up to `poll` late.
     let pw_record = insert::on_path("pw-record");
@@ -417,14 +441,15 @@ fn run(t: &Thresholds, auto_record: bool, data_home: &Path, model: &Path) {
             }
         };
         warned = false;
-        let snap = snapshot(&dump);
+        let snap = snapshot(&dump, proc);
+        let (apps, what) = who(&snap);
         let now = t0.elapsed().as_millis() as u64;
         let mut begin = false;
         match det.feed(now, &snap) {
             Some(Step::Start) if auto_record => begin = true,
-            Some(Step::Start) => match prompt_cmd(&snap.apps, t.prompt).spawn() {
+            Some(Step::Start) => match prompt_cmd(&apps, what, t.prompt).spawn() {
                 Ok(c) => {
-                    eprintln!("shepetal: meeting ({}) detected, asking: Record this meeting?", snap.apps.join(", "));
+                    eprintln!("shepetal: meeting detected ({apps} on the {what}), asking: Record this meeting?");
                     asking = Some((c, now));
                 }
                 Err(e) => eprintln!("shepetal: meeting not recorded: notify-send: {e}"),
@@ -467,16 +492,16 @@ fn run(t: &Thresholds, auto_record: bool, data_home: &Path, model: &Path) {
         if begin {
             match start(data_home, pw_record) {
                 Ok(s) => {
-                    eprintln!("shepetal: meeting ({}) recording to {}, system audio {:?}", snap.apps.join(", "), s.dir.display(), meeting::system_audio_source(&dump));
+                    eprintln!("shepetal: meeting ({apps} on the {what}) recording to {}, system audio {:?}", s.dir.display(), meeting::system_audio_source(&dump));
                     rec = Some(s);
                 }
                 Err(e) => eprintln!("shepetal: meeting not recorded: {e}"),
             }
         }
         if let Some(s) = rec.as_mut() {
-            for a in &snap.apps {
+            for a in snap.mic.iter().chain(&snap.cam).filter(|a| !a.is_empty()) {
                 if !s.apps.contains(a) {
-                    s.apps.push(a);
+                    s.apps.push(a.clone());
                 }
             }
         }
@@ -505,24 +530,36 @@ mod tests {
         Value::Array(objs)
     }
 
+    /// No /proc: no camera fallback, and only this process is ours.
+    const NO_PROC: &str = "/nonexistent/shepetal-proc";
+
     fn dump(streams: &[Value], source: &str) -> Snapshot {
-        snapshot(&pw(streams, source))
+        snapshot(&pw(streams, source), Path::new(NO_PROC))
     }
 
     fn zoom() -> Value {
         mic("ZOOM VoiceEngine", "zoom")
     }
 
-    fn firefox() -> Value {
-        mic("Firefox", "firefox")
+    /// Firefox on a running PipeWire camera: the camera node, Firefox's stream and their link.
+    fn firefox_cam() -> Vec<Value> {
+        vec![
+            json!({ "id": 900, "type": "PipeWire:Interface:Node", "info": { "state": "running", "props": {
+                "media.class": "Video/Source", "device.api": "v4l2" } } }),
+            json!({ "id": 901, "type": "PipeWire:Interface:Node", "info": { "state": "running", "props": {
+                "media.class": "Stream/Input/Video", "application.name": "Firefox" } } }),
+            json!({ "id": 902, "type": "PipeWire:Interface:Link", "info": { "output-node-id": 900, "input-node-id": 901 } }),
+        ]
     }
 
     /// The streams shepetal itself opens while a meeting records: Me.wav, Others.wav (on the sink
-    /// monitor) and a dictation.
+    /// monitor) and a dictation, all from this process's pid.
     fn own() -> Vec<Value> {
-        let mut monitor = mic("shepetal", "pw-record");
+        let mut rec = mic("shepetal", "pw-record");
+        rec["info"]["props"]["application.process.id"] = json!(std::process::id());
+        let mut monitor = rec.clone();
         monitor["info"]["props"]["stream.capture.sink"] = json!(true);
-        vec![mic("shepetal", "pw-record"), monitor, mic("shepetal", "pw-record")]
+        vec![rec.clone(), monitor, rec]
     }
 
     const BUILTIN: &str = "alsa_input.analog-stereo";
@@ -537,12 +574,17 @@ mod tests {
     }
 
     #[test]
-    fn starts_once_a_meeting_app_held_the_mic_for_the_grace() {
+    fn starts_once_another_app_used_the_mic_or_the_camera_for_the_grace() {
         // docs/re/meetings.md 2.3: 5 s grace. Seen at 0, 2, 4 and 6 s: the start comes at 6 s,
         // never earlier, and only once.
         let z = dump(&[zoom()], BUILTIN);
-        assert_eq!(z.apps, ["Zoom"]);
+        assert_eq!((z.mic.clone(), z.cam.len()), (vec!["ZOOM VoiceEngine".to_string()], 0));
         assert_eq!(play(&mut Detector::default(), &times(&z, 6)), [(6000, Start)]);
+        // Any app counts, not only call apps, and the camera alone is enough.
+        assert_eq!(play(&mut Detector::default(), &times(&dump(&[mic("GNOME Sound Recorder", "gnome-sound-recorder")], BUILTIN), 6)), [(6000, Start)]);
+        let c = dump(&firefox_cam(), BUILTIN);
+        assert_eq!((c.mic.len(), c.cam.clone()), (0, vec!["Firefox".to_string()]));
+        assert_eq!(play(&mut Detector::default(), &times(&c, 6)), [(6000, Start)]);
     }
 
     #[test]
@@ -558,6 +600,12 @@ mod tests {
         let mut seq = times(&z, 4);
         seq.extend(times(&idle, 10));
         assert_eq!(play(&mut Detector::default(), &seq), [(6000, Start), (22000, Stop)]);
+
+        // Used again after the end (40 s) is a new meeting with a new prompt, also after Not now.
+        let mut seq = times(&z, 16);
+        seq.extend(times(&idle, 4));
+        seq.extend(times(&z, 4));
+        assert_eq!(play(&mut Detector::default(), &seq), [(6000, Start), (36000, Stop), (46000, Start)]);
     }
 
     #[test]
@@ -575,12 +623,14 @@ mod tests {
     }
 
     #[test]
-    fn two_apps_are_one_meeting_until_both_let_go() {
-        let both = dump(&[zoom(), firefox()], BUILTIN);
-        assert_eq!(both.apps, ["Browser (Firefox)", "Zoom"]);
+    fn mic_and_camera_are_one_meeting_until_both_are_free() {
+        let mut streams = vec![zoom()];
+        streams.extend(firefox_cam());
+        let both = dump(&streams, BUILTIN);
+        assert_eq!(who(&both), ("Firefox, ZOOM VoiceEngine".into(), "microphone and camera"));
         let mut seq = times(&both, 10); // 0..18 s
-        seq.extend(times(&dump(&[firefox()], BUILTIN), 10)); // Zoom left at 20 s, Firefox stays
-        seq.extend(times(&dump(&[], BUILTIN), 3)); // both gone at 40 s
+        seq.extend(times(&dump(&firefox_cam(), BUILTIN), 10)); // the mic is free at 20 s, the camera is not
+        seq.extend(times(&dump(&[], BUILTIN), 3)); // both free at 40 s
         assert_eq!(play(&mut Detector::default(), &seq), [(6000, Start), (44000, Stop)]);
     }
 
@@ -588,9 +638,9 @@ mod tests {
     fn shepetal_own_streams_never_start_or_hold_a_meeting() {
         // While a meeting records, shepetal holds the mic twice (Me.wav, a dictation) and the sink
         // monitor once (Others.wav). Counted, they would keep the recording on after the call,
-        // forever. They are not even mic users: Me.wav and the dictation by name, Others.wav as
+        // forever. They are not even mic users: Me.wav and the dictation by pid, Others.wav as
         // a monitor.
-        assert_eq!(meeting::mic_streams(&pw(&own(), BUILTIN)), []);
+        assert_eq!(meeting::mic_streams(&pw(&own(), BUILTIN), &[std::process::id()]), []);
         let own_only = dump(&own(), BUILTIN);
         assert_eq!(play(&mut Detector::default(), &times(&own_only, 20)), []);
 
@@ -653,18 +703,34 @@ mod tests {
 
     #[test]
     fn the_prompt_has_one_record_button_and_expires_with_the_threshold() {
-        let c = prompt_cmd(&["Zoom", "Browser (Firefox)"], 20000);
+        let c = prompt_cmd("Firefox, ZOOM VoiceEngine", "microphone and camera", 20000);
         let args: Vec<_> = std::iter::once(c.get_program()).chain(c.get_args()).map(|a| a.to_string_lossy().into_owned()).collect();
         assert_eq!(args, ["notify-send", "--app-name=shepetal", "--action=record=Record", "--expire-time=20000", "Record this meeting?",
-            "Zoom, Browser (Firefox) is using the microphone. Nothing is recorded unless you click Record."]);
+            "Firefox, ZOOM VoiceEngine is using the microphone and camera. Nothing is recorded unless you click Record."]);
+        // The prompt names the apps when PipeWire or /proc does, and says what they use.
+        let s = |mic: &[&str], cam: &[&str]| Snapshot {
+            mic: mic.iter().map(|a| a.to_string()).collect(), cam: cam.iter().map(|a| a.to_string()).collect(), devices: vec![] };
+        assert_eq!(who(&s(&[""], &[])), ("An app".into(), "microphone"));
+        assert_eq!(who(&s(&[], &["zoom"])), ("zoom".into(), "camera"));
+        assert_eq!(who(&s(&["", "Zoom"], &["Zoom"])), ("Zoom".into(), "microphone and camera"));
     }
 
     #[test]
     fn the_committed_pw_dump_fixture_is_a_meeting() {
         let d: Value = serde_json::from_str(include_str!("../fixtures/pw-dump-meeting.json")).unwrap();
-        let s = snapshot(&d);
-        assert_eq!(s.apps, ["Browser (Firefox)", "Zoom"]);
+        // Its shepetal recorder, pid 9001, is a child of this process in a fake /proc.
+        let proc = std::env::temp_dir().join(format!("shepetal-fixproc-{}", std::process::id()));
+        std::fs::create_dir_all(proc.join("9001")).unwrap();
+        std::fs::write(proc.join("9001/status"), format!("Name:\tpw-record\nPPid:\t{}\n", std::process::id())).unwrap();
+        let s = snapshot(&d, &proc);
+        std::fs::remove_dir_all(&proc).unwrap();
+        assert_eq!(s.mic, ["Firefox", "GNOME Sound Recorder", "ZOOM VoiceEngine"]);
+        assert_eq!(s.cam, ["Firefox"]);
         assert_eq!(s.devices.len(), 2, "{:?}", s.devices);
+        // Privacy: what is shown and logged is app names only. The fixture's camera stream has
+        // a Meet tab title as its media.name.
+        assert!(!format!("{s:?}{:?}", who(&s)).contains("Weekly sync"));
+        assert_eq!(snapshot(&d, Path::new(NO_PROC)).mic.last().map(String::as_str), Some("shepetal"), "not our child: another app");
     }
 
     #[test]
@@ -741,15 +807,17 @@ mod tests {
     /// fake pw-dump, pw-record, whisper-cli and notify-send. It runs in a child copy of this test
     /// binary, because the tests in main.rs swap PATH for their own fakes. The fake notify-send
     /// does `answer`: `record` (Record clicked), `dismiss`, or `ignore` (waits until SIGINT).
-    /// `extra` adds thresholds. Returns the fakes' dir in the parent, None in the child.
-    fn call(test: &str, auto_record: bool, answer: &str, extra: &str) -> Option<PathBuf> {
+    /// `extra` adds thresholds. With `cam`, the call is Zoom holding /dev/video0 in a fake /proc
+    /// instead of a PipeWire mic stream. Returns the fakes' dir in the parent, None in the child.
+    fn call(test: &str, auto_record: bool, answer: &str, extra: &str, cam: bool) -> Option<PathBuf> {
         const HOME: &str = "SHEPETAL_TEST_MEETING_HOME";
         if let Ok(home) = std::env::var(HOME) {
             let home = PathBuf::from(home);
             // The call ends after read 12, so the meeting ends at about read 16.
             let t = Thresholds::parse(&format!("poll=0.1,start_after=0.3,min_session=0.5,reacquire=0.3,end_with_evidence=0.3,{extra}")).unwrap();
             let h = home.clone();
-            std::thread::spawn(move || run(&t, auto_record, &h, Path::new("/models/ggml.bin")));
+            let proc = home.parent().unwrap().join("proc");
+            std::thread::spawn(move || run(&t, auto_record, &h, Path::new("/models/ggml.bin"), &proc));
             let reads = home.parent().unwrap().join("reads");
             for _ in 0..400 {
                 std::thread::sleep(Duration::from_millis(50));
@@ -768,15 +836,21 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("bin")).unwrap();
         let (dd, call, idle) = (d.display(), pw(&[zoom()], BUILTIN), pw(&[], BUILTIN));
+        let (on, off) = if cam {
+            (format!("mkdir -p {dd}/proc/4242/fd; echo zoom > {dd}/proc/4242/comm; ln -sf /dev/video0 {dd}/proc/4242/fd/9; printf '%s' '{idle}'"),
+             format!("rm -rf {dd}/proc/4242; printf '%s' '{idle}'"))
+        } else {
+            (format!("printf '%s' '{call}'"), format!("printf '%s' '{idle}'"))
+        };
         let tools = [
             ("notify-send", format!("exec 2>/dev/null\necho \"$*\" >> {dd}/prompt.args\ncase {answer} in\n\
                 record) sleep 0.2; echo record ;;\n\
                 dismiss) sleep 0.2 ;;\n\
                 *) trap 'echo \"closed after read $(cat {dd}/reads)\" >> {dd}/prompt.log; exit 0' INT\n\
                    i=0; while [ $i -lt 3000 ]; do sleep 0.01; i=$((i+1)); done ;;\nesac\n")),
-            // The call holds the mic for the first 12 reads, then it is gone.
+            // The call holds the mic (or the camera) for the first 12 reads, then it is gone.
             ("pw-dump", format!("n=$(cat {dd}/reads 2>/dev/null || echo 0); echo $((n+1)) > {dd}/reads\n\
-                [ $n -lt 12 ] && printf '%s' '{call}' || printf '%s' '{idle}'\n")),
+                if [ $n -lt 12 ]; then {on}; else {off}; fi\n")),
             // Like pw-record: "RIFF final" only once SIGINT finishes the header.
             ("pw-record", format!("exec >/dev/null 2>&1\nfor f; do :; done\necho \"$*\" >> {dd}/rec.args\n\
                 trap 'printf \"RIFF final\" > \"$f\"; exit 0' INT\nprintf 'RIFF partial' > \"$f\"\n\
@@ -810,8 +884,8 @@ mod tests {
         std::fs::remove_dir_all(d).unwrap();
     }
 
-    /// The call was recorded, stopped and transcribed.
-    fn recorded(d: &Path) {
+    /// The call was recorded, stopped and transcribed, with `app` in its header.
+    fn recorded(d: &Path, app: &str) {
         use std::os::unix::fs::PermissionsExt;
         let dirs: Vec<_> = std::fs::read_dir(d.join("home/shepetal/meetings")).unwrap().flatten().map(|e| e.path()).collect();
         assert_eq!(dirs.len(), 1, "one call, one meeting: {dirs:?}");
@@ -824,8 +898,8 @@ mod tests {
         let mut files: Vec<_> = rec.lines().map(|l| (l.rsplit('/').next().unwrap(), l.contains("stream.capture.sink = true"))).collect();
         files.sort();
         assert_eq!(files, [(ME, false), (OTHERS, true)], "only Others.wav records the sink monitor: {rec}");
-        assert_eq!(read("transcript.md"), "# Meeting\n\n- Apps: Zoom\n- Audio: Me.wav (microphone), Others.wav (system audio)\n\n\
-            [00:00:01] Me: Hello from me.\n\n[00:00:01] Others: Hi from them.\n");
+        assert_eq!(read("transcript.md"), format!("# Meeting\n\n- Apps: {app}\n- Audio: Me.wav (microphone), Others.wav (system audio)\n\n\
+            [00:00:01] Me: Hello from me.\n\n[00:00:01] Others: Hi from them.\n"));
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!([mode(dir), mode(&dir.join(ME)), mode(&dir.join("transcript.md"))], [0o700, 0o600, 0o600]);
         std::fs::remove_dir_all(d).unwrap();
@@ -839,16 +913,26 @@ mod tests {
 
     #[test]
     fn a_meeting_records_only_after_record_is_clicked() {
-        let Some(d) = call("meeting_rec::tests::a_meeting_records_only_after_record_is_clicked", false, "record", "") else { return };
+        let Some(d) = call("meeting_rec::tests::a_meeting_records_only_after_record_is_clicked", false, "record", "", false) else { return };
         let asked = read(d.join("prompt.args"));
         assert_eq!(asked.lines().count(), 1, "one prompt per meeting: {asked}");
-        assert!(asked.contains("--action=record=Record") && asked.contains("Zoom is using the microphone"), "{asked}");
-        recorded(&d);
+        assert!(asked.contains("--action=record=Record") && asked.contains("ZOOM VoiceEngine is using the microphone."), "{asked}");
+        recorded(&d, "ZOOM VoiceEngine");
+    }
+
+    #[test]
+    fn a_camera_alone_is_offered_and_records_after_the_click() {
+        // Zoom opens /dev/video0 itself, past PipeWire: only the /proc scan sees it.
+        let Some(d) = call("meeting_rec::tests::a_camera_alone_is_offered_and_records_after_the_click", false, "record", "", true) else { return };
+        let asked = read(d.join("prompt.args"));
+        assert_eq!(asked.lines().count(), 1, "one prompt per meeting: {asked}");
+        assert!(asked.contains("zoom is using the camera."), "{asked}");
+        recorded(&d, "zoom");
     }
 
     #[test]
     fn a_dismissed_prompt_records_nothing_for_that_meeting() {
-        let Some(d) = call("meeting_rec::tests::a_dismissed_prompt_records_nothing_for_that_meeting", false, "dismiss", "") else { return };
+        let Some(d) = call("meeting_rec::tests::a_dismissed_prompt_records_nothing_for_that_meeting", false, "dismiss", "", false) else { return };
         assert_eq!(read(d.join("prompt.args")).lines().count(), 1, "not asked again in the same meeting");
         nothing_recorded(&d);
     }
@@ -856,23 +940,23 @@ mod tests {
     #[test]
     fn an_unanswered_prompt_is_withdrawn_and_records_nothing() {
         // The call lasts 12 reads. A 0.5 s prompt shown at about read 3 must go well before that.
-        let Some(d) = call("meeting_rec::tests::an_unanswered_prompt_is_withdrawn_and_records_nothing", false, "ignore", "prompt=0.5") else { return };
+        let Some(d) = call("meeting_rec::tests::an_unanswered_prompt_is_withdrawn_and_records_nothing", false, "ignore", "prompt=0.5", false) else { return };
         assert!(closed_after(&d) < 12, "withdrawn by the timeout, not by the end of the call");
         nothing_recorded(&d);
     }
 
     #[test]
     fn the_prompt_is_withdrawn_when_the_call_ends_first() {
-        let Some(d) = call("meeting_rec::tests::the_prompt_is_withdrawn_when_the_call_ends_first", false, "ignore", "prompt=60") else { return };
+        let Some(d) = call("meeting_rec::tests::the_prompt_is_withdrawn_when_the_call_ends_first", false, "ignore", "prompt=60", false) else { return };
         assert!(closed_after(&d) >= 12, "withdrawn when the call ended");
         nothing_recorded(&d);
     }
 
     #[test]
     fn auto_record_records_without_asking() {
-        let Some(d) = call("meeting_rec::tests::auto_record_records_without_asking", true, "record", "") else { return };
+        let Some(d) = call("meeting_rec::tests::auto_record_records_without_asking", true, "record", "", false) else { return };
         assert!(!d.join("prompt.args").exists(), "no prompt with meetings.auto_record");
-        recorded(&d);
+        recorded(&d, "ZOOM VoiceEngine");
     }
 
     #[test]
