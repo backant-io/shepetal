@@ -36,6 +36,9 @@ pub enum Event {
     /// Tray menu: Start at login was clicked. The app flips the setting, then calls
     /// `Ui::set_start_at_login` so the check mark follows.
     StartAtLogin,
+    /// Tray menu: Recordings > Keep recordings (false) or Delete recordings after 24 hours
+    /// (true) was picked. The app saves the choice, then calls `Ui::set_delete_after_24h`.
+    DeleteAfter24h(bool),
     /// Tray menu: Quit. The tray icon, overlay and hook are already gone.
     Quit,
 }
@@ -55,6 +58,16 @@ pub enum Key {
     /// Ctrl+Win+D can cancel. Only downs, and only while the hotkey is held: normal typing is
     /// never reported.
     Other(u16),
+}
+
+/// The tray's Recordings submenu, in order: each item's label, whether it is the checked one, and
+/// whether picking it means delete after 24 h. Keep is the default (goal rule 4); there is no
+/// "never store".
+pub fn recordings_menu(delete_after_24h: bool) -> [(&'static str, bool, bool); 2] {
+    [
+        ("Keep recordings", !delete_after_24h, false),
+        ("Delete recordings after 24 hours", delete_after_24h, true),
+    ]
 }
 
 /// A hotkey: one to three keys that must all be held, as Windows VK codes. Left and right
@@ -704,6 +717,29 @@ mod tests {
             1.0,
             "and repeats"
         );
+    }
+
+    #[test]
+    fn recordings_menu_checks_exactly_the_current_choice() {
+        let keep = recordings_menu(false);
+        assert_eq!(
+            keep.map(|(l, ..)| l),
+            ["Keep recordings", "Delete recordings after 24 hours"],
+            "the Mac's wording"
+        );
+        assert_eq!(
+            keep.map(|(_, on, _)| on),
+            [true, false],
+            "keep is checked by default"
+        );
+        assert_eq!(recordings_menu(true).map(|(_, on, _)| on), [false, true]);
+        // Each item picks its own choice, whatever is checked now.
+        for now in [false, true] {
+            assert_eq!(
+                recordings_menu(now).map(|(.., delete)| delete),
+                [false, true]
+            );
+        }
     }
 
     #[test]

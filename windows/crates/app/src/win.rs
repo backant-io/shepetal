@@ -6,8 +6,9 @@
 use crate::dialog::{self, Card};
 use crate::flow::{self, Flow, Kept};
 use crate::meeting::{self, Show};
-use crate::system::{self, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RUN_KEY, RUN_VALUE};
+use crate::system::{self, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RETENTION_VALUE, RUN_KEY, RUN_VALUE, SETTINGS_KEY};
 use shepetal_core::gesture::{Action, Gesture, HINT_MS};
+use shepetal_core::retention::Retention;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -48,19 +49,35 @@ fn starts_at_login() -> bool {
     reg_string(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE).is_some()
 }
 
+/// Writes a REG_SZ under HKCU, creating the key if needed.
+fn set_reg_string(key: &str, value: &str, data: &str) -> u32 {
+    let (key, name, data) = (wide(key), wide(value), wide(data));
+    unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, data.as_ptr().cast(), (data.len() * 2) as u32) }
+}
+
 fn set_start_at_login(on: bool) -> Result<(), String> {
-    let (key, name) = (wide(RUN_KEY), wide(RUN_VALUE));
     let r = if on {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let data = wide(&system::run_command(&exe));
-        unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, data.as_ptr().cast(), (data.len() * 2) as u32) }
+        set_reg_string(RUN_KEY, RUN_VALUE, &system::run_command(&exe))
     } else {
+        let (key, name) = (wide(RUN_KEY), wide(RUN_VALUE));
         unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) }
     };
     match r {
         ERROR_SUCCESS => Ok(()),
         ERROR_FILE_NOT_FOUND if !on => Ok(()),
         r => Err(format!("Could not change start at login (error {r}).")),
+    }
+}
+
+fn retention() -> Retention {
+    system::retention(reg_string(HKEY_CURRENT_USER, SETTINGS_KEY, RETENTION_VALUE).as_deref())
+}
+
+fn set_retention(r: Retention) -> Result<(), String> {
+    match set_reg_string(SETTINGS_KEY, RETENTION_VALUE, r.as_str()) {
+        ERROR_SUCCESS => Ok(()),
+        e => Err(format!("Could not save the Recordings setting (error {e}).")),
     }
 }
 
@@ -217,6 +234,8 @@ pub fn run() {
         Err(e) => return message(&format!("Shepetal can't watch the keyboard or show its 🤫: {e}")),
     };
     ui.set_start_at_login(starts_at_login());
+    let mut retention = retention();
+    ui.set_delete_after_24h(retention == Retention::Delete24h);
 
     let (tx, rx) = mpsc::channel();
     let forward = tx.clone();
@@ -230,7 +249,7 @@ pub fn run() {
 
     let mut flow = Flow::new(
         AppMic(audio::Mic::open(PRE_ROLL).ok()),
-        AppStore(store),
+        AppStore(store.clone()),
         AppInsert(None),
         ui,
         flow::rules,
@@ -239,6 +258,9 @@ pub fn run() {
     let t0 = Instant::now();
     let ms = |at: Instant| at.saturating_duration_since(t0).as_millis() as u64;
     let mut paused = false;
+    // Goal rule 4: with delete after 24 h, clips go at launch and within a minute of turning 24 h old.
+    let mut prune = system::Prune::default();
+    let mut prune_failed = false;
     let mut meeting_app = String::new();
     let card = card.map_err(|e| flow.error(&format!("Shepetal can't offer to record meetings: {e}"), 0)).ok();
     loop {
@@ -262,6 +284,15 @@ pub fn run() {
                     flow.error(&e, now);
                 }
                 flow.show.set_start_at_login(starts_at_login());
+                vec![]
+            }
+            Ok(Msg::Input(input::Event::DeleteAfter24h(on))) => {
+                if let Err(e) = set_retention(if on { Retention::Delete24h } else { Retention::Keep }) {
+                    flow.error(&e, now);
+                }
+                retention = self::retention(); // the check mark shows what was saved
+                flow.show.set_delete_after_24h(retention == Retention::Delete24h);
+                prune.now();
                 vec![]
             }
             // The tray, overlay and hook are already gone.
@@ -301,6 +332,17 @@ pub fn run() {
             }
         }
         flow.tick(now);
+        if retention == Retention::Delete24h && prune.due(now) {
+            match store.prune(retention, now_ms()) {
+                Ok(_) => prune_failed = false,
+                // Once, not every minute while it keeps failing.
+                Err(e) if !prune_failed => {
+                    prune_failed = true;
+                    flow.error(&format!("Could not delete recordings older than 24 hours: {e}"), now);
+                }
+                Err(_) => {}
+            }
+        }
     }
     flow.show.quit();
 }

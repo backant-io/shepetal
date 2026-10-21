@@ -1,6 +1,7 @@
 //! The names shepetal.exe shares with Windows and with the installer
 //! (windows/installer/shepetal.iss), and the pure decisions made on them.
 
+use shepetal_core::retention::Retention;
 use std::path::Path;
 
 /// Single instance. The installer's `AppMutex` names the same mutex, so setup and the uninstaller
@@ -11,6 +12,44 @@ pub const MUTEX: &str = "Shepetal.SingleInstance";
 /// the tray toggle, removed by the uninstaller.
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 pub const RUN_VALUE: &str = "Shepetal";
+
+/// Shepetal's own settings: one REG_SZ per setting under HKCU. The uninstaller removes the key.
+pub const SETTINGS_KEY: &str = r"Software\Shepetal";
+/// `keep` or `delete_after_24h`, the Mac's values (`Retention::as_str`).
+pub const RETENTION_VALUE: &str = "Retention";
+
+/// The retention a stored value means. Missing, or anything else ("never store" included), is
+/// keep, the default (goal rule 4).
+pub fn retention(value: Option<&str>) -> Retention {
+    value.and_then(Retention::parse).unwrap_or_default()
+}
+
+/// With delete after 24 h, how often the audio folder is checked while Shepetal runs, so a clip
+/// goes within a minute of turning 24 hours old.
+pub const PRUNE_EVERY_MS: u64 = 60_000;
+
+/// When the audio folder is next checked for clips 24 hours old. Due at once after `new` and
+/// after `now`, so launch and picking the setting both prune right away.
+#[derive(Debug, Default)]
+pub struct Prune {
+    next_ms: u64,
+}
+
+impl Prune {
+    /// Whether to prune at `now_ms` (any monotonic clock); if so, the next one is a minute later.
+    pub fn due(&mut self, now_ms: u64) -> bool {
+        if now_ms < self.next_ms {
+            return false;
+        }
+        self.next_ms = now_ms + PRUNE_EVERY_MS;
+        true
+    }
+
+    /// Prune at the next `due`.
+    pub fn now(&mut self) {
+        self.next_ms = 0;
+    }
+}
 
 /// The Run value's data: the exe, quoted because the install path may hold spaces.
 pub fn run_command(exe: &Path) -> String {
@@ -52,6 +91,39 @@ mod tests {
         assert!(ISS.contains(&format!("AppMutex={MUTEX}")), "AppMutex in shepetal.iss");
         assert!(ISS.contains(&format!("#define RunValue \"{RUN_VALUE}\"")), "RunValue in shepetal.iss");
         assert!(ISS.contains(&format!("#define RunKey \"{RUN_KEY}\"")), "RunKey in shepetal.iss");
+    }
+
+    #[test]
+    fn retention_is_keep_unless_the_user_picked_24_h() {
+        assert_eq!(retention(None), Retention::Keep, "nothing stored: keep, the default");
+        assert_eq!(retention(Some("keep")), Retention::Keep);
+        assert_eq!(retention(Some("delete_after_24h")), Retention::Delete24h);
+        for v in ["never", "never_store", "Delete_after_24h", "24h", ""] {
+            assert_eq!(retention(Some(v)), Retention::Keep, "{v}");
+        }
+        // The value written is the one read back.
+        for r in [Retention::Keep, Retention::Delete24h] {
+            assert_eq!(retention(Some(r.as_str())), r);
+        }
+    }
+
+    #[test]
+    fn prune_runs_at_launch_then_every_minute_and_at_once_when_asked() {
+        let mut p = Prune::default();
+        assert!(p.due(5), "at launch");
+        assert!(!p.due(6));
+        assert!(!p.due(5 + PRUNE_EVERY_MS - 1));
+        assert!(p.due(5 + PRUNE_EVERY_MS), "a minute later");
+        assert!(!p.due(5 + PRUNE_EVERY_MS + 1));
+        p.now();
+        assert!(p.due(5 + PRUNE_EVERY_MS + 2), "right after the setting is picked");
+        assert!(!p.due(5 + PRUNE_EVERY_MS + 3));
+    }
+
+    #[test]
+    fn uninstaller_removes_the_settings_key() {
+        assert!(ISS.contains(&format!("#define SettingsKey \"{SETTINGS_KEY}\"")), "SettingsKey in shepetal.iss");
+        assert!(ISS.contains("RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, '{#SettingsKey}')"));
     }
 
     #[test]

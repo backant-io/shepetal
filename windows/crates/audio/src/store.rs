@@ -15,14 +15,8 @@ pub enum Kind {
     TooShort,
 }
 
-/// How long clips stay. There is no "never store": it is the user's own audio on their device.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Retention {
-    #[default]
-    Keep,
-    /// Delete clips once they are 24 hours old.
-    Delete24h,
-}
+/// How long clips stay: keep (the default) or delete after 24 h. There is no "never store".
+pub use shepetal_core::retention::Retention;
 
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
@@ -40,6 +34,7 @@ fn data_dir_from(local_app_data: Option<PathBuf>) -> io::Result<PathBuf> {
 }
 
 /// The folder of kept clips.
+#[derive(Clone)]
 pub struct Store {
     dir: PathBuf,
 }
