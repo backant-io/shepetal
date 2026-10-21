@@ -307,6 +307,15 @@ mod tests {
         assert_eq!(take(&log), ["insert See you on 26.07.26.", "mode Idle"]);
     }
 
+    // Cleanup drops a filler but keeps the comma before it, so the date rule sees "of, March" and
+    // "twenty, sixth". The first is the spec's own example; the second must never become day 6.
+    #[test]
+    fn dates_read_what_cleanup_leaves_around_a_filler() {
+        assert_eq!(rules("the the first of, um, March"), "01.03.");
+        assert_eq!(rules("the twenty, uh, sixth of July twenty twenty six"), "the twenty, sixth of July twenty twenty six");
+        assert_eq!(rules("Meet on March 5, uh, 10:30."), "Meet on 05.03., 10:30.");
+    }
+
     #[test]
     fn focus_moved_leaves_the_text_on_the_clipboard_with_the_ctrl_v_hint() {
         let moved = "The window changed while you spoke. The text is on the clipboard: press Ctrl+V to paste it.";

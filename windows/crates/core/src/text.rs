@@ -413,8 +413,9 @@ impl<'a> Words<'a> {
     fn day_first(&self, i: usize) -> Option<Found> {
         let the = self.word(i) == "the" && self.gap(i) == " ";
         let d = i + usize::from(the);
-        // In "twenty ninth" the day is 29, never "ninth".
-        let tens_before = d > 0 && self.spaced(d - 1) && matches!(self.word(d - 1).as_str(), "twenty" | "thirty");
+        // In "twenty ninth" the day is 29, never "ninth". Cleanup leaves "twenty, ninth" from "twenty, uh, ninth".
+        let tens_before =
+            d > 0 && matches!(self.gap(d - 1), " " | "-" | ", ") && matches!(self.word(d - 1).as_str(), "twenty" | "thirty");
         let spelled = self.longest(d, 2, en_ordinal).filter(|_| !tens_before);
         let (day, n, bare) = match spelled.or_else(|| de_ordinal(&self.word(d)).map(|v| (v, 1))) {
             Some((v, n)) => (v, n, false),
@@ -424,9 +425,16 @@ impl<'a> Words<'a> {
         if gap != " " && !(bare && gap == ". ") {
             return None;
         }
-        let of = self.word(d + n) == "of" && self.gap(d + n) == " ";
+        // "of" never ends a phrase, so a comma after it is a dropped filler's: "the first of, um, March".
+        let of = self.word(d + n) == "of" && matches!(self.gap(d + n), " " | ", ");
         let m = d + n + usize::from(of);
         let mo = month(&self.word(m))?;
+        if self.gap(m).starts_with('-') {
+            return None; // "die erste Juli-Woche" is a week
+        }
+        if !of && matches!(self.word(m).as_str(), "may" | "march") && !self.capital(m) {
+            return None; // "the second may be better", "the first march was long"
+        }
         let year = self.year(m);
         if of && year.is_none() && (day, mo) == (4, 7) {
             return None; // "Happy Fourth of July!" is the holiday's name
@@ -437,14 +445,18 @@ impl<'a> Words<'a> {
     /// `MONTH [the] DAY [,] [YEAR]`, with an English or digit day.
     fn month_first(&self, i: usize) -> Option<Found> {
         let mo = month(&self.word(i))?;
-        if mo == 5 && self.word(i) == "may" && &self.text[self.at[i].0..self.at[i].1] != "May" {
+        if self.word(i) == "may" && !self.capital(i) {
             return None; // "you may first want to"
         }
         if self.gap(i) != " " {
             return None;
         }
         let d = i + 1 + usize::from(self.word(i + 1) == "the" && self.gap(i + 1) == " ");
-        let (day, n) = self.longest(d, 2, en_ordinal).or_else(|| Some((digit_day(&self.word(d))?.0, 1)))?;
+        let (day, n) = match self.longest(d, 2, en_ordinal) {
+            Some(found) => found,
+            None if self.joined(d) => return None, // "Juli 26.07.2026", "July 10:30", "March 3-5"
+            None => (digit_day(&self.word(d))?.0, 1),
+        };
         self.found(day, mo, d + n - 1, self.year(d + n - 1))
     }
 
@@ -456,12 +468,18 @@ impl<'a> Words<'a> {
         }
         let y = last + 1;
         let w = self.word(y);
-        if let Some(v) = digits(&w, 4) {
-            return Some((v % 100, v, y + 1));
-        }
-        let century = if w.starts_with("nineteen") || w.starts_with("neunzehn") { 1900 } else { 2000 };
-        let (yy, n) = self.spoken_year(y, &w)?;
-        Some((yy, century + yy, y + n))
+        let (yy, full, n) = match digits(&w, 4) {
+            Some(v) => (v % 100, v, 1),
+            None => {
+                let century = if w.starts_with("nineteen") || w.starts_with("neunzehn") { 1900 } else { 2000 };
+                let (yy, n) = self.spoken_year(y, &w)?;
+                (yy, century + yy, n)
+            }
+        };
+        // A year ending in 00 is also a round count: "On July 4th two thousand people marched". And a year
+        // never stops inside a hyphenated word: "nineteen twenty-first" is not 1920.
+        let last = y + n - 1;
+        ((yy != 0 || self.ends(last)) && !self.gap(last).starts_with('-')).then_some((yy, full, y + n))
     }
 
     /// A spelled or two-digit year at word `y` (`w`): its last two digits and its length in words.
@@ -486,14 +504,30 @@ impl<'a> Words<'a> {
         if let Some(found) = self.longest(y, 3, de_year) {
             return Some(found);
         }
-        // A short year (26, twenty six, sechsundzwanzig) only before punctuation or the end: in "July fourth
-        // twenty six people came" it is a count.
+        // A short year (26, twenty six, sechsundzwanzig) only where `ends`: in "July fourth twenty six people
+        // came" it is a count.
         let (v, n) = match digits(w, 2) {
             Some(v) => (v, 1),
             None => self.longest(y, 2, en_number).or_else(|| de_number(w).map(|v| (v, 1))).filter(|(v, _)| *v >= 10)?,
         };
-        let ends = self.gap(y + n - 1).chars().next().is_none_or(|c| ".,;:!?)".contains(c));
-        ends.then_some((v, n))
+        self.ends(y + n - 1).then_some((v, n))
+    }
+
+    /// The end of the text, or `.` `;` `:` `!` `?` `)` without a digit right after it, follows word `k`. A
+    /// comma does not count: in "May 15, 16, and 17" the 16 is a day, and in "March 5, 10:30" a time.
+    fn ends(&self, k: usize) -> bool {
+        let mut after = self.text[self.at[k].1..].chars();
+        after.next().is_none_or(|c| ".;:!?)".contains(c) && !after.next().is_some_and(|c| c.is_ascii_digit()))
+    }
+
+    /// Word `k` runs on into another number through `.` `,` `:` `/` or `-`: "26.07.2026", "10:30", "3-5".
+    fn joined(&self, k: usize) -> bool {
+        matches!(self.gap(k), "." | "," | ":" | "/" | "-") && self.word(k + 1).starts_with(|c: char| c.is_ascii_digit())
+    }
+
+    /// Word `i` starts with a capital: "May", "MAY".
+    fn capital(&self, i: usize) -> bool {
+        self.text[self.at[i].0..].starts_with(char::is_uppercase)
     }
 
     /// The date as numbers if it exists, from its fields and its last word before the year.
@@ -720,5 +754,34 @@ mod tests {
             }
         }
         assert!(failed.is_empty(), "{} of {} date cases failed:\n{}", failed.len(), cases.len(), failed.join("\n"));
+    }
+
+    // docs/text-rules.md: running the rule twice changes nothing, also on text no vector holds. A month
+    // before a numeric date once re-read its first number as a day: "Juli 26.07.2026" became
+    // "26.07.07.2026", and "Does May July 4th work?" changed again on a second run.
+    #[test]
+    fn dates_on_its_own_output_changes_nothing() {
+        let vocab: Vec<&str> = "the of on am den May may March march Juli July Juni 4th 26 5 26. 07. 1st first second \
+            twenty sixth ninth twenty-sixth nineteen two thousand 2026 2000 26.07.2026 04.07. 10:30 3-5 zweitausend \
+            sechsundzwanzig people , . ?"
+            .split_whitespace()
+            .collect();
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as usize
+        };
+        let mut changed = 0;
+        for _ in 0..50_000 {
+            let n = 1 + next() % 8;
+            let s = (0..n).map(|_| vocab[next() % vocab.len()]).collect::<Vec<_>>().join(" ");
+            let s = s.replace(" ,", ",").replace(" .", ".").replace(" ?", "?");
+            let once = dates(&s);
+            changed += usize::from(once != s);
+            assert_eq!(dates(&once), once, "{s:?} became {once:?} on the first run");
+        }
+        assert!(changed > 5_000, "only {changed} of 50000 strings held a date, so the check proves little");
     }
 }
