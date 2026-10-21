@@ -372,7 +372,7 @@ Setup: for steps 4 and 5, the alternative engine's file from `docs/models.md` (L
 ### M-CLEAN-1: download the cleanup model (F32)
 1. On an Apple Silicon Mac without the model, open the 🤫 menu. Expected: at the top, the item "Download cleanup model (about 1.3 GB)" (about 0.5 GB on an 8 GB Mac), with no yellow mark and no grey Cleanup line. Open shepetal. Expected: Home's Cleanup line reads "Rules only (download the cleanup model from the 🤫 menu)". Neither shows a model or file name.
 2. Before downloading, in TextEdit, hold fn and say "Let's meet on Tuesday, actually Wednesday, at three." Release. Expected: the sentence as you said it, "actually" included. Without the model, the rules never guess which half you meant.
-3. Turn Wi-Fi off and click the download item. Expected: within a few seconds the download item is back in the 🤫 menu, with no grey line, and Home's Cleanup line reads "Rules only (the download failed; try again from the 🤫 menu)". Turn Wi-Fi back on.
+3. Turn Wi-Fi off and click the download item. Expected: within a few seconds "Cleanup model download failed: check the internet connection and try again" shows next to 🤫 (#239), the download item is back in the 🤫 menu, with no grey line, and Home's Cleanup line reads "Rules only (the download failed; try again from the 🤫 menu)". Turn Wi-Fi back on.
 4. Click the download item, then open the 🤫 menu again while it downloads. Expected: no download item and no grey line, so the download cannot start twice. Home's Cleanup line reads "Downloading the cleanup model…". While the file is checked, fn still works.
 5. Once the file is in `~/Library/Application Support/Shepetal/models`, open the 🤫 menu again. Expected: no cleanup line or item, and the menu starts with "Record meeting". Home's Cleanup line reads "On".
 
@@ -422,7 +422,7 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 4. In System Settings > Privacy & Security > Accessibility, turn Shepetal off. Open the menu. Expected: "Permissions needed…" at the very top with a yellow mark; choosing it opens the Permissions window. Turn Shepetal back on: the line is gone the next time the menu opens.
 5. Signed out (Home > Sign out): the top of the menu has "Sign in to start your free trial…". With a test account 7 days or less from the end of its trial, or after it: "Get shepetal for $4.99…" instead. With more than 7 days left, or Yours forever, neither.
 6. Open shepetal and check that nothing left the app: Home has the account line with Sign out, the speech recognition line and the Donate links (each opens its page); Settings has Recordings, Open recordings folder, Start at login, Dictionary… and Permissions….
-7. Without the speech model (move `~/Library/Application Support/FluidAudio/Models` aside and restart): the top of the menu has "Download on-device speech recognition (about 470 MB)" with a yellow mark. Choose it, then open the menu again while it downloads. Expected: no download item and no grey line, so a second download cannot start; Home's Speech recognition line reads "Downloading on-device speech recognition…". Turn Wi-Fi off during a download: Home reads "Download failed: …" and the download item is back in the menu. Move the folder back.
+7. Without the speech model (move `~/Library/Application Support/FluidAudio/Models` aside and restart): the top of the menu has "Download on-device speech recognition (about 470 MB)" with a yellow mark. Choose it, then open the menu again while it downloads. Expected: no download item and no grey line, so a second download cannot start; Home's Speech recognition line reads "Downloading on-device speech recognition…". Turn Wi-Fi off during a download: "Speech recognition download failed: …" shows next to 🤫 (#239), Home reads "Download failed: …" and the download item is back in the menu. Move the folder back.
 
 ### M-NEW-1: what's new after an update (F111)
 1. Install **Shepetal-0.1.0.pkg** from the v0.1.0-mac release, or keep the 0.1.0 that is already installed. Open it and dictate once. Stay signed in, in the trial or with a license: a sign-in or trial-ended hint would replace the update hint, on purpose.
@@ -431,10 +431,10 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 4. Choose Open shepetal in the 🤫 menu, and on Home click **What's new…**. Expected: the window **What's new in shepetal** lists the release notes newest first, each under its version and a DD.MM.YY date. A 0.1.1 test build has no notes of its own, so 0.1.0 is at the top. The 🤫 menu has no What's new item.
 5. Choose Quit shepetal in the 🤫 menu and open it again. Expected: no hint.
 
-### M-HUB-1: open the Shepetal window
+### M-HUB-1: open the shepetal window
 1. Before you install this build, run `sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite 'select count(*) from history'` and note the number. Install and open the new build. Run the command again. Expected: the same number. (`HistoryTests.testOldDatabaseUpgradesWithoutLosingRows` checks this on a copy of the old schema.)
 2. With all three permissions granted, quit Shepetal and open it again from Finder or Spotlight. Expected: only 🤫 appears. No Shepetal window opens.
-3. Open the 🤫 menu and choose Open shepetal. Expected: a window titled "Shepetal" with Home, History, Dictionary, Meetings and Settings tabs comes to the front.
+3. Open the 🤫 menu and choose Open shepetal. Expected: a window titled "shepetal", in lowercase, with Home, History, Dictionary, Meetings and Settings tabs comes to the front.
 4. Close it. Open `dist/Shepetal.app` again (Finder, Spotlight or `open dist/Shepetal.app`). Expected: the same window opens. No second 🤫 appears.
 5. Home: expected rows for speech recognition ("On-device speech recognition (standard engine)", no model name), the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
 
