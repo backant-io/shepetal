@@ -18,7 +18,7 @@ GAP = 6  # between 🤫 and its text
 PAD = 4  # inside the dark text box
 EMOJI_PX = 13  # the glyph in its 18 px circle, as on the Mac
 TEXT_PX = 11
-HINT_S, ERROR_S = 2, 4  # how long a hint and an error's text stay, as on the Mac
+HINT_S, ERROR_S = 3, 4  # how long a hint and an error's text stay, as on the Mac
 PULSE_S, PULSE_MIN = 0.6, 0.35  # processing: opacity 1 → 0.35 → 1, 0.6 s each way
 
 # Ring colors: Apple's system red, orange, blue and yellow, which the Mac indicator uses.

@@ -617,7 +617,7 @@ In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from
 
 ### L-FN-3: too-short press and its hint
 1. Tap fn once, briefly (under half a second), and don't tap again.
-2. Expected: nothing is typed. About half a second after the release the daemon prints `shepetal: hint: Hold fn to talk · double-tap for hands-free` (with the L-KEY-3 key's name in place of fn). A new `<unix-ms>.tooshort.wav` is in `~/.local/share/shepetal/audio/`.
+2. Expected: nothing is typed. About half a second after the release the daemon prints `shepetal: hint: Hold fn to talk · double-tap for hands-free` (with the L-KEY-3 key's name in place of fn), and the same text shows next to 🤫 for about 3 s, then goes. A new `<unix-ms>.tooshort.wav` is in `~/.local/share/shepetal/audio/`.
 3. Tap fn and type a word right after it. Expected: the same hint, nothing transcribed.
 4. Tap fn and then hold a letter key down so it repeats. Expected: the hint still comes about half a second after the tap, not when you let go of the letter.
 (Automated: `single_tap_is_too_short_once_window_expires`, `typing_after_a_tap_is_still_too_short`, `a_tap_ends_as_too_short_on_time_while_a_key_repeats`, `too_short_press_keeps_the_clip_and_shows_the_hint`.)
@@ -849,7 +849,7 @@ The dictionary and snippets live in `~/.config/shepetal/` and are read again at 
 2. Switch workspaces. Expected: 🤫 stays. Play a video full screen in Firefox. Expected: 🤫 stays on top (a window mapped above it can cover it for up to a second; known gap in docs/linux.md).
 3. Click on 🤫. Expected: the click reaches what is below, and the focused window does not change.
 4. Hold fn and talk. Expected: red ring. Release: blue pulsing ring, then 🤫 alone once the text is typed. Double-tap fn. Expected: orange ring until the next press.
-5. Tap fn once. Expected: `Hold fn to talk · double-tap for hands-free` to the right of 🤫 for about 2 s (goal rule 2 now says about 3 s, #140).
+5. Tap fn once. Expected: `Hold fn to talk · double-tap for hands-free` to the right of 🤫 for about 3 s (goal rule 2).
 6. Stop the daemon with Ctrl+C. Expected: 🤫 disappears. Start it again and run `pkill -9 -f 'shepetal daemon'` in another terminal. Expected: 🤫 disappears too.
 (Automated: `every_indicator_gets_the_state_and_late_ones_the_current_one`, `the_indicator_shows_each_step_of_a_hands_free_dictation`, `a_too_short_press_shows_the_hint_next_to_the_indicator`, `a_silent_recording_puts_the_indicator_back_to_idle`, `a_failed_dictation_turns_the_indicator_yellow`, `a_reader_that_never_reads_cannot_stall_the_daemon`, `a_running_daemon_keeps_its_socket_and_a_dead_ones_is_replaced`; the X11 screenshots of `linux/indicator/check.sh`.)
 
@@ -877,7 +877,7 @@ The dictionary and snippets live in `~/.config/shepetal/` and are read again at 
 
 ### L-IND-6: 🤫 without the hotkey
 1. With no daemon running, on any of the desktops: `printf 'recording\nhint Hello from shepetal\n' | (cat; sleep 5) | shepetal indicator`.
-2. Expected: a red ring and `Hello from shepetal` next to 🤫 for about 2 s, then 🤫 disappears when the command ends.
+2. Expected: a red ring and `Hello from shepetal` next to 🤫 for about 3 s, then 🤫 disappears when the command ends.
 (Automated: `every_indicator_gets_the_state_and_late_ones_the_current_one`.)
 
 ### L-IND-7: shepetal-indicator not installed, then installed (#130)
