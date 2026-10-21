@@ -4,6 +4,7 @@ import Foundation
 /// (open notes) have no chord until the user records one.
 public enum ShortcutAction: String, CaseIterable {
     case ptt, handsFree, dismiss, pasteLast, copyLast, openNotes
+    case polish  // F45: rewrite the selected text with the active saved prompt
 
     /// Our own wording, for the Shortcuts window.
     public var title: String {
@@ -14,6 +15,7 @@ public enum ShortcutAction: String, CaseIterable {
         case .pasteLast: "Paste last transcript"
         case .copyLast: "Copy last transcript"
         case .openNotes: "Open notes"
+        case .polish: "Polish selected text"
         }
     }
 }
@@ -43,6 +45,7 @@ public enum Key {
     public static let left = 123, right = 124, down = 125, up = 126
     static let a = 0, s = 1, f = 3, h = 4, z = 6, x = 7, c = 8, v = 9, q = 12, w = 13, e = 14, n = 45, m = 46
     static let three = 20, four = 21, five = 23, grave = 50
+    static let p = 35
 
     /// Mouse button `n` (3 = middle, 4 and 5 = side buttons ... 10); CGEvent's buttonNumber is n - 1.
     public static func mouse(_ n: Int) -> Int { 1000 + n }
@@ -96,6 +99,7 @@ public struct Shortcuts: Equatable {
     public static let defaults: [ShortcutAction: Set<Int>] = [
         .ptt: [Key.fn], .handsFree: [Key.fn, Key.space], .dismiss: [Key.esc],
         .pasteLast: [Key.ctrl, Key.cmd, Key.v], .copyLast: [Key.ctrl, Key.cmd, Key.c],
+        .polish: [Key.ctrl, Key.cmd, Key.p],
     ]
 
     /// Our own list of chords that macOS, or nearly every Mac app, already uses.
@@ -187,6 +191,7 @@ public struct Shortcuts: Equatable {
 /// What the key router tells the app.
 public enum KeyInput: Equatable {
     case pttDown, pttUp, toggle, dismiss, pasteLast, copyLast, openNotes
+    case polish               // F45
     case otherKey             // during a hold or a dictation, a key or button went down that completes no shortcut
     case recorded(Set<Int>)   // the chord the Shortcuts window asked for, as pressed
 }
@@ -247,6 +252,7 @@ public struct KeyRouter {
         case .pasteLast: return ([.pasteLast], drop)
         case .copyLast: return ([.copyLast], drop)
         case .openNotes: return ([.openNotes], drop)
+        case .polish: return ([.polish], drop)
         }
     }
 

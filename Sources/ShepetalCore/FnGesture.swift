@@ -141,6 +141,7 @@ public struct FnGesture: Equatable {
         case .dismiss: dismiss()
         case .otherKey: otherKeyDown(at: t)
         case .pasteLast, .copyLast, .openNotes, .recorded: []
+        case .polish: []  // F45: not a dictation
         }
     }
 
