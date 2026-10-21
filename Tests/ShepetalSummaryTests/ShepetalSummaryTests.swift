@@ -133,6 +133,55 @@ final class ShepetalSummaryTests: XCTestCase {
         XCTAssertNil(MeetingSummarizer.modelURL(inResources: Self.repo))
     }
 
+    // MARK: notes (F71)
+
+    /// Without notes the merge must hand back exactly what summarize() wrote: the measured summary stays as it is.
+    func testNoNotesLeaveTheSummaryAsSummarizeWroteIt() throws {
+        let s = try MeetingSummarizer()
+        let text = try String(contentsOf: Self.repo.appendingPathComponent("summarize/fixtures/01_release_planning.txt"), encoding: .utf8)
+        let summary = s.summarize(turns: turns(text))
+        XCTAssertFalse(summary.actionItems.isEmpty || summary.keyPoints.isEmpty, "the fixture must exercise every list")
+        for notes in ["", "  \n\n", "- \n* \n"] { XCTAssertEqual(s.merge(summary, notes: notes), summary, notes.debugDescription) }
+    }
+
+    /// What I typed as a task is mine and comes first, deadline and all, even though the weights (trained on
+    /// speech) score a typed line low. A line without a cue, or a question, is a note, not a task.
+    func testATypedTaskBecomesMyActionItemAheadOfTheMeetingsOnes() throws {
+        let spoken = ActionItem(owner: "Others", task: "send the signed contract", due: "Friday")
+        let got = try MeetingSummarizer().merge(Summary(overview: "Contract call.", actionItems: [spoken]), notes: """
+            - Send the deck to Kate by Friday
+            TODO: draft the FAQ
+            * [ ] book the demo room
+            budget looks tight
+            Should we move the launch next week?
+            """)
+        XCTAssertEqual(got.actionItems, [ActionItem(owner: "Me", task: "Send the deck to Kate", due: "Friday"),
+                                         ActionItem(owner: "Me", task: "draft the FAQ"),
+                                         ActionItem(owner: "Me", task: "book the demo room"),
+                                         spoken])
+        XCTAssertEqual(got.overview, "Contract call.")
+    }
+
+    /// A key point my notes already say, and a task both said and typed, show once: the notes are the user's words.
+    /// A one-word note shares a word with a key point without repeating it, so that key point stays.
+    func testNotesDropTheKeyPointsAndTasksTheyRepeat() throws {
+        let summary = Summary(overview: "", keyPoints: ["We will rewrite the pricing page before the launch",
+                                                         "The budget for March is forty thousand"],
+                              actionItems: [ActionItem(owner: "Me", task: "book the follow-up review", due: "next Thursday")])
+        let got = try MeetingSummarizer().merge(summary, notes: """
+            Pricing page needs a rewrite before launch
+            budget
+            I'll book the review for next Thursday
+            """)
+        XCTAssertEqual(got.keyPoints, ["The budget for March is forty thousand"])
+        XCTAssertEqual(got.actionItems, [ActionItem(owner: "Me", task: "book the review", due: "next Thursday")])
+    }
+
+    func testNoteLinesDropBlankLinesAndListMarkers() {
+        XCTAssertEqual(noteLines("- one\n\n  * two  \n• three\n1. four\n2) five\n-dash-word\n"),
+                       ["one", "two", "three", "four", "five", "-dash-word"])
+    }
+
     func testMissingModelThrows() {
         XCTAssertThrowsError(try MeetingSummarizer(modelURL: URL(fileURLWithPath: "/nonexistent/actions_model.json")))
     }
