@@ -24,20 +24,50 @@ func readString(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) ->
     return ref?.takeRetainedValue() as String?
 }
 
+/// The object IDs, numbers and strings the probes read off a property graph: live Core Audio or CoreMediaIO, or a
+/// test fixture. Object IDs and selectors are UInt32 in both frameworks.
+struct PropertyReader: Sendable {
+    var ids: @Sendable (UInt32, UInt32) -> [UInt32]
+    var number: @Sendable (UInt32, UInt32) -> UInt32?
+    var string: @Sendable (UInt32, UInt32) -> String? = { _, _ in nil }
+
+    static let coreAudio = PropertyReader(ids: { object, selector in
+        var addr = address(selector)
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(object, &addr, 0, nil, &size) == noErr else { return [] }
+        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+        guard AudioObjectGetPropertyData(object, &addr, 0, nil, &size, &ids) == noErr else { return [] }
+        return ids
+    }, number: { read($0, $1, UInt32(0)) }, string: readString)
+
+    static let coreMediaIO = PropertyReader(ids: { object, selector in
+        var addr = Probes.cmio(selector)
+        var size: UInt32 = 0
+        guard CMIOObjectGetPropertyDataSize(object, &addr, 0, nil, &size) == noErr else { return [] }
+        var ids = [CMIOObjectID](repeating: 0, count: Int(size) / MemoryLayout<CMIOObjectID>.size)
+        var used: UInt32 = 0
+        guard CMIOObjectGetPropertyData(object, &addr, 0, nil, size, &used, &ids) == noErr else { return [] }
+        return ids
+    }, number: { object, selector in
+        var addr = Probes.cmio(selector)
+        var value: UInt32 = 0
+        var used: UInt32 = 0
+        let size = UInt32(MemoryLayout<UInt32>.size)
+        return CMIOObjectGetPropertyData(object, &addr, 0, nil, size, &used, &value) == noErr ? value : nil
+    })
+}
+
 public enum Probes {
     /// Processes capturing audio input, via Core Audio process objects (macOS 14.2+), with their executables and
     /// the executable of the process responsible for each (a helper's app). Reads metadata only: no TCC prompt.
-    public static func micUsers() -> [MicUser] {
-        var addr = address(kAudioHardwarePropertyProcessObjectList)
-        let system = AudioObjectID(kAudioObjectSystemObject)
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr else { return [] }
-        var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(system, &addr, 0, nil, &size, &ids) == noErr else { return [] }
-        return ids.compactMap { id in
-            guard read(id, kAudioProcessPropertyIsRunningInput, UInt32(0)) == 1 else { return nil }
-            let pid = read(id, kAudioProcessPropertyPID, pid_t(0)) ?? 0
-            return MicUser(pid: pid, bundleID: readString(id, kAudioProcessPropertyBundleID) ?? "",
+    public static func micUsers() -> [MicUser] { micUsers(.coreAudio) }
+
+    /// `micUsers()` on any process list: tests pass a fixture of fake process objects.
+    static func micUsers(_ r: PropertyReader) -> [MicUser] {
+        r.ids(AudioObjectID(kAudioObjectSystemObject), kAudioHardwarePropertyProcessObjectList).compactMap { id in
+            guard r.number(id, kAudioProcessPropertyIsRunningInput) == 1 else { return nil }
+            let pid = pid_t(bitPattern: r.number(id, kAudioProcessPropertyPID) ?? 0)
+            return MicUser(pid: pid, bundleID: r.string(id, kAudioProcessPropertyBundleID) ?? "",
                            path: path(pid), responsiblePath: path(responsible?(pid) ?? pid))
         }
     }
@@ -55,25 +85,17 @@ public enum Probes {
 
     /// Whether any camera runs in some process, from CoreMediaIO device state. This reads no frames, so it needs
     /// no camera access and never prompts. macOS does not say which process it is.
-    public static func cameraInUse() -> Bool {
-        var addr = cmio(kCMIOHardwarePropertyDevices)
-        let system = CMIOObjectID(kCMIOObjectSystemObject)
-        var size: UInt32 = 0
-        guard CMIOObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr else { return false }
-        var ids = [CMIOObjectID](repeating: 0, count: Int(size) / MemoryLayout<CMIOObjectID>.size)
-        var used: UInt32 = 0
-        guard CMIOObjectGetPropertyData(system, &addr, 0, nil, size, &used, &ids) == noErr else { return false }
-        return ids.contains { id in
-            var running: UInt32 = 0
-            var a = cmio(kCMIODevicePropertyDeviceIsRunningSomewhere)
-            return CMIOObjectGetPropertyData(id, &a, 0, nil, UInt32(MemoryLayout<UInt32>.size), &used, &running) == noErr
-                && running != 0
+    public static func cameraInUse() -> Bool { cameraInUse(.coreMediaIO) }
+
+    /// `cameraInUse()` on any device list: tests pass a fixture of fake CMIO devices.
+    static func cameraInUse(_ r: PropertyReader) -> Bool {
+        r.ids(CMIOObjectID(kCMIOObjectSystemObject), CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices)).contains {
+            (r.number($0, CMIOObjectPropertySelector(kCMIODevicePropertyDeviceIsRunningSomewhere)) ?? 0) != 0
         }
     }
 
-    static func cmio(_ selector: Int) -> CMIOObjectPropertyAddress {
-        CMIOObjectPropertyAddress(mSelector: CMIOObjectPropertySelector(selector),
-                                  mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+    static func cmio(_ selector: CMIOObjectPropertySelector) -> CMIOObjectPropertyAddress {
+        CMIOObjectPropertyAddress(mSelector: selector, mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
                                   mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
     }
 
