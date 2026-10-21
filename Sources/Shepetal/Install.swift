@@ -104,18 +104,18 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, @preco
     func standardUserDriverWillFinishUpdateSession() { found = nil }
 }
 
-/// Offers once to move a copy run from the DMG, Downloads or App Translocation to /Applications (`MovePrompt`), then
-/// opens the copy there and quits. Returns true when this instance is quitting.
+/// Offers once per version to move a copy run from the DMG, Downloads or App Translocation to /Applications
+/// (`MovePrompt`), then opens the copy there and quits. Returns true when this instance is quitting.
 @MainActor
 enum MoveToApplications {
     static func offerIfNeeded() -> Bool {
         let here = Bundle.main.bundleURL
-        let readOnly = (try? here.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) ?? false
-        let d = UserDefaults.standard
-        guard MovePrompt.offers(path: here.path, home: NSHomeDirectory(), readOnlyVolume: readOnly == true,
-                                bundleID: Bundle.main.bundleIdentifier ?? "", asked: d.bool(forKey: MovePrompt.askedKey))
+        let d = UserDefaults.standard, fm = FileManager.default
+        let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? ""
+        guard MovePrompt.offers(path: here.path, home: NSHomeDirectory(), readOnlyVolume: readOnly(here),
+                                bundleID: Bundle.main.bundleIdentifier ?? "", asked: MovePrompt.asked(d, version: version))
         else { return false }
-        d.set(true, forKey: MovePrompt.askedKey)
+        MovePrompt.remember(d, version: version)
         let alert = NSAlert()
         alert.messageText = "Move Shepetal to Applications?"
         alert.informativeText = "It updates itself only from there."
@@ -124,24 +124,37 @@ enum MoveToApplications {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return false }
 
-        let dest = URL(fileURLWithPath: "/Applications/Shepetal.app")
+        // ponytail: a newer root-owned copy in /Applications is not looked at once the move goes to ~/Applications.
+        let dest = URL(fileURLWithPath: MovePrompt.destination(home: NSHomeDirectory(), writable: fm.isWritableFile(atPath:),
+                                                               exists: fm.fileExists(atPath:)))
         let build = { (b: Bundle?) in Int(b?.infoDictionary?["CFBundleVersion"] as? String ?? "") }
         let installed = Bundle(url: dest).flatMap { $0.bundleIdentifier == UninstallPlan.bundleID ? build($0) : nil }
+        let source = original(here)
         do {
-            switch MovePrompt.move(installedBuild: installed, runningBuild: build(Bundle.main) ?? 0) {
+            let move = MovePrompt.move(installedBuild: installed, runningBuild: build(Bundle.main) ?? 0)
+            switch move {
             case .openInstalled: break
             case .replace:
-                try FileManager.default.trashItem(at: dest, resultingItemURL: nil)
+                try fm.trashItem(at: dest, resultingItemURL: nil)
                 try copy(here, to: dest)
-            case .copy: try copy(here, to: dest)
+            case .copy:
+                try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)  // ~/Applications
+                try copy(here, to: dest)
             }
+            // A move leaves no copy behind (LetsMove does the same); the DMG's stays.
+            if move != .openInstalled, !readOnly(source) { try? fm.trashItem(at: source, resultingItemURL: nil) }
         } catch {
-            // ponytail: no admin prompt for a root-owned copy from the old .pkg; the message says what to do instead.
             let fail = NSAlert()
             fail.messageText = "Shepetal could not move itself"
             fail.informativeText = "\(error.localizedDescription)\nDrag Shepetal into Applications in Finder instead."
             fail.runModal()
             return false
+        }
+        if dest.path != MovePrompt.system, fm.fileExists(atPath: MovePrompt.system) {
+            let old = NSAlert()
+            old.messageText = "shepetal is now in your own Applications folder"
+            old.informativeText = "The older copy in /Applications needs an administrator password to remove. Move it to the Trash in Finder."
+            old.runModal()
         }
         let open = Process()
         open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
@@ -151,6 +164,21 @@ enum MoveToApplications {
         guard open.terminationStatus == 0 else { return false }
         NSApp.terminate(nil)
         return true
+    }
+
+    /// The DMG. A translocated bundle reads as read-only too, so ask this of `original(_:)`.
+    private static func readOnly(_ url: URL) -> Bool {
+        (try? url.resourceValues(forKeys: [.volumeIsReadOnlyKey]).volumeIsReadOnly) == true
+    }
+
+    /// Where a translocated bundle really is, e.g. ~/Downloads/Shepetal.app. Security's
+    /// SecTranslocateCreateOriginalPathForURL has no Swift header, so it is looked up at run time, as LetsMove does.
+    static func original(_ url: URL) -> URL {
+        guard url.path.contains("/AppTranslocation/"),
+              let security = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY),
+              let sym = dlsym(security, "SecTranslocateCreateOriginalPathForURL") else { return url }
+        typealias Original = @convention(c) (CFURL, UnsafeMutablePointer<Unmanaged<CFError>?>?) -> Unmanaged<CFURL>?
+        return unsafeBitCast(sym, to: Original.self)(url as CFURL, nil)?.takeRetainedValue() as URL? ?? url
     }
 
     /// The user already chose this download, so the copy loses its quarantine flag.

@@ -135,7 +135,18 @@ public enum UninstallPlan {
 /// Move to Applications (docs/install-and-update.md 1): Sparkle cannot update a copy on the DMG or one macOS
 /// translocated, so a copy run from there offers once to move itself.
 public enum MovePrompt {
-    public static let askedKey = "movePromptShown"
+    public static let askedKey = "movePromptVersion"
+    public static let system = "/Applications/Shepetal.app"
+
+    /// Asked once per version (CFBundleVersion): a newer download that again runs from Downloads or the DMG asks again.
+    public static func asked(_ defaults: UserDefaults, version: String) -> Bool { defaults.string(forKey: askedKey) == version }
+    public static func remember(_ defaults: UserDefaults, version: String) { defaults.set(version, forKey: askedKey) }
+
+    /// /Applications, unless that folder is not writable (a standard account) or the copy there cannot be replaced
+    /// (root-owned, from the old .pkg): then ~/Applications, which needs no password.
+    public static func destination(home: String, writable: (String) -> Bool, exists: (String) -> Bool) -> String {
+        writable("/Applications") && (!exists(system) || writable(system)) ? system : home + "/Applications/Shepetal.app"
+    }
 
     public static func offers(path: String, home: String, readOnlyVolume: Bool, bundleID: String, asked: Bool) -> Bool {
         guard !asked, bundleID == UninstallPlan.bundleID else { return false }
