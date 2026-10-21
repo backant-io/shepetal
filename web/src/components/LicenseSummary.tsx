@@ -15,7 +15,7 @@ export function LicenseSummary({ license, now = Date.now() }: { license: License
     return (
       <>
         <p className="display text-[clamp(3rem,10vw,5rem)] leading-none">Yours forever.</p>
-        <p className="mt-4 text-[var(--hush)]">You bought Shepetal. Future updates are included.</p>
+        <p className="mt-4 text-[var(--hush)]">You bought shepetal. Future updates are included.</p>
       </>
     );
   }
@@ -25,7 +25,7 @@ export function LicenseSummary({ license, now = Date.now() }: { license: License
       <>
         <p className="display text-[clamp(3rem,10vw,5rem)] leading-none">Your trial ended.</p>
         <p className="mt-4 text-[var(--hush)]">
-          It ended on {ends}. Buy Shepetal once for $4.99 to keep using it, with future updates included.
+          It ended on {ends}. Buy shepetal once for $4.99 to keep using it, with future updates included.
         </p>
       </>
     );
@@ -37,7 +37,7 @@ export function LicenseSummary({ license, now = Date.now() }: { license: License
         {n} {n === 1 ? 'day' : 'days'} left
       </p>
       <p className="mt-4 text-[var(--hush)]">
-        Your free trial runs until {ends}. After that it is $4.99 once, and Shepetal is yours forever.
+        Your free trial runs until {ends}. After that it is $4.99 once, and shepetal is yours forever.
       </p>
     </>
   );

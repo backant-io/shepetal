@@ -28,7 +28,7 @@
   --m-bar: #f2f1f1;
   --m-side: #f6f5f5;
   --m-text: #1d1d1f;
-  --m-muted: #6e6e73;
+  --m-muted: #636368;
   --m-line: rgb(0 0 0 / 0.09);
   --m-shadow: 0 1px 1px rgb(38 20 28 / 0.04), 0 14px 36px -10px rgb(38 20 28 / 0.22), 0 48px 96px -32px rgb(38 20 28 / 0.32);
   --m-font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', system-ui, sans-serif;
@@ -40,7 +40,7 @@
   --m-bar: #2d2a2d;
   --m-side: #29262a;
   --m-text: #ececee;
-  --m-muted: #9d9aa0;
+  --m-muted: #a8a5ab;
   --m-line: rgb(255 255 255 / 0.09);
   --m-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 30px 70px -16px rgb(0 0 0 / 0.7);
 }
@@ -50,7 +50,7 @@
     --m-bar: #2d2a2d;
     --m-side: #29262a;
     --m-text: #ececee;
-    --m-muted: #9d9aa0;
+    --m-muted: #a8a5ab;
     --m-line: rgb(255 255 255 / 0.09);
     --m-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 30px 70px -16px rgb(0 0 0 / 0.7);
   }
@@ -59,13 +59,28 @@
 .sec {
   padding-block: var(--section);
 }
-.lp [id] {
-  scroll-margin-top: 80px;
+/* Focus and in-page jumps stay clear of the sticky header, and of the share bar on phones (WCAG 2.4.11). */
+html {
+  scroll-padding-top: 80px;
 }
-/* Sections below the fold render when they come near. */
-.lp > section:not(.hero) {
-  content-visibility: auto;
-  contain-intrinsic-size: auto 1000px;
+@media (max-width: 759px) {
+  html {
+    scroll-padding-bottom: 88px;
+  }
+}
+.skip {
+  position: absolute;
+  z-index: 60;
+  left: 12px;
+  top: -60px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--sh-primary-fill);
+  color: var(--sh-on-primary);
+  font-weight: 600;
+}
+.skip:focus {
+  top: 12px;
 }
 
 /* ---------- Type, on the brand scale ---------- */
@@ -175,8 +190,19 @@
   font-size: 0.55em;
 }
 .ref a {
+  display: inline-block;
+  min-width: 24px;
+  min-height: 24px;
+  line-height: 24px;
+  text-align: center;
+  padding: 0 0.2em;
   color: var(--sh-accent);
-  padding: 0.2em;
+}
+/* The hero's marker lands with the last word, so it never shows before the headline. */
+.hero-title .ref {
+  font-size: 0.26em;
+  margin-left: 0.04em;
+  animation: word-in 240ms var(--sh-ease-settle) 600ms both;
 }
 .link {
   color: var(--sh-accent);
@@ -330,7 +356,7 @@
 }
 @media (min-width: 980px) {
   .hero-top {
-    grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
     gap: 64px;
   }
 }
@@ -366,9 +392,24 @@
   animation-delay: calc(120ms + var(--t, 0ms));
 }
 
+/* Desktop: the title in three lines, so more of the Mac shows above the fold. */
+@media (min-width: 980px) {
+  .hero-title {
+    max-width: 16em;
+    font-size: clamp(56px, 5vw, 72px);
+    /* balance picks other breaks with the fallback font than with shepetal Serif, and the title jumps on swap */
+    text-wrap: wrap;
+  }
+}
+
 /* The demo: a Mac screen at the last light, with a new email open. */
 .demo {
   margin-top: clamp(40px, 6vw, 80px);
+}
+@media (min-width: 980px) {
+  .demo {
+    margin-top: clamp(32px, 4vw, 56px);
+  }
 }
 .screen {
   position: relative;
@@ -425,8 +466,15 @@
   .menubar .mb-hide {
     display: none;
   }
-  .screen {
-    aspect-ratio: 4 / 5;
+  /* A Mac stays 16:10 on a phone: the screen runs off the right edge, anchored left so the 🤫 stays in view. */
+  .demo {
+    overflow: hidden;
+    margin-right: calc(-1 * var(--gutter));
+  }
+  .demo .screen {
+    width: 170%;
+    max-width: none;
+    border-radius: 14px 0 0 14px;
   }
 }
 
@@ -502,11 +550,15 @@
 }
 @media (max-width: 640px) {
   .mail-win {
-    width: 90%;
-    top: 10%;
+    left: 4%;
+    top: 12%;
+    width: min(calc(100vw - 2 * var(--gutter) - 8px), 520px);
+    transform: none;
   }
   .mail-body {
-    height: 210px;
+    height: auto;
+    max-height: 210px;
+    min-height: 150px;
   }
 }
 .caret {
@@ -712,15 +764,19 @@
   align-content: start;
   padding: 20px 14px 20px 0;
 }
-.facts li:nth-child(even) {
-  padding-left: 16px;
-  border-left: 1px solid var(--sh-border);
-}
-.facts li:nth-child(n + 3) {
-  border-top: 1px solid var(--sh-border);
-}
-.facts li:last-child {
-  grid-column: 1 / -1;
+/* Phones show four in two columns (Wi-Fi off is in the privacy band), so no cell stands alone. */
+@media (max-width: 899px) {
+  .facts .f-wifi {
+    display: none;
+  }
+  .facts li:nth-child(2),
+  .facts li:nth-child(5) {
+    padding-left: 16px;
+    border-left: 1px solid var(--sh-border);
+  }
+  .facts li:nth-child(n + 4) {
+    border-top: 1px solid var(--sh-border);
+  }
 }
 .facts b {
   font-family: var(--sh-font-display);
@@ -737,12 +793,9 @@
   .facts {
     grid-template-columns: repeat(5, minmax(0, 1fr));
   }
-  .facts li,
-  .facts li:nth-child(n) {
+  .facts li {
     padding: 28px 20px;
-    border-top: 0;
     border-left: 1px solid var(--sh-border);
-    grid-column: auto;
   }
   .facts li:first-child {
     padding-left: 0;
@@ -845,7 +898,25 @@
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .stage {
-    background-image: url('/brand/imagery/dusk-air-1600.webp');
+    background-image: image-set(url('/brand/imagery/dusk-air-1600.avif') type('image/avif'), url('/brand/imagery/dusk-air-1600.webp') type('image/webp'));
+  }
+}
+@media (max-width: 640px) {
+  .stage {
+    background-image: url('/brand/imagery/last-light-800.webp');
+  }
+}
+@media (max-width: 640px) and (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .stage {
+    background-image: image-set(url('/brand/imagery/dusk-air-800.avif') type('image/avif'), url('/brand/imagery/dusk-air-800.webp') type('image/webp'));
+  }
+}
+@media (min-width: 980px) {
+  .apps .stage,
+  .meet .stage {
+    max-width: 1040px;
+    margin-inline: auto;
+    aspect-ratio: 16 / 10;
   }
 }
 .stage > .win {
@@ -1015,8 +1086,12 @@
   width: 30px;
   text-align: right;
   font-style: normal;
-  color: var(--m-muted);
-  opacity: 0.6;
+  color: #767679;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .code i {
+    color: #8a878c;
+  }
 }
 .code-hl {
   background: color-mix(in srgb, var(--m-text) 5%, transparent);
@@ -1089,7 +1164,7 @@
   min-height: 240px;
   font-size: 14px;
 }
-.doc h4 {
+.doc-h {
   font-size: 20px;
   font-weight: 700;
   margin-bottom: 10px;
@@ -1133,12 +1208,12 @@
   letter-spacing: -0.03em;
 }
 .big-num .pre {
-  display: block;
-  font-size: 0.24em;
+  display: inline;
+  font-size: 0.2em;
   font-weight: 380;
   letter-spacing: -0.005em;
-  line-height: 1.2;
-  margin-bottom: 0.1em;
+  vertical-align: 0.9em;
+  margin-right: 0.35em;
 }
 .big-num .unit {
   font-size: 0.42em;
@@ -1210,8 +1285,8 @@
 .ruler figcaption {
   display: flex;
   flex-wrap: wrap;
-  justify-content: space-between;
-  gap: 8px 24px;
+  justify-content: flex-start;
+  gap: 8px 48px;
   margin-top: 44px;
   font-size: 15px;
   color: var(--sh-text-muted);
@@ -1228,67 +1303,11 @@
   padding-top: clamp(40px, 5vw, 56px);
   border-top: 1px solid var(--sh-border);
 }
-.wpm > div:first-child {
-  display: grid;
-  gap: 14px;
-  align-content: start;
-}
 @media (min-width: 900px) {
   .wpm {
     grid-template-columns: 1fr 1.1fr;
     gap: 64px;
   }
-}
-.rates {
-  display: grid;
-  gap: 22px;
-}
-.rate {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px 16px;
-  align-items: baseline;
-  font-size: 15px;
-}
-.rate > span:first-child {
-  color: var(--sh-text-muted);
-}
-.rate b {
-  justify-self: end;
-  font-weight: 600;
-}
-.rate-bar {
-  grid-column: 1 / -1;
-  height: 10px;
-  border-radius: 999px;
-  background: var(--sh-bg-sunken);
-  overflow: hidden;
-}
-.rate-bar i {
-  display: block;
-  height: 100%;
-  width: var(--w);
-  border-radius: inherit;
-  background: var(--sh-text);
-  transform-origin: left;
-  animation: grow 900ms var(--sh-ease-settle) 200ms both;
-}
-.rate-type .rate-bar i {
-  background: var(--sh-text-muted);
-}
-@keyframes grow {
-  from {
-    transform: scaleX(0);
-  }
-}
-.source {
-  font-size: 13px;
-  line-height: 1.55;
-  color: var(--sh-text-muted);
-}
-.source a {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 /* ---------- Privacy: the dusk band ---------- */
@@ -1306,6 +1325,11 @@
   color: var(--sh-text);
   background: radial-gradient(120% 90% at 50% -10%, var(--sh-neutral-800) 0%, var(--night-bg) 70%);
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .night {
+    border-block: 1px solid rgb(255 255 255 / 0.06);
+  }
+}
 .privacy {
   display: grid;
   gap: 48px;
@@ -1321,35 +1345,6 @@
   display: grid;
   gap: 22px;
   justify-items: start;
-}
-.online {
-  display: grid;
-  gap: 10px;
-  margin-block: 6px 10px;
-  padding: 18px 20px;
-  border-radius: 12px;
-  border: 1px solid var(--sh-border);
-  color: var(--sh-text-muted);
-}
-.online ul {
-  display: grid;
-  gap: 6px;
-  font-size: 14px;
-  line-height: 1.5;
-}
-.online li {
-  position: relative;
-  padding-left: 16px;
-}
-.online li::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0.62em;
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--sh-accent);
 }
 .offline {
   position: relative;
@@ -1731,7 +1726,7 @@
   animation: line-in var(--sh-dur-slow) var(--sh-ease-settle) both;
   animation-delay: calc(0.3s + var(--i) * 0.35s);
 }
-.sum h5 {
+.sum-h {
   font-size: 12px;
   font-weight: 700;
   margin-bottom: 2px;
@@ -1962,38 +1957,6 @@
   color: var(--m-muted);
 }
 
-/* ---------- Quiet by design ---------- */
-.details-sec {
-  padding-top: 0;
-}
-.details {
-  display: grid;
-  gap: 32px 40px;
-  margin-top: 40px;
-}
-.details li {
-  display: grid;
-  gap: 8px;
-  align-content: start;
-  padding-top: 20px;
-  border-top: 1px solid var(--sh-border);
-}
-.details p {
-  font-size: 16px;
-  line-height: 1.6;
-  color: var(--sh-text-muted);
-}
-@media (min-width: 720px) {
-  .details {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-@media (min-width: 1100px) {
-  .details {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-  }
-}
-
 /* ---------- The name, and the maker ---------- */
 .story-sec {
   padding-top: 0;
@@ -2141,61 +2104,39 @@
 .compare tbody td:last-child {
   color: var(--sh-text-muted);
 }
-
-/* ---------- Platforms ---------- */
-.plat-sec {
-  padding-top: 0;
-}
-.plat-grid {
-  display: grid;
-  gap: 32px;
-}
-@media (min-width: 900px) {
-  .plat-grid {
-    grid-template-columns: 0.8fr 1.2fr;
-    gap: 64px;
-    align-items: start;
-  }
-}
-.plats {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-.plat {
-  display: grid;
-  gap: 6px;
-  align-content: start;
-  padding: 18px 20px 20px;
-  border-radius: 12px;
-  border: 1px dashed var(--sh-border);
-  color: var(--sh-text-muted);
-  font-size: 14px;
-  line-height: 1.45;
-}
-.plat b {
-  font-family: var(--sh-font-display);
-  font-weight: 400;
-  font-size: 24px;
-  color: var(--sh-text);
-}
+/* Phones: one block per row, each value labelled, so no cell wraps to four lines. */
 @media (max-width: 560px) {
-  .plat {
-    padding: 14px 14px 16px;
-    font-size: 13px;
+  .compare thead {
+    display: none;
   }
-  .plat b {
-    font-size: 20px;
+  .compare tbody tr {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px 16px;
+    padding: 14px 0;
+    border-top: 1px solid var(--sh-border);
   }
-}
-.plat-now {
-  grid-column: 1 / -1;
-  border-style: solid;
-  border-color: color-mix(in srgb, var(--sh-text) 30%, transparent);
-  background: var(--sh-bg-raised);
-}
-.plat-now span {
-  color: var(--sh-text);
+  .compare tbody th,
+  .compare tbody td {
+    width: auto;
+    padding: 0;
+    border-top: 0;
+  }
+  .compare tbody th {
+    grid-column: 1 / -1;
+  }
+  .compare tbody td::before {
+    display: block;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--sh-text-muted);
+  }
+  .compare tbody td:nth-child(2)::before {
+    content: 'shepetal';
+  }
+  .compare tbody td:last-child::before {
+    content: 'Cloud subscriptions';
+  }
 }
 
 /* ---------- FAQ ---------- */
@@ -2311,6 +2252,28 @@
 }
 .notes li:target {
   color: var(--sh-text);
+}
+
+/* ---------- Phones: the trial starts on the Mac ---------- */
+/* Google refuses sign-in inside in-app browsers (X, Instagram), so under 760 px every trial button
+   becomes Send to my Mac, and the header drops its own. */
+.cta-mac {
+  display: none;
+}
+@media (max-width: 759px) {
+  .lp .cta-row > form,
+  .lp .cta-row > .on-mac,
+  .site-head .head-end form {
+    display: none;
+  }
+  .cta-mac {
+    display: contents;
+  }
+  .cta-mac p {
+    flex-basis: 100%;
+    order: 9;
+    max-width: 34em;
+  }
 }
 
 /* ---------- Phones: send the page to a Mac ---------- */

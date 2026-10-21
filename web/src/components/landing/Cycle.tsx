@@ -27,7 +27,7 @@ export function InView({ className = '', children }: { className?: string; child
 
 /**
  * Tabs that move to the next scene on their own while they are on screen, and stop once the
- * reader picks one. Each panel is shown fresh, so its CSS animation plays from the start.
+ * reader picks one or moves focus into them. Each panel is shown fresh, so its CSS animation plays from the start.
  */
 export function Cycle({
   label,
@@ -71,6 +71,8 @@ export function Cycle({
       data-visible={visible}
       data-run={run}
       style={{ '--cycle-ms': `${ms}ms` } as CSSProperties}
+      // A keyboard reader inside the tabs keeps the tab they are on (WCAG 2.2.2).
+      onFocus={() => setAuto(false)}
     >
       <div role="tablist" aria-label={label} className="cycle-tabs">
         {tabs.map((t, n) => (

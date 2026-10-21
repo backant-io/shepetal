@@ -34,7 +34,11 @@ describe('landing page', () => {
 
   it('starts the trial with the Google sign-in form, never a plain link, so the button works without JavaScript', () => {
     expect(page).toContain("const TRY = 'Try 30 days free'");
-    expect(page.match(/<SignInButton redirectTo="\/account"/g)?.length).toBeGreaterThanOrEqual(4);
+    const signIns = page.match(/<SignInButton redirectTo="\/account"/g)?.length ?? 0;
+    expect(signIns).toBeGreaterThanOrEqual(4);
+    // Google refuses sign-in inside in-app browsers such as X's, so on a phone each trial button has a
+    // Send to my Mac next to it (CSS swaps them under 760 px).
+    expect(page.match(/<SendToMac \/>/g)?.length).toBe(signIns);
     expect(page).toContain('$4.99 once');
     expect(page).toContain('no card');
   });
@@ -50,10 +54,11 @@ describe('landing page', () => {
       expect(page.slice(at, at + 200), line).toContain(`<Ref n={${n}} first />`);
       expect(page, `note ${n}`).toContain(`id="note-${n}"`);
     }
-    // 4x stands on two rates, so both carry a source a reader can open: speaking (NCVS) and typing (Karat et al.).
+    // 4x keeps the speaking source a reader can open, and never cites Karat et al.: in that study dictation with
+    // corrections was slower than typing, so the link would argue against the line (brand/strategy.md, Evidence notes).
     const note4 = page.slice(page.indexOf('id="note-4"'), page.indexOf('</li>', page.indexOf('id="note-4"')));
     expect(note4).toContain('{NCVS}');
-    expect(note4).toContain('{KARAT}');
+    expect(text).not.toMatch(/Karat|302979/);
     // The measured latency keeps its conditions next to it.
     expect(page).toMatch(/measured on an M4 Pro\.\s*<Ref n=\{3\} first \/>/);
   });
@@ -98,7 +103,8 @@ describe('landing page', () => {
 
   it('states the real system requirement and keeps the other platforms undated', () => {
     expect(visible).toContain('macOS 14.4 or later');
-    expect(visible).not.toMatch(/macOS 14 or later|coming soon/i);
+    // No build a visitor can download is out yet (/download says coming soon), so the page says Mac first, never available now.
+    expect(visible).not.toMatch(/macOS 14 or later|coming soon|available now/i);
     expect(visible).toMatch(/Linux, Windows and iPhone are in development\. No dates yet\./);
   });
 

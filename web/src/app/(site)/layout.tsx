@@ -9,16 +9,15 @@ import './site.css';
 import './landing.css';
 
 const title = 'shepetal: dictation that stays on your Mac';
-const description =
-  'Quiet dictation for the Mac. Press one key. Your words appear wherever you speak, and your voice stays on your Mac.';
-// brand/assets/og/og-dark.png as a JPEG; the brand keeps the price and the steps off link previews.
+const description = 'Instant dictation that stays on your Mac. Press one key. Your words appear wherever you speak.';
+// Built from web/og/og.html (headless Chrome, then JPEG); the brand keeps the price and the steps off link previews.
 // A static file, so link previews (X, iMessage, Slack) get it from the edge without waking the Worker.
 const ogImage = {
   url: '/og.jpg',
   width: 1200,
   height: 630,
   type: 'image/jpeg',
-  alt: 'shepetal. Quiet dictation for the Mac. Instant dictation that stays on your Mac. Press one key. Your words appear wherever you speak.',
+  alt: 'shepetal. Instant dictation that stays on your Mac. Illustration: the shepetal indicator with its ring, and a spoken prompt landed in a terminal.',
 };
 
 export const metadata: Metadata = {
@@ -47,6 +46,9 @@ export const viewport: Viewport = {
 export default function SiteLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col">
+      <a href="#content" className="skip">
+        Skip to content
+      </a>
       <SiteHeader
         cta={
           <SignInButton redirectTo="/account" className="btn">
@@ -54,7 +56,9 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
           </SignInButton>
         }
       />
-      <div className="flex-1">{children}</div>
+      <div id="content" className="flex-1">
+        {children}
+      </div>
       <footer className="site-foot">
         <div className="wrap">
           <div className="foot-grid">
@@ -63,7 +67,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
                 <source srcSet="/brand/shepetal-wordmark-small-on-dark.svg" media="(prefers-color-scheme: dark)" />
                 <img src="/brand/shepetal-wordmark-small-on-light.svg" alt="shepetal" width={119} height={32} />
               </picture>
-              <p style={{ marginTop: 14 }}>Dictation for Mac, made in Slovenia by Pavel Hegler.</p>
+              <p style={{ marginTop: 14 }}>Dictation for Mac by Pavel Hegler, from Slovenia.</p>
             </div>
             <nav className="foot-links" aria-label="Site">
               <Link href="/account">Account</Link>
@@ -73,6 +77,10 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
           </div>
           <div className="foot-small">
             <p>This site loads no trackers and serves its own fonts.</p>
+            <p>
+              Fonts: Newsreader and Hanken Grotesk, under the SIL Open Font License 1.1:{' '}
+              <a href="/brand/fonts/Newsreader-OFL.txt">license</a> and <a href="/brand/fonts/HankenGrotesk-OFL.txt">license</a>.
+            </p>
             <p>
               The <Shush size={14} /> artwork is Noto Color Emoji by Google, under the Apache License 2.0:{' '}
               <a href="/brand/emoji/LICENSE-Apache-2.0.txt">license</a> and <a href="/brand/emoji/NOTICE.txt">notice</a>.

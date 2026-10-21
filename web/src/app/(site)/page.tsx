@@ -3,15 +3,15 @@ import { Fragment } from 'react';
 import { HeroDemo } from '@/components/HeroDemo';
 import { Cycle, InView } from '@/components/landing/Cycle';
 import { Icons, Ind, Shush, Win, Words } from '@/components/landing/Mac';
-import { ShareBar } from '@/components/landing/ShareBar';
+import { SendToMac, ShareBar } from '@/components/landing/ShareBar';
 import { SignInButton } from '@/components/SignInButton';
 
 export const metadata: Metadata = { alternates: { canonical: '/' } };
 
 const TRY = 'Try 30 days free';
 const NCVS = 'https://ncvs.org/archive/ncvs/tutorials/voiceprod/tutorial/quality.html';
-// Typing: Karat et al., CHI 1999 (everyday computer users), and Dhakal et al., CHI 2018 (a large online typing test).
-const KARAT = 'https://doi.org/10.1145/302979.303160';
+// Dhakal et al., CHI 2018 (a large online typing test): the faster typists, next to whom speaking is about 3x.
+// Which typing studies 4x may cite is in brand/strategy.md, Evidence notes.
 const DHAKAL = 'https://doi.org/10.1145/3173574.3174220';
 
 /** A footnote marker. The first marker of a note carries the id the note links back to. */
@@ -25,7 +25,8 @@ function Ref({ n, first }: { n: number; first?: boolean }) {
   );
 }
 
-/** A generated brand image: AVIF with a WebP fallback, in the widths that exist, and the night version in dark mode. */
+/** A generated brand image: AVIF with a WebP fallback, in the widths that exist, and the night version in dark mode.
+ * `webp` for the images whose WebP came out smaller than the AVIF (last-light, valley). */
 function Photo({
   name,
   night,
@@ -36,6 +37,7 @@ function Photo({
   sizes,
   eager,
   className,
+  webp,
 }: {
   name: string;
   night?: string;
@@ -46,13 +48,14 @@ function Photo({
   sizes: string;
   eager?: boolean;
   className?: string;
+  webp?: boolean;
 }) {
   const set = (n: string, t: string) => widths.map((x) => `/brand/imagery/${n}-${x}.${t} ${x}w`).join(', ');
   return (
     <picture className={className}>
       {night && <source type="image/avif" srcSet={set(night, 'avif')} sizes={sizes} media="(prefers-color-scheme: dark)" />}
       {night && <source type="image/webp" srcSet={set(night, 'webp')} sizes={sizes} media="(prefers-color-scheme: dark)" />}
-      <source type="image/avif" srcSet={set(name, 'avif')} sizes={sizes} />
+      {!webp && <source type="image/avif" srcSet={set(name, 'avif')} sizes={sizes} />}
       <img
         src={`/brand/imagery/${name}-${widths[widths.length - 1]}.webp`}
         srcSet={set(name, 'webp')}
@@ -112,11 +115,11 @@ const APP_SCENES = [
   </Fragment>,
   <Fragment key="chat">
     <Stage label="A team chat. The message lands in the box at the bottom.">
-      <Win title="#launch">
+      <Win title="#studio">
         <div className="chat">
           <div className="chat-side">
             <span># general</span>
-            <span className="on"># launch</span>
+            <span className="on"># studio</span>
             <span># design</span>
             <span>Maja Novak</span>
             <span>Luka Kos</span>
@@ -126,7 +129,7 @@ const APP_SCENES = [
               <span className="av">LK</span>
               <div>
                 <b>Luka</b> <small>09:12</small>
-                <p>Is everyone ready for the beta call at three?</p>
+                <p>Is everyone ready for the client call at three?</p>
               </div>
             </div>
             <div className="msg">
@@ -235,13 +238,13 @@ const APP_SCENES = [
   </Fragment>,
   <Fragment key="docs">
     <Stage mode="free" label="A doc in the browser. Hands-free: the ring is orange while you speak, then the paragraph lands.">
-      <Win bar={<span className="browser-bar">Launch notes</span>}>
+      <Win bar={<span className="browser-bar">Handover notes</span>}>
         <div className="doc">
-          <h4>Launch notes</h4>
-          <p>Beta on Friday. Release notes go out on 23.10.26.</p>
+          <p className="doc-h">Handover notes</p>
+          <p>The new site goes to the client on 23.10.26.</p>
           <p>
             <Words
-              text="The first testers get the build on Friday morning. Ask them to use it in the apps they open every day, and write down anything that felt slow."
+              text="Walk them through the editor first, then the invoices, and leave time at the end for their questions. Send the checklist the day before."
               delay="2.6s"
             />
           </p>
@@ -261,7 +264,7 @@ const MEET_TABS = [
   <Fragment key="card">
     <span className="n">1</span>
     <span className="step-t">A call starts</span>
-    <span className="s">A small card next to the indicator asks first. If you ignore it, nothing records.</span>
+    <span className="s">A small card next to the indicator asks first, and recording waits for your click.</span>
   </Fragment>,
   <Fragment key="live">
     <span className="n">2</span>
@@ -321,10 +324,10 @@ const MEET_SCENES = [
           zoom.us · 21.10.26 15:00 <span className="live">Live</span>
         </p>
         {[
-          ['Others · 0:03', 'Shall we ship the beta on Friday?', ''],
-          ['Me · 0:09', 'Yes. I’ll send the release notes tomorrow.', 'me'],
-          ['Others · 0:15', 'Good, then I’ll book the review for Monday.', ''],
-          ['Me · 0:21', 'Monday works. I’ll bring the test results.', 'me'],
+          ['Others · 0:03', 'Can we move the handover to Thursday?', ''],
+          ['Me · 0:09', 'Yes. I’ll send the checklist tomorrow.', 'me'],
+          ['Others · 0:15', 'Good, then I’ll invite the client.', ''],
+          ['Me · 0:21', 'Thursday works. I’ll bring the invoice too.', 'me'],
         ].map(([cap, text, who], i) => (
           <div key={cap} className={`line ${who}`} style={{ '--i': i } as React.CSSProperties}>
             <small>{cap}</small>
@@ -340,7 +343,7 @@ const MEET_SCENES = [
     key="sum"
     className="stage"
     role="img"
-    aria-label="Illustration: the Meetings tab in shepetal. A list of calls, and the summary of the zoom.us call with an overview, key points, a decision and two action items."
+    aria-label="Illustration: the Meetings tab in shepetal. A list of calls, and the summary of the zoom.us call with an overview, a decision and two action items."
   >
     <Win title="shepetal">
       <div className="hub">
@@ -349,10 +352,10 @@ const MEET_SCENES = [
             zoom.us<small>21.10.26 · 42 min</small>
           </div>
           <div className="hub-row">
-            Google Chrome<small>20.10.26 · 18 min</small>
+            Microsoft Teams<small>20.10.26 · 18 min</small>
           </div>
           <div className="hub-row">
-            FaceTime<small>17.10.26 · 9 min</small>
+            zoom.us<small>17.10.26 · 9 min</small>
           </div>
         </div>
         <div className="hub-main sum">
@@ -361,26 +364,26 @@ const MEET_SCENES = [
             <span>Transcript</span>
           </div>
           <div style={{ '--i': 1 } as React.CSSProperties}>
-            <h5>Overview</h5>
-            <p>The team agreed to ship the beta on Friday and review it on Monday.</p>
+            <p className="sum-h">Overview</p>
+            <p>The team moved the client handover to Thursday.</p>
           </div>
           <div style={{ '--i': 2 } as React.CSSProperties}>
-            <h5>Decisions</h5>
-            <p>Ship the beta on Friday.</p>
+            <p className="sum-h">Decisions</p>
+            <p>Hand over on Thursday.</p>
           </div>
           <div style={{ '--i': 3 } as React.CSSProperties}>
-            <h5>Action items</h5>
+            <p className="sum-h">Action items</p>
             <table>
               <tbody>
                 <tr>
                   <td>Me</td>
-                  <td>Send the release notes</td>
+                  <td>Send the checklist</td>
                   <td>22.10.26</td>
                 </tr>
                 <tr>
                   <td>Luka</td>
-                  <td>Book the review</td>
-                  <td>27.10.26</td>
+                  <td>Invite the client</td>
+                  <td>22.10.26</td>
                 </tr>
               </tbody>
             </table>
@@ -410,7 +413,7 @@ const FAQ: [string, React.ReactNode][] = [
   ],
   [
     'What happens after 30 days?',
-    'You can keep shepetal with a single payment of $4.99. It is yours, with updates. The trial needs no card, so nothing is charged on its own.',
+    'You can keep shepetal with a single payment of $4.99. It is yours, with updates. The trial needs no card, so you pay only when you decide to buy.',
   ],
   [
     'Which Macs does it run on?',
@@ -418,15 +421,16 @@ const FAQ: [string, React.ReactNode][] = [
   ],
   [
     'Does it work in the terminal and in code editors?',
-    'Yes. Your words land wherever your cursor is: the terminal, your code editor, the chat with your coding agent, mail, notes or a doc in the browser.',
+    'Yes. In the terminal or your editor, press the key and your words land at the prompt, as in any other app. Long instructions for a coding agent are where speaking saves the most.',
   ],
   [
-    'Does it make sounds?',
+    'How do I know it is listening?',
     <>
-      No. The app makes no sounds. The <Shush /> in the bottom-left corner of your screen shows what it is doing: a red ring while it
-      records, orange in hands-free and a pulsing blue ring while it writes.
+      The <Shush /> in the bottom-left corner of your screen shows it: a red ring while it records, orange in hands-free and a pulsing
+      blue ring while it writes. It stays in its corner on every desktop and over full-screen apps, and the app itself is silent.
     </>,
   ],
+  ['How are dates written?', 'As numbers. Say “the twenty-sixth of July” and it lands as 26.07.26.'],
   [
     'Who knows a meeting is being recorded?',
     <>
@@ -454,12 +458,14 @@ export default function Home() {
             </h1>
             <div className="hero-copy">
               <p className="t-lead">
-                Press one key. Your words appear wherever you speak, about 0.1 s after you finish, and your voice stays on your Mac.
+                Press one key. Your words appear wherever you speak. The text is there about 0.1 s after you finish, and your voice stays
+                on your Mac.
               </p>
               <div className="cta-row" id="hero-cta">
                 <SignInButton redirectTo="/account" className="btn btn-lg">
                   {TRY}
                 </SignInButton>
+                <SendToMac />
                 <a href="#price" className="btn btn-quiet btn-lg">
                   $4.99 once
                 </a>
@@ -475,6 +481,7 @@ export default function Home() {
             wallpaper={
               <Photo
                 name="last-light"
+                webp
                 night="dusk-air"
                 widths={[800, 1600, 2400]}
                 alt=""
@@ -508,23 +515,23 @@ export default function Home() {
         <ul className="facts" aria-label="shepetal in short">
           <li>
             <b>About 0.1 s</b>
-            <span>from letting go to text, M4 Pro</span>
+            <span>after you finish speaking, M4 Pro</span>
           </li>
           <li>
+            <b>On your Mac</b>
+            <span>your voice and text never leave it</span>
+          </li>
+          <li className="f-wifi">
             <b>Wi-Fi off</b>
             <span>dictation keeps working</span>
           </li>
           <li>
             <b>$4.99 once</b>
-            <span>after 30 days free</span>
+            <span>after 30 days free, no card</span>
           </li>
           <li>
-            <b>No sounds</b>
-            <span>the indicator shows the state</span>
-          </li>
-          <li>
-            <b>No trackers</b>
-            <span>on this page, fonts served from here</span>
+            <b>Any app</b>
+            <span>the terminal and your code editor too</span>
           </li>
         </ul>
       </div>
@@ -534,7 +541,7 @@ export default function Home() {
         <div className="wrap">
           <div className="head">
             <h2 id="apps-title" className="t-h1">
-              Press one key. Your words appear wherever you speak.
+              Your words land in any app.
             </h2>
             <p className="t-lead muted">
               Mail, chat, your code editor, the terminal and docs in the browser. The text lands where your cursor is, in the app you were
@@ -570,14 +577,17 @@ export default function Home() {
       <section className="sec speed-sec" aria-labelledby="speed-title">
         <div className="wrap">
           <InView className="speed">
-            <h2 id="speed-title" className="big-num">
-              <span className="pre">About</span>0.1<span className="unit"> s</span>
+            <h2 id="speed-title" className="t-h2">
+              Silent while you speak, ready when you stop.
             </h2>
-            <p className="t-lead">
-              From letting go of <span className="kbd">fn</span> to the text in your app, measured on an M4 Pro.
-              <Ref n={3} first /> Speech recognition runs on your Mac, so the text is ready the moment you finish speaking.
+            <p className="big-num">
+              <span className="pre">About</span>0.1<span className="unit"> s</span>
             </p>
-            <figure className="ruler" aria-label="A timeline from 0 to 1 second. You let go at 0. The text is there between 57 and 89 milliseconds, 69 on average.">
+            <p className="t-lead">
+              From the moment you finish speaking to the text in your app, measured on an M4 Pro.
+              <Ref n={3} first /> Speech recognition runs right on your Mac, so the text is there about 0.1 s after you stop.
+            </p>
+            <figure className="ruler" aria-label="A timeline from 0 to 1 second. You stop speaking at 0. The text is there between 57 and 89 milliseconds, 69 on average.">
               <div className="ruler-track" aria-hidden="true">
                 <span className="ruler-band" />
                 <span className="ruler-dot" />
@@ -589,7 +599,7 @@ export default function Home() {
               </div>
               <figcaption>
                 <span>
-                  <b>You let go</b> at 0
+                  <b>You stop speaking</b> at 0
                 </span>
                 <span>
                   <b>The text is there</b> after 57 to 89 ms, 69 ms on average
@@ -598,42 +608,16 @@ export default function Home() {
             </figure>
           </InView>
 
-          <InView className="wpm">
-            <div>
-              <h3 className="t-h3">
-                Instant, real-time, 4x faster.
-                <Ref n={4} first />
-              </h3>
-              <p className="t-body muted">Speaking is about 4x faster than typing: about 150 words a minute against about 40.</p>
-            </div>
-            <div className="rates">
-              <div className="rate">
-                <span>Speaking</span>
-                <b>about 150 words a minute</b>
-                <span className="rate-bar" aria-hidden="true">
-                  <i style={{ '--w': '100%' } as React.CSSProperties} />
-                </span>
-              </div>
-              <div className="rate rate-type">
-                <span>Typing</span>
-                <b>about 40 words a minute</b>
-                <span className="rate-bar" aria-hidden="true">
-                  <i style={{ '--w': `${(40 / 150) * 100}%` } as React.CSSProperties} />
-                </span>
-              </div>
-              <p className="source">
-                Speaking rate from the{' '}
-                <a href={NCVS} rel="noopener">
-                  US National Center for Voice and Speech
-                </a>
-                . Typing rate of the fast typists in a study of everyday computer users (
-                <a href={KARAT} rel="noopener">
-                  Karat et al., CHI 1999
-                </a>
-                ). Your own gain depends on how fast you type.
-              </p>
-            </div>
-          </InView>
+          <div className="wpm">
+            <h3 className="t-h3">
+              Instant, real-time, 4x faster.
+              <Ref n={4} first />
+            </h3>
+            <p className="t-lead muted">
+              You speak about 150 words a minute and type about 40, so saying it is about 4x faster than typing it. Your own gain
+              depends on how fast you type.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -646,25 +630,21 @@ export default function Home() {
               <Ref n={2} first />
             </h2>
             <p className="t-lead">
-              Your voice and your text stay on your Mac. Speech recognition runs on the Mac, so dictation keeps working with the <span className="nw">Wi-Fi</span> off.
+              Your voice and your text stay on your Mac. Speech recognition runs on the Mac, so dictation keeps working with the{' '}
+              <span className="nw">Wi-Fi</span> off.
             </p>
             <p className="t-body muted">
               Cloud dictation sends your voice to a server to turn it into text. shepetal does that work on your Mac, and that is how it is
               built.
             </p>
-            <div className="online">
-              <p className="t-small">shepetal goes online for four things, and none of them carries your audio or your text:</p>
-              <ul>
-                <li>signing in with Google</li>
-                <li>the license check, at launch and once a day, never while you dictate</li>
-                <li>checkout</li>
-                <li>the one-time speech recognition download, about 470 MB</li>
-              </ul>
-            </div>
+            <a href="#note-2" className="link">
+              What goes online, and why
+            </a>
             <div className="cta-row">
               <SignInButton redirectTo="/account" className="btn btn-lg">
                 {TRY}
               </SignInButton>
+              <SendToMac />
               <a href="/privacy" className="link">
                 Read the privacy details
               </a>
@@ -697,7 +677,7 @@ export default function Home() {
                 <div className="notes-body">
                   <p className="notes-t">Train to Ljubljana</p>
                   <p>
-                    <Words text="Draft the welcome email for the testers and keep it short." delay="3.4s" />
+                    <Words text="Draft the welcome email for the new client and keep it short." delay="3.4s" />
                   </p>
                 </div>
               </Win>
@@ -717,8 +697,8 @@ export default function Home() {
               It asks before it records.
             </h2>
             <p className="t-lead muted">
-              When a call starts in Zoom, Google Meet, Teams or another call app, a small card next to the indicator asks first. Click Record and
-              focus on the conversation. The transcript and the summary are in Meetings.
+              When a call app such as Zoom, Google Meet or Teams uses your mic or camera, a small card next to the indicator asks first. One
+              click on Record, and you can focus on the conversation. The transcript and the summary are in Meetings.
             </p>
             <p className="t-body muted">
               Recording automatically is a setting, and it is off until you turn it on. Let people know before you record them.
@@ -738,8 +718,8 @@ export default function Home() {
               Your recordings stay on your Mac.
             </h2>
             <p className="t-lead muted">
-              Every recording, transcript and summary is saved in a folder on your Mac that only your user account can read. Keep them, or
-              choose Delete recordings after 24 hours in Settings.
+              Every recording, transcript and summary is saved in a folder on your Mac that only your user account can read. Choose Delete
+              recordings after 24 hours in Settings, and the audio goes a day later. Transcripts and summaries stay until you delete them.
             </p>
           </div>
           <InView className="settings-wrap">
@@ -768,7 +748,7 @@ export default function Home() {
                     <span className="m-del">Delete recordings after 24 hours</span>
                   </div>
                   <div className="set-row">
-                    <span>Record meetings automatically</span>
+                    <span>Always record meetings automatically</span>
                     <span className="switch" />
                   </div>
                   <p className="set-note">A detected meeting records only after you click Record next to the indicator.</p>
@@ -779,43 +759,13 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Small details */}
-      <section className="sec details-sec" aria-labelledby="details-title">
-        <div className="wrap">
-          <h2 id="details-title" className="t-h2">
-            Quiet by design
-          </h2>
-          <ul className="details">
-            <li>
-              <h3 className="t-h4">No sounds</h3>
-              <p>
-                The app makes no sounds. The <Shush /> in the bottom-left corner of your screen shows what it is doing, in 18 points of space.
-              </p>
-            </li>
-            <li>
-              <h3 className="t-h4">Dates as numbers</h3>
-              <p>Say “the twenty-sixth of July” and it lands as 26.07.26.</p>
-            </li>
-            <li>
-              <h3 className="t-h4">Hands-free</h3>
-              <p>
-                Double-tap <span className="kbd">fn</span> to speak without holding the key. Tap <span className="kbd">fn</span> once to finish.
-              </p>
-            </li>
-            <li>
-              <h3 className="t-h4">On every Space</h3>
-              <p>The indicator stays in its corner on every desktop and over full-screen apps, and clicks go through it.</p>
-            </li>
-          </ul>
-        </div>
-      </section>
-
       {/* The name, and the maker */}
       <section id="story" className="sec story-sec" aria-labelledby="name-title">
         <div className="wrap story">
           <figure className="story-photo">
             <Photo
               name="valley"
+              webp
               widths={[800, 1400]}
               alt="A turquoise river in a green alpine valley at the end of the day"
               w={1400}
@@ -841,13 +791,12 @@ export default function Home() {
                 corner shows you what it is doing. Meetings work the same way: it asks first, and the transcript stays with you.
               </p>
               <p>
-                shepetal is new, so if you start now you are one of the first people using it, and every update after you buy it is yours
-                too.
+                shepetal is new, and every update after you buy it is yours too.
               </p>
             </div>
             <p className="sign">
               <b>Pavel Hegler</b>
-              Maker of shepetal, Slovenia
+              Maker of shepetal
             </p>
           </div>
         </div>
@@ -869,8 +818,12 @@ export default function Home() {
                 <SignInButton redirectTo="/account" className="btn btn-lg">
                   {TRY}
                 </SignInButton>
-                <span className="t-small muted">Sign in with Google to start the trial</span>
+                <span className="t-small muted on-mac">Sign in with Google to start the trial</span>
+                <SendToMac />
               </div>
+              <p className="t-small muted">
+                Mac first: macOS 14.4 or later, Apple silicon. Linux, Windows and iPhone are in development. No dates yet.
+              </p>
             </div>
             <table className="compare">
               <caption>shepetal next to cloud dictation subscriptions</caption>
@@ -903,36 +856,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Platforms */}
-      <section className="sec plat-sec" aria-labelledby="plat-title">
-        <div className="wrap plat-grid">
-          <div className="head">
-            <h2 id="plat-title" className="t-h2">
-              Mac now
-            </h2>
-            <p className="t-body muted">Linux, Windows and iPhone are in development. No dates yet.</p>
-          </div>
-          <ul className="plats">
-            <li className="plat plat-now">
-              <b>Mac</b>
-              <span>Available now · macOS 14.4 or later, Apple silicon</span>
-            </li>
-            <li className="plat">
-              <b>Linux</b>
-              <span>In development</span>
-            </li>
-            <li className="plat">
-              <b>Windows</b>
-              <span>In development</span>
-            </li>
-            <li className="plat">
-              <b>iPhone</b>
-              <span>In development</span>
-            </li>
-          </ul>
-        </div>
-      </section>
-
       {/* FAQ */}
       <section id="faq" className="sec faq-sec" aria-labelledby="faq-title">
         <div className="wrap faq-grid">
@@ -958,12 +881,13 @@ export default function Home() {
             Instant dictation that stays on your Mac.
           </h2>
           <p className="t-lead">
-            Dictation and meetings in one app on your Mac. 30 days free, no card. Then $4.99 once, with updates. Be one of the first to use it.
+            Dictation and meetings in one app on your Mac. 30 days free, no card. Then $4.99 once, with updates.
           </p>
           <div className="cta-row">
             <SignInButton redirectTo="/account" className="btn btn-lg">
               {TRY}
             </SignInButton>
+            <SendToMac />
           </div>
           <p className="final-meta">Google sign-in, only for the license · For Mac with Apple silicon, macOS 14.4 or later</p>
         </div>
@@ -977,36 +901,36 @@ export default function Home() {
           </h2>
           <ol>
             <li id="note-1">
-              Hold fn to dictate, double-tap fn for hands-free, tap fn once to stop. The text lands in any app you can type in, after a
-              one-time setup: the permissions, a Google sign-in and one download. <a href="#ref-1">Back</a>
+              The one key is fn, and a double-tap of fn starts hands-free until you tap it again. The text lands in any app that accepts a
+              paste (in password fields and secure input, the text waits on the clipboard for Command-V), after a one-time setup: the permissions, a
+              Google sign-in and one download. <a href="#ref-1">Back</a>
             </li>
             <li id="note-2">
               “100% private” means your voice and your text: speech recognition runs on your Mac, and shepetal never sends your audio or your
               text anywhere. Your recordings, transcripts and history are stored on the Mac in a folder only your user account can read. The
-              text you dictate goes wherever the app you paste it into sends it. shepetal goes online for four things, and none of them
-              carries audio or text: sign-in, the license check (at launch and once a day, never while you dictate), checkout, and the
-              one-time speech recognition download of about 470 MB. Your account (your Google email address and your license status) is kept
-              by shepetal’s account service, and payment is handled by the payment provider. Dictation works with the Wi-Fi off; the license
-              needs a connection once every 7 days. Meeting summaries are written on the Mac. <a href="#ref-2">Back</a>
+              text you dictate goes wherever the app you paste it into sends it. shepetal goes online only for these, and none of them
+              carries your audio or your text: signing in with Google; the license check (at launch and once a day, never while you
+              dictate); checkout; update checks; and the downloads you start: speech recognition (about 470 MB, once) and the optional
+              cleanup. Your account (your Google email address and your license status) is kept by shepetal’s account service, and payment
+              is handled by the payment provider. Dictation works with the Wi-Fi off; the license needs a connection once every 7 days.
+              Meeting summaries are written on the Mac. With Handoff on, macOS can offer text that waits on the clipboard to your other
+              Apple devices. If you turn on the setting that lets other apps read your meetings and dictations, the apps you connect can read
+              them, and they may send them to their own servers. <a href="#ref-2">Back</a>
             </li>
             <li id="note-3">
               About 0.1 s from letting go of fn to the text: 57 to 89 ms (69 ms on average) on six synthesized clips of 4.5 to 10.7 s, with
-              the default speech recognition, on an M4 Pro, network blocked, October 20, 2026. Longer dictations, other Macs and the
-              alternative speech recognition take longer. Real-time means the text is ready the moment you finish speaking, with nothing uploaded.{' '}
-              <a href="#ref-3">Back</a>
+              the default speech recognition and without the optional cleanup, pasted into a text view the app owns, on an M4 Pro, network
+              blocked, October 20, 2026. Longer dictations, other Macs and the alternative speech recognition take longer, and with the
+              optional cleanup on, the text takes up to about 0.8 s. Real-time means the text is ready about 0.1 s after you finish
+              speaking, with nothing uploaded. <a href="#ref-3">Back</a>
             </li>
             <li id="note-4">
               Speaking runs at about 150 words per minute (
               <a href={NCVS} rel="noopener">
                 US National Center for Voice and Speech
               </a>
-              ). In a study of everyday computer users, people typed 32.5 words per minute when they copied text, 40 for the fast typists among them, and
-              19 when they wrote their own words (
-              <a href={KARAT} rel="noopener">
-                Karat et al., CHI 1999
-              </a>
-              ). We use 40: 150 ÷ 40 = 3.75, rounded to 4x. In a large online typing test, people copying sentences averaged about 52 words
-              per minute (
+              ). Typing runs at about 40 words per minute, a common average for keyboard typing. 150 ÷ 40 = 3.75, rounded to 4x. In a large
+              online typing test, people copying sentences averaged about 52 words per minute (
               <a href={DHAKAL} rel="noopener">
                 Dhakal et al., CHI 2018
               </a>

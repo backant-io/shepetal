@@ -3,7 +3,7 @@ import './globals.css';
 
 export const metadata: Metadata = {
   title: 'shepetal',
-  description: 'Quiet dictation for the Mac. Your voice stays on your Mac.',
+  description: 'Instant dictation that stays on your Mac.',
   metadataBase: new URL('https://shepetal.backant.io'),
 };
 

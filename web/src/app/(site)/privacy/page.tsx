@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Privacy Policy',
-  description: 'How Shepetal handles your information. Your voice and your text stay on your Mac.',
+  description: 'How shepetal handles your information. Your voice and your text stay on your Mac.',
   alternates: { canonical: '/privacy' },
 };
 
@@ -15,9 +15,9 @@ export default function PrivacyPolicy() {
 
       <div className="prose-legal mt-12">
         <p>
-          Backant Inc. (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes Shepetal, a
-          dictation app for Mac, and runs the website at shepetal.backant.io (the &quot;Site&quot;). The Site and the
-          Shepetal app together are the &quot;Service&quot;. This Privacy Policy explains what information we collect
+          Backant Inc. (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes shepetal, a
+          dictation app for Mac, and runs this website (the &quot;Site&quot;). The Site and the
+          shepetal app together are the &quot;Service&quot;. This Privacy Policy explains what information we collect
           when you use the Service, how we use it and how we protect it. &quot;You&quot; refers to you, as a user of the
           Service.
         </p>
@@ -27,12 +27,12 @@ export default function PrivacyPolicy() {
 
         <h2>I. Your voice and your text</h2>
         <p>
-          Shepetal turns your speech into text with on-device speech recognition. Your recordings, the text made from
-          them and your dictation history are stored on your Mac in Shepetal&apos;s folder, and we never receive them.
+          shepetal turns your speech into text with on-device speech recognition. Your recordings, the text made from
+          them and your dictation history are stored on your Mac in shepetal&apos;s folder, and we never receive them.
           You can delete them at any time in the app or by deleting that folder.
         </p>
         <p>
-          The first time you set up Shepetal, the app downloads its speech recognition files. Like any download, this
+          The first time you set up shepetal, the app downloads its speech recognition files. Like any download, this
           request shares technical details such as your IP address with the server that hosts the files.
         </p>
 
@@ -40,7 +40,7 @@ export default function PrivacyPolicy() {
         <h3>1. Your account</h3>
         <p>
           You sign in with your Google account. Google tells us your email address, and we store it together with the
-          date your free trial started and whether you bought Shepetal.
+          date your free trial started and whether you bought shepetal.
         </p>
         <h3>2. Purchases</h3>
         <p>
@@ -49,7 +49,7 @@ export default function PrivacyPolicy() {
         </p>
         <h3>3. The app sign-in</h3>
         <p>
-          When you connect the Shepetal app to your account, we create an access token for it and store only a hash of
+          When you connect the shepetal app to your account, we create an access token for it and store only a hash of
           that token. The app sends the token when it checks your license.
         </p>
         <h3>4. Cookies and logs</h3>
@@ -100,7 +100,7 @@ export default function PrivacyPolicy() {
         <p>
           You can ask us for a copy of the information we hold about you, or ask us to correct or delete it, by
           emailing <a href="mailto:privacy@backant.io">privacy@backant.io</a>. Deleting your account ends your trial
-          or license on our side. Everything Shepetal stored on your Mac stays there until you delete it.
+          or license on our side. Everything shepetal stored on your Mac stays there until you delete it.
         </p>
 
         <h2>VI. Links to other websites</h2>

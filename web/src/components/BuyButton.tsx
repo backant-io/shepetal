@@ -7,7 +7,7 @@ export async function startCheckout(fetchImpl: typeof fetch = fetch): Promise<{ 
   try {
     const res = await fetchImpl('/api/checkout', { method: 'POST' });
     if (res.status === 401) return { error: 'You were signed out. Reload the page and sign in again.' };
-    if (res.status === 409) return { error: 'You already own Shepetal. Reload the page to see it.' };
+    if (res.status === 409) return { error: 'You already own shepetal. Reload the page to see it.' };
     const body = (await res.json().catch(() => ({}))) as { url?: unknown };
     if (res.ok && typeof body.url === 'string') return { url: body.url };
   } catch {

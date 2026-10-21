@@ -15,7 +15,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
       <main className="mx-auto max-w-xl px-4 pt-16 sm:px-8">
         <h1 className="display text-[clamp(3rem,10vw,5rem)] leading-none">Sign in</h1>
         <p className="mt-6 text-lg leading-relaxed">
-          Sign in with your Google account to start your free trial and download Shepetal. The trial runs for 30 days
+          Sign in with your Google account to start your free trial and download shepetal. The trial runs for 30 days
           and needs no credit card.
         </p>
         <div className="mt-10">
@@ -34,7 +34,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
       {purchased && (
         <p role="status" className="mb-10 rounded-xl bg-[var(--raised)] px-4 py-3">
           {license.status === 'active'
-            ? 'Thank you. Shepetal is yours now.'
+            ? 'Thank you. shepetal is yours now.'
             : 'Thank you. Your payment can take a minute to show up here, so reload the page in a moment.'}
         </p>
       )}
@@ -47,7 +47,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         </a>
         {license.status !== 'active' && <BuyButton quiet={license.status === 'trial'} />}
       </div>
-      <p className="mt-4 text-sm text-[var(--hush)]">Needs macOS 14 or later.</p>
+      <p className="mt-4 text-sm text-[var(--hush)]">Needs macOS 14.4 or later and a Mac with Apple silicon.</p>
 
       <div className="mt-16 flex flex-wrap items-center justify-between gap-4 border-t border-[var(--line)] pt-6 text-sm">
         <p>

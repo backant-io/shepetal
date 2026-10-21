@@ -6,11 +6,11 @@ import { Ind, Win, Words, type IndState } from './landing/Mac';
 // What the visitor "says", and the text that lands. A spoken date lands as numbers, as in the app.
 const LINES = [
   {
-    said: 'The beta goes out on Friday, and I’ll send you the release notes on the twenty-third of October.',
-    text: 'The beta goes out on Friday, and I’ll send you the release notes on 23.10.26.',
+    said: 'I’ll book the cabin for the twenty-third of October.',
+    text: 'I’ll book the cabin for 23.10.26.',
   },
-  { said: 'Can you check the new screenshots before lunch?', text: 'Can you check the new screenshots before lunch?' },
-  { said: 'Thanks for testing it this week.', text: 'Thanks for testing it this week.' },
+  { said: 'Can you send me the address before the weekend?', text: 'Can you send me the address before the weekend?' },
+  { said: 'Thanks for planning all of it.', text: 'Thanks for planning all of it.' },
 ];
 
 // The app's gesture (FnGesture.swift): recording starts as fn goes down. Let go after 0.5 s or more and the
@@ -136,9 +136,10 @@ export function HeroDemo({ wallpaper }: { wallpaper: React.ReactNode }) {
         if (!e.isIntersecting) return;
         io.disconnect();
         auto.current = true;
-        later(900, press);
+        later(600, press);
       },
-      { threshold: 0.4 },
+      // Low, so it plays in the first viewport: on a laptop or a phone only about a third of the screen shows there.
+      { threshold: 0.15 },
     );
     io.observe(el);
     return () => {
@@ -170,14 +171,14 @@ export function HeroDemo({ wallpaper }: { wallpaper: React.ReactNode }) {
             <span>Wed 09:41</span>
           </span>
         </div>
-        <Win title="Beta on Friday" className="mail-win">
+        <Win title="Trip to Bled" className="mail-win">
           <div className="field">
             <span>To:</span>
             <span>Maja Novak</span>
           </div>
           <div className="field">
             <span>Subject:</span>
-            <span>Beta on Friday</span>
+            <span>Trip to Bled</span>
           </div>
           <div className="mail-body">
             <p>Hi Maja,</p>
