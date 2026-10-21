@@ -57,7 +57,7 @@ suite_scripts() {
 suite_linux() {   # the command from linux/README.md, plus cache mounts
   [ -d "$ROOT/linux" ] || { echo "linux/: not on this branch"; return 0; }
   mkdir -p "$CACHE/cargo-registry" "$CACHE/linux-target"
-  docker run --rm -v "$ROOT/linux":/src -w /src -e CARGO_TARGET_DIR=/target \
+  docker run --rm -v "$ROOT":/src -w /src/linux -e CARGO_TARGET_DIR=/target \
     -v "$CACHE/cargo-registry":/root/.cargo/registry -v "$CACHE/linux-target":/target ubuntu:24.04 sh -c \
     'apt-get update -qq && apt-get install -y -qq cargo >/dev/null && cargo test && cargo build --release && /target/release/shepetal probe --pw-dump fixtures/pw-dump-meeting.json'
 }

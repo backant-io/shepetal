@@ -145,5 +145,5 @@ These follow from the rules above. They are accepted because the alternative bre
 Reading the file from each suite:
 
 - **Mac**: `URL(fileURLWithPath: #filePath)` up to the repo root, as `ShepetalSummaryTests` reads `python_golden.json`. Decode it with `JSONDecoder`.
-- **Linux**: `include_str!("../../Tests/fixtures/text-rules/dates.json")` from `linux/src`, with `serde_json` (already a dependency). The `linux` suite in `scripts/ci/run-checks.sh` mounts only `linux/` into Docker, so it must mount the repo root and work in `linux/`. Otherwise the file is not in the container.
+- **Linux**: `include_str!("../../Tests/fixtures/text-rules/dates.json")` from `linux/src`, with `serde_json` (already a dependency). The Linux Docker commands (`scripts/ci/run-checks.sh`, `linux/README.md`, `linux/indicator/check.sh`) mount the repo root and work in `linux/`, so the file is in the container.
 - **Windows**: `include_str!("../../../../Tests/fixtures/text-rules/dates.json")` from `windows/crates/core/src`. The core crate has no dependencies, so add `serde_json` as a dev-dependency.
