@@ -1,7 +1,7 @@
 //! Goal rule 4: the raw audio of every recording is kept, owner-only, as a 16 kHz mono WAV.
 
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 /// Why a clip ended. Cancelled and too-short clips are kept too, flagged in the file name.
@@ -15,14 +15,8 @@ pub enum Kind {
     TooShort,
 }
 
-/// How long clips stay. There is no "never store": it is the user's own audio on their device.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum Retention {
-    #[default]
-    Keep,
-    /// Delete clips once they are 24 hours old.
-    Delete24h,
-}
+/// How long clips stay: keep (the default) or delete after 24 h. There is no "never store".
+pub use shepetal_core::retention::Retention;
 
 const DAY_MS: u64 = 24 * 60 * 60 * 1000;
 
@@ -40,6 +34,7 @@ fn data_dir_from(local_app_data: Option<PathBuf>) -> io::Result<PathBuf> {
 }
 
 /// The folder of kept clips.
+#[derive(Clone)]
 pub struct Store {
     dir: PathBuf,
 }
@@ -63,13 +58,27 @@ impl Store {
             Kind::TooShort => ".tooshort",
         };
         let path = self.dir.join(format!("{stamp_ms}{flag}.wav"));
-        let mut opts = fs::OpenOptions::new();
-        opts.write(true).create_new(true);
-        #[cfg(unix)]
-        std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
-        let file = opts.open(&path)?;
-        crate::wav::write(file, samples, crate::RATE)?;
+        crate::wav::write(create_new(&path)?, samples, crate::RATE)?;
         Ok(path)
+    }
+
+    /// Keep the transcript of the dictation clip `stamp_ms` as `<stamp_ms>.txt` (UTF-8), next to
+    /// its WAV, for the history. Written once, never overwritten, like the clip.
+    pub fn save_transcript(&self, stamp_ms: u64, text: &str) -> io::Result<PathBuf> {
+        let path = self.dir.join(format!("{stamp_ms}.txt"));
+        create_new(&path)?.write_all(text.as_bytes())?;
+        Ok(path)
+    }
+
+    /// The newest `limit` transcripts, newest first, as (stamp, text). Transcripts stay when the
+    /// 24 h setting deletes their audio, as on Linux; other files are skipped.
+    pub fn recent(&self, limit: usize) -> io::Result<Vec<(u64, String)>> {
+        let mut stamps: Vec<u64> = fs::read_dir(&self.dir)?
+            .filter_map(|e| e.ok()?.file_name().to_str()?.strip_suffix(".txt").filter(|s| digits(s))?.parse().ok())
+            .collect();
+        stamps.sort_unstable_by(|a, b| b.cmp(a));
+        stamps.truncate(limit);
+        stamps.into_iter().map(|s| Ok((s, fs::read_to_string(self.dir.join(format!("{s}.txt")))?))).collect()
     }
 
     /// Apply `retention` at `now_ms`: with `Delete24h`, remove the clips that are 24 hours old
@@ -91,11 +100,23 @@ impl Store {
     }
 }
 
+/// A new owner-only file: an existing one is an error, not overwritten.
+fn create_new(path: &Path) -> io::Result<fs::File> {
+    let mut opts = fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    opts.open(path)
+}
+
+fn digits(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())
+}
+
 /// The stamp of a file name `save` writes, or None for any other file.
 fn clip_stamp(name: &str) -> Option<u64> {
     let base = name.strip_suffix(".wav")?;
-    let digits = |s: &&str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    ["", ".cancelled", ".tooshort"].iter().find_map(|f| base.strip_suffix(f).filter(digits))?.parse().ok()
+    ["", ".cancelled", ".tooshort"].iter().find_map(|f| base.strip_suffix(f).filter(|s| digits(s)))?.parse().ok()
 }
 
 #[cfg(unix)]
@@ -337,6 +358,31 @@ mod tests {
         want.extend(young);
         want.sort();
         assert_eq!(names(&dir), want);
+    }
+
+    #[test]
+    fn transcripts_are_kept_next_to_their_clip_and_listed_newest_first() {
+        let dir = fresh("history");
+        let store = Store::open(&dir).unwrap();
+        store.save(10, Kind::Dictation, &[0.1]).unwrap();
+        let p = store.save_transcript(10, "first, with ümlauts").unwrap();
+        assert_eq!(p.file_name().unwrap(), "10.txt");
+        store.save_transcript(30, "third").unwrap();
+        store.save_transcript(20, "second").unwrap();
+        for other in ["notes.txt", "x1.txt", "5.txt.bak"] {
+            fs::write(dir.join(other), b"x").unwrap();
+        }
+        assert_eq!(store.recent(10).unwrap(), [(30, "third".into()), (20, "second".into()), (10, "first, with ümlauts".into())]);
+        assert_eq!(store.recent(2).unwrap().len(), 2);
+        assert_eq!(store.save_transcript(30, "again").unwrap_err().kind(), io::ErrorKind::AlreadyExists);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600, "owner-only like the clips");
+        }
+        // The 24 h setting deletes the audio, not the history.
+        assert_eq!(store.prune(Retention::Delete24h, 10 + DAY_MS).unwrap(), 1);
+        assert_eq!(store.recent(10).unwrap().len(), 3);
     }
 
     #[test]

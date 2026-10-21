@@ -36,6 +36,14 @@ pub enum Event {
     /// Tray menu: Start at login was clicked. The app flips the setting, then calls
     /// `Ui::set_start_at_login` so the check mark follows.
     StartAtLogin,
+    /// Tray menu: Recordings > Keep recordings (false) or Delete recordings after 24 hours
+    /// (true) was picked. The app saves the choice, then calls `Ui::set_delete_after_24h`.
+    DeleteAfter24h(bool),
+    /// Tray menu: Hotkey > `HOTKEYS[n]` was picked. The app saves it, then calls `Ui::set_hotkey`.
+    Hotkey(usize),
+    /// Tray menu: Recent > item `n` (0 is the newest) of the list last given to `Ui::set_recent`.
+    /// The app copies that text.
+    CopyRecent(usize),
     /// Tray menu: Quit. The tray icon, overlay and hook are already gone.
     Quit,
     /// Tray menu: the account line with this id (see `MenuLine`) was clicked.
@@ -71,6 +79,49 @@ pub enum Key {
     /// Ctrl+Win+D can cancel. Only downs, and only while the hotkey is held: normal typing is
     /// never reported.
     Other(u16),
+}
+
+/// The tray's Recordings submenu, in order: each item's label, whether it is the checked one, and
+/// whether picking it means delete after 24 h. Keep is the default (goal rule 4); there is no
+/// "never store".
+pub fn recordings_menu(delete_after_24h: bool) -> [(&'static str, bool, bool); 2] {
+    [
+        ("Keep recordings", !delete_after_24h, false),
+        ("Delete recordings after 24 hours", delete_after_24h, true),
+    ]
+}
+
+/// The tray's Hotkey choices; the first is the default. Each one, plus Space, is its hands-free
+/// chord. Not offered: Ctrl+Alt, which is AltGr on many layouts (typing @ would start a
+/// dictation), and keys that type or toggle something (Caps Lock, letters).
+pub const HOTKEYS: [&str; 4] = ["Ctrl+Win", "Alt+Win", "Shift+Win", "F13"];
+
+/// The tray's Hotkey submenu: each choice and whether it is checked. A hotkey set some other way
+/// (regedit) checks none.
+pub fn hotkey_menu(current: &str) -> [(&'static str, bool); HOTKEYS.len()] {
+    // All keys are held at once, so Win+Alt is Alt+Win.
+    let keys = |s: &str| {
+        Hotkey::parse(s).ok().map(|mut h| {
+            h.0.sort_unstable();
+            h
+        })
+    };
+    let current = keys(current);
+    HOTKEYS.map(|h| (h, keys(h) == current))
+}
+
+/// How many transcripts the tray's Recent submenu lists, as on the Mac.
+pub const RECENT: usize = 10;
+
+/// A transcript as a Recent menu item: on one line, at most 60 characters (as on the Mac) plus
+/// "…", and with `&` doubled, since a menu would take a single one as a shortcut underline.
+pub fn recent_label(text: &str) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut label: String = line.chars().take(60).collect();
+    if line.chars().count() > 60 {
+        label.push('…');
+    }
+    label.replace('&', "&&")
 }
 
 /// A hotkey: one to three keys that must all be held, as Windows VK codes. Left and right
@@ -158,6 +209,22 @@ impl Chord {
 
     pub fn hotkey(&self) -> &Hotkey {
         &self.hotkey
+    }
+
+    /// Switches to `hotkey`. If the old one was held, its release is reported first, so the
+    /// gesture never waits for an up that will not come.
+    pub fn set_hotkey(&mut self, hotkey: Hotkey) -> Option<KeyEvent> {
+        let was = self.active;
+        *self = Chord {
+            hotkey,
+            esc: self.esc,
+            space: self.space,
+            ..Chord::default()
+        };
+        was.then_some(KeyEvent {
+            key: Key::Hotkey,
+            down: false,
+        })
     }
 
     pub fn feed(&mut self, vk: u16, down: bool) -> Option<KeyEvent> {
@@ -278,8 +345,8 @@ pub fn ring_alpha(mode: Mode, ms: u64) -> f32 {
     1.0 - (1.0 - PULSE_MIN) * t
 }
 
-/// How long a hint stays next to 🤫 (product rule 2: about 2 s).
-pub const HINT_MS: u64 = 2000;
+/// How long a hint stays next to 🤫 (product rule 2: about 3 s, as on the Mac).
+pub const HINT_MS: u64 = 3000;
 
 /// The indicator's state over time. Pure: times are milliseconds on any monotonic clock.
 #[derive(Debug, Default)]
@@ -732,6 +799,129 @@ mod tests {
     }
 
     #[test]
+    fn hotkey_choices_parse_and_the_current_one_is_checked() {
+        assert_eq!(HOTKEYS[0], "Ctrl+Win", "the default comes first");
+        for h in HOTKEYS {
+            assert!(Hotkey::parse(h).is_ok(), "{h}");
+        }
+        assert_eq!(
+            hotkey_menu("Ctrl+Win").map(|(_, on)| on),
+            [true, false, false, false]
+        );
+        assert_eq!(
+            hotkey_menu("win+alt").map(|(_, on)| on),
+            [false, true, false, false],
+            "same keys, any order or case"
+        );
+        assert_eq!(
+            hotkey_menu("F13").map(|(_, on)| on),
+            [false, false, false, true]
+        );
+        assert_eq!(
+            hotkey_menu("Ctrl+Shift+F1").map(|(_, on)| on),
+            [false; 4],
+            "set in regedit"
+        );
+        assert!(
+            !HOTKEYS
+                .iter()
+                .any(|h| Hotkey::parse(h) == Hotkey::parse("Ctrl+Alt")),
+            "AltGr"
+        );
+    }
+
+    #[test]
+    fn switching_the_hotkey_releases_a_held_one_and_takes_the_new_keys() {
+        let mut c = Chord::new(Hotkey::default());
+        c.feed(0xA2, true); // VK_LCONTROL
+        assert_eq!(
+            c.feed(VK_LWIN, true),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: true
+            })
+        );
+        assert_eq!(
+            c.set_hotkey(Hotkey::parse("F13").unwrap()),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: false
+            })
+        );
+        assert_eq!(
+            c.feed(VK_LWIN, false),
+            None,
+            "the old keys are plain keys now"
+        );
+        assert_eq!(c.feed(0xA2, false), None);
+        assert_eq!(
+            c.feed(0x7C, true),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: true
+            }),
+            "F13"
+        );
+        assert_eq!(
+            c.set_hotkey(Hotkey::default()),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: false
+            })
+        );
+        assert_eq!(
+            c.set_hotkey(Hotkey::default()),
+            None,
+            "nothing held, nothing to release"
+        );
+    }
+
+    #[test]
+    fn recent_labels_are_one_short_line_and_keep_ampersands() {
+        assert_eq!(recent_label("Hello world."), "Hello world.");
+        assert_eq!(recent_label("  two\r\nlines\there "), "two lines here");
+        assert_eq!(
+            recent_label("Q&A at 3"),
+            "Q&&A at 3",
+            "a single & would underline the A"
+        );
+        let long = "ä".repeat(61);
+        assert_eq!(
+            recent_label(&long),
+            format!("{}…", "ä".repeat(60)),
+            "60 characters, not bytes"
+        );
+        assert_eq!(
+            recent_label(&"x".repeat(60)),
+            "x".repeat(60),
+            "exactly 60 is not cut"
+        );
+    }
+
+    #[test]
+    fn recordings_menu_checks_exactly_the_current_choice() {
+        let keep = recordings_menu(false);
+        assert_eq!(
+            keep.map(|(l, ..)| l),
+            ["Keep recordings", "Delete recordings after 24 hours"],
+            "the Mac's wording"
+        );
+        assert_eq!(
+            keep.map(|(_, on, _)| on),
+            [true, false],
+            "keep is checked by default"
+        );
+        assert_eq!(recordings_menu(true).map(|(_, on, _)| on), [false, true]);
+        // Each item picks its own choice, whatever is checked now.
+        for now in [false, true] {
+            assert_eq!(
+                recordings_menu(now).map(|(.., delete)| delete),
+                [false, true]
+            );
+        }
+    }
+
+    #[test]
     fn hint_shows_for_its_time_and_a_new_one_restarts_it() {
         let mut v = View::default();
         v.show_hint("Hold Ctrl+Win to talk", HINT_MS, 1000);
@@ -739,17 +929,17 @@ mod tests {
             v.frame(1000).label.as_deref(),
             Some("Hold Ctrl+Win to talk")
         );
-        assert!(v.animating(2999));
+        assert!(v.animating(3999));
         v.show_hint("Copied, press Ctrl+V", HINT_MS, 2500);
         assert_eq!(
-            v.frame(3500).label.as_deref(),
+            v.frame(4500).label.as_deref(),
             Some("Copied, press Ctrl+V"),
             "old timer is gone"
         );
-        assert_eq!(v.frame(4499).label.as_deref(), Some("Copied, press Ctrl+V"));
-        assert_eq!(v.frame(4500).label, None);
+        assert_eq!(v.frame(5499).label.as_deref(), Some("Copied, press Ctrl+V"));
+        assert_eq!(v.frame(5500).label, None);
         assert!(
-            !v.animating(4500),
+            !v.animating(5500),
             "nothing left to redraw, the timer can stop"
         );
     }

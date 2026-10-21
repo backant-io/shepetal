@@ -4,6 +4,12 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### windows (#118 follow-ups, PR #192; #140, PR #183)
+
+- **Done in #192:** Tray > Recordings (keep, the default, or delete after 24 hours; pruned at launch, on pick and every minute), the 19/20 min length cap, transcripts kept as `<stamp>.txt` with Tray > Recent (click to copy), Tray > Hotkey (Ctrl+Win, Alt+Win, Shift+Win, F13), download progress on first run (a press says how far it is instead of a blue ring for minutes), and a failed `CreateMutexW` no longer starts a second instance. Settings live under `HKCU\Software\Shepetal`; the uninstaller removes them. Unit tests on Linux with deliberate breaks; hand steps 3, 6, 8, 12, 13 and 18 in windows/README.md, none run on a PC.
+- **#183:** the short-press hint shows for 3 s on Windows and Linux, as on the Mac.
+- **Left in #118:** a history window (search, replay, re-transcribe), text around the cursor (`text::fit`), signing, the hand test on a PC, and from the #80 review: the always-open mic, the DPI-unaware dialog and the first-run dialog behind other windows at autostart. Meeting items wait for the meetings effort; sign-in, trial and license are #149.
+
 ### Parity audit (main at 86bf3fa)
 
 `docs/parity.md` was checked against every PR merged to main since the 45e8bf4 audit, through #39 and #138: #66, #83, #86, #92, #94, #96, #113, #129, #131, #134, #135, #136, #139, #142, #146, #148, #151, #152, #154 and #138 change cells or evidence. #39 brought its own ledger rows (Mac F07 and F08 to `hand-test`). #25, #74, #80, #116, #120, #122, #147 and #153 do not (CI, docs, the Windows app, tooling or summarizer quality). The Windows crates (#82, #87, #91, #108, #110) change no cell. Measured with `python3 scripts/parity.py`:

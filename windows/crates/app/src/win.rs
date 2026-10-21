@@ -10,10 +10,11 @@ use crate::dialog::{self, Card, Transcripts};
 use crate::license::{self, Access, Client};
 use crate::flow::{self, Flow, Kept};
 use crate::meeting::{self, Show};
-use crate::system::{self, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RUN_KEY, RUN_VALUE};
-use crate::transcript::Meeting;
+use crate::system::{self, HOTKEY_VALUE, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RETENTION_VALUE, RUN_KEY, RUN_VALUE, SETTINGS_KEY};
 use crate::winaccount::{self, CredTokens, WinHttp};
 use shepetal_core::gesture::{Action, Gesture, HINT_MS};
+use shepetal_core::retention::Retention;
+use crate::transcript::Meeting;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
@@ -27,7 +28,7 @@ use windows_sys::Win32::System::Com::{CoInitializeEx, COINIT_APARTMENTTHREADED};
 use windows_sys::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_SZ,
 };
-use windows_sys::Win32::System::Threading::CreateMutexW;
+use windows_sys::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -43,8 +44,14 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// Takes the named mutex. The handle stays open until the process exits, which frees the name.
 fn already_running() -> bool {
-    let h = unsafe { CreateMutexW(null(), 0, wide(MUTEX).as_ptr()) };
-    !h.is_null() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS
+    let name = wide(MUTEX);
+    let h = unsafe { CreateMutexW(null(), 0, name.as_ptr()) };
+    let existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+    system::already_running(!h.is_null(), existed, || {
+        let other = unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) };
+        // Left open like ours: the process is about to exit anyway.
+        !other.is_null()
+    })
 }
 
 fn reg_string(root: HKEY, key: &str, value: &str) -> Option<String> {
@@ -60,19 +67,46 @@ fn starts_at_login() -> bool {
     reg_string(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE).is_some()
 }
 
+/// Writes a REG_SZ under HKCU, creating the key if needed.
+fn set_reg_string(key: &str, value: &str, data: &str) -> u32 {
+    let (key, name, data) = (wide(key), wide(value), wide(data));
+    unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, data.as_ptr().cast(), (data.len() * 2) as u32) }
+}
+
 fn set_start_at_login(on: bool) -> Result<(), String> {
-    let (key, name) = (wide(RUN_KEY), wide(RUN_VALUE));
     let r = if on {
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-        let data = wide(&system::run_command(&exe));
-        unsafe { RegSetKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr(), REG_SZ, data.as_ptr().cast(), (data.len() * 2) as u32) }
+        set_reg_string(RUN_KEY, RUN_VALUE, &system::run_command(&exe))
     } else {
+        let (key, name) = (wide(RUN_KEY), wide(RUN_VALUE));
         unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, key.as_ptr(), name.as_ptr()) }
     };
     match r {
         ERROR_SUCCESS => Ok(()),
         ERROR_FILE_NOT_FOUND if !on => Ok(()),
         r => Err(format!("Could not change start at login (error {r}).")),
+    }
+}
+
+fn retention() -> Retention {
+    system::retention(reg_string(HKEY_CURRENT_USER, SETTINGS_KEY, RETENTION_VALUE).as_deref())
+}
+
+fn set_retention(r: Retention) -> Result<(), String> {
+    match set_reg_string(SETTINGS_KEY, RETENTION_VALUE, r.as_str()) {
+        ERROR_SUCCESS => Ok(()),
+        e => Err(format!("Could not save the Recordings setting (error {e}).")),
+    }
+}
+
+fn hotkey() -> String {
+    system::hotkey(reg_string(HKEY_CURRENT_USER, SETTINGS_KEY, HOTKEY_VALUE).as_deref())
+}
+
+fn set_hotkey(name: &str) -> Result<(), String> {
+    match set_reg_string(SETTINGS_KEY, HOTKEY_VALUE, name) {
+        ERROR_SUCCESS => Ok(()),
+        e => Err(format!("Could not save the hotkey (error {e}).")),
     }
 }
 
@@ -196,6 +230,8 @@ fn now_ms() -> u64 {
 /// What the other threads send to this one.
 enum Msg {
     Input(input::Event),
+    /// How far the first-run model download is, in percent.
+    Progress(u8),
     /// The model loaded (None) or could not be fetched or loaded.
     Ready(Option<String>),
     Text(Result<String, String>),
@@ -221,7 +257,8 @@ impl flow::Mic for AppMic {
     }
 }
 
-struct AppStore(audio::Store);
+/// The store, and the stamp of the last dictation clip, which its transcript is saved under.
+struct AppStore(audio::Store, Option<u64>);
 
 impl flow::Store for AppStore {
     fn keep(&mut self, samples: &[f32], why: Kept) -> Result<(), String> {
@@ -230,8 +267,20 @@ impl flow::Store for AppStore {
             Kept::Cancelled => audio::Kind::Cancelled,
             Kept::TooShort => audio::Kind::TooShort,
         };
-        self.0.save(now_ms(), kind, samples).map(drop).map_err(|e| format!("Could not keep the recording: {e}"))
+        let stamp = now_ms();
+        self.1 = (why == Kept::Dictation).then_some(stamp);
+        self.0.save(stamp, kind, samples).map(drop).map_err(|e| format!("Could not keep the recording: {e}"))
     }
+    fn transcript(&mut self, text: &str) -> Result<(), String> {
+        // Under the clip's stamp; one that failed to save still gets its text in the history.
+        let stamp = self.1.take().unwrap_or_else(now_ms);
+        self.0.save_transcript(stamp, text).map(drop).map_err(|e| format!("Could not save the text in the history: {e}"))
+    }
+}
+
+/// The newest transcripts for the tray's Recent submenu. An unreadable folder lists nothing.
+fn recent(store: &audio::Store) -> Vec<String> {
+    store.recent(input::RECENT).unwrap_or_default().into_iter().map(|(_, text)| text).collect()
 }
 
 struct AppInsert(Option<insert::Focus>);
@@ -262,7 +311,9 @@ impl flow::Show for input::Ui {
 fn spawn_stt(dir: PathBuf, model: &'static audio::model::Model, tx: Sender<Msg>) -> Sender<Vec<f32>> {
     let (clips, rx) = mpsc::channel::<Vec<f32>>();
     thread::spawn(move || {
-        let mut whisper = audio::model::ensure(&dir, model).and_then(|path| audio::Whisper::load(&path));
+        let progress = tx.clone();
+        let mut whisper = audio::model::ensure(&dir, model, |p| drop(progress.send(Msg::Progress(p))))
+            .and_then(|path| audio::Whisper::load(&path));
         let _ = tx.send(Msg::Ready(whisper.as_ref().err().cloned()));
         for samples in rx {
             let text = match &mut whisper {
@@ -351,11 +402,16 @@ pub fn run() {
     let tokens = CredTokens::new(env("SHEPETAL_CREDENTIAL_TARGET").as_deref());
     let mut account = Account::new(tokens, Some(data.join("account.json")), required);
     account_onboarding(&mut account);
-    let (ui, events) = match input::spawn(input::Hotkey::parse(flow::HOTKEY).unwrap_or_default()) {
+    let hotkey = hotkey();
+    let (ui, events) = match input::spawn(&hotkey) {
         Ok(x) => x,
         Err(e) => return message(&format!("Shepetal can't watch the keyboard or show its 🤫: {e}")),
     };
     ui.set_start_at_login(starts_at_login());
+    let mut retention = retention();
+    ui.set_delete_after_24h(retention == Retention::Delete24h);
+    let mut history = recent(&store);
+    ui.set_recent(history.clone());
 
     let (tx, rx) = mpsc::channel();
     let forward = tx.clone();
@@ -373,14 +429,18 @@ pub fn run() {
 
     let mut flow = Flow::new(
         AppMic(audio::Mic::open(PRE_ROLL).ok()),
-        AppStore(store),
+        AppStore(store.clone(), None),
         AppInsert(None),
         ui,
     );
+    flow.hotkey = hotkey;
     let mut gesture = Gesture::default();
     let t0 = Instant::now();
     let ms = |at: Instant| at.saturating_duration_since(t0).as_millis() as u64;
     let mut paused = false;
+    // Goal rule 4: with delete after 24 h, clips go at launch and within a minute of turning 24 h old.
+    let mut prune = system::Prune::default();
+    let mut prune_failed = false;
     // The app of the latest offer: a recording starts only from one, so it names the meeting.
     let mut meeting_app = String::new();
     let card = card.map_err(|e| flow.error(&format!("Shepetal can't offer to record meetings: {e}"), 0)).ok();
@@ -413,6 +473,15 @@ pub fn run() {
                 flow.show.set_start_at_login(starts_at_login());
                 vec![]
             }
+            Ok(Msg::Input(input::Event::DeleteAfter24h(on))) => {
+                if let Err(e) = set_retention(if on { Retention::Delete24h } else { Retention::Keep }) {
+                    flow.error(&e, now);
+                }
+                retention = self::retention(); // the check mark shows what was saved
+                flow.show.set_delete_after_24h(retention == Retention::Delete24h);
+                prune.now();
+                vec![]
+            }
             Ok(Msg::Input(input::Event::Account(id))) => {
                 if let Some(cmd) = Command::from_id(id) {
                     account.command(cmd, flow.busy());
@@ -425,14 +494,43 @@ pub fn run() {
             }
             // The tray, overlay and hook are already gone.
             Ok(Msg::Input(input::Event::Quit)) | Err(RecvTimeoutError::Disconnected) => break,
+            Ok(Msg::Progress(p)) => {
+                flow.downloading = Some(p);
+                vec![]
+            }
             Ok(Msg::Ready(err)) => {
-                if let Some(e) = err {
-                    flow.error(&e, now);
+                let downloaded = flow.downloading.take().is_some();
+                match err {
+                    Some(e) => flow.error(&e, now),
+                    None if downloaded => flow.show.show_hint(&system::ready_hint(&flow.hotkey), HINT),
+                    None => {}
                 }
                 vec![]
             }
             Ok(Msg::Text(text)) => {
                 flow.transcribed(text, now);
+                history = recent(&store);
+                flow.show.set_recent(history.clone());
+                vec![]
+            }
+            Ok(Msg::Input(input::Event::Hotkey(n))) => {
+                let name = input::HOTKEYS[n];
+                match set_hotkey(name).and_then(|()| flow.show.set_hotkey(name)) {
+                    Ok(()) => {
+                        flow.hotkey = name.into();
+                        flow.show.show_hint(&format!("Hold {name} to talk"), HINT);
+                    }
+                    Err(e) => flow.error(&e, now),
+                }
+                vec![]
+            }
+            Ok(Msg::Input(input::Event::CopyRecent(n))) => {
+                if let Some(text) = history.get(n) {
+                    match insert::copy(text) {
+                        Ok(()) => flow.show.show_hint("Copied. Press Ctrl+V to paste it.", HINT),
+                        Err(e) => flow.error(&format!("Could not use the clipboard: {e}"), now),
+                    }
+                }
                 vec![]
             }
             Ok(Msg::Meeting(notice)) => {
@@ -468,12 +566,24 @@ pub fn run() {
             if let Some(samples) = flow.action(action, now) {
                 let _ = stt.send(samples);
             }
-            // The mic did not open: end the gesture too, so its release stops nothing.
+            // The mic did not open, or the model is still downloading: end the gesture too, so its
+            // release stops nothing.
             if action == Action::Start && !flow.busy() {
                 gesture.reset();
             }
         }
         flow.tick(now);
+        if retention == Retention::Delete24h && prune.due(now) {
+            match store.prune(retention, now_ms()) {
+                Ok(_) => prune_failed = false,
+                // Once, not every minute while it keeps failing.
+                Err(e) if !prune_failed => {
+                    prune_failed = true;
+                    flow.error(&format!("Could not delete recordings older than 24 hours: {e}"), now);
+                }
+                Err(_) => {}
+            }
+        }
         if account_tick.elapsed() >= ACCOUNT_TICK {
             account_tick = Instant::now();
             account.tick(unix_now(), flow.busy());

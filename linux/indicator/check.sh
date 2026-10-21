@@ -82,7 +82,7 @@ steps() {
     $grab "/out/$1-recording.png"; check shot "/out/$1-recording.png" recording
     echo "hint $hint" >&3; sleep 0.5
     $grab "/out/$1-hint.png"; check shot "/out/$1-hint.png" recording "$hint"
-    echo handsfree >&3; sleep 2  # the hint is gone after about 2 s
+    echo handsfree >&3; sleep 3  # the hint is gone after about 3 s
     $grab "/out/$1-handsfree.png"; check shot "/out/$1-handsfree.png" handsfree
     echo processing >&3
     for i in 1 2 3; do sleep 0.3; $grab "/out/$1-processing-$i.png"; done
