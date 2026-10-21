@@ -250,7 +250,8 @@ J_TEXT="明日の会議の資料を、金曜日までに送ってください。
 printf '%s\n' "$J_TEXT" > "$J.txt"
 SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ja "$BIN" --e2e "$J.wav" "$FIX/e01.wav" 2>>"$WORK/stderr.log" | tee "$WORK/languages.jsonl" || true
 SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ko "$BIN" --e2e "$J.wav" 2>>"$WORK/stderr.log" | tee "$WORK/outside.jsonl" || true
-E2E_LANGUAGES=de,fr "$BIN" --e2e "$FIX/e02.wav" 2>>"$WORK/stderr.log" | tee "$WORK/wrong-language.jsonl" || true
+# The hint names the language in the system language (Locale.current): pinned, so "English" is checked on any Mac.
+E2E_LANGUAGES=de,fr "$BIN" -AppleLocale en_US --e2e "$FIX/e02.wav" 2>>"$WORK/stderr.log" | tee "$WORK/wrong-language.jsonl" || true
 python3 - "$WORK/languages.jsonl" "$WORK/wrong-language.jsonl" "$FIX" "$(basename "$WHISPER" .bin)" "$WORK/outside.jsonl" <<'PY'
 import json, os, re, sys, unicodedata
 
