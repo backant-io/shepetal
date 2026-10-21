@@ -36,6 +36,20 @@ final class AccountWiringTests: XCTestCase {
         XCTAssertTrue(src.contains("Account.shared.menuItems().forEach(menu.addItem)"))
     }
 
+    /// Signed out at launch or on a blocked fn press, Account opens the Shepetal window on Home, where Sign in is
+    /// at the top. Never from a --no-permission-prompts launch (scripts/check-app.sh must not take the focus).
+    func testSignInOpensTheWindowOnHome() throws {
+        XCTAssertTrue(try app().contains("showHome: { [weak self] in if self?.allowPrompts == true { self?.openedHub()?.showHome() } })"),
+                      "Account.shared.start must get the window presenter")
+        let hub = code(try source("Hub.swift"))
+        let show = try XCTUnwrap(hub.range(of: "func showHome() {"))
+        XCTAssertTrue(hub[show.upperBound...].prefix(120).contains("UserDefaults.standard.set(\"home\", forKey: \"hubTab\")"),
+                      "showHome must pick the Home tab")
+        let home = try XCTUnwrap(hub.range(of: "private struct HomeTab: View {"))
+        XCTAssertTrue(hub[home.upperBound...].prefix(400).contains("Form {\n                AccountSection()"),
+                      "the account comes first on Home")
+    }
+
     /// Every place an engine or download error reaches the screen goes through SpeechError(plain:).
     func testEngineErrorsAreMadePlainWhereTheyReachTheUI() throws {
         let speech = code(try source("Speech.swift"))

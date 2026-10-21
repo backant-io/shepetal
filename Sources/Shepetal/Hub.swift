@@ -4,8 +4,9 @@ import ShepetalCore
 import SwiftUI
 
 /// The one Shepetal window: Home, History and Settings. It opens from the 🤫 menu and when the app is
-/// opened again while it runs, never at launch. Settings added by other parts (shortcuts, mic,
-/// languages, dictionary, login) stay in the 🤫 menu for now.
+/// opened again while it runs. It opens by itself on Home only when dictation needs sign-in: once at launch,
+/// and on a blocked fn press. Settings added by other parts (shortcuts, mic, languages, dictionary, login)
+/// stay in the 🤫 menu for now.
 @MainActor
 final class Hub {
     private let window: NSWindow
@@ -31,6 +32,12 @@ final class Hub {
         model.reload()
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    /// Home, with the account and Sign in at the top.
+    func showHome() {
+        UserDefaults.standard.set("home", forKey: "hubTab")
+        show()
     }
 
     /// The Meetings tab with this meeting open (the transcript window's Open in Meetings).
@@ -163,6 +170,7 @@ private struct HomeTab: View {
             let s = model.status()
             let missing = Permission.missing
             Form {
+                AccountSection()
                 LabeledContent("Speech recognition", value: s.model)
                 LabeledContent("fn key", value: s.fnWatched ? "Watched: hold fn to talk, double-tap for hands-free"
                                                             : "Not watched yet (needs Input Monitoring)")
@@ -172,7 +180,6 @@ private struct HomeTab: View {
                 LabeledContent("Permissions", value: missing.isEmpty ? "All granted"
                                                      : "Missing: " + missing.map(\.title).joined(separator: ", "))
                 if !missing.isEmpty { Button("Open Permissions…", action: model.openPermissions) }
-                AccountSection()
                 Section("Donate") {
                     ForEach(AppDelegate.donate, id: \.1) { title, url in Link(title, destination: URL(string: url)!) }
                 }
