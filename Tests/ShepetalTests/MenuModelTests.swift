@@ -74,7 +74,7 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(top(MenuState(access: .signedOut, signingIn: true)).map(\.title), ["Cancel sign-in"],
                        "a sheet stuck in a browser can be closed from the menu")
 
-        let buy = ["Get shepetal for $4.99…"]
+        let buy = ["Get shepetal: $23.99 once or $0.99 a month…"]
         XCTAssertEqual(top(MenuState(access: .trial(daysLeft: 30))).map(\.title), [], "no nagging early in the trial")
         XCTAssertEqual(top(MenuState(access: .trial(daysLeft: 8))).map(\.title), [])
         XCTAssertEqual(top(MenuState(access: .trial(daysLeft: 7))).map(\.title), buy, "from 7 days left")
@@ -83,6 +83,11 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(top(MenuState(access: .expired)).first?.action, .buy)
         XCTAssertEqual(top(MenuState(access: .lifetime)), [])
         XCTAssertEqual(top(MenuState(access: .unchecked)), [], "Check license now is on Home")
+        // The plans: a subscriber has nothing to buy; an ended subscription buys again; a failed payment is fixed on Home.
+        XCTAssertEqual(top(MenuState(access: .subscription(paidThrough: Date() + 86_400, renews: true))), [])
+        XCTAssertEqual(top(MenuState(access: .subscription(paidThrough: Date() + 86_400, renews: false))), [])
+        XCTAssertEqual(top(MenuState(access: .subscriptionEnded)).map(\.title), buy)
+        XCTAssertEqual(top(MenuState(access: .paymentFailed)), [], "Manage subscription is on Home")
 
         XCTAssertEqual(top(MenuState(canDownloadEngine: true)).map(\.action), [.download])
         XCTAssertEqual(top(MenuState(canDownloadEngine: false)), [],
@@ -90,7 +95,7 @@ final class MenuModelTests: XCTestCase {
 
         let groups = MenuModel.groups(busy)
         XCTAssertEqual(groups[0].map(\.title), ["Permissions needed…", "Download on-device speech recognition (about 470 MB)",
-                                                 "Download cleanup model (about 1.3 GB)", "Get shepetal for $4.99…"],
+                                                 "Download cleanup model (about 1.3 GB)", "Get shepetal: $23.99 once or $0.99 a month…"],
                        "every contextual item is in the first group")
         XCTAssertEqual(groups[1].first?.title, "Stop meeting recording", "then the menu as usual")
     }

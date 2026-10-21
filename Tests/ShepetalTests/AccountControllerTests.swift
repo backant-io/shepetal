@@ -63,6 +63,14 @@ final class AccountControllerTests: XCTestCase {
         return (200, body)
     }
 
+    /// GET /api/license for the monthly plan (web/API.md), paid through `paidThrough`.
+    private func monthly(_ paidThrough: Date, status: String = "active", renews: Bool = true, failed: Bool = false) -> (Int, Any) {
+        (200, ["status": status, "plan": "subscription", "email": "a@example.com",
+               "trial_ends_at": status == "active" ? NSNull() as Any : ISO8601DateFormatter().string(from: Date() - 40 * day) as Any,
+               "paid_through": ISO8601DateFormatter().string(from: paidThrough), "renews": renews, "payment_failed": failed])
+    }
+    private var plans: URL { URL(string: server.url.absoluteString + "/account#plans")! }
+
     private func until(_ what: String, _ condition: () -> Bool) async throws {
         for _ in 0..<1000 where !condition() { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertTrue(condition(), what)
@@ -311,20 +319,19 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever"])
     }
 
-    func testExpiredBlocksFnAndBuyOpensCheckout() async throws {
+    func testExpiredBlocksFnAndBuyOpensThePlanChoice() async throws {
         try tokens.write("tok-1")
-        server.handler = { [unowned self] r in
-            r.path == "/api/checkout" ? (200, ["url": "https://checkout.stripe.com/c/pay/cs_test_1"]) : license("expired", endsIn: -day)
-        }
+        server.handler = { [unowned self] _ in license("expired", endsIn: -day) }
         let a = account()
         try await until("checked at launch") { a.access == .expired }
         XCTAssertFalse(a.allowFnDown())
-        XCTAssertEqual(hints.last, "Trial ended: get Shepetal for $4.99")
-        XCTAssertTrue(titles(a).contains("Get shepetal for $4.99…"))
+        XCTAssertEqual(hints.last, "Trial ended. Pick a plan to keep Shepetal.")
+        XCTAssertTrue(titles(a).contains("Get shepetal: $23.99 once or $0.99 a month…"))
+        let sent = server.requests.count
         a.buy()
-        try await until("checkout opened") { !opened.isEmpty }
-        XCTAssertEqual(opened, [URL(string: "https://checkout.stripe.com/c/pay/cs_test_1")!])
-        XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer tok-1")
+        XCTAssertEqual(opened, [plans], "the site's plan choice: $23.99 once or $0.99 a month")
+        XCTAssertEqual(server.requests.count, sent, "no checkout request: the buyer picks the plan on the site")
+        XCTAssertFalse(plans.absoluteString.contains("tok-1"), "the token never goes into an address")
     }
 
     func testAPurchaseOnTheWebsiteUnlocksOnTheNextFnPress() async throws {
@@ -333,7 +340,7 @@ final class AccountControllerTests: XCTestCase {
         server.handler = { [unowned self] _ in license(status, endsIn: -day) }
         let a = account()
         try await until("checked at launch") { a.access == .expired }
-        XCTAssertTrue(titles(a).contains("Get shepetal for $4.99…"))
+        XCTAssertTrue(titles(a).contains("Get shepetal: $23.99 once or $0.99 a month…"))
         status = "active"  // paid on shepetal.backant.io
         let sent = server.requests.count
         XCTAssertFalse(a.allowFnDown(), "this press is still blocked")
@@ -347,47 +354,119 @@ final class AccountControllerTests: XCTestCase {
 
     func testBuyRechecksUntilThePurchaseShowsUp() async throws {
         try tokens.write("tok-1")
-        var status = "trial"
-        server.handler = { [unowned self] r in
-            r.path == "/api/checkout" ? (200, ["url": "https://checkout.stripe.com/c/pay/cs_test_2"]) : license(status, endsIn: 5 * day)
-        }
+        var reply = license("trial", endsIn: 5 * day)
+        server.handler = { _ in reply }
         let a = account()
         try await until("checked at launch") { a.access == .trial(daysLeft: 5) }
         a.buy()
-        try await until("checkout opened") { !opened.isEmpty }
-        status = "active"
+        XCTAssertEqual(opened, [plans])
+        reply = license("active")  // the lifetime license, bought on the site
         a.now = { Date() + 120 }
         a.tick()  // a minute later, not 24 h
         try await until("re-checked after checkout") { a.access == .lifetime }
         XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever"])
     }
 
-    /// Bought, then Buy pressed again before the re-check ran: the service answers 409 already_active.
-    /// The user must see "Yours forever", not "Checkout failed", and no second checkout page opens.
-    func testBuyWhenAlreadyBoughtChecksAndShowsYoursForever() async throws {
+    func testBuyingTheMonthlyPlanShowsUpTooAndDictates() async throws {
         try tokens.write("tok-1")
-        var status = "trial"
-        server.handler = { [unowned self] r in
-            r.path == "/api/checkout" ? (409, ["error": "already_active"]) : license(status, endsIn: 5 * day)
-        }
-        let a = account()
-        try await until("checked at launch") { a.access == .trial(daysLeft: 5) }
-        status = "active"  // paid in the browser a moment ago
-        a.buy()
-        try await until("re-checked after the 409") { a.access == .lifetime }
-        XCTAssertEqual(a.message, "")
-        XCTAssertTrue(opened.isEmpty)
-        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever"])
-    }
-
-    func testCheckoutWithARevokedTokenSignsOut() async throws {
-        try tokens.write("tok-1")
-        server.handler = { [unowned self] r in r.path == "/api/checkout" ? (401, ["error": "unauthorized"]) : license("expired", endsIn: -day) }
+        var reply = license("expired", endsIn: -day)
+        server.handler = { _ in reply }
         let a = account()
         try await until("checked at launch") { a.access == .expired }
         a.buy()
+        let through = Date() + 30 * day
+        reply = monthly(through)  // $0.99 a month, bought on the site
+        a.now = { Date() + 120 }
+        a.tick()
+        try await until("re-checked after checkout") { a.access.isPaid }
+        let paid = try XCTUnwrap(a.state.license?.subscription?.paidThrough)
+        XCTAssertEqual(a.access, .subscription(paidThrough: paid, renews: true))
+        XCTAssertTrue(a.allowFnDown())
+        XCTAssertEqual(titles(a), ["Signed in as a@example.com · $0.99 a month, renews \(AccountText.day(paid))"], "no Buy in the menu")
+    }
+
+    /// Manage subscription opens the Stripe Billing Portal from the app, with the token, then re-checks for an hour
+    /// so a cancel there shows up here: "Yours until <date>", and dictation still works until then.
+    func testManageOpensTheBillingPortalAndACancelShowsUp() async throws {
+        try tokens.write("tok-1")
+        let through = Date() + 10 * day
+        var reply = monthly(through)
+        server.handler = { r in r.path == "/api/billing/portal" ? (200, ["url": "https://billing.stripe.com/p/session/test_1"]) : reply }
+        let a = account()
+        try await until("checked at launch") { a.access.isPaid }
+        XCTAssertTrue(a.access.canManage)
+        a.manage()
+        try await until("portal opened") { !opened.isEmpty }
+        XCTAssertEqual(opened, [URL(string: "https://billing.stripe.com/p/session/test_1")!])
+        XCTAssertEqual(server.requests.last?.path, "/api/billing/portal")
+        XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer tok-1")
+        reply = monthly(through, renews: false)  // cancelled in the portal
+        a.now = { Date() + 120 }
+        a.tick()
+        try await until("re-checked after the portal") { a.access == .subscription(paidThrough: a.state.license!.subscription!.paidThrough!, renews: false) }
+        XCTAssertTrue(a.allowFnDown(), "a cancelled subscription works until its period ends")
+        XCTAssertTrue(a.summaryLine.hasSuffix("Yours until \(AccountText.day(a.state.license!.subscription!.paidThrough!))"), a.summaryLine)
+
+        // Its period ends, with the Mac offline: it stops on time, and the menu offers the plans again.
+        server.handler = { _ in (0, [:]) }
+        a.now = { through + 60 }
+        XCTAssertFalse(a.allowFnDown())
+        XCTAssertEqual(a.access, .subscriptionEnded)
+        XCTAssertEqual(hints.last, "Your subscription ended. Pick a plan to keep Shepetal.")
+        XCTAssertTrue(titles(a).contains("Get shepetal: $23.99 once or $0.99 a month…"))
+    }
+
+    /// "Works offline" for a subscriber: the paid period plus 14 days without reaching the service.
+    func testASubscriptionKeepsDictatingOfflineThroughItsPeriodPlusFourteenDays() async throws {
+        try tokens.write("tok-1")
+        let through = Date() + 20 * day
+        server.handler = { [unowned self] _ in monthly(through) }
+        let a = account()
+        try await until("checked at launch") { a.access.isPaid }
+
+        server.handler = { _ in (0, [:]) }  // offline from now on
+        for later in [8 * day, 20 * day + 60, 33 * day] {
+            let b = account()
+            b.now = { Date() + later }
+            try await until("the launch check failed") { b.checkTask == nil && b.message.contains("Could not check") }
+            XCTAssertTrue(b.allowFnDown(), "\(Int(later / day)) days offline still dictates")
+        }
+        let c = account()
+        c.now = { [day] in Date() + 35 * day }  // paid period + 15 days
+        try await until("the launch check failed") { c.checkTask == nil && c.message.contains("Could not check") }
+        XCTAssertFalse(c.allowFnDown())
+        XCTAssertEqual(c.access, .unchecked)
+        XCTAssertEqual(hints.last, "Connect to the internet so Shepetal can check your license")
+    }
+
+    func testAFailedPaymentBlocksFnAndManageFixesIt() async throws {
+        try tokens.write("tok-1")
+        var reply = monthly(Date() - 60, status: "expired", failed: true)
+        server.handler = { r in r.path == "/api/billing/portal" ? (200, ["url": "https://billing.stripe.com/p/session/test_2"]) : reply }
+        let a = account()
+        try await until("checked at launch") { a.access == .paymentFailed }
+        XCTAssertFalse(a.allowFnDown())
+        XCTAssertEqual(hints.last, "Payment failed. Update your card in Manage subscription.")
+        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Payment failed"], "fixed on Home, not bought again from the menu")
+        XCTAssertEqual(homeShown, 1, "Home, with Manage subscription, opens once at launch")
+        a.manage()
+        try await until("portal opened") { !opened.isEmpty }
+        reply = monthly(Date() + 30 * day)  // a new card, the invoice paid
+        a.now = { Date() + 120 }
+        a.tick()
+        try await until("re-checked") { a.access.isPaid }
+        XCTAssertTrue(a.allowFnDown())
+    }
+
+    func testManageWithARevokedTokenSignsOut() async throws {
+        try tokens.write("tok-1")
+        server.handler = { [unowned self] r in r.path == "/api/billing/portal" ? (401, ["error": "unauthorized"]) : monthly(Date() + 9 * day) }
+        let a = account()
+        try await until("checked at launch") { a.access.isPaid }
+        a.manage()
         try await until("signed out") { a.access == .signedOut }
         XCTAssertNil(tokens.read())
+        XCTAssertTrue(opened.isEmpty)
         XCTAssertEqual(titles(a).prefix(2), ["Not signed in", "Sign in to start your free trial…"])
     }
 
