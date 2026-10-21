@@ -1,0 +1,25 @@
+/* The website's own cut of the brand fonts: Latin and Latin-1 plus š and the typographic punctuation,
+   and only the weights the site uses. 120 KB in place of 270 KB, so the first paint on a phone comes sooner.
+   Modified fonts get a new name (SIL OFL 1.1 and identity.md): "shepetal Serif" is Newsreader,
+   "shepetal Sans" is Hanken Grotesk. Both licenses are in fonts/. Rebuild them with fonts/subset.py.
+   A character outside the cut falls back to the full brand fonts from tokens.css. */
+@font-face {
+  font-family: 'shepetal Serif';
+  src: url('./fonts/shepetal-serif.woff2') format('woff2');
+  font-weight: 300 440;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20-7E, U+A0-FF, U+160-161, U+B7, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2032-2033, U+2122, U+2192, U+2212;
+}
+@font-face {
+  font-family: 'shepetal Sans';
+  src: url('./fonts/shepetal-sans.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20-7E, U+A0-FF, U+160-161, U+B7, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2032-2033, U+2122, U+2192, U+2212;
+}
+:root {
+  --sh-font-display: 'shepetal Serif', 'Newsreader', 'Iowan Old Style', Georgia, serif;
+  --sh-font-text: 'shepetal Sans', 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
