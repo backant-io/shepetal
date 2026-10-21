@@ -1,0 +1,544 @@
+/* The blog, brand v2.1 (BRAND.md): blush by day, dusk by night, Newsreader for headlines and reading text,
+   Hanken Grotesk for everything else, and one Mulberry field per page (the afterglow call to action).
+   Only brand tokens are used here, so the blog follows tokens.css and fonts.css and nothing else. */
+
+.bl {
+  --bl-gutter: clamp(16px, 4.4vw, 64px);
+  --bl-max: 1200px;
+  --bl-read: 40rem;
+  padding-bottom: 0;
+}
+
+.bl-wrap {
+  width: 100%;
+  max-width: calc(var(--bl-max) + 2 * var(--bl-gutter));
+  margin-inline: auto;
+  padding-inline: var(--bl-gutter);
+}
+
+.bl .sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---------- Head ---------- */
+.bl-head {
+  padding-top: clamp(40px, 7vw, 96px);
+  padding-bottom: clamp(28px, 4vw, 48px);
+}
+.bl-crumbs ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: var(--sh-size-small);
+  color: var(--sh-text-muted);
+}
+.bl-crumbs li + li::before {
+  content: '/';
+  margin-right: 8px;
+  opacity: 0.6;
+}
+.bl-crumbs a {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-underline-offset: 3px;
+}
+.bl-crumbs a:hover {
+  color: var(--sh-text);
+}
+.bl-kicker {
+  font-size: var(--sh-size-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--sh-accent);
+}
+.bl-title {
+  margin-top: 20px;
+  max-width: 18em;
+  font-family: var(--sh-font-display);
+  font-weight: 360;
+  font-size: clamp(38px, 5.6vw, 72px);
+  line-height: 1.05;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+.bl-dek {
+  margin-top: 20px;
+  max-width: 34em;
+  font-family: var(--sh-font-display);
+  font-weight: 380;
+  font-size: clamp(19px, 1.7vw, 22px);
+  line-height: 1.5;
+  color: var(--sh-text-muted);
+  text-wrap: pretty;
+}
+.bl-byline {
+  margin-top: 24px;
+  font-size: var(--sh-size-small);
+  color: var(--sh-text-muted);
+}
+
+/* ---------- Article grid: the contents on the left from 1040 px, the reading column next to it ---------- */
+.bl-grid {
+  display: grid;
+  gap: 32px;
+  padding-bottom: clamp(64px, 9vw, 128px);
+}
+@media (min-width: 1040px) {
+  .bl-grid {
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 64px;
+    align-items: start;
+  }
+  .bl-toc {
+    position: sticky;
+    top: 96px;
+  }
+}
+.bl-toc {
+  font-size: var(--sh-size-small);
+  border-top: 1px solid var(--sh-border);
+  padding-top: 16px;
+}
+.bl-toc-h {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.bl-toc ol {
+  display: grid;
+  gap: 2px;
+}
+.bl-toc a {
+  display: block;
+  padding: 5px 0;
+  color: var(--sh-text-muted);
+  line-height: 1.35;
+}
+.bl-toc a:hover {
+  color: var(--sh-text);
+}
+
+/* ---------- Reading text ---------- */
+.bl-body {
+  min-width: 0;
+  max-width: 48rem;
+}
+.bl-body > section + section {
+  margin-top: clamp(48px, 6vw, 72px);
+}
+.bl-body h2 {
+  font-family: var(--sh-font-display);
+  font-weight: 380;
+  font-size: clamp(28px, 3.2vw, 40px);
+  line-height: 1.12;
+  letter-spacing: -0.008em;
+  text-wrap: balance;
+  margin-bottom: 20px;
+  scroll-margin-top: 96px;
+}
+.bl-body h3 {
+  font-family: var(--sh-font-display);
+  font-weight: 440;
+  font-size: 24px;
+  line-height: 1.25;
+  margin: 36px 0 12px;
+  text-wrap: balance;
+}
+.bl-body p,
+.bl-body li {
+  font-family: var(--sh-font-display);
+  font-weight: 400;
+  font-size: var(--sh-size-reading);
+  line-height: 1.65;
+  max-width: var(--bl-read);
+  text-wrap: pretty;
+}
+.bl-body p + p,
+.bl-body p + ul,
+.bl-body ul + p {
+  margin-top: 16px;
+}
+.bl-body ul.bl-list {
+  display: grid;
+  gap: 8px;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+.bl-body ul.bl-list li::marker {
+  color: var(--sh-accent);
+}
+.bl-body a {
+  color: var(--sh-accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.bl-body a:hover {
+  text-decoration-thickness: 2px;
+}
+.bl-body strong {
+  font-weight: 600;
+}
+.bl-short {
+  padding: clamp(20px, 3vw, 32px);
+  border-radius: var(--sh-radius-lg);
+  background: var(--sh-bg-raised);
+  box-shadow: inset 0 0 0 1px var(--sh-border);
+}
+.bl-short h2 {
+  font-family: var(--sh-font-text);
+  font-size: var(--sh-size-small);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--sh-accent);
+  margin-bottom: 10px;
+}
+.bl-short p {
+  font-size: var(--sh-size-lead);
+  line-height: 1.5;
+}
+
+/* ---------- The side-by-side table ---------- */
+.bl-table-wrap {
+  margin: 28px 0 8px;
+}
+.bl-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.bl-table caption {
+  text-align: left;
+  font-size: var(--sh-size-small);
+  color: var(--sh-text-muted);
+  padding-bottom: 12px;
+}
+.bl-table th,
+.bl-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--sh-border);
+}
+.bl-table thead th {
+  font-weight: 600;
+  font-size: var(--sh-size-body);
+  border-bottom: 1.5px solid var(--sh-text);
+}
+.bl-table tbody th {
+  font-weight: 600;
+  color: var(--sh-text-muted);
+  width: 9.5em;
+}
+.bl-table [data-us] {
+  background: color-mix(in srgb, var(--sh-accent) 7%, transparent);
+}
+/* Phones: one card per app, each fact labeled, so nothing scrolls sideways. */
+@media (max-width: 719px) {
+  .bl-table,
+  .bl-table tbody,
+  .bl-table tr,
+  .bl-table td,
+  .bl-table th {
+    display: block;
+  }
+  .bl-table caption {
+    display: block;
+  }
+  .bl-table thead {
+    display: none;
+  }
+  .bl-table tbody tr {
+    padding: 12px 0;
+    border-bottom: 1px solid var(--sh-border);
+  }
+  .bl-table tbody th {
+    width: auto;
+    border: 0;
+    padding: 4px 0 6px;
+    color: var(--sh-text);
+  }
+  .bl-table td {
+    display: grid;
+    grid-template-columns: 7.5em minmax(0, 1fr);
+    gap: 12px;
+    border: 0;
+    padding: 6px 8px;
+    border-radius: var(--sh-radius-sm);
+  }
+  .bl-table td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    color: var(--sh-text-muted);
+  }
+}
+
+/* ---------- Verdict cards ---------- */
+.bl-picks {
+  display: grid;
+  gap: 12px;
+  margin-top: 24px;
+}
+@media (min-width: 720px) {
+  .bl-picks {
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  }
+}
+.bl-picks li {
+  padding: 20px;
+  border-radius: var(--sh-radius-md);
+  box-shadow: inset 0 0 0 1px var(--sh-border);
+  background: var(--sh-bg-raised);
+}
+.bl-picks li[data-us] {
+  box-shadow: inset 0 0 0 1.5px var(--sh-accent);
+}
+.bl-body .bl-picks p {
+  font-size: 16px;
+  line-height: 1.55;
+}
+.bl-body .bl-picks .bl-picks-h {
+  font-family: var(--sh-font-text);
+  font-weight: 600;
+  font-size: var(--sh-size-small);
+  margin-bottom: 6px;
+}
+
+/* ---------- Ranked entries ---------- */
+.bl-rank {
+  padding-top: 28px;
+  margin-top: 28px;
+  border-top: 1px solid var(--sh-border);
+  scroll-margin-top: 96px;
+}
+.bl-body .bl-rank h3 {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
+  margin: 0 0 16px;
+  font-size: clamp(26px, 2.6vw, 32px);
+}
+.bl-rank-n {
+  font-family: var(--sh-font-text);
+  font-size: 15px;
+  font-weight: 600;
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--sh-radius-full);
+  box-shadow: inset 0 0 0 1.5px var(--sh-border);
+  align-self: center;
+}
+.bl-rank[data-us] .bl-rank-n {
+  background: var(--sh-primary-fill);
+  color: var(--sh-on-primary);
+  box-shadow: none;
+}
+.bl-rank-v {
+  flex-basis: 100%;
+  font-family: var(--sh-font-text);
+  font-size: var(--sh-size-small);
+  font-weight: 500;
+  color: var(--sh-text-muted);
+}
+@media (min-width: 720px) {
+  .bl-rank-v {
+    flex-basis: auto;
+  }
+}
+.bl-facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 1px;
+  margin-bottom: 18px;
+  border-radius: var(--sh-radius-md);
+  overflow: hidden;
+  background: var(--sh-border);
+  box-shadow: 0 0 0 1px var(--sh-border);
+}
+.bl-facts > div {
+  padding: 12px 14px;
+  background: var(--sh-bg-raised);
+}
+.bl-facts dt {
+  font-size: var(--sh-size-caption);
+  font-weight: 600;
+  color: var(--sh-text-muted);
+  margin-bottom: 2px;
+}
+.bl-facts dd {
+  font-size: var(--sh-size-small);
+  line-height: 1.4;
+}
+
+/* ---------- Questions ---------- */
+.bl-faq > div + div {
+  border-top: 1px solid var(--sh-border);
+}
+.bl-body .bl-faq h3 {
+  font-size: 21px;
+  margin: 20px 0 8px;
+}
+.bl-faq > div {
+  padding-bottom: 20px;
+}
+
+/* ---------- Cards ---------- */
+.bl-shelf {
+  padding-bottom: clamp(48px, 7vw, 96px);
+}
+.bl-shelf h2,
+.bl-related h2 {
+  font-family: var(--sh-font-display);
+  font-weight: 380;
+  font-size: clamp(28px, 3.2vw, 40px);
+  line-height: 1.12;
+  margin-bottom: 24px;
+}
+.bl-cards {
+  display: grid;
+  gap: 16px;
+}
+@media (min-width: 720px) {
+  .bl-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1040px) {
+  .bl-cards:not([data-large]) {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.bl-card {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  height: 100%;
+  padding: 24px;
+  border-radius: var(--sh-radius-lg);
+  background: var(--sh-bg-raised);
+  box-shadow: inset 0 0 0 1px var(--sh-border);
+  transition: box-shadow var(--sh-dur-fast) var(--sh-ease-move), transform var(--sh-dur-fast) var(--sh-ease-move);
+}
+.bl-card:hover {
+  box-shadow: inset 0 0 0 1.5px var(--sh-accent);
+}
+.bl-card-k {
+  font-size: var(--sh-size-caption);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--sh-accent);
+}
+.bl-card-t {
+  font-family: var(--sh-font-display);
+  font-weight: 400;
+  font-size: 24px;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+[data-large] .bl-card-t {
+  font-size: clamp(26px, 2.6vw, 32px);
+}
+.bl-card-d {
+  font-size: 15px;
+  line-height: 1.5;
+  color: var(--sh-text-muted);
+}
+.bl-related {
+  padding-block: clamp(56px, 8vw, 112px);
+}
+
+/* ---------- Call to action: the page's one Mulberry field, blush text only ---------- */
+.bl-cta {
+  background: var(--sh-gradient-afterglow);
+  color: var(--sh-neutral-50);
+  padding-block: clamp(72px, 10vw, 144px);
+  text-align: center;
+}
+.bl-cta .bl-wrap {
+  display: grid;
+  justify-items: center;
+  gap: 20px;
+}
+.bl-cta-mark {
+  width: 160px;
+  height: auto;
+  margin-bottom: 8px;
+}
+.bl-cta h2 {
+  font-family: var(--sh-font-display);
+  font-weight: 360;
+  font-size: clamp(36px, 5vw, 64px);
+  line-height: 1.06;
+  letter-spacing: -0.012em;
+  text-wrap: balance;
+}
+.bl-cta-lead {
+  font-family: var(--sh-font-display);
+  font-size: clamp(19px, 1.7vw, 22px);
+  line-height: 1.5;
+  max-width: 30em;
+}
+.bl-cta-claims {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 44rem;
+}
+.bl-cta-claims li {
+  font-size: var(--sh-size-small);
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: var(--sh-radius-full);
+  box-shadow: inset 0 0 0 1px rgb(250 238 232 / 0.32);
+}
+.bl-cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.bl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0.9rem 1.5rem;
+  border-radius: var(--sh-radius-md);
+  font-weight: 600;
+  line-height: 1;
+  background: var(--sh-neutral-50);
+  color: var(--sh-neutral-950);
+  transition: transform var(--sh-dur-fast) var(--sh-ease-move);
+}
+.bl-btn:active {
+  transform: translateY(1px);
+}
+.bl-btn-quiet {
+  background: transparent;
+  color: var(--sh-neutral-50);
+  box-shadow: inset 0 0 0 1.5px rgb(250 238 232 / 0.5);
+}
+.bl-cta :focus-visible {
+  outline-color: var(--sh-neutral-50);
+}
+
+/* ---------- Index ---------- */
+.bl-index-head .bl-title {
+  margin-top: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bl * {
+    transition: none !important;
+  }
+}

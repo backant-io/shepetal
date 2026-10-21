@@ -1,0 +1,42 @@
+<!doctype html>
+<!-- The blog's link previews (public/blog/og/<slug>.jpg), 1200 x 630, built by og/blog-og.mjs, which passes the
+     kicker and the title in the query string. The afterglow with the wordmark and the article's title. No price
+     and no steps on a preview (BRAND.md). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'shepetal Serif'; src: url('../src/app/(site)/fonts/shepetal-serif.woff2') format('woff2'); font-weight: 300 440; }
+  @font-face { font-family: 'shepetal Sans'; src: url('../src/app/(site)/fonts/shepetal-sans.woff2') format('woff2'); font-weight: 400 700; }
+  * { margin: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body {
+    position: relative;
+    background: radial-gradient(110% 120% at 80% 115%, #8A2D57 0%, #5E1C3A 36%, #2A0F1D 70%, #1C0A13 100%);
+    color: #FAEEE8;
+    font-family: 'shepetal Sans', sans-serif;
+  }
+  .grain { position: absolute; inset: 0; background: url('../public/brand/grain.svg') 0 0 / 256px; opacity: 0.05; }
+  .copy { position: absolute; left: 88px; right: 88px; top: 80px; bottom: 80px; display: flex; flex-direction: column; }
+  .mark { display: block; width: 210px; height: auto; }
+  .kicker { margin-top: auto; font-size: 24px; font-weight: 600; letter-spacing: 0.02em; color: #E6ABB8; }
+  h1 { margin-top: 18px; max-width: 980px; font-family: 'shepetal Serif', serif; font-weight: 340; font-size: 76px; line-height: 1.04; letter-spacing: -0.014em; text-wrap: balance; }
+  h1.long { font-size: 64px; }
+</style>
+</head>
+<body>
+  <div class="grain"></div>
+  <div class="copy">
+    <img class="mark" src="../public/brand/shepetal-wordmark-on-dark.svg" alt="shepetal">
+    <p class="kicker" id="k"></p>
+    <h1 id="t"></h1>
+  </div>
+  <script>
+    const q = new URLSearchParams(location.search);
+    document.getElementById('k').textContent = q.get('k') || '';
+    const t = document.getElementById('t');
+    t.textContent = q.get('t') || '';
+    if (t.textContent.length > 48) t.className = 'long';
+  </script>
+</body>
+</html>
