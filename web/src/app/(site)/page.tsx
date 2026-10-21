@@ -8,7 +8,7 @@ const FEATURES = [
   },
   {
     title: 'Fast',
-    body: 'The text is in place a moment after you let go of fn, because your Mac does all the work right there on its own chip.',
+    body: 'The text is in place a moment after you finish speaking, because your Mac does all the work right there on its own chip.',
   },
   {
     title: 'Every app',
@@ -29,8 +29,7 @@ export default function Home() {
         </div>
         <div className="max-w-md">
           <p className="text-lg leading-relaxed">
-            Shepetal is dictation that runs fully on your Mac. You hold fn, say what you want to write and let go, and
-            the text lands where your cursor is.
+            Press one key. Your words appear wherever you speak. Shepetal is dictation that runs fully on your Mac.
           </p>
           <p className="mt-4 leading-relaxed text-[var(--hush)]">
             While it runs, a tiny 🤫 sits in the bottom-left corner of your screen, like the one on this page, and turns

@@ -6,14 +6,23 @@ import './site.css';
 const display = Funnel_Display({ subsets: ['latin'], weight: ['300', '400'], variable: '--font-display' });
 const sans = Funnel_Sans({ subsets: ['latin'], weight: ['400', '500', '600'], variable: '--font-sans' });
 
+const title = 'shepetal: Write at the speed of thought.';
 const description =
-  'Dictation that runs fully on your Mac with on-device speech recognition. Hold fn, talk, and the text lands where your cursor is. Free for 30 days, then $4.99 once.';
+  'Press one key. Your words appear wherever you speak. Dictation that runs fully on your Mac with on-device speech recognition. Free for 30 days, then $4.99 once.';
+// A static file in public/, served from the edge without waking the Worker.
+const ogImage = {
+  url: '/og.png',
+  width: 1200,
+  height: 630,
+  type: 'image/png',
+  alt: 'shepetal. Instant dictation that stays on your Mac. Press one key. Your words appear wherever you speak.',
+};
 
 export const metadata: Metadata = {
-  title: { default: 'Shepetal: hold fn, talk, done', template: '%s - Shepetal' },
+  title: { default: title, template: '%s - Shepetal' },
   description,
-  openGraph: { title: 'Shepetal: hold fn, talk, done', description, url: '/', siteName: 'Shepetal', type: 'website' },
-  twitter: { card: 'summary_large_image', title: 'Shepetal: hold fn, talk, done', description },
+  openGraph: { title, description, url: '/', siteName: 'Shepetal', type: 'website', images: [ogImage] },
+  twitter: { card: 'summary_large_image', title, description, images: [ogImage] },
 };
 
 export const viewport: Viewport = {
