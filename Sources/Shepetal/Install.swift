@@ -124,14 +124,16 @@ enum MoveToApplications {
         NSApp.activate(ignoringOtherApps: true)
         guard alert.runModal() == .alertFirstButtonReturn else { return false }
 
-        // ponytail: a newer root-owned copy in /Applications is not looked at once the move goes to ~/Applications.
-        let dest = URL(fileURLWithPath: MovePrompt.destination(home: NSHomeDirectory(), writable: fm.isWritableFile(atPath:),
-                                                               exists: fm.fileExists(atPath:)))
         let build = { (b: Bundle?) in Int(b?.infoDictionary?["CFBundleVersion"] as? String ?? "") }
-        let installed = Bundle(url: dest).flatMap { $0.bundleIdentifier == UninstallPlan.bundleID ? build($0) : nil }
+        let ours = { (u: URL) in Bundle(url: u).flatMap { $0.bundleIdentifier == UninstallPlan.bundleID ? build($0) : nil } }
+        let running = build(Bundle.main) ?? 0
+        let dest = URL(fileURLWithPath: MovePrompt.destination(home: NSHomeDirectory(), writable: fm.isWritableFile(atPath:),
+                                                               exists: fm.fileExists(atPath:),
+                                                               systemBuild: ours(URL(fileURLWithPath: MovePrompt.system)),
+                                                               runningBuild: running))
         let source = original(here)
         do {
-            let move = MovePrompt.move(installedBuild: installed, runningBuild: build(Bundle.main) ?? 0)
+            let move = MovePrompt.move(installedBuild: ours(dest), runningBuild: running)
             switch move {
             case .openInstalled: break
             case .replace:
@@ -150,10 +152,12 @@ enum MoveToApplications {
             fail.runModal()
             return false
         }
-        if dest.path != MovePrompt.system, fm.fileExists(atPath: MovePrompt.system) {
+        // The old .pkg's root-owned copy (not newer: `destination` would have opened it). On a standard account the copy
+        // there is an admin's, shared by every account, so nothing is said.
+        if dest.path != MovePrompt.system, fm.fileExists(atPath: MovePrompt.system), fm.isWritableFile(atPath: "/Applications") {
             let old = NSAlert()
             old.messageText = "shepetal is now in your own Applications folder"
-            old.informativeText = "The older copy in /Applications needs an administrator password to remove. Move it to the Trash in Finder."
+            old.informativeText = "The copy in /Applications needs an administrator password to remove. Move it to the Trash in Finder."
             old.runModal()
         }
         let open = Process()

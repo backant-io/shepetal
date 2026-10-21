@@ -143,9 +143,13 @@ public enum MovePrompt {
     public static func remember(_ defaults: UserDefaults, version: String) { defaults.set(version, forKey: askedKey) }
 
     /// /Applications, unless that folder is not writable (a standard account) or the copy there cannot be replaced
-    /// (root-owned, from the old .pkg): then ~/Applications, which needs no password.
-    public static func destination(home: String, writable: (String) -> Bool, exists: (String) -> Bool) -> String {
-        writable("/Applications") && (!exists(system) || writable(system)) ? system : home + "/Applications/Shepetal.app"
+    /// (root-owned, from the old .pkg): then ~/Applications, which needs no password. A copy in /Applications newer
+    /// than this one (`systemBuild`, e.g. an admin's on a standard account) is always the target, so `move` opens it:
+    /// moving must not downgrade.
+    public static func destination(home: String, writable: (String) -> Bool, exists: (String) -> Bool,
+                                   systemBuild: Int?, runningBuild: Int) -> String {
+        if let s = systemBuild, s > runningBuild { return system }
+        return writable("/Applications") && (!exists(system) || writable(system)) ? system : home + "/Applications/Shepetal.app"
     }
 
     public static func offers(path: String, home: String, readOnlyVolume: Bool, bundleID: String, asked: Bool) -> Bool {
