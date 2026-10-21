@@ -9,6 +9,7 @@ final class FakeEngine: SpeechEngine {
     var text: String
     var error: Error?
     private(set) var calls = 0
+    private(set) var heard: [Float] = []  // the samples of the last call
 
     init(_ text: String = "", error: Error? = nil) {
         self.text = text
@@ -17,6 +18,7 @@ final class FakeEngine: SpeechEngine {
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         calls += 1
+        heard = samples
         if let error { throw error }
         return text
     }

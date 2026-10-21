@@ -136,6 +136,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. With AirPods connected and preferred, dictate once. Expected: "Tip: the built-in mic records clearer than Bluetooth" shows once. Dictate again: it does not show again, not even after a relaunch.
 2. On the built-in mic, hold fn and say a sentence very quietly from about an arm's length away. Expected: after the text lands, "Speak closer or use a wired mic". A normal sentence at normal distance does not show it. If it shows too often or never, tune it with `defaults write io.backant.shepetal micQuietFloor -float 0.002` (RMS, default 0.003) and relaunch.
 
+### M-MIC-6: Voice Isolation in a loud room (#75)
+1. With music or a TV playing loudly near the Mac, or in a café, hold fn and dictate two sentences at a normal voice. Expected: the text has the sentences and none of the background speech or lyrics.
+2. During any dictation, open Control Center > Mic Mode. Expected: Shepetal is not listed there, and Shepetal never opens that menu itself.
+3. Open the dictation in the hub and play it. Expected: the recording plays back raw, with the background noise still in it. Only the text was made from the isolated voice.
+4. If words go missing in a quiet room, lower the effect with `defaults write io.backant.shepetal voiceIsolationMix -float 50` (percent, default 100; 0 turns it off) and relaunch.
+
 ### M-LANG-1: languages
 1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
 2. Check Deutsch and Français. Expected: the menu's model line stays "Model: parakeet-tdt-0.6b-v3" (no reload). Say a German sentence. Expected: German text.
