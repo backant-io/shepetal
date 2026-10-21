@@ -172,7 +172,14 @@ private final class FailingStore: MeetingStoring {
     func list(limit: Int) throws -> [Meeting] {
         [Meeting(id: "x", app: "Zoom", startedAt: Date(), meAudioPath: "", othersAudioPath: "")]
     }
-    func search(_ query: String, limit: Int) throws -> [Meeting] { [] }
+    func search(_ query: String, folder: String?, limit: Int) throws -> [MeetingHit] { [] }
     func get(_ id: String) throws -> MeetingRecord? { throw Broken() }
     func delete(_ id: String) throws {}
+    func deleteTranscripts(endedBefore cutoff: Date, recording: String?, now: Date) throws -> [String] { [] }
+    func folders() throws -> [MeetingFolder] { [] }
+    func createFolder(_ name: String) throws -> MeetingFolder { throw Broken() }
+    func renameFolder(_ id: String, to name: String) throws {}
+    func deleteFolder(_ id: String) throws {}
+    func setFolders(_ folderIDs: Set<String>, for meetingID: String) throws {}
+    func list(inFolder folderID: String, limit: Int) throws -> [Meeting] { [] }
 }
