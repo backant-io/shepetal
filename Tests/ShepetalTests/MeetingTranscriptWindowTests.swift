@@ -117,7 +117,7 @@ final class MeetingTranscriptWindowTests: XCTestCase {
     func testEveryMeetingTheFlowFinishesReusesOneWindow() throws {
         let flow = MeetingFlow(store: store, summarizer: MeetingTranscriberTests.StubSummarizer(), engine: { nil }, hint: { _ in })
         var panels: [RecordingPanel] = []
-        MeetingTranscriptWindow.follow(flow, open: { _ in }) { let p = RecordingPanel(); panels.append(p); return p }
+        _ = MeetingTranscriptWindow.follow(flow, open: { _ in }) { let p = RecordingPanel(); panels.append(p); return p }
         XCTAssertEqual(panels.count, 0, "no window before a meeting ends")
         for (i, id) in ["a", "b", "c"].enumerated() {
             flow.onTranscript(try ended(id, "Zoom", minutesAgo: Double(30 - i), said: [Segment(speaker: .me, start: 1, end: 2, text: id)]), true)
@@ -125,6 +125,25 @@ final class MeetingTranscriptWindowTests: XCTestCase {
         XCTAssertEqual(panels.count, 1)
         XCTAssertEqual(panels.first?.calls.count, 3, "each meeting brings it to the front")
         XCTAssertEqual((panels.first?.contentView as? NSHostingView<MeetingTranscriptView>)?.rootView.model.record?.meeting.id, "c")
+    }
+
+    // The 🤫 menu's Past meetings: the same one window, back in front even after the user closed it, never key.
+    func testAPastMeetingFromTheMenuReusesTheWindowAndBringsItBack() throws {
+        let flow = MeetingFlow(store: store, summarizer: MeetingTranscriberTests.StubSummarizer(), engine: { nil }, hint: { _ in })
+        var panels: [RecordingPanel] = []
+        let openPast = MeetingTranscriptWindow.follow(flow, open: { _ in }) { let p = RecordingPanel(); panels.append(p); return p }
+        let a = try ended("a", "Zoom", minutesAgo: 30, said: [Segment(speaker: .me, start: 1, end: 2, text: "a")])
+        let b = try ended("b", "Zoom", minutesAgo: 20, said: [Segment(speaker: .me, start: 1, end: 2, text: "b")])
+        openPast(a)  // before any meeting ended in this run
+        XCTAssertEqual(panels.count, 1)
+        flow.onTranscript(b, true)
+        openPast(b)  // the user closed it, then chose b in the menu
+        XCTAssertEqual(panels.count, 1, "never a second window")
+        XCTAssertEqual(panels[0].calls, ["orderFrontRegardless", "orderFrontRegardless", "orderFrontRegardless"],
+                       "in front each time, never made key")
+        let view = try XCTUnwrap((panels[0].contentView as? NSHostingView<MeetingTranscriptView>)?.rootView)
+        XCTAssertEqual(view.model.record?.meeting.id, "b")
+        XCTAssertFalse(view.summarizing, "a past meeting promises no summary, so nothing spins for ever")
     }
 
     func testTheNextMeetingClearsCopiedFromTheLastOne() throws {

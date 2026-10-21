@@ -29,22 +29,27 @@ final class MeetingTranscriptWindow {
     }
 
     /// One window for every meeting `flow` finishes, made at the first one: the latest replaces the one shown.
+    /// Returns what the 🤫 menu's Past meetings call: a past meeting in that same window, in front.
     static func follow(_ flow: MeetingFlow, open: @escaping (String) -> Void,
-                       panel: @escaping @MainActor () -> TranscriptPanel = { TranscriptPanel() }) {
+                       panel: @escaping @MainActor () -> TranscriptPanel = { TranscriptPanel() }) -> (Meeting) -> Void {
         var window: MeetingTranscriptWindow?
-        flow.onTranscript = { [store = flow.store] m, summarizing in
-            window = window ?? MeetingTranscriptWindow(model: MeetingsModel(store: store), open: open, panel: panel())
-            window?.show(m, summarizing: summarizing)
+        let shared = { [store = flow.store] () -> MeetingTranscriptWindow in
+            let w = window ?? MeetingTranscriptWindow(model: MeetingsModel(store: store), open: open, panel: panel())
+            window = w
+            return w
         }
+        flow.onTranscript = { m, summarizing in shared().show(m, summarizing: summarizing) }
+        return { shared().show($0, summarizing: false, front: true) }
     }
 
     /// `summarizing` false: no summary is coming (the final pass or the summary failed), so none is promised.
-    /// The same meeting again only updates the window; a window the user closed stays closed.
-    func show(_ meeting: Meeting, summarizing: Bool = true) {
+    /// The same meeting again only updates the window; a window the user closed stays closed, unless `front`
+    /// (they chose it in the 🤫 menu).
+    func show(_ meeting: Meeting, summarizing: Bool = true, front: Bool = false) {
         let shown = model.selectedID == meeting.id
         model.select(meeting.id)
         hosting.rootView = MeetingTranscriptView(model: model, open: open, summarizing: summarizing)
-        if !shown { panel.orderFrontRegardless() }
+        if !shown || front { panel.orderFrontRegardless() }
     }
 }
 

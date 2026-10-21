@@ -195,7 +195,7 @@ public enum Access: Equatable, Sendable {
         }
     }
 
-    /// One line for the menu and Home.
+    /// One line for Home.
     public var summary: String {
         switch self {
         case .signedOut: "Not signed in"
