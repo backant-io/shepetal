@@ -89,6 +89,10 @@ final class NotesWindowTests: XCTestCase {
         w.open(a.id)
         XCTAssertEqual(made.count, 2, "a already has a tab")
         XCTAssertEqual(made[0].calls.last, "makeKeyAndOrderFront", "its tab is selected")
+        let (aShown, bShown) = (made[0].calls.count, made[1].calls.count)
+        w.show()
+        XCTAssertEqual([made[0].calls.count, made[1].calls.count], [aShown + 1, bShown],
+                       "the shortcut again keeps the tab in front, a, not the top note of the list, b")
         w.newNote()
         XCTAssertEqual(made.count, 3)
         XCTAssertEqual(made[0].joined.last, made[2], "a new note joins the tab in front, a")

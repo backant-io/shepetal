@@ -42,7 +42,10 @@ final class ShortcutsTests: XCTestCase {
         XCTAssertEqual(paste.inputs, [.pasteLast], "the other shortcuts keep working")
 
         var g = FnGesture()
-        XCTAssertEqual(g.handle(.openNotes, at: 0), [], "opening notes never starts, stops or cancels a dictation")
+        XCTAssertEqual(g.handle(.openNotes, at: 0), [], "opening notes never starts a dictation")
+        XCTAssertEqual(g.handle(.toggle, at: 1), [.start, .lockHandsFree])
+        XCTAssertEqual(g.handle(.openNotes, at: 3), [], "nor stops or cancels one")
+        XCTAssertEqual(g.state, .handsFree(since: 1))
 
         XCTAssertEqual(Shortcuts(stored: r.shortcuts.stored).chord(.openNotes), [ctrl, opt, n], "kept in UserDefaults")
         XCTAssertEqual(r.shortcuts.problem([ctrl, opt, n], for: .copyLast), .inUse, "two actions never share a chord")
