@@ -87,10 +87,10 @@ final class LocalPasteboardTests: XCTestCase {
             let code = try String(contentsOf: f, encoding: .utf8).components(separatedBy: .newlines)
                 .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
             for l in code {
-                for banned in ["clearContents(", "declareTypes("] {
+                for banned in ["clearContents", "declareTypes"] {  // bare words: `clearContents ()` and #selector too
                     XCTAssertFalse(l.contains(banned), "\(f.lastPathComponent): \(l.trimmingCharacters(in: .whitespaces)) – use clearOnThisMac()")
                 }
-                if l.contains("prepareForNewContents(") { prepares.append(l.trimmingCharacters(in: .whitespaces)) }
+                if l.contains("prepareForNewContents") { prepares.append(l.trimmingCharacters(in: .whitespaces)) }
             }
         }
         XCTAssertEqual(prepares, ["func clearOnThisMac() { _ = prepareForNewContents(with: .currentHostOnly) }"])

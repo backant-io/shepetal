@@ -286,6 +286,18 @@ final class AccountTests: XCTestCase {
                        "account.json edited to active")
     }
 
+    /// Seals already in account.json must keep verifying in every later build and on every macOS: a change here
+    /// leaves each lifetime user who is offline at the update unable to dictate. The expected values were computed
+    /// outside Swift (Python hmac over the documented bytes). Change the format only with a migration.
+    func testTheSealFormatNeverChanges() {
+        let paid = AccountState(license: License(status: .active, trialEndsAt: nil, email: "a@example.com"), lastGoodCheck: now)
+        XCTAssertEqual(paid.sealed(with: token).seal, "XhSFAd/JP4hbmdANIb7wJOOgp6Bt+2GvA/Nh5a0AtaY=")
+        let trial = AccountState(license: License(status: .trial, trialEndsAt: now + 5 * day, email: "a@example.com"),
+                                 lastGoodCheck: now - day, lastAttempt: now)
+        XCTAssertEqual(trial.sealed(with: token).seal, "ZjjVYOW2XSAw+w40UTo5IcFU1+VPDkIf51i1DO03rWg=",
+                       "lastAttempt is not sealed: a failed check keeps the seal")
+    }
+
     func testUnauthorizedSignsOutAndClearsTheCache() {
         let (s, signedOut) = AccountPolicy.apply(.success(.unauthorized), to: state(.active, checkedAgo: 0), now: now, token: token)
         XCTAssertTrue(signedOut)

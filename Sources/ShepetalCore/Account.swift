@@ -264,13 +264,15 @@ public struct AccountState: Codable, Equatable, Sendable {
         return HMAC<SHA256>.isValidAuthenticationCode(code, authenticating: sealedBytes, using: SymmetricKey(data: Data(token.utf8)))
     }
 
-    /// The sealed fields as they are saved: dates in whole seconds, so a seal made in memory still matches after a
-    /// round trip through the file.
+    /// The sealed fields, one per line. Dates are in whole seconds, as the file has them, so a seal made in memory
+    /// still matches after a round trip through the file. The bytes are built by hand rather than with JSONEncoder,
+    /// so an OS update that changes the encoder's output cannot break every seal; `AccountTests` pins them. The
+    /// email comes last because it is the only field that can contain a newline.
     private var sealedBytes: Data {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        e.outputFormatting = .sortedKeys
-        return (try? e.encode(AccountState(license: license, lastGoodCheck: lastGoodCheck))) ?? Data()
+        let iso = ISO8601DateFormatter()
+        let fields = ["shepetal-license-v1", license?.status.rawValue ?? "", license?.trialEndsAt.map(iso.string) ?? "",
+                      lastGoodCheck.map(iso.string) ?? "", license?.email ?? ""]
+        return Data(fields.joined(separator: "\n").utf8)
     }
 
     public static func load(_ url: URL) -> AccountState {
