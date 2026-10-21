@@ -19,6 +19,18 @@ pub fn ready_hint(hotkey: &str) -> String {
 /// ask the user to quit a running shepetal first. No `Global\` prefix: one instance per session.
 pub const MUTEX: &str = "Shepetal.SingleInstance";
 
+/// Whether another Shepetal holds `MUTEX`. `created`: CreateMutexW returned a handle, and
+/// `existed`: its last error was ERROR_ALREADY_EXISTS. If the create failed, `opened` asks
+/// OpenMutexW whether the name exists, so a failed create never starts a second instance next
+/// to a running one.
+pub fn already_running(created: bool, existed: bool, opened: impl FnOnce() -> bool) -> bool {
+    if created {
+        existed
+    } else {
+        opened()
+    }
+}
+
 /// Start at login: a value under HKCU, written by the installer's "start at login" task and by
 /// the tray toggle, removed by the uninstaller.
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -172,6 +184,14 @@ mod tests {
         // uninstaller deletes only the models, never the recordings next to them.
         let data: Vec<&str> = ISS.lines().filter(|l| l.to_ascii_lowercase().contains(r"{localappdata}\shepetal")).collect();
         assert_eq!(data, [r#"Type: filesandordirs; Name: "{localappdata}\Shepetal\models""#]);
+    }
+
+    #[test]
+    fn a_failed_create_asks_whether_the_mutex_exists() {
+        assert!(!already_running(true, false, || panic!("not asked when the create worked")), "first instance");
+        assert!(already_running(true, true, || panic!("not asked")), "second instance");
+        assert!(already_running(false, false, || true), "create failed, but a running one holds the name");
+        assert!(!already_running(false, false, || false), "create and open failed: nothing to go by, start");
     }
 
     #[test]

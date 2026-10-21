@@ -18,7 +18,7 @@ use windows_sys::Win32::Foundation::{GetLastError, ERROR_ALREADY_EXISTS, ERROR_F
 use windows_sys::Win32::System::Registry::{
     RegDeleteKeyValueW, RegGetValueW, RegSetKeyValueW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_SZ,
 };
-use windows_sys::Win32::System::Threading::CreateMutexW;
+use windows_sys::Win32::System::Threading::{CreateMutexW, OpenMutexW, SYNCHRONIZATION_SYNCHRONIZE};
 use windows_sys::Win32::UI::Shell::ShellExecuteW;
 use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
 
@@ -32,8 +32,14 @@ fn wide(s: &str) -> Vec<u16> {
 
 /// Takes the named mutex. The handle stays open until the process exits, which frees the name.
 fn already_running() -> bool {
-    let h = unsafe { CreateMutexW(null(), 0, wide(MUTEX).as_ptr()) };
-    !h.is_null() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS
+    let name = wide(MUTEX);
+    let h = unsafe { CreateMutexW(null(), 0, name.as_ptr()) };
+    let existed = unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
+    system::already_running(!h.is_null(), existed, || {
+        let other = unsafe { OpenMutexW(SYNCHRONIZATION_SYNCHRONIZE, 0, name.as_ptr()) };
+        // Left open like ours: the process is about to exit anyway.
+        !other.is_null()
+    })
 }
 
 fn reg_string(root: HKEY, key: &str, value: &str) -> Option<String> {
