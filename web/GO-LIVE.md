@@ -19,11 +19,15 @@ Google Cloud Console → APIs & Services → Credentials → backant's OAuth cli
 
 ## 3. Stripe (Pavel, backant account, live mode)
 
-1. Create a product "Shepetal" with a one-time price of $4.99 USD. Put the price ID (`price_…`) in `STRIPE_PRICE_ID` in `web/wrangler.toml` and merge that one-line change to `main`.
-2. Create a **new** webhook endpoint `https://shepetal.backant.io/api/stripe/webhook` with the events `checkout.session.completed` **and** `checkout.session.async_payment_succeeded` (without the second, a delayed payment method never activates). Do not touch backant's existing endpoint or its secret.
-3. Copy that endpoint's signing secret (`whsec_…`) for step 4.
+1. Create or update the products, prices, the PRODUCTHUNT code and the Billing Portal configuration (prints the IDs, changes nothing on a second run, archives the old $4.99 price):
 
-Both sites share this Stripe account, so each webhook sees the other's checkouts. shepetal acts only on a paid session with `metadata.app = "shepetal"` and answers everything else 200 (the e2e sends a paid backant subscription checkout and checks that it grants nothing). backant's handler acts only on `mode=subscription`. If shepetal ever sells a subscription, filter backant's handler first.
+   ```sh
+   cd web && STRIPE_SECRET_KEY="$(aws ssm get-parameter --with-decryption --name /backant/WEB_STRIPE_SECRET_KEY --query Parameter.Value --output text)" node scripts/stripe-setup.mjs --live
+   ```
+2. The webhook endpoint `https://shepetal.backant.io/api/stripe/webhook` (we_1USl5ADrjgXysMQjYGGaUepu) must send `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` and `invoice.payment_failed`. Do not touch backant's own endpoint or its secret.
+3. Copy that endpoint's signing secret (`whsec_…`) for step 4 if it is not set yet.
+
+Both sites share this Stripe account, so each webhook sees the other's events. shepetal acts only on sessions and subscriptions with `metadata.app = "shepetal"` and answers everything else 200. backant's handler acts on every `mode=subscription` checkout that has a `client_reference_id`, so shepetal's subscription checkouts carry none (the user id is in metadata), and backant finds no client for shepetal's Stripe customers on subscription events. Filtering `metadata.app = "shepetal"` out in backant's handler as well is the safe follow-up.
 
 ## 4. Database, Worker and secrets
 
@@ -35,7 +39,7 @@ git switch main && git pull
 npm ci
 npx wrangler whoami                      # Hegler Technologies
 npx wrangler secret list                 # names only: AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY
-npm run db:migrate:remote                # applies 0002_app_login (drops device_codes, creates app_codes, adds tokens.last_used_at)
+npm run db:migrate:remote                # applies what is not applied yet: 0002_app_login, 0003_plans (plan and subscription columns, stripe_events)
 npx wrangler secret put STRIPE_WEBHOOK_SECRET   # paste the whsec_ value from step 3
 npm run deploy
 ```
@@ -108,7 +112,7 @@ t = call('/api/app/token', dict(code=got['code'], code_verifier=v, redirect_uri=
 print('signed in as', t['email'])
 print('license', call('/api/license', tok=t['access_token']))        # trial, trial_ends_at = now + 30 days
 print('checkout', call('/api/checkout', {}, t['access_token'])['url'])  # https://checkout.stripe.com/...
-input('Pay in the browser (live, $4.99), then press Enter: ')
+input('Pay in the browser (live, $23.99, or $4.99 with PRODUCTHUNT), then press Enter: ')
 print('license', call('/api/license', tok=t['access_token']))        # active, trial_ends_at null
 print('sign out', call('/api/app/revoke', {}, t['access_token']))    # {'ok': True}
 try: call('/api/license', tok=t['access_token']); print('FAIL: the revoked token still works')

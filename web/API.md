@@ -30,11 +30,28 @@ The app makes a code_verifier (43 to 128 characters from A-Z a-z 0-9 - . _ ~), i
 
 ## License and purchase
 
-- GET /api/license with Authorization: Bearer <access_token>: 200 {status:"trial"|"active"|"expired", trial_ends_at: ISO-8601 or null, email}; 401 for an invalid, revoked or expired (90 days unused) token. trial_ends_at is the first sign-in plus 30 days, and null for "active".
-- POST /api/checkout (Bearer token or web session): 200 {url} to a Stripe Checkout session (mode payment) for the one-time $4.99 price (STRIPE_PRICE_ID), with client_reference_id set to the user id and metadata.app = "shepetal". Success returns to /account?purchased=1, cancel to /account. 401 when signed out; 409 {error:"already_active"} once bought.
-- POST /api/stripe/webhook (Stripe only; the Stripe-Signature is checked against STRIPE_WEBHOOK_SECRET over the raw body, 400 if it does not match): a checkout.session.completed or checkout.session.async_payment_succeeded whose session has payment_status "paid" and metadata.app "shepetal" makes that user "active" forever. Every other event and session gets 200 and changes nothing. backant.io uses the same Stripe account, so its own checkouts (subscriptions, no shepetal metadata) arrive here too.
+- GET /api/license with Authorization: Bearer <access_token>: 200 {status, plan, trial_ends_at, paid_through, renews, payment_failed, email}; 401 for an invalid, revoked or expired (90 days unused) token.
+  - status: "trial" | "active" | "expired". "active" means shepetal works now: a lifetime license, or a subscription paid through a date still ahead. The apps before plans read only status, trial_ends_at and email.
+  - plan: "lifetime" | "subscription" | "trial".
+    - lifetime: status "active" forever; trial_ends_at, paid_through null.
+    - subscription: status "active" while now < paid_through, the end of the last paid period. After it, status follows the trial dates ("trial" inside the first 30 days, else "expired") and plan stays "subscription".
+    - trial: status "trial", then "expired"; trial_ends_at is the first sign-in plus 30 days.
+  - paid_through: ISO-8601 or null (lifetime, trial). For a renewal that failed, it is the start of the unpaid period, so the subscription stops there until it is paid.
+  - renews: true while a subscription will charge again at paid_through (also while Stripe retries a failed payment); false once cancelled, so it ends at paid_through.
+  - payment_failed: true while the last renewal is unpaid (Stripe status past_due or unpaid). The card is updated in the Billing Portal.
+- POST /api/checkout (Bearer token or web session) with JSON {plan: "lifetime" | "monthly"}; no body or no plan is "lifetime". 200 {url} to a Stripe Checkout session:
+  - lifetime: mode payment, the one-time $23.99 price (lookup_key shepetal_lifetime), client_reference_id = user id.
+  - monthly: mode subscription, the $0.99 monthly price (lookup_key shepetal_monthly), subscription metadata {app: "shepetal", user_id}. No client_reference_id: backant.io's own handler treats a subscription checkout's client_reference_id as its client id.
+  - Both: allow_promotion_codes, the user's own Stripe customer (created once per user, so a first_time_transaction code works once per user), metadata {app: "shepetal", user_id, plan}. The PRODUCTHUNT code takes $19.00 off the lifetime price only; Stripe refuses it on the monthly plan.
+  - Success returns to /account?purchased=1, cancel to /account. 401 when signed out; 400 {error:"invalid_plan"}; 409 {error:"already_active"} once the lifetime license is bought; 409 {error:"already_subscribed"} for monthly while a subscription is active. A subscriber may buy the lifetime license: the subscription then stops renewing and runs to its period end.
+- POST /api/billing/portal (Bearer token or web session): 200 {url} to the Stripe Billing Portal for the user's customer (configuration with metadata app=shepetal: cancel at period end, update the card, invoices; returns to /account). 404 {error:"no_customer"} before any checkout; 401 when signed out.
+- POST /api/stripe/webhook (Stripe only; the Stripe-Signature is checked against STRIPE_WEBHOOK_SECRET over the raw body, 400 if it does not match). Each event id is handled once (table stripe_events); a failure answers 500 and releases the id so Stripe's retry runs it. Events:
+  - checkout.session.completed and checkout.session.async_payment_succeeded with metadata.app "shepetal": mode payment with payment_status "paid" (or "no_payment_required") makes the user's lifetime license; mode subscription stores the subscription.
+  - customer.subscription.updated, customer.subscription.deleted (and .created), invoice.paid and invoice.payment_failed: the subscription is read fresh from Stripe, so the order of events does not matter, and stored if its metadata.app is "shepetal": plan, Stripe status, current_period_end, cancel_at_period_end and paid_through.
+  - Every other event and object gets 200 and changes nothing. backant.io uses the same Stripe account, so its own checkouts and subscriptions arrive here too.
 
 ## Site
 
 - GET /download (signed in): 302 to the latest backant-io/shepetal GitHub release asset matching Shepetal-*.pkg, or a page saying it is coming soon if none exists.
-- The trial starts at the user's first shepetal sign-in (web or app) and lasts 30 days, with no card. "active" never expires. Each user is keyed by their Google account email, lowercased.
+- The trial starts at the user's first shepetal sign-in (web or app) and lasts 30 days, with no card. A lifetime license never expires.
+- GET /account#plans: the plan choice ($23.99 once or $0.99 a month), where the apps' Buy button lands. Subscribers get Manage subscription there. Each user is keyed by their Google account email, lowercased.

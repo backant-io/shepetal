@@ -21,8 +21,10 @@ migrations_dir = "migrations"
 [vars]
 NEXTAUTH_URL = "https://shepetal.backant.io"
 AUTH_URL = "https://shepetal.backant.io"
-# One-time $4.99 price in backant's Stripe account. Set once the price exists.
-STRIPE_PRICE_ID = "price_1USl5ADrjgXysMQjColtJKH5"
+# Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
+# and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
+# scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and
+# STRIPE_PORTAL_CONFIG override the lookups if ever needed.
 
 # Secrets: wrangler secret put AUTH_SECRET
 #          wrangler secret put GOOGLE_CLIENT_ID
