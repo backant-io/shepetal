@@ -10,6 +10,7 @@ pub enum Backend {
     /// No key injector: copy the text and let the user paste it.
     WlCopy,
     Xclip,
+    Xsel,
 }
 
 pub struct Env<'a> {
@@ -33,14 +34,14 @@ pub fn choose(env: &Env, has: impl Fn(&str) -> bool) -> Option<Backend> {
 
 /// The clipboard tool for this session, for text that is not typed (goal rule 8).
 pub fn clipboard(env: &Env, has: impl Fn(&str) -> bool) -> Option<Backend> {
-    let order: &[Backend] = if env.session == "wayland" { &[Backend::WlCopy, Backend::Xclip] } else { &[Backend::Xclip] };
+    let order: &[Backend] = if env.session == "wayland" { &[Backend::WlCopy, Backend::Xclip, Backend::Xsel] } else { &[Backend::Xclip, Backend::Xsel] };
     order.iter().copied().find(|b| has(b.bin()))
 }
 
 impl Backend {
     /// Copies instead of typing: the user pastes.
     pub fn is_clipboard(self) -> bool {
-        matches!(self, Backend::WlCopy | Backend::Xclip)
+        matches!(self, Backend::WlCopy | Backend::Xclip | Backend::Xsel)
     }
 
     pub fn bin(self) -> &'static str {
@@ -50,6 +51,7 @@ impl Backend {
             Backend::Ydotool => "ydotool",
             Backend::WlCopy => "wl-copy",
             Backend::Xclip => "xclip",
+            Backend::Xsel => "xsel",
         }
     }
 
@@ -62,6 +64,7 @@ impl Backend {
             Backend::Ydotool => &["type", "--file", "-"],
             Backend::WlCopy => &[],
             Backend::Xclip => &["-selection", "clipboard"],
+            Backend::Xsel => &["--clipboard", "--input"],
         }
     }
 
@@ -113,6 +116,7 @@ mod tests {
             (Ydotool, "type --file -"),
             (WlCopy, ""),
             (Xclip, "-selection clipboard"),
+            (Xsel, "--clipboard --input"),
         ];
         let dir = std::env::temp_dir().join(format!("shepetal-bin-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -137,7 +141,11 @@ mod tests {
         assert_eq!(clip("wayland", &["xclip"]), Some(Xclip));
         assert_eq!(clip("x11", ALL), Some(Xclip));
         assert_eq!(clip("x11", &["wl-copy"]), None);
-        assert!(WlCopy.is_clipboard() && Xclip.is_clipboard());
+        // xsel when xclip is missing, in either session.
+        assert_eq!(clip("x11", &["xsel"]), Some(Xsel));
+        assert_eq!(clip("wayland", &["xsel", "xdotool"]), Some(Xsel));
+        assert_eq!(clip("x11", &["xsel", "xclip"]), Some(Xclip));
+        assert!(WlCopy.is_clipboard() && Xclip.is_clipboard() && Xsel.is_clipboard());
         assert!(!Wtype.is_clipboard() && !Xdotool.is_clipboard() && !Ydotool.is_clipboard());
     }
 
