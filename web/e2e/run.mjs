@@ -192,9 +192,12 @@ async function main() {
   ok('migrations applied to a fresh local D1');
 
   const log = createWriteStream(logFile);
+  // --local-upstream: with the custom-domain route in wrangler.toml, wrangler dev otherwise rewrites Host and
+  // Origin to shepetal.backant.io, and the consent POST fails its Origin check against AUTH_URL with a 403.
   worker = spawn(
     join(BIN, 'wrangler'),
     ['dev', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(await freePort()),
+      '--local-upstream', `localhost:${port}`,
       '--persist-to', state, '--env-file', envFile, '--show-interactive-dev-session=false'],
     { cwd: WEB, detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
   );
