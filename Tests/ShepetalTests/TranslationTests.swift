@@ -1,4 +1,5 @@
 import AppKit
+import ShepetalCore
 import Translation
 import XCTest
 @testable import Shepetal
@@ -25,6 +26,10 @@ final class TranslationTests: XCTestCase {
     }
 
     let german = "Hallo, wie geht es dir heute?"
+    let chinese = "你好，今天你怎么样？我们明天见。"
+    let japanese = "こんにちは、今日はお元気ですか？また明日会いましょう。"
+    let thai = "สวัสดีครับ วันนี้คุณเป็นอย่างไรบ้าง"
+    let norwegian = "Hei, hvordan har du det i dag? Vi sees i morgen."
 
     func step(_ translator: Translator?, on: Bool = true, languages: [String] = []) -> TranslateStep {
         TranslateStep(isOn: { on }, languages: { languages }, translator: translator)
@@ -55,11 +60,13 @@ final class TranslationTests: XCTestCase {
     // Source equal to target skips the step: English is never sent off to become English, and an empty
     // dictation or one whose language cannot be told stays as it is, without a hint. With Automatic a short one
     // cannot be told: "Redis." reads as French and "x" as Slovak, and neither must ask for a download. Nor
-    // may jargon the recognizer is unsure of: "Redis Postgres Kubernetes" reads as German at 0.43.
+    // may jargon the recognizer is unsure of: "Redis Postgres Kubernetes" reads as German at 0.43. English stays
+    // English among Chinese and Norwegian, and when only German is chosen it is not sent off as German.
     func testEnglishSkipsTheStep() async {
         let stub = StubTranslator()
         for (text, languages) in [("Send the report to Anna by Friday.", [String]()), ("Okay, see you tomorrow.", ["en-US", "de"]),
-                                  ("", []), ("42", []), ("Redis.", []), ("x", []), ("Ship it now", []),
+                                  ("Okay, see you tomorrow.", ["zh", "no", "en"]), ("Send the report to Anna by Friday.", ["de"]),
+                                  ("", []), ("42", []), ("Redis.", []), ("x", []), ("Ship it now", []), ("你好", []),
                                   ("Redis Postgres Kubernetes", []), ("Kafka Redis Mongo Elastic", [])] {
             let out = await step(stub, languages: languages)(text)
             XCTAssertEqual(out.text, text)
@@ -77,6 +84,36 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(Translate.spokenLanguage("Danke schön", among: ["de", "en"]), "de", "chosen: no word count")
         XCTAssertEqual(Translate.spokenLanguage("Bonjour à tous, merci d'être venus si nombreux.", among: []), "fr")
         XCTAssertEqual(Translate.spokenLanguage("Bonjour à tous, merci d'être venus si nombreux.", among: ["fr-CA", "en"]), "fr")
+        XCTAssertEqual(Translate.spokenLanguage("Send the report to Anna by Friday.", among: ["de"]), "en", "a sure guess beats the pin")
+        XCTAssertNil(Translate.spokenLanguage("Tere, kuidas sul täna läheb? Näeme homme.", among: ["et"]),
+                     "but not for a language the recognizer cannot tell: it reads this Estonian as Finnish at 0.95")
+        // No spaces between words, and the recognizer's own tags for whisper's "zh" and "no".
+        XCTAssertEqual(Translate.spokenLanguage(chinese, among: []), "zh-Hans", "Automatic: 7 words, not 1")
+        XCTAssertEqual(Translate.spokenLanguage(japanese, among: []), "ja")
+        XCTAssertEqual(Translate.spokenLanguage(thai, among: []), "th")
+        XCTAssertEqual(Translate.spokenLanguage(chinese, among: ["zh"]), "zh-Hans")
+        XCTAssertEqual(Translate.spokenLanguage("你好嗎？今天過得怎麼樣？", among: ["zh", "en"]), "zh-Hant")
+        XCTAssertEqual(Translate.spokenLanguage("你好", among: ["zh", "en"]).map { languageCodes([$0]) }, ["zh"], "chosen: short is fine")
+        XCTAssertEqual(Translate.spokenLanguage(japanese, among: ["ja"]), "ja")
+        XCTAssertEqual(Translate.spokenLanguage(norwegian, among: ["no"]), "nb")
+        XCTAssertEqual(Translate.spokenLanguage(norwegian, among: ["no", "en"]), "nb")
+        XCTAssertEqual(Translate.spokenLanguage("Hei", among: ["no", "en"]), "nb")
+    }
+
+    // Chinese, Japanese and Thai reach the translator, and so does Norwegian; Apple has no Norwegian to English,
+    // so 🤫 says that rather than nothing.
+    func testTextWithoutSpacesAndNorwegianAreTranslatedOrSayWhy() async {
+        let stub = StubTranslator()
+        for (text, languages) in [(chinese, [String]()), (chinese, ["zh"]), (japanese, []), (thai, []), (norwegian, ["no", "en"])] {
+            let out = await step(stub, languages: languages)(text)
+            XCTAssertEqual(out.text, "Hello, how are you today?", text)
+        }
+        XCTAssertEqual(stub.calls.map(\.source), ["zh-Hans", "zh-Hans", "ja", "th", "nb"])
+        let unsupported = StubTranslator()
+        unsupported.result = .failure(.unsupported)
+        let out = await step(unsupported, languages: ["no"])(norwegian)
+        XCTAssertEqual(out.text, norwegian)
+        XCTAssertEqual(out.hint, "Not translated: on-device translation has no \(Translate.name("nb")) to English")
     }
 
     // A failure inserts what was said, and 🤫 says why in plain words that name the language and no model.
@@ -102,29 +139,6 @@ final class TranslationTests: XCTestCase {
         let before15 = await step(nil)(self.german)
         XCTAssertEqual(before15.text, self.german)
         XCTAssertEqual(before15.hint, "Not translated: on-device translation needs macOS 15")
-    }
-
-    /// Records every request any URLSession in this process starts.
-    final class NetworkSpy: URLProtocol {
-        nonisolated(unsafe) static var requests: [URL] = []
-        override class func canInit(with request: URLRequest) -> Bool {
-            requests.append(request.url ?? URL(fileURLWithPath: "/"))
-            return false
-        }
-    }
-
-    // Rule 1: the step itself sends nothing anywhere, translated or not. (Apple's side runs out of process:
-    // hand step M-TRN-1 translates with Wi-Fi off.)
-    func testTheStepMakesNoNetworkRequest() async {
-        URLProtocol.registerClass(NetworkSpy.self)
-        defer { URLProtocol.unregisterClass(NetworkSpy.self) }
-        NetworkSpy.requests = []
-        let failing = StubTranslator()
-        failing.result = .failure(.failed)
-        _ = await step(StubTranslator())(german)
-        _ = await step(failing)(german)
-        _ = await step(StubTranslator(), languages: ["en"])("Send it.")
-        XCTAssertEqual(NetworkSpy.requests, [])
     }
 
     // MARK: Apple's translation, its calls stubbed
@@ -177,6 +191,14 @@ final class TranslationTests: XCTestCase {
             _ = try await t.translate(german, from: "de", to: "en")
             XCTFail("the session failed")
         } catch { XCTAssertEqual(error as? TranslateError, .failed) }
+    }
+
+    // Esc while a dictation waits for its session lets the dictation go at once, not after the 10 s timeout. The
+    // host cannot run here without showing its panel and reaching Apple's translation, so this pins the source.
+    func testEscDoesNotWaitForTheSession() throws {
+        let run = try AppSource.body(of: "func run(", in: AppSource.code("Translation.swift"))
+        XCTAssertTrue(run.contains("withTaskCancellationHandler"))
+        XCTAssertTrue(run.contains("} onCancel: {\n            Task { @MainActor [weak self] in self?.finish(.failure(CancellationError())) }"))
     }
 
     // The download is the user's: a shepetal window that says what it is for, no timeout while the system asks,

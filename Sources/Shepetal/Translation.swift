@@ -30,17 +30,24 @@ enum Translate {
         return nil
     }
 
-    /// The language the text is in: one of the chosen ones when there are any. With Automatic, only a sure guess
-    /// on at least 3 words, F12's bar (it read "Redis." as French). nil when the recognizer cannot tell.
+    /// The language the text is in: a sure guess on at least 3 words, F12's bar (it read "Redis." as French), so
+    /// English is not sent off as German when only German is chosen. Else one of the chosen ones, and with
+    /// Automatic nil. The tokenizer counts the words: Chinese, Japanese and Thai put no spaces between them.
     static func spokenLanguage(_ text: String, among languages: [String]) -> String? {
-        let recognizer = NLLanguageRecognizer()
         let chosen = languageCodes(languages)
-        recognizer.languageConstraints = chosen.map { NLLanguage($0) }
+        let recognizer = NLLanguageRecognizer()
         recognizer.processString(text)
-        guard chosen.isEmpty else { return recognizer.dominantLanguage?.rawValue }
-        guard text.split(whereSeparator: \.isWhitespace).count >= 3,
-              let (language, p) = recognizer.languageHypotheses(withMaximum: 1).first, p >= 0.9 else { return nil }
-        return language.rawValue
+        let words = NLTokenizer(unit: .word)
+        words.string = text
+        if words.tokens(for: text.startIndex..<text.endIndex).count >= 3, chosen.allSatisfy({ !languagesTextCannotTell.contains($0) }),
+           let (language, p) = recognizer.languageHypotheses(withMaximum: 1).first, p >= 0.9 { return language.rawValue }
+        guard !chosen.isEmpty else { return nil }
+        // The recognizer's tags for whisper's "zh" are zh-Hans and zh-Hant, and for "no" nb: it knows neither bare code.
+        recognizer.reset()
+        let tags: [String: [NLLanguage]] = ["zh": [.simplifiedChinese, .traditionalChinese], "no": [.norwegian]]
+        recognizer.languageConstraints = chosen.flatMap { tags[$0] ?? [NLLanguage($0)] }
+        recognizer.processString(text)
+        return recognizer.dominantLanguage?.rawValue
     }
 
     static func name(_ language: String) -> String { Locale.current.localizedString(forIdentifier: language) ?? language }
@@ -174,8 +181,8 @@ final class TranslationHost: ObservableObject {
         if visible { window.setContentSize(view.fittingSize) }
     }
 
-    /// `work`'s result, once SwiftUI has handed over a session for `pair`. Fails after `timeout`, or when the
-    /// user closes the window.
+    /// `work`'s result, once SwiftUI has handed over a session for `pair`. Fails after `timeout`, when the user
+    /// closes the window, or when the dictation is cancelled (Esc), so a session that never comes does not hold it.
     func run(_ pair: TranslationSession.Configuration, timeout: Duration?,
              _ work: @escaping (TranslationSession) async throws -> String) async throws -> String {
         let closed = NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
@@ -186,23 +193,27 @@ final class TranslationHost: ObservableObject {
             window.contentView = nil  // the view holds this host: let both go
             window.close()
         }
-        return try await withCheckedThrowingContinuation { continuation in
-            waiting = continuation
-            self.work = work
-            if let timeout {
-                timer = Task { [weak self] in
-                    guard (try? await Task.sleep(for: timeout)) != nil else { return }
-                    self?.finish(.failure(TranslateError.failed))
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                waiting = continuation
+                self.work = work
+                if let timeout {
+                    timer = Task { [weak self] in
+                        guard (try? await Task.sleep(for: timeout)) != nil else { return }
+                        self?.finish(.failure(TranslateError.failed))
+                    }
                 }
+                if visible {
+                    NSApp.activate(ignoringOtherApps: true)  // the user asked for it in the 🤫 menu
+                    window.center()
+                    window.makeKeyAndOrderFront(nil)
+                } else {
+                    window.orderFrontRegardless()  // a non-activating panel: shepetal does not become the active app
+                }
+                configuration = pair
             }
-            if visible {
-                NSApp.activate(ignoringOtherApps: true)  // the user asked for it in the 🤫 menu
-                window.center()
-                window.makeKeyAndOrderFront(nil)
-            } else {
-                window.orderFrontRegardless()  // a non-activating panel: shepetal does not become the active app
-            }
-            configuration = pair
+        } onCancel: {
+            Task { @MainActor [weak self] in self?.finish(.failure(CancellationError())) }
         }
     }
 
