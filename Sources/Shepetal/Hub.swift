@@ -31,7 +31,7 @@ final class Hub {
         dictionary = DictionaryModel(url: pipeline.dictionary, editAsText: openDictionary)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
-        window.title = "Shepetal"
+        window.title = "shepetal"
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: HubView(model: model, meetings: meetings, dictionary: dictionary, input: input))
         window.center()

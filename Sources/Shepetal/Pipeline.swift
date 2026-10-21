@@ -217,9 +217,11 @@ final class Pipeline {
     }
 
     /// User action only (the 🤫 menu): this Mac's cleanup model from Hugging Face into <data>/models, checked
-    /// against its SHA-256, then loaded. A second call while one runs does nothing.
-    func downloadCleanup() async {
-        guard !downloadingCleanup, let m = currentCleanupModel() else { return }
+    /// against its SHA-256, then loaded. A second call while one runs does nothing. Returns the notice for 🤫
+    /// when the download fails.
+    @discardableResult
+    func downloadCleanup() async -> String? {
+        guard !downloadingCleanup, let m = currentCleanupModel() else { return nil }
         downloadingCleanup = true
         cleanupStatus = "Downloading the cleanup model…"
         defer { downloadingCleanup = false }
@@ -232,9 +234,10 @@ final class Pipeline {
         } catch {
             FileHandle.standardError.write(Data("cleanup model download: \(error)\n".utf8))
             cleanupStatus = "Rules only (the download failed; try again from the 🤫 menu)"
-            return
+            return "Cleanup model download failed: check the internet connection and try again"  // the detail went to stderr
         }
         await loadCleanup()
+        return nil
     }
 
     private func saved(_ saving: Task<URL, Error>, _ run: inout Run) async -> String? {

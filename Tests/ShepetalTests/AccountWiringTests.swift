@@ -63,7 +63,9 @@ final class AccountWiringTests: XCTestCase {
         XCTAssertTrue(hub.contains("message = \"Re-transcribe failed: \" + (SpeechError(plain: error,"))
         XCTAssertFalse(hub.contains("failed: \\(error.localizedDescription)"))
         let app = try app()
-        XCTAssertTrue(app.contains("engineStatus = \"Download failed: \" + (SpeechError(plain: error,"))
+        XCTAssertTrue(app.contains("let reason = SpeechError(plain: error, \"check the internet connection and try again\").errorDescription ?? \"\""))
+        XCTAssertTrue(app.contains("engineStatus = \"Download failed: \" + reason"), "Home's line")
+        XCTAssertTrue(app.contains("fail(\"Speech recognition download failed: \" + reason)"), "next to 🤫 (#239)")
     }
 
     /// Decision (1): only the card's Record click starts a meeting recording, Not now never does, and the red

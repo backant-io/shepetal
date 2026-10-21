@@ -31,6 +31,7 @@ final class AppFormatPipelineTests: XCTestCase {
     func pipeline() throws -> Pipeline {
         let p = try Pipeline(root: root, pasteboard: pasteboard)
         p.appFormat = AppFormat(defaults)
+        p.styleDefaults = defaults  // no style picked: the checks below see the format alone
         p.appFormat.set(.raw, for: terminal.bundleId)
         return p
     }

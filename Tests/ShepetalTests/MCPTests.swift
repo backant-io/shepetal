@@ -118,6 +118,14 @@ final class MCPTests: XCTestCase {
         XCTAssertEqual(dictations.text, "- \(MeetingFormat.date(t0, format: "dd.MM.yy HH:mm")) · Mail: Please pay the invoice by Monday.")
         XCTAssertTrue(try tool(s, "search_dictations", ["query": ""]).text.hasPrefix("- \(MeetingFormat.date(t0.addingTimeInterval(60), format: "dd.MM.yy HH:mm")) · Slack: Lunch at noon?\n"),
                       "an empty query lists the latest first")
+
+        // A row switched to Show raw (F48) reaches AI apps as heard, as Copy and Recent give it.
+        let history = try History(path: root.appendingPathComponent("history.sqlite"))
+        try history.add(HistoryEntry(id: "d3", createdAt: t0.addingTimeInterval(120), outcome: .inserted, audioPath: "/a/d3.wav",
+                                     durationMs: 1000, rawText: "um the receipt is here", text: "The receipt is here.", app: "Notes"))
+        try history.setReverted("d3", true)
+        XCTAssertEqual(try tool(s, "search_dictations", ["query": "receipt"]).text,
+                       "- \(MeetingFormat.date(t0.addingTimeInterval(120), format: "dd.MM.yy HH:mm")) · Notes: um the receipt is here")
     }
 
     func testUnknownIdToolAndMethodAreErrors() throws {

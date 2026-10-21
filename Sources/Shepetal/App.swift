@@ -361,11 +361,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             engine = nil
             NSLog("shepetal: speech: %@", error.localizedDescription)  // model names stay in the log
             let tier = currentModelTier()
+            let couldNotStart = speechRoute(languages: speech.languages, tier: tier).model == tier.primary && ParakeetEngine.isInstalled
             engineStatus = speechRoute(languages: speech.languages, tier: tier).model != tier.primary
                 ? error.localizedDescription  // Speech.load's own plain message names the languages
-                : ParakeetEngine.isInstalled ? "On-device speech recognition could not start"
-                                             : "On-device speech recognition is not downloaded yet"
-            fail("No speech recognition. Open the 🤫 menu.")
+                : couldNotStart ? "On-device speech recognition could not start"
+                                : "On-device speech recognition is not downloaded yet"
+            // The menu offers the download and Languages, but nothing for a model that could not start: Home says why (#239).
+            fail(couldNotStart ? "No speech recognition. See Home in the shepetal window." : "No speech recognition. Open the 🤫 menu.")
         }
     }
 
@@ -439,7 +441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch action {
         case .permissions: showOnboarding()
         case .download: downloadModel()
-        case .downloadCleanup: Task { await pipeline?.downloadCleanup() }
+        case .downloadCleanup: Task { if let failed = await pipeline?.downloadCleanup() { fail(failed) } }
         case .downloadDictionarySupport: speech.downloadBoost()
         case .signIn: Account.shared.signIn()
         case .cancelSignIn: Account.shared.cancelSignIn()
@@ -513,7 +515,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         engineStatus = "Downloading on-device speech recognition…"
         Task {
             defer { downloading = false }
-            do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""); return }
+            do { try await ParakeetEngine.download() } catch {
+                let reason = SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""
+                engineStatus = "Download failed: " + reason
+                fail("Speech recognition download failed: " + reason)  // the menu's Download item is back, so say why (#239)
+                return
+            }
             await loadEngine()
         }
     }

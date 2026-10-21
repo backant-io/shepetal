@@ -121,11 +121,11 @@ final class MCPServer {
                 }
                 return text(MeetingFormat.markdown(record))
             default:  // search_dictations
-                let rows = try history()?.search(query, limit: limit).filter { !$0.text.isEmpty } ?? []
+                let rows = try history()?.search(query, limit: limit).filter { !$0.shownText.isEmpty } ?? []  // Show raw (F48): what Copy and Recent give
                 if rows.isEmpty { return text(query.isEmpty ? "No dictations yet." : "No dictation contains \"\(query)\".") }
                 return text(rows.map { e in
                     let when = MeetingFormat.date(e.createdAt, format: "dd.MM.yy HH:mm")
-                    return "- \(when) · \(e.app.isEmpty ? "unknown app" : e.app): \(e.text)"
+                    return "- \(when) · \(e.app.isEmpty ? "unknown app" : e.app): \(e.shownText)"
                 }.joined(separator: "\n"))
             }
         } catch {

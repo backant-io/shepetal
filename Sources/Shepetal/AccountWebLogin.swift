@@ -48,7 +48,7 @@ final class WebLogin: NSObject, ASWebAuthenticationPresentationContextProviding 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         MainActor.assumeIsolated {
             if let anchor { return anchor }
-            if let w = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.title == "Shepetal" }) { return w }
+            if let w = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.title == "shepetal" }) { return w }
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1, height: 1), styleMask: [.borderless],
                              backing: .buffered, defer: false)
             w.isOpaque = false
