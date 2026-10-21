@@ -60,6 +60,12 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(many.promptTerms.first, "star", "a starred entry at the end of the file still goes first")
     }
 
+    /// Parakeet's keyword rescoring writes a term exactly as it gets it (#30), so the terms keep the file's casing.
+    func testPromptTermsKeepTheFileCasing() {
+        let v = Vocabulary("useEffect\n*Postgres\nredis => Redis\nGitHub")
+        XCTAssertEqual(v.promptTerms, ["Postgres", "useEffect", "redis", "GitHub"])
+    }
+
     func testEmptyDictionaryChangesNothing() {
         let text = "Exactly what (the model) said, c++ and all."
         XCTAssertEqual(Vocabulary().apply(text), text)

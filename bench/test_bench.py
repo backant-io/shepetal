@@ -3,6 +3,7 @@
 run: uv run --no-project --python 3.12 --with jiwer python bench/test_bench.py -v   (no models needed)
 """
 import json, os, re, time, unittest
+from unittest import mock
 import bench
 
 ROOT = os.path.dirname(bench.HERE)
@@ -70,6 +71,18 @@ class Rss(unittest.TestCase):
     def test_units_per_platform(self):  # 310 MB peak, as each kernel reports ru_maxrss
         self.assertEqual(bench.rss_mb(325320704, "darwin"), 310)  # bytes
         self.assertEqual(bench.rss_mb(317440, "linux"), 310)      # kilobytes
+
+
+class Boost(unittest.TestCase):
+    def test_boost_run_stays_out_of_the_users_model_cache(self):  # the app boosts with any CTC model it finds there (F39)
+        env = {}
+        def run(cmd, **kw):
+            if cmd[0] != "cp": env.update(kw["env"])
+            return type("P", (), {"stdout": '{"load": 1, "dir": "d"}\n'})()
+        with mock.patch.object(bench.subprocess, "run", run): bench.fluid("boost")
+        self.assertTrue(env["CFFIXED_USER_HOME"].startswith(bench.C + os.sep), env["CFFIXED_USER_HOME"])
+        self.assertTrue({"useEffect", "Postgres", "Redis"} <= set(env["FLUID_VOCAB"].split(",")))  # the words Parakeet missed
+        self.assertEqual(env["FLUID_ENCODER"], "int8")  # the app's encoder, as in the plain row
 
 
 class DocsMatchResults(unittest.TestCase):
