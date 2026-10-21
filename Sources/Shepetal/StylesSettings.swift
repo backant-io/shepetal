@@ -9,7 +9,7 @@ struct StylesSection: View {
         } header: {
             Text("Styles")
         } footer: {
-            Text("Work messages: Slack and Teams. Email: Mail, Outlook, Superhuman, Spark, and Gmail or Outlook on the web. Personal messages: Messages, WhatsApp, Telegram, Signal, WeChat and Messenger. Until you pick a style, shepetal writes Formal everywhere. Dictionary words keep their spelling in every style.")
+            Text("Work messages: Slack and Teams. Email: Mail, Outlook, Superhuman, Spark, Mimestream, Thunderbird, Airmail, and Gmail, Outlook, Proton Mail or Fastmail on the web. Personal messages: Messages, WhatsApp, Telegram, Signal, WeChat and Messenger. Until you pick a style, shepetal writes Formal everywhere. Dictionary words keep their spelling in every style.")
                 .font(.caption).foregroundStyle(.secondary)
         }
     }
