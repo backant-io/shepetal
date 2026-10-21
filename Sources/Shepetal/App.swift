@@ -28,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
+    private var transcriptWindow: MeetingTranscriptWindow?
     private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
                                                                  card: { [weak self] in self?.meetingCard.show($0) }) { [weak self] in self?.indicator.show($0, seconds: 4) }
     /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
@@ -83,6 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.statusItem.button?.title = $0 ? "🤫●" : "🤫"
                 self?.indicator.meeting = $0  // the red ring, for the whole recording
             }
+            meetingFlow?.onTranscript = { [weak self] in self?.showTranscript($0) }
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
         applyRetention()
@@ -345,15 +347,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return false
     }
 
-    @objc private func openHub() {
-        guard let pipeline else { return fail("History is not available") }
+    @objc private func openHub() { openedHub()?.show() }
+
+    /// The meeting's transcript window, in front without taking focus from the app in use.
+    private func showTranscript(_ m: Meeting) {
+        guard let store = meetingFlow?.store else { return }
+        transcriptWindow = transcriptWindow ?? MeetingTranscriptWindow(model: MeetingsModel(store: store)) { [weak self] in
+            self?.openedHub()?.showMeeting($0)
+        }
+        transcriptWindow?.show(m)
+    }
+
+    private func openedHub() -> Hub? {
+        guard let pipeline else { fail("History is not available"); return nil }
         hub = hub ?? Hub(pipeline: pipeline, engine: { [weak self] in self?.engine },
                          status: { [weak self] in (self?.engineStatus ?? "", self?.tap.isRunning == true) },
                          retention: { [weak self] in self?.retention ?? .keep },
                          setRetention: { [weak self] in self?.retention = $0 },
                          openPermissions: { [weak self] in self?.showOnboarding() },
                          meetingStore: meetingFlow?.store ?? InMemoryMeetingStore())
-        hub?.show()
+        return hub
     }
 
     @objc private func restoreFnKey() {
