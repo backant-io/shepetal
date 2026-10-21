@@ -17,8 +17,8 @@ final class Hub {
          retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void,
          openPermissions: @escaping () -> Void, loginItem: LoginItem, openDictionary: @escaping () -> Void,
          restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore(),
-         openWhatsNew: @escaping () -> Void = {}, notices: @escaping () -> [NoticeLog.Notice] = { [] },
-         updater: SparkleUpdater? = nil, uninstallBlocker: @escaping () -> String? = { nil }) {
+         updater: SparkleUpdater? = nil, uninstallBlocker: @escaping () -> String? = { nil },
+         openWhatsNew: @escaping () -> Void = {}, notices: @escaping () -> [NoticeLog.Notice] = { [] }) {
         model = HubModel(pipeline: pipeline, engine: engine, status: status, retention: retention,
                          setRetention: setRetention, openPermissions: openPermissions, loginItem: loginItem,
                          openDictionary: openDictionary, restoreFnKey: restoreFnKey, openWhatsNew: openWhatsNew,

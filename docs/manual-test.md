@@ -384,8 +384,8 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 
 ### M-NEW-1: what's new after an update (F111)
 1. Install **Shepetal-0.1.0.pkg** from the v0.1.0-mac release, or keep the 0.1.0 that is already installed. Open it and dictate once. Stay signed in, in the trial or with a license: a sign-in or trial-ended hint would replace the update hint, on purpose.
-2. From main, build a newer installer with `VERSION=0.1.1 scripts/make-pkg.sh`, then install `dist/Shepetal-0.1.1.pkg` the same way. The installer reopens shepetal.
-3. Expected: next to the corner 🤫, **Updated to 0.1.1 · What's new… is on Home in the shepetal window** shows for about 6 s. No shepetal window opens. (Where the focus goes after an install is the installer's behaviour, M-SETUP-1, not this step.)
+2. From main, build a newer DMG with `VERSION=0.1.1 scripts/make-dmg.sh`, quit shepetal, drag Shepetal from `dist/Shepetal-0.1.1.dmg` into Applications (replace), and open it. (After a Sparkle update, M-UPD-1, the same hint shows.)
+3. Expected: next to the corner 🤫, **Updated to 0.1.1 · What's new… is on Home in the shepetal window** shows for about 6 s. No shepetal window opens.
 4. Choose Open shepetal in the 🤫 menu, and on Home click **What's new…**. Expected: the window **What's new in shepetal** lists the release notes newest first, each under its version and a DD.MM.YY date. A 0.1.1 test build has no notes of its own, so 0.1.0 is at the top. The 🤫 menu has no What's new item.
 5. Choose Quit shepetal in the 🤫 menu and open it again. Expected: no hint.
 

@@ -61,8 +61,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        if allowPrompts, MoveToApplications.offerIfNeeded() { return }  // the copy in /Applications takes over
         let crashHint = Watchdog.start()  // F99: first, so a crash in the rest of the launch is caught too
+        if allowPrompts, MoveToApplications.offerIfNeeded() { return }  // the copy in /Applications takes over; Quit stays quit
         indicator = Indicator()
         let updated = WhatsNewWindow.atLaunch()  // before Pipeline creates history.sqlite (how an update from 0.1.0 is told from a first install)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -487,10 +487,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          loginItem: loginItem, openDictionary: { [speech] in speech.openDictionary() },
                          restoreFnKey: { [weak self] in self?.restoreFnKey() },
                          meetingStore: meetingFlow?.store ?? InMemoryMeetingStore(),
-                         openWhatsNew: { [weak self] in self?.openWhatsNew() },
-                         notices: { [weak self] in self?.indicator.notices.newestFirst ?? [] },
                          updater: updater as? SparkleUpdater,
-                         uninstallBlocker: { [weak self] in UninstallPlan.blocker(self?.activity ?? Activity()) })
+                         uninstallBlocker: { [weak self] in UninstallPlan.blocker(self?.activity ?? Activity()) },
+                         openWhatsNew: { [weak self] in self?.openWhatsNew() },
+                         notices: { [weak self] in self?.indicator.notices.newestFirst ?? [] })
         return hub
     }
 

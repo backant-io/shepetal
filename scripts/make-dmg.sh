@@ -9,7 +9,8 @@
 # The DMG is signed with the app's identity unless the app is signed ad-hoc. It needs uv (uvx runs dmgbuild).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-export VERSION=${VERSION:-0.1.0}
+VERSION=${VERSION:-0.1.0}
+export VERSION
 export REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-1} UPDATES=${UPDATES:-1}  # the release requires sign-in and updates itself
 [ "${SKIP_APP:-0}" = 1 ] || scripts/make-app.sh
 APP=dist/Shepetal.app
