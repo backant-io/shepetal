@@ -28,11 +28,11 @@ final class PasteGatePipelineTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
-    private func process(_ engine: StubEngine, focusKept: @escaping () -> Bool?,
+    private func process(_ engine: StubEngine, context: @escaping () -> Void = {}, focusKept: @escaping () -> Bool?,
                          secureInput: @escaping () -> String?) async throws -> (Pipeline.Run, HistoryEntry) {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let run = await pipeline.process(samples, engine: engine, context: { ("", "", "") }, focusKept: focusKept,
-                                         secureInput: secureInput, sendPaste: { [unowned self] event in
+        let run = await pipeline.process(samples, engine: engine, context: { context(); return ("", "", "") },
+                                         focusKept: focusKept, secureInput: secureInput, sendPaste: { [unowned self] event in
             // The target app reading the promised item is what makes the paste land.
             if event.type == .keyDown { pastes += 1; _ = pasteboard.string(forType: .string) }
         })
@@ -67,27 +67,59 @@ final class PasteGatePipelineTests: XCTestCase {
         assertOnClipboard(run, row, message: PasteGate.focusMoved)
     }
 
-    // M-NS-1: the text field is read through Accessibility on the main thread, and a busy or hung app answers
-    // only when AX gives up (1.5 s per call measured on macOS 15). When the window changed, that field is not
-    // where the text goes, so rule 8 must decide without reading it, well inside 300 ms of the text being ready.
+    // When the window changed, the field that has focus now is not where the text goes, so it is not read.
     func testFocusMovedDecidesWithoutReadingTheNewField() async throws {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         var reads = 0
-        let slowField = { reads += 1; Thread.sleep(forTimeInterval: 1.5) }  // what one timed-out AX call costs
-        var decidedAfter: TimeInterval?
-        let engine = StubEngine("hello there")
-        let run = await pipeline.process(samples, engine: engine,
-                                         context: { slowField(); return ("", "", "") },
-                                         focusKept: {
-                                             decidedAfter = ProcessInfo.processInfo.systemUptime - (engine.doneAt ?? 0)
-                                             return false
-                                         },
-                                         secureInput: { nil }, sendPaste: { [unowned self] _ in pastes += 1 })
+        let run = await pipeline.process(samples, engine: StubEngine("hello there"),
+                                         context: { reads += 1; return ("Earlier text", "", "") },
+                                         focusKept: { false }, secureInput: { nil },
+                                         sendPaste: { [unowned self] _ in pastes += 1 })
         XCTAssertEqual(reads, 0, "the field that took focus must not be read")
-        XCTAssertLessThan(try XCTUnwrap(decidedAfter), 0.3)
         XCTAssertEqual(pastes, 0)
         XCTAssertEqual(run.error, PasteGate.focusMoved)
         XCTAssertEqual(pasteboard.string(forType: .string), "hello there", "the text waits on the clipboard as dictated")
+    }
+
+    // Rule 8 holds up to the Cmd+V: reading the field takes AX round trips, and the user can switch windows or
+    // reach a password field (secure input) during them.
+    func testFocusOrSecureInputChangingWhileTheFieldIsReadBlocksThePaste() async throws {
+        for secure in [false, true] {
+            var read = false
+            let (run, row) = try await process(StubEngine("hello there"), context: { read = true },
+                                               focusKept: { secure || !read }, secureInput: { secure && read ? "Safari" : nil })
+            assertOnClipboard(run, row, message: secure ? PasteGate.secureInput("Safari") : PasteGate.focusMoved)
+            XCTAssertTrue(read)
+        }
+    }
+
+    // M-NS-1 on Pavel's Mac (build 6298f40): with under 1 GB free and macOS purging space, the WAV write on the
+    // main thread took 86 s. The file's last change is at 00:41:56.857 and the main thread logged again right
+    // after it, while only Shepetal was reported not responding. Then focus had long moved. The write must hold
+    // neither the main thread nor the transcript and the rule-8 decision, and the audio and its row are still kept.
+    func testAStalledAudioWriteHoldsNeitherTheMainThreadNorTheDecision() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let disk = DispatchSemaphore(value: 0), written = DispatchSemaphore(value: 0), write = pipeline.writeAudio
+        pipeline.writeAudio = { samples, id in
+            _ = disk.wait(timeout: .now() + 3)  // the disk answers once the decision is made, or after 3 s
+            defer { written.signal() }
+            return try write(samples, id)
+        }
+        var writtenAtDecision: Bool?
+        let run = await pipeline.process(samples, engine: StubEngine("hello there"), context: { ("", "", "") },
+                                         focusKept: { false }, secureInput: { nil },
+                                         sendPaste: { [unowned self] _ in pastes += 1 }, decided: {
+            XCTAssertEqual($0, PasteGate.focusMoved)
+            writtenAtDecision = written.wait(timeout: .now()) == .success
+            disk.signal()
+        })
+        XCTAssertEqual(writtenAtDecision, false, "rule 8 decided on the main thread while the WAV was still being written")
+        XCTAssertEqual(pastes, 0)
+        XCTAssertEqual(pasteboard.string(forType: .string), "hello there", "the text waits on the clipboard")
+        let row = try XCTUnwrap(try pipeline.history.recent().first { $0.id == run.entry.id })
+        XCTAssertEqual(row.outcome, .pasteFailed)
+        XCTAssertEqual(try Data(contentsOf: URL(fileURLWithPath: row.audioPath)), AudioStore.wav(samples), "the audio is kept")
+        XCTAssertEqual(run.error, PasteGate.focusMoved, "no WAV or history error after the stall")
     }
 
     // Focus that cannot be read (no Accessibility) does not block the paste; the paste check is the backstop.
@@ -105,13 +137,11 @@ private final class StubEngine: SpeechEngine {
     let name = "stub"
     let text: String
     private(set) var called = false
-    private(set) var doneAt: TimeInterval?  // when the transcript was ready
 
     init(_ text: String) { self.text = text }
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         called = true
-        doneAt = ProcessInfo.processInfo.systemUptime
         return text
     }
 }

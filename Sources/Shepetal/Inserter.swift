@@ -137,10 +137,6 @@ enum FocusedText {
         var string: (_ range: CFRange) -> String?  // AXStringForRange
     }
 
-    /// Per AX call: the read runs on the main thread just before a paste, and a busy app must not freeze Shepetal
-    /// for AX's default (1.5 s per call measured on macOS 15). A whole document's text is the slowest read.
-    static let timeout: Float = 0.25
-
     /// Read once per dictation, after transcription.
     static func context() -> Context {
         focused().map { context($0) } ?? ("", "", "")
@@ -156,10 +152,11 @@ enum FocusedText {
     /// Without Accessibility only the frontmost app is known, and the window is nil.
     static func window() -> (app: Int32, window: AXUIElement?)? {
         let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        // This runs on the main thread at fn-down: a hung app must not stall fn handling for AX's default 6 s.
-        guard let app = focusedApp(timeout: 0.1).0 else {
+        guard let app = element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute).0 else {
             return PasteGate.focus(axPid: nil, frontmostPid: frontmost, window: nil as AXUIElement?)
         }
+        // This runs on the main thread at fn-down: a hung app must not stall fn handling for AX's default 6 s.
+        AXUIElementSetMessagingTimeout(app, 0.1)
         askForTree { AXUIElementSetAttributeValue(app, $0 as CFString, $1) }
         var pid: pid_t = 0
         let axPid: Int32? = AXUIElementGetPid(app, &pid) == .success ? pid : nil
@@ -175,12 +172,6 @@ enum FocusedText {
         _ = set("AXManualAccessibility", kCFBooleanTrue)
     }
 
-    private static func focusedApp(timeout: Float) -> (AXUIElement?, AXError) {
-        let (app, err) = element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute)
-        if let app { AXUIElementSetMessagingTimeout(app, timeout) }
-        return (app, err)
-    }
-
     /// An attribute that holds an element. Another type is nil, not a crashing cast.
     private static func element(_ of: AXUIElement, _ attribute: String) -> (AXUIElement?, AXError) {
         var value: CFTypeRef?
@@ -190,14 +181,11 @@ enum FocusedText {
     }
 
     private static func focused() -> Field? {
-        var (app, err) = focusedApp(timeout: timeout)
-        var el: AXUIElement?
-        if let app { (el, err) = element(app, kAXFocusedUIElementAttribute) }
+        let (el, err) = element(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute)
         guard let el else {
             NSLog("shepetal: context: no focused element (AX %d), text goes in as dictated", err.rawValue)
             return nil
         }
-        AXUIElementSetMessagingTimeout(el, timeout)
         return Field(get: { name in
             var v: CFTypeRef?
             return (AXUIElementCopyAttributeValue(el, name as CFString, &v), v)
@@ -212,13 +200,23 @@ enum FocusedText {
     }
 
     /// The field's text and selection. Every read logs one line: the role, the length and the selection, or what
-    /// failed with its AX code. Never the text.
-    static func read(_ f: Field, log: (String) -> Void) -> (String, NSRange)? {
-        let role = f.get(kAXRoleAttribute).1 as? String ?? "no role"
+    /// failed with its AX code. Never the text. An app that does not answer costs one AX timeout, not one per
+    /// attribute: the read stops at the first call that times out.
+    static func read(_ field: Field, log: (String) -> Void) -> (String, NSRange)? {
+        var hung = false
+        let f = Field(get: { name in
+            if hung { return (.cannotComplete, nil) }
+            let answer = field.get(name)
+            hung = answer.0 == .cannotComplete
+            return answer
+        }, string: { hung ? nil : field.string($0) })
+        let (roleErr, roleRef) = f.get(kAXRoleAttribute)
+        let role = roleRef as? String ?? "no role"
         func unreadable(_ why: String) -> (String, NSRange)? {
             log("\(role): \(why), text goes in as dictated")
             return nil
         }
+        if hung { return unreadable("no answer (AX \(roleErr.rawValue))") }  // not shown: logged
         let (rangeErr, rangeRef) = f.get(kAXSelectedTextRangeAttribute)
         var cf = CFRange()
         guard let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID(), AXValueGetValue(rangeRef as! AXValue, .cfRange, &cf) else {

@@ -167,8 +167,18 @@ final class FocusedTextTests: XCTestCase {
     // A field that cannot be read at all gets the text exactly as dictated: no space, case or period guessed.
     // That is right for an empty field and the only safe choice for an unreadable one.
     func testUnreadableFieldInsertsTextAsDictated() {
-        let unreadable = FocusedText.Field(get: { _ in (.cannotComplete, nil) }, string: { _ in nil })
+        let unreadable = FocusedText.Field(get: { _ in (.attributeUnsupported, nil) }, string: { _ in nil })
         XCTAssertEqual(fit("Send the report today.", context(unreadable)), "Send the report today.")
-        XCTAssertEqual(logged, ["no role: AXSelectedTextRange unreadable (AX -25204), text goes in as dictated"])
+        XCTAssertEqual(logged, ["no role: AXSelectedTextRange unreadable (AX -25205), text goes in as dictated"])
+    }
+
+    // The read runs on the main thread. An app that does not answer (each AX call waits for the timeout, 1.5 s
+    // measured on macOS 15) is asked once, not once per attribute.
+    func testAppThatDoesNotAnswerIsAskedOnce() {
+        var calls = 0
+        let hung = FocusedText.Field(get: { _ in calls += 1; return (.cannotComplete, nil) }, string: { _ in calls += 1; return nil })
+        XCTAssertTrue(context(hung) == ("", "", ""))
+        XCTAssertEqual(calls, 1)
+        XCTAssertEqual(logged, ["no role: no answer (AX -25204), text goes in as dictated"])
     }
 }

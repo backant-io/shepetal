@@ -23,9 +23,12 @@ public struct AudioStore {
         try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: url.path)
     }
 
+    /// Where `save` puts the recording `id`.
+    public func url(_ id: String) -> URL { dir.appendingPathComponent("\(id).wav") }
+
     @discardableResult
     public func save(_ samples: [Float], id: String) throws -> URL {
-        let url = dir.appendingPathComponent("\(id).wav")
+        let url = self.url(id)
         guard FileManager.default.createFile(atPath: url.path, contents: Self.wav(samples),
                                              attributes: [.posixPermissions: 0o600]) else {
             throw CocoaError(.fileWriteUnknown, userInfo: [NSFilePathErrorKey: url.path])

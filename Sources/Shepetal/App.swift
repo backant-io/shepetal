@@ -240,17 +240,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let start = focusAtStart
         transcription = Task {
             let app = await appAtStart?.value ?? AppContext()
+            var shown: String?
             // Pipeline reads the context right after its last cancel check; a cancel during the paste
             // would cut the paste's waits short.
             let run = await pipeline.process(samples, engine: engine, app: app, context: { [weak self] in
                 self?.inserting = true
                 return FocusedText.context()
             }, focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
-               secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
+               secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV,
+               decided: { [weak self] in shown = $0; self?.finish($0) })
             busy = false
             inserting = false
             transcription = nil
-            if let error = run.error, !Task.isCancelled { fail(error) } else { indicator.set(.idle) }
+            if run.error != shown { finish(run.error) }  // the WAV or the history row failed afterwards
             if !Task.isCancelled, Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
         }
     }
@@ -283,6 +285,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         indicator.show("Copied", seconds: 1.5)
+    }
+
+    /// The end of a dictation. Esc while transcribing (#47) shows no error.
+    private func finish(_ error: String?) {
+        if let error, !Task.isCancelled { fail(error) } else { indicator.set(.idle) }
     }
 
     private func fail(_ message: String) {
