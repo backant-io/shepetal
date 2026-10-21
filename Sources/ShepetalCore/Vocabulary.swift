@@ -132,3 +132,70 @@ public struct Vocabulary {
         return Array(terms.map(\.spoken).prefix(Self.promptLimit))
     }
 }
+
+// MARK: F26: words learned from the user's edits
+
+extension Vocabulary {
+    /// The comment line that starts each learned batch in dictionary.txt.
+    public static let learnedMarker = "# learned from your edits"
+
+    /// One batch as it was appended, so undo can take exactly it out again.
+    public struct LearnedBatch: Equatable {
+        public let entries: [Entry]
+        let block: String          // the marker line and the entry lines, each ending in a newline
+        let addedNewline: Bool     // the file did not end in a newline, so one went in before the block
+        let createdFile: Bool      // there was no file: undo removes it again
+    }
+
+    /// Appends the entries no line of the file already covers, under a `learnedMarker` line, and keeps the file
+    /// owner-only. An entry whose spoken side (any case) is already in the file is left out: what the user wrote
+    /// wins, and nothing is added twice. nil, and the file untouched, when nothing is left.
+    public static func appendLearned(_ entries: [Entry], to url: URL, at date: Date = Date()) throws -> LearnedBatch? {
+        var seen = Set(load(url).entries.map { $0.spoken.lowercased() })
+        let new = entries.filter { seen.insert($0.spoken.lowercased()).inserted }
+        guard !new.isEmpty else { return nil }
+        let createdFile = !FileManager.default.fileExists(atPath: url.path)
+        try create(url)
+        let text = try Data(contentsOf: url)  // bytes: whatever the user's editor wrote stays exactly as it was
+        let addedNewline = !text.isEmpty && text.last != UInt8(ascii: "\n")
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "dd.MM.yy HH:mm"
+        let block = "\(learnedMarker), \(f.string(from: date))\n" + new.map { $0.line + "\n" }.joined()
+        try write(text + Data((addedNewline ? "\n" + block : block).utf8), to: url)
+        return LearnedBatch(entries: new, block: block, addedNewline: addedNewline, createdFile: createdFile)
+    }
+
+    /// Takes `batch` out again. With the file unchanged since, it is byte for byte what it was before the batch
+    /// (gone, when the batch created it). After the user edited the file, the batch's lines go only if they are
+    /// still there together, once. False, and the file untouched, otherwise.
+    @discardableResult
+    public static func undoLearned(_ batch: LearnedBatch, at url: URL) throws -> Bool {
+        guard let data = FileManager.default.contents(atPath: url.path) else { return false }
+        // Bytes, not characters: a file ending in "\r" would join the block's "\n" into one character.
+        let text = [UInt8](data), block = [UInt8](batch.block.utf8)
+        let appended = (batch.addedNewline ? [UInt8(ascii: "\n")] : []) + block
+        let rest: [UInt8]
+        if text.count >= appended.count, text.suffix(appended.count).elementsEqual(appended) {
+            rest = Array(text.dropLast(appended.count))
+        } else if let at = find(block, in: text), find(block, in: text, from: at + 1) == nil {
+            rest = Array(text[..<at] + text[(at + block.count)...])
+        } else { return false }
+        if batch.createdFile, rest.elementsEqual(header.utf8) {
+            try FileManager.default.removeItem(at: url)
+            return true
+        }
+        try write(Data(rest), to: url)
+        return true
+    }
+
+    private static func find(_ needle: [UInt8], in hay: [UInt8], from start: Int = 0) -> Int? {
+        guard !needle.isEmpty, hay.count >= needle.count, start <= hay.count - needle.count else { return nil }
+        return (start...(hay.count - needle.count)).first { hay[$0 ..< $0 + needle.count].elementsEqual(needle) }
+    }
+
+    private static func write(_ data: Data, to url: URL) throws {
+        try data.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+}

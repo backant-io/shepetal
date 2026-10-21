@@ -151,4 +151,81 @@ final class VocabularyTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), Vocabulary.header)
         XCTAssertEqual(try mode(), 0o600, "a write from the tab leaves it owner-only again")
     }
+
+    // MARK: F26: words learned from the user's edits
+
+    private func scratch() throws -> (URL, () throws -> Int, () -> Void) {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-vocab-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let url = dir.appendingPathComponent("dictionary.txt")
+        let mode = { (try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as! NSNumber).intValue }
+        return (url, mode, { try? FileManager.default.removeItem(at: dir) })
+    }
+
+    /// Undo has to give the user their file back exactly: their comments, their layout, a missing final newline.
+    func testLearnedBatchIsAppendedUnderAMarkerAndUndoLeavesTheFileAsBefore() throws {
+        let (url, mode, cleanup) = try scratch()
+        defer { cleanup() }
+        let at = DateComponents(calendar: Calendar(identifier: .gregorian), timeZone: .current, year: 2026, month: 10, day: 21, hour: 21, minute: 5).date!
+        let learned = [Vocabulary.Entry(spoken: "jon", written: "John"), Vocabulary.Entry(spoken: "GitHub", written: "GitHub")]
+        for before in ["# mine\nKubernetes\nbtw => by the way", "# mine\nKubernetes\n", "Word\r"] {
+            try Data(before.utf8).write(to: url)
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
+            let batch = try XCTUnwrap(try Vocabulary.appendLearned(learned, to: url, at: at))
+            let text = try String(contentsOf: url, encoding: .utf8)
+            XCTAssertTrue(text.hasSuffix("# learned from your edits, 21.10.26 21:05\njon => John\nGitHub\n"), text)
+            XCTAssertTrue(try Data(contentsOf: url).starts(with: Data(before.utf8)), "the user's lines stay as they were")
+            XCTAssertEqual(Array(Vocabulary.load(url).entries.suffix(2)), learned, "dictation applies them from the next one on")
+            XCTAssertEqual(try mode(), 0o600)
+            XCTAssertEqual(batch.entries, learned)
+
+            XCTAssertTrue(try Vocabulary.undoLearned(batch, at: url))
+            XCTAssertEqual(try Data(contentsOf: url), Data(before.utf8), "byte for byte as before: \(before.debugDescription)")
+            XCTAssertEqual(try mode(), 0o600)
+            XCTAssertFalse(try Vocabulary.undoLearned(batch, at: url), "a second undo finds nothing to take out")
+            XCTAssertEqual(try Data(contentsOf: url), Data(before.utf8))
+        }
+        try FileManager.default.removeItem(at: url)
+        let batch = try XCTUnwrap(try Vocabulary.appendLearned(learned, to: url))
+        XCTAssertTrue(try String(contentsOf: url, encoding: .utf8).hasPrefix(Vocabulary.header), "a new file explains its format")
+        XCTAssertEqual(try mode(), 0o600)
+        XCTAssertTrue(try Vocabulary.undoLearned(batch, at: url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "there was no file before the batch")
+    }
+
+    /// What the user wrote wins: a learned pair never replaces or shadows their entry, and nothing goes in twice.
+    func testLearnedNeverOverridesTheUsersEntryAndIsNotAddedTwice() throws {
+        let (url, _, cleanup) = try scratch()
+        defer { cleanup() }
+        let mine = "Jon\ngithub => GitHub\n*Shepetal\n"
+        try Data(mine.utf8).write(to: url)
+        XCTAssertNil(try Vocabulary.appendLearned([Vocabulary.Entry(spoken: "jon", written: "John"),
+                                                   Vocabulary.Entry(spoken: "GitHub", written: "GitHub"),
+                                                   Vocabulary.Entry(spoken: "shepetal", written: "Shepetal")], to: url))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), mine, "nothing left to learn: the file is untouched")
+
+        let kube = Vocabulary.Entry(spoken: "cooper netties", written: "Kubernetes")
+        let batch = try XCTUnwrap(try Vocabulary.appendLearned([kube, kube, Vocabulary.Entry(spoken: "jon", written: "John")], to: url))
+        XCTAssertEqual(batch.entries, [kube], "once, and the user's Jon stays")
+        XCTAssertNil(try Vocabulary.appendLearned([Vocabulary.Entry(spoken: "Cooper Netties", written: "Kubernetes")], to: url),
+                     "already learned")
+        XCTAssertEqual(Vocabulary.load(url).apply("deploy to cooper netties"), "deploy to Kubernetes")
+    }
+
+    /// The user may edit the file between the learn and the undo: undo takes only the batch, or nothing.
+    func testUndoAfterTheUserEditedTheFile() throws {
+        let (url, _, cleanup) = try scratch()
+        defer { cleanup() }
+        try Data("Kubernetes\n".utf8).write(to: url)
+        let batch = try XCTUnwrap(try Vocabulary.appendLearned([Vocabulary.Entry(spoken: "jon", written: "John")], to: url))
+        try Vocabulary.update(url, replacing: nil, with: Vocabulary.Entry(spoken: "pr", written: "pull request"))
+        XCTAssertTrue(try Vocabulary.undoLearned(batch, at: url))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "Kubernetes\npr => pull request\n")
+
+        let again = try XCTUnwrap(try Vocabulary.appendLearned([Vocabulary.Entry(spoken: "jon", written: "John")], to: url))
+        try Vocabulary.update(url, replacing: Vocabulary.Entry(spoken: "jon", written: "John"), with: Vocabulary.Entry(spoken: "jon", written: "Jonathan"))
+        let edited = try Data(contentsOf: url)
+        XCTAssertFalse(try Vocabulary.undoLearned(again, at: url), "the user changed the learned line: it is theirs now")
+        XCTAssertEqual(try Data(contentsOf: url), edited)
+    }
 }
