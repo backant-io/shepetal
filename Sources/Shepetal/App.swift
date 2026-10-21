@@ -72,9 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Off the tap callback: opening the mic is slow, and a slow callback gets the tap turned off.
         tap.onInput = { [weak self] input, t in DispatchQueue.main.async { MainActor.assumeIsolated { self?.key(input, at: t) } } }
         wireMicAndSpeech()
-        fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
-        fnWatch.active = { [weak self] in self?.tap.isRunning == true }
-        fnWatch.start()
+        fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.taken) }
+        tap.onFn = { [weak self] down, t in DispatchQueue.main.async { MainActor.assumeIsolated { self?.fnReceived(down: down, at: t) } } }
+        tap.onGlobe = { [weak self] t in DispatchQueue.main.async { MainActor.assumeIsolated { self?.fnWatch.globe(at: t) } } }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -125,10 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// The tap delivered fn: an earlier "fn not received" no longer holds.
-    private func fnReceived() {
-        fnWatch.tapEvent()
-        guard FnDiagnostics.problem == FnHealth.hint else { return }
+    /// The tap delivered fn (keycode 63): an earlier "fn not received" no longer holds.
+    private func fnReceived(down: Bool, at t: TimeInterval) {
+        fnWatch.fn(down: down, at: t)
+        guard [FnHealth.hint, FnHealth.taken].contains(FnDiagnostics.problem) else { return }
         FnDiagnostics.problem = nil
         if indicator.mode == .error { indicator.set(.idle) }
     }
@@ -147,7 +147,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// `t`: when the key moved (`FnClock`), which can be well before the main thread reads it.
     private func key(_ input: KeyInput, at t: TimeInterval) {
         let idle = dictation?.gesture.state == .idle
-        if [.pttDown, .pttUp, .toggle].contains(input) { fnReceived() }
         switch input {
         case .pasteLast: pasteLast()
         case .copyLast: copyLast()

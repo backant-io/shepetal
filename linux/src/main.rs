@@ -154,7 +154,7 @@ fn history_cmd(args: &[String]) -> Res {
 /// Put `text` on the clipboard of this session.
 fn copy(text: &str) -> Res {
     let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
-    let clip = insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("no wl-copy or xclip")?;
+    let clip = insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("no wl-copy, xclip or xsel")?;
     clip.insert(text).map_err(|e| e.to_string())
 }
 
@@ -462,7 +462,10 @@ fn listen(rx: &mpsc::Receiver<(u16, i32)>, key: u16, key_name: &str, data_home: 
         for cmd in s.feed(k, now) {
             let hint = match cmd {
                 Cmd::Dictation(a) => act(a, &mut rec, data_home, stt, typer, key_name, ind)?,
-                Cmd::MaxLengthWarning => Some(shortcuts::WARNING.into()),
+                Cmd::MaxLengthWarning => {
+                    notify(shortcuts::WARNING);
+                    Some(shortcuts::WARNING.into())
+                }
                 Cmd::PasteLast | Cmd::CopyLast => again(cmd, data_home, typer),
             };
             if let Some(hint) = hint {
@@ -491,6 +494,21 @@ type Rec = (Child, PathBuf, Option<String>);
 
 /// The paste-last key types the newest dictated text in the history at the cursor again (F21), so
 /// it survives a restart; copy-last puts it on the clipboard. Returns the hint for 🤫.
+/// The length warning also goes to the desktop's notifications: the hint next to 🤫 is gone after
+/// about 2 s, and on GNOME without the extension there is no 🤫. Without notify-send
+/// (libnotify-bin) only 🤫 and stderr say it. Not waited for here; a thread reaps it.
+fn notify(text: &str) {
+    if !insert::on_path("notify-send") {
+        return;
+    }
+    match Command::new("notify-send").args(["-a", "shepetal", "-t", "10000", "shepetal", text]).spawn() {
+        Ok(mut c) => {
+            std::thread::spawn(move || c.wait());
+        }
+        Err(e) => eprintln!("shepetal: notify-send: {e}"),
+    }
+}
+
 fn again(cmd: Cmd, data_home: &Path, typer: insert::Backend) -> Option<String> {
     let entries = history::load(data_home);
     let Some(text) = history::last_text(&entries).map(|e| e.text.as_str()) else { return Some("Nothing dictated yet".into()) };
@@ -593,7 +611,7 @@ fn deliver(text: &str, typer: insert::Backend, focused_at_start: Option<&str>, i
     };
     let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
     let clip = if typer.is_clipboard() { Some(typer) } else { insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path) };
-    match clip.ok_or_else(|| std::io::Error::other("no wl-copy or xclip")).and_then(|c| c.insert(text)) {
+    match clip.ok_or_else(|| std::io::Error::other("no wl-copy, xclip or xsel")).and_then(|c| c.insert(text)) {
         Ok(()) => {
             ind.send("idle");
             ("paste_failed", Some(focus::clipboard_hint(why)))
@@ -847,6 +865,7 @@ mod tests {
             ("hyprctl", format!("echo \"$*\" > \"{d_}/focus.args\"\ncat \"{d_}/hypr-active\"\n")),
             ("wl-copy", format!("cat > \"{d_}/clipboard\"\n")),
             ("pw-play", format!("echo \"$*\" > \"{d_}/played\"\n")),
+            ("notify-send", format!("echo \"$*\" >> \"{d_}/notified\"\n")),
         ];
         for (bin, body) in tools {
             std::fs::write(d.join(bin), format!("#!/bin/sh\n{body}")).unwrap();
@@ -997,6 +1016,36 @@ mod tests {
             assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");
             // The last idle is the cancel when the keyboard went away.
             assert_eq!(read_lines(r, 6), ["idle", "recording", "handsfree", "processing", "idle", "idle"]);
+        });
+    }
+
+    #[test]
+    fn a_dictation_that_reaches_the_cap_is_warned_stopped_and_typed() {
+        // F10 through the daemon: config.json's cap (here 1.5 s, so the one-minute warning comes
+        // at once) warns next to 🤫 and as a notification, then stops the recording while fn is
+        // still held. The text is typed as on a release, and the late release does nothing.
+        with_fake_tools("cap", |d| {
+            let home = d.join("home");
+            let audio = home.join("shepetal/audio");
+            let (ind, r) = indicator_in(d);
+            let (tx, rx) = mpsc::channel();
+            let typed = d.join("typed");
+            let keyboard = std::thread::spawn(move || {
+                tx.send((shepetal::KEY_FN, 1)).unwrap();
+                wait_until("the recorder", || clips(&audio).iter().any(|p| std::fs::read(p).is_ok_and(|b| b == b"RIFF partial")));
+                wait_until("the forced stop", || typed.exists());
+                tx.send((shepetal::KEY_FN, 0)).unwrap();
+                std::thread::sleep(Duration::from_millis(800)); // a late tap would end as too short here
+            });
+            let cfg = shortcuts::Config { max_ms: 1500, ..defaults() };
+            assert_eq!(listen(&rx, shepetal::KEY_FN, "fn", &home, &cpu(), insert::Backend::Wtype, &ind, &cfg).unwrap_err(), "all input devices closed");
+            keyboard.join().unwrap();
+            assert_eq!(std::fs::read_to_string(d.join("typed")).unwrap(), "Hello world.");
+            assert_eq!(std::fs::read(d.join("heard.wav")).unwrap(), b"RIFF final", "the whole clip was transcribed");
+            assert_eq!(std::fs::read_to_string(d.join("notified")).unwrap(), "-a shepetal -t 10000 shepetal Recording stops in 1 minute\n");
+            // The last idle is the cancel when the keyboard went away: nothing was recording.
+            assert_eq!(read_lines(r, 6), ["idle", "recording", "hint Recording stops in 1 minute", "processing", "idle", "idle"]);
+            assert_eq!(clips(&home.join("shepetal/audio")).len(), 1, "one recording, not a second from the release");
         });
     }
 
