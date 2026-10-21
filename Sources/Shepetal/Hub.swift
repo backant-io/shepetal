@@ -3,10 +3,9 @@ import AVFoundation
 import ShepetalCore
 import SwiftUI
 
-/// The one Shepetal window: Home, History and Settings. It opens from the 🤫 menu and when the app is
+/// The one Shepetal window: Home, History, Meetings and Settings. It opens from the 🤫 menu and when the app is
 /// opened again while it runs. It opens by itself on Home only when dictation needs sign-in: once at launch,
-/// and on a blocked fn press. Settings added by other parts (shortcuts, mic, languages, dictionary, login)
-/// stay in the 🤫 menu for now.
+/// and on a blocked fn press. Shortcuts, the mic and the languages are in the 🤫 menu; every other setting is here.
 @MainActor
 final class Hub {
     private let window: NSWindow
@@ -16,9 +15,11 @@ final class Hub {
     init(pipeline: Pipeline, engine: @escaping () -> SpeechEngine?,
          status: @escaping () -> (model: String, fnWatched: Bool),
          retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void,
-         openPermissions: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore()) {
+         openPermissions: @escaping () -> Void, loginItem: LoginItem, openDictionary: @escaping () -> Void,
+         restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore()) {
         model = HubModel(pipeline: pipeline, engine: engine, status: status, retention: retention,
-                         setRetention: setRetention, openPermissions: openPermissions)
+                         setRetention: setRetention, openPermissions: openPermissions, loginItem: loginItem,
+                         openDictionary: openDictionary, restoreFnKey: restoreFnKey)
         meetings = MeetingsModel(store: meetingStore)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -37,6 +38,12 @@ final class Hub {
     /// Home, with the account and Sign in at the top.
     func showHome() {
         UserDefaults.standard.set("home", forKey: "hubTab")
+        show()
+    }
+
+    /// The Meetings tab (the 🤫 menu's Open Meetings, before there are any).
+    func showMeetings() {
+        UserDefaults.standard.set("meetings", forKey: "hubTab")
         show()
     }
 
@@ -72,6 +79,9 @@ final class HubModel: ObservableObject {
     let retention: () -> Retention
     let setRetention: (Retention) -> Void
     let openPermissions: () -> Void
+    let loginItem: LoginItem
+    let openDictionary: () -> Void
+    private let restore: () -> Void
 
     @Published var query = "" { didSet { reload() } }
     @Published var showArchived = false { didSet { reload() } }
@@ -82,9 +92,11 @@ final class HubModel: ObservableObject {
     private var loaded: [SpeechModel: SpeechEngine] = [:]
 
     init(pipeline: Pipeline, engine: @escaping () -> SpeechEngine?, status: @escaping () -> (model: String, fnWatched: Bool),
-         retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void, openPermissions: @escaping () -> Void) {
+         retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void, openPermissions: @escaping () -> Void,
+         loginItem: LoginItem, openDictionary: @escaping () -> Void, restoreFnKey: @escaping () -> Void) {
         self.pipeline = pipeline; self.engine = engine; self.status = status
         self.retention = retention; self.setRetention = setRetention; self.openPermissions = openPermissions
+        self.loginItem = loginItem; self.openDictionary = openDictionary; restore = restoreFnKey
     }
 
     func reload() {
@@ -142,6 +154,17 @@ final class HubModel: ObservableObject {
     func changeRetention(_ r: Retention) {
         setRetention(r)
         reload()
+    }
+
+    /// Both read macOS, not a published value, so Settings is told to draw again.
+    func toggleLogin() {
+        loginItem.toggle()
+        objectWillChange.send()
+    }
+
+    func restoreFnKey() {
+        restore()
+        objectWillChange.send()
     }
 }
 
@@ -244,8 +267,13 @@ private struct SettingsTab: View {
                 Text("Delete recordings after 24 hours").tag(Retention.delete24h)
             }
             Button("Open recordings folder") { NSWorkspace.shared.open(Paths.audio) }
+            Toggle("Start at login", isOn: Binding(get: { model.loginItem.isOn }, set: { _ in model.toggleLogin() }))
+            Button("Dictionary…", action: model.openDictionary)
+            if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
+                Button("Restore 🌐 key setting (\(FnKeySetting.describe(previous)))", action: model.restoreFnKey)
+            }
             Button("Permissions…", action: model.openPermissions)
-            Text("Other settings are in the 🤫 menu.").font(.caption).foregroundStyle(.secondary)
+            Text("Shortcuts, the microphone and languages are in the 🤫 menu.").font(.caption).foregroundStyle(.secondary)
         }
         .formStyle(.grouped)
     }

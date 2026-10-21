@@ -68,7 +68,7 @@ extension Paths {
     static var dictionary: URL { root.appendingPathComponent("dictionary.txt") }
 }
 
-/// The 🤫 menu's Languages submenu and Dictionary item.
+/// The 🤫 menu's Languages submenu, and Settings' Dictionary… button.
 @MainActor
 final class SpeechMenu: NSObject {
     /// Called when a language change needs another model.
@@ -86,7 +86,7 @@ final class SpeechMenu: NSObject {
         }
     }
 
-    func items() -> [NSMenuItem] {
+    func languagesItem() -> NSMenuItem {
         let menu = NSMenu()
         let auto = menu.addItem(withTitle: "Automatic", action: #selector(automatic), keyEquivalent: "")
         auto.target = self
@@ -101,9 +101,7 @@ final class SpeechMenu: NSObject {
         }
         let languagesItem = NSMenuItem(title: "Languages", action: nil, keyEquivalent: "")
         languagesItem.submenu = menu
-        let dictionary = NSMenuItem(title: "Dictionary…", action: #selector(openDictionary), keyEquivalent: "")
-        dictionary.target = self
-        return [languagesItem, dictionary]
+        return languagesItem
     }
 
     @objc private func automatic() { languages = [] }
@@ -114,7 +112,7 @@ final class SpeechMenu: NSObject {
     }
 
     /// Creates dictionary.txt with its header comment if needed and opens it in the default editor.
-    @objc private func openDictionary() {
+    func openDictionary() {
         do {
             try AudioStore.makeOwnerOnlyDirectory(Paths.root)
             try Vocabulary.create(Paths.dictionary)

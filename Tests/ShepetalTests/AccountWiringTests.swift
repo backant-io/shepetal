@@ -27,13 +27,17 @@ final class AccountWiringTests: XCTestCase {
                                  "the fn gate is gone from key(_:at:)")
         let run = try XCTUnwrap(body.range(of: "run { $0.handle(input, at: t) }"))
         XCTAssertLessThan(gate.lowerBound, run.lowerBound, "the gate must come before the gesture")
+        // Every input, before the switch: a refused press opens Home on its release, never when a key came first.
+        let release = try XCTUnwrap(body.range(of: "Account.shared.afterBlockedPress(input)"), "a blocked press never opens Home")
+        XCTAssertLessThan(release.lowerBound, try XCTUnwrap(body.range(of: "switch input {")).lowerBound)
     }
 
     func testLicenseTimerKnowsWhenADictationRuns() throws {
         let src = try app()
         XCTAssertTrue(src.contains("Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },"),
                       "isDictating must cover recording (gesture) and transcribing (busy)")
-        XCTAssertTrue(src.contains("Account.shared.menuItems().forEach(menu.addItem)"))
+        XCTAssertTrue(src.contains("access: Account.shared.access, signingIn: Account.shared.signingIn,"),
+                      "the 🤫 menu's account items follow the account")
     }
 
     /// Signed out at launch or on a blocked fn press, Account opens the Shepetal window on Home, where Sign in is

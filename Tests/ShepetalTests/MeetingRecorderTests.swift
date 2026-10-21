@@ -68,7 +68,6 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertNil(recorder.current, "detected is not consent: nothing records before the click")
         XCTAssertTrue(capture.started.isEmpty)
         XCTAssertEqual(hints, [])
-        XCTAssertEqual(recorder.menuItem.title, "Start meeting recording")
         feed(zoom, 6, 10)
         XCTAssertTrue(capture.started.isEmpty, "still waiting for the click")
 
@@ -78,7 +77,6 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertEqual(meeting.app, "zoom.us")
         XCTAssertNil(meeting.endedAt, "running")
         XCTAssertEqual(hints, ["Meeting detected · recording"])
-        XCTAssertEqual(recorder.menuItem.title, "Stop meeting recording")
 
         let folder = try XCTUnwrap(capture.started.first)
         XCTAssertEqual(folder.path, root.appendingPathComponent(meeting.id).path, "one folder per meeting under meetings/")
@@ -98,7 +96,6 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertEqual(ended.first?.meAudioPath, meeting.meAudioPath, "both channels go to the transcriber")
         XCTAssertEqual(ended.first?.othersAudioPath, meeting.othersAudioPath)
         XCTAssertTrue(FileManager.default.fileExists(atPath: meeting.meAudioPath), "the audio is kept")
-        XCTAssertEqual(recorder.menuItem.title, "Start meeting recording")
     }
 
     func testWithoutSystemAudioOnlyTheMicIsRecordedAndTheHintSaysSo() throws {
@@ -171,7 +168,6 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(recorder.current).app, "zoom.us")
         XCTAssertEqual(capture.started.count, 1)
         XCTAssertEqual(hints, ["Meeting detected · recording"])
-        XCTAssertEqual(recorder.menuItem.title, "Stop meeting recording")
         XCTAssertFalse(cards.contains { $0 != nil }, "no question when the setting says always")
     }
 
@@ -212,11 +208,11 @@ final class MeetingRecorderTests: XCTestCase {
 
     func testStartingByHandAnswersTheCard() {
         feed(zoom, 0, 5)
-        recorder.menuItem.performAction()
+        recorder.toggle()
         XCTAssertEqual(cards, ["zoom.us", nil])
-        XCTAssertEqual(recorder.current?.app, MeetingRecorder.manualApp, "the menu item keeps working")
+        XCTAssertEqual(recorder.current?.app, MeetingRecorder.manualApp, "the menu's Record meeting keeps working")
         XCTAssertEqual(hints, ["Recording meeting"])
-        recorder.menuItem.performAction()
+        recorder.toggle()
         XCTAssertNil(recorder.current)
         XCTAssertEqual(ended.map(\.app), [MeetingRecorder.manualApp])
     }

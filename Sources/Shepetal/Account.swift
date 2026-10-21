@@ -39,6 +39,8 @@ final class Account: NSObject, ObservableObject {
     private var showHome: () -> Void = {}
     private var shownHomeAtLaunch = false
     private var launchCheck = false
+    /// A refused press is down: its release opens Home (`afterBlockedPress`).
+    private var homeOnRelease = false
 
     private let client: AccountClient
     private let tokens: TokenStore
@@ -93,15 +95,26 @@ final class Account: NSObject, ObservableObject {
         refresh()
         guard access.allowsDictation || !required else {
             hint(signingIn ? "Finish signing in with Google first" : access.blockedHint ?? "")
-            if !signingIn { showHome() }  // Sign in (or Buy) is on Home; the sign-in sheet stays in front
+            homeOnRelease = !signingIn  // the sign-in sheet stays in front
             // Nothing is being dictated, so ask again: a purchase on the website or a network that came back
             // unlocks on the next press instead of the next day. At most once a minute.
             if signedIn, now().timeIntervalSince(state.lastAttempt ?? .distantPast) >= 60 { check() }
             return false
         }
+        homeOnRelease = false
+        launchCheck = false  // the user dictates now: a later check never opens the window
         checkTask?.cancel()
         checkTask = nil
         return true
+    }
+
+    /// The key input after a refused press. Its release opens Home, where Sign in (or Buy) is, unless another key
+    /// went down first: fn+Delete, fn+arrows and fn+F-keys are shortcuts, not a try at dictating, and the window
+    /// would take the focus, and their next key, from the user's app on every press.
+    func afterBlockedPress(_ input: KeyInput) {
+        guard homeOnRelease, input == .pttUp || input == .otherKey else { return }
+        homeOnRelease = false
+        if input == .pttUp { showHome() }
     }
 
     /// One license check in the background, unless one runs or the user is dictating.
@@ -228,38 +241,14 @@ final class Account: NSObject, ObservableObject {
 
     @objc func checkNow() { check() }
 
-    /// One line for the menu and Home: "Signed in as <email> · Trial, 12 days left", or "Not signed in".
+    /// One line for Home: "Signed in as <email> · Trial, 12 days left", or "Not signed in".
     var summaryLine: String {
         if signingIn { return "Signing in with Google…" }
         guard signedIn else { return access.summary }
         return (email.isEmpty ? "Signed in" : "Signed in as \(email)") + " · " + access.summary
     }
 
-    /// The account part of the 🤫 menu.
-    func menuItems() -> [NSMenuItem] {
-        refresh()
-        var items = [NSMenuItem(title: summaryLine, action: nil, keyEquivalent: "")]
-        func add(_ title: String, _ action: Selector) {
-            let i = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            i.target = self
-            items.append(i)
-        }
-        switch access {
-        case .signedOut:
-            if signingIn { add("Cancel sign-in", #selector(cancelSignIn)) } else { add(AccountText.signIn + "…", #selector(signIn)) }
-        case .trial: add(AccountText.buy + "…", #selector(buy))
-        case .expired:
-            add(AccountText.buy + "…", #selector(buy))
-            add("Check license now", #selector(checkNow))  // bought on the website
-        case .unchecked: add("Check license now", #selector(checkNow))
-        case .lifetime: break
-        }
-        if signedIn { add("Sign out", #selector(signOut)) }
-        if !message.isEmpty, !signingIn { items.append(NSMenuItem(title: message, action: nil, keyEquivalent: "")) }
-        return items
-    }
-
-    private func refresh() {
+    func refresh() {
         let a = AccountPolicy.access(signedIn: signedIn, state: state, now: now())
         if a != access { access = a }
     }

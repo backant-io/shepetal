@@ -30,8 +30,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tapFailed = false
     private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
+    private let updater: any UpdateChecking = NoUpdateChecker()
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
+    /// Past meetings in the 🤫 menu: the meeting in the transcript window.
+    private var openTranscript: (Meeting) -> Void = { _ in }
     private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
                                                                  card: { [weak self] in self?.meetingCard.show($0) }) { [weak self] in self?.indicator.show($0, seconds: 4) }
     /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
@@ -91,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.indicator.meeting = $0  // the red ring, for the whole recording
             }
             if let meetingFlow {  // the transcript window, in front without taking focus from the app in use
-                MeetingTranscriptWindow.follow(meetingFlow) { [weak self] in self?.openedHub()?.showMeeting($0) }
+                openTranscript = MeetingTranscriptWindow.follow(meetingFlow) { [weak self] in self?.openedHub()?.showMeeting($0) }
             }
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
@@ -148,6 +151,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// `t`: when the key moved (`FnClock`), which can be well before the main thread reads it.
     private func key(_ input: KeyInput, at t: TimeInterval) {
+        Account.shared.afterBlockedPress(input)  // the release of a refused press opens Home
         let idle = dictation?.gesture.state == .idle
         switch input {
         case .pasteLast: pasteLast()
@@ -350,80 +354,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: menu
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.removeAllItems()
-        menu.addItem(withTitle: tap.isRunning ? holdHint : "fn is not being watched yet", action: nil, keyEquivalent: "")
-        menu.addItem(withTitle: engineStatus, action: nil, keyEquivalent: "")
-        menu.addItem(item("Open Shepetal…", #selector(openHub)))
-        Account.shared.menuItems().forEach(menu.addItem)
-        if engine == nil, !ParakeetEngine.isInstalled {
-            menu.addItem(item("Download on-device speech recognition (about 470 MB)", #selector(downloadModel)))
+        Account.shared.refresh()
+        let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,
+                              engineProblem: engine == nil ? engineStatus : nil,
+                              canDownloadEngine: engine == nil && !ParakeetEngine.isInstalled,
+                              access: Account.shared.access, signingIn: Account.shared.signingIn,
+                              recordingMeeting: meetings.current != nil,
+                              meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],
+                              recent: (try? pipeline?.history.recent(limit: 10)) ?? [],
+                              pasteLast: tap.router.shortcuts.chord(.pasteLast),
+                              canCheckForUpdates: updater.canCheckForUpdates)
+        MenuModel.build(MenuModel.groups(state), into: menu, target: self, action: #selector(menuAction(_:))) { [mic, speech] in
+            switch $0 {
+            case .microphone: mic.menuItem()
+            case .languages: speech.languagesItem()
+            default: nil
+            }
         }
-        for i in [mic.menuItem()] + speech.items() { menu.addItem(i) }
-        menu.addItem(.separator())
-
-        let recent = NSMenu()
-        for entry in (try? pipeline?.history.recent(limit: 10)) ?? [] {
-            let title = entry.text.isEmpty ? "(\(entry.outcome.rawValue.replacingOccurrences(of: "_", with: " ")))" : String(entry.text.prefix(60))
-            let i = item(title, #selector(copyEntry(_:)))
-            i.representedObject = entry.text
-            i.isEnabled = !entry.text.isEmpty
-            recent.addItem(i)
-        }
-        if recent.items.isEmpty { recent.addItem(withTitle: "Nothing yet", action: nil, keyEquivalent: "") }
-        let recentItem = NSMenuItem(title: "Recent (click to copy)", action: nil, keyEquivalent: "")
-        recentItem.submenu = recent
-        menu.addItem(recentItem)
-        let keys = tap.router.shortcuts
-        menu.addItem(item("Paste last text (\(Key.label(keys.chord(.pasteLast))))", #selector(menuPasteLast)))
-        menu.addItem(item("Copy last text (\(Key.label(keys.chord(.copyLast))))", #selector(menuCopyLast)))
-        menu.addItem(item("Shortcuts…", #selector(openShortcuts)))
-
-        let keep = NSMenu()
-        for (r, title) in [(Retention.keep, "Keep recordings"), (.delete24h, "Delete recordings after 24 hours")] {
-            let i = item(title, #selector(setRetention(_:)))
-            i.representedObject = r.rawValue
-            i.state = retention == r ? .on : .off
-            keep.addItem(i)
-        }
-        let keepItem = NSMenuItem(title: "Recordings", action: nil, keyEquivalent: "")
-        keepItem.submenu = keep
-        menu.addItem(keepItem)
-        menu.addItem(item("Open recordings folder", #selector(openRecordings)))
-        menu.addItem(meetings.menuItem)
-        menu.addItem(loginItem.menuItem)
-        if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
-            menu.addItem(item("Restore 🌐 key setting (\(FnKeySetting.describe(previous)))", #selector(restoreFnKey)))
-        }
-        menu.addItem(item(Permission.missing.isEmpty ? "Permissions…" : "Permissions… (\(Permission.missing.count) missing)", #selector(openPermissions)))
-        menu.addItem(.separator())
-        for (title, url) in Self.donate {
-            let i = item("Donate: \(title)", #selector(openLink(_:)))
-            i.representedObject = url
-            menu.addItem(i)
-        }
-        menu.addItem(.separator())
-        menu.addItem(item("Quit Shepetal", #selector(NSApplication.terminate(_:)), target: NSApp))
     }
 
-    private func item(_ title: String, _ action: Selector, target: AnyObject? = nil) -> NSMenuItem {
-        let i = NSMenuItem(title: title, action: action, keyEquivalent: "")
-        i.target = target ?? self
-        return i
+    @objc private func menuAction(_ sender: NSMenuItem) {
+        guard let action = sender.representedObject as? MenuAction else { return }
+        switch action {
+        case .permissions: showOnboarding()
+        case .download: downloadModel()
+        case .signIn: Account.shared.signIn()
+        case .cancelSignIn: Account.shared.cancelSignIn()
+        case .buy: Account.shared.buy()
+        case .meeting: meetings.toggle()
+        case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { openTranscript(m) }
+        case .openMeetings: openedHub()?.showMeetings()
+        case .openApp: openHub()
+        case .checkForUpdates: updater.checkForUpdates()
+        case .pasteLast: pasteLast()
+        case .copy(let text):
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        case .shortcuts: openShortcuts()
+        case .helpCenter: NSWorkspace.shared.open(MenuModel.helpCenter)
+        case .feedback: NSWorkspace.shared.open(MenuModel.feedback)
+        case .quit: NSApp.terminate(nil)
+        case .microphone, .languages: break  // their own submenus
+        }
     }
 
-    @objc private func copyEntry(_ sender: NSMenuItem) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(sender.representedObject as? String ?? "", forType: .string)
-    }
-
-    @objc private func setRetention(_ sender: NSMenuItem) {
-        retention = Retention(rawValue: sender.representedObject as? String ?? "") ?? .keep
-    }
-
-    @objc private func menuPasteLast() { pasteLast() }
-    @objc private func menuCopyLast() { copyLast() }
-
-    @objc private func openShortcuts() {
+    private func openShortcuts() {
         shortcuts = shortcuts ?? ShortcutsWindow(tap: tap)
         NSApp.activate(ignoringOtherApps: true)
         shortcuts?.window?.center()
@@ -436,7 +411,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return false
     }
 
-    @objc private func openHub() { openedHub()?.show() }
+    private func openHub() { openedHub()?.show() }
 
     private func openedHub() -> Hub? {
         guard let pipeline else { fail("History is not available"); return nil }
@@ -445,24 +420,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          retention: { [weak self] in self?.retention ?? .keep },
                          setRetention: { [weak self] in self?.retention = $0 },
                          openPermissions: { [weak self] in self?.showOnboarding() },
+                         loginItem: loginItem, openDictionary: { [speech] in speech.openDictionary() },
+                         restoreFnKey: { [weak self] in self?.restoreFnKey() },
                          meetingStore: meetingFlow?.store ?? InMemoryMeetingStore())
         return hub
     }
 
-    @objc private func restoreFnKey() {
+    private func restoreFnKey() {
         let previous = FnKeySetting.restorable(FnKeySystem.io)
         guard FnKeySetting.restore(FnKeySystem.io) else { return }
         indicator.show("🌐 key back to \(FnKeySetting.describe(previous)) until Shepetal starts again", seconds: 6)
     }
 
-    @objc private func openRecordings() { NSWorkspace.shared.open(Paths.audio) }
-    @objc private func openPermissions() { showOnboarding() }
-
-    @objc private func openLink(_ sender: NSMenuItem) {
-        if let s = sender.representedObject as? String, let url = URL(string: s) { NSWorkspace.shared.open(url) }
-    }
-
-    @objc private func downloadModel() {
+    private func downloadModel() {
         engineStatus = "Downloading on-device speech recognition…"
         Task {
             do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""); return }
