@@ -1,0 +1,105 @@
+#!/usr/bin/env python3
+"""The shepetal "Meeting transcript" window, shown when a recorded meeting's transcript is ready.
+
+`shepetal daemon` starts it from PATH and writes one JSON line to its stdin:
+{"head": "Zoom, 21.10.26 17:30, 12 min", "text": "...", "copy": true, "folder": "/home/..."}.
+It prints `shown` once the window is on screen and `copy` on each click on Copy transcript. The
+daemon then puts the transcript on the clipboard and answers with a JSON line, {"copied": true}
+or {"error": "..."}, shown inline next to the buttons. Open folder opens the meeting folder.
+
+It never takes the keyboard focus by itself. It runs on X11 (XWayland on GNOME and KDE Wayland)
+with focus-on-map off, which GTK sends as _NET_WM_USER_TIME 0, the EWMH way to tell the window
+manager not to focus it. It is kept above other windows until it is first focused, for window
+managers that would put an unfocused new window behind the app. A click focuses it as usual.
+Design and checks: docs/linux-meetings.md.
+"""
+import json
+import os
+import signal
+import sys
+
+
+def main():
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    # The daemon reads stdout. A file manager started by Open folder must not hold it open.
+    out = os.fdopen(os.dup(1), "w")  # not inherited (Python dups with O_CLOEXEC)
+    os.dup2(2, 1)
+    os.environ["GDK_BACKEND"] = "x11"  # see above: Wayland has no way to map a window unfocused
+    import gi
+    gi.require_version("Gdk", "3.0")
+    gi.require_version("Gtk", "3.0")
+    from gi.repository import Gdk, Gio, GLib, Gtk
+
+    stdin = Gio.DataInputStream.new(Gio.UnixInputStream.new(0, False))
+    line, _ = stdin.read_line_utf8(None)
+    try:
+        msg = json.loads(line or "")
+    except ValueError:
+        sys.exit("shepetal-transcript: expected one JSON line on stdin from `shepetal daemon`")
+    if Gdk.Display.get_default() is None:
+        sys.exit("shepetal-transcript: no X11 display (on Wayland, XWayland must be on)")
+
+    win = Gtk.Window(title="Meeting transcript")
+    win.set_default_size(560, 600)
+    win.set_focus_on_map(False)
+    win.set_keep_above(True)
+
+    def engaged(*_):  # clicked into: no longer kept above other windows
+        win.set_keep_above(False)
+        return False
+
+    win.connect("focus-in-event", engaged)
+    win.connect("map-event", lambda *_: print("shown", file=out, flush=True) or False)
+    win.connect("destroy", Gtk.main_quit)
+
+    box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin=12)
+    head = Gtk.Label(xalign=0)
+    head.set_markup(f"<b>{GLib.markup_escape_text(msg['head'])}</b>")
+    view = Gtk.TextView(editable=False, cursor_visible=False, wrap_mode=Gtk.WrapMode.WORD_CHAR,
+                        left_margin=6, right_margin=6, top_margin=6, bottom_margin=6)
+    view.get_buffer().set_text(msg["text"])
+    scroll = Gtk.ScrolledWindow(vexpand=True, shadow_type=Gtk.ShadowType.IN)
+    scroll.add(view)
+    copy = Gtk.Button(label="Copy transcript", sensitive=msg["copy"])
+    folder = Gtk.Button(label="Open folder")
+    said = Gtk.Label()
+    row = Gtk.Box(spacing=8)
+    row.pack_start(copy, False, False, 0)
+    row.pack_start(folder, False, False, 0)
+    row.pack_start(said, False, False, 0)
+    for w in (head, scroll, row):
+        box.pack_start(w, w is scroll, w is scroll, 0)
+    win.add(box)
+
+    said_n = [0]
+
+    def say(text):  # inline, for 3 s
+        said.set_text(text)
+        said_n[0] += 1
+        n = said_n[0]
+        GLib.timeout_add_seconds(3, lambda: n == said_n[0] and said.set_text("") or False)
+
+    def answer(stream, res):
+        line, _ = stream.read_line_finish_utf8(res)
+        if line is None:  # the daemon is gone, and copying goes through it
+            copy.set_sensitive(False)
+            return
+        r = json.loads(line)
+        say("Copied" if r.get("copied") else r.get("error", "Not copied"))
+        stream.read_line_async(GLib.PRIORITY_DEFAULT, None, answer)
+
+    def open_folder(_):
+        try:
+            Gtk.show_uri_on_window(win, Gio.File.new_for_path(msg["folder"]).get_uri(), Gtk.get_current_event_time())
+        except GLib.Error as e:
+            say(f"Not opened: {e.message}")
+
+    copy.connect("clicked", lambda _: print("copy", file=out, flush=True))
+    folder.connect("clicked", open_folder)
+    stdin.read_line_async(GLib.PRIORITY_DEFAULT, None, answer)
+    win.show_all()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    main()

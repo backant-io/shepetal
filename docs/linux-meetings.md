@@ -57,20 +57,38 @@ Record on a Record? prompt, or always with auto-record on (see Settings). The co
    recording. Consecutive segments from one speaker are joined into one turn. If a channel
    can't be transcribed, the reason is listed in the header and the other channel is still
    written. With no speech on either channel, the transcript ends with `No speech was recorded.`
-6. Then the transcript window opens: `xdg-open transcript.md`, so the user's default app for
-   text shows it (GNOME: Text Editor), where the text can be read, selected and copied. Next to
-   it, a notification "Meeting transcript ready" shows the apps, the start and the length, with
-   two buttons:
+6. Then the Meeting transcript window shows: `shepetal-transcript` (GTK 3, in
+   `linux/indicator/`), which the daemon starts from PATH. It has the apps, the start and the
+   length on top (`Zoom, 21.10.26 14:05, 32 min`; what is not known is left out), the turns
+   below as selectable text, and two buttons:
    - Copy transcript: puts the turns on the clipboard, one `[hh:mm:ss] Speaker: text` line
-     each, without the header. It uses `wl-copy` on Wayland, else `xclip`, else `xsel`, and then
-     shows a short "Transcript copied" notification. With none of them installed, it shows
-     "Transcript not copied: no wl-copy, xclip or xsel" and says so on stderr.
-   - Open folder: opens the meeting folder (`xdg-open`), with the audio and the transcript.
-   The clipboard is written only on a click on Copy transcript. Both notifications ask for no
-   sound (`suppress-sound`). A meeting with no speech, or one that was not transcribed, has
-   only Open folder, and the notification says why. The notification stays in the notification
-   list until it is clicked or dismissed, and goes away when the daemon exits. Every recorded
-   meeting gets one window and one notification.
+     each, without the header. The window prints `copy`, and the daemon copies with `wl-copy`
+     on Wayland, else `xclip`, else `xsel`, then answers the window, which shows "Copied" next to
+     the buttons for 3 s. With none of them installed, it shows "Not copied: no wl-copy, xclip or
+     xsel" there and says so on stderr. It can be clicked again. Ctrl+C on a selection copies
+     just that.
+   - Open folder: opens the meeting folder, with the audio and the transcript.
+
+   The window never takes the keyboard focus by itself (rule 8). It runs on X11, through
+   XWayland on Wayland, and maps with focus-on-map off, which GTK sends as `_NET_WM_USER_TIME`
+   0, the EWMH hint for "do not focus this window". Mutter, KWin, xfwm4 and i3 leave the focus
+   where it is. It is also kept above other windows until it is first focused, for window
+   managers that would put an unfocused new window behind the app (Mutter and xfwm4 put it in
+   front anyway). A click focuses it as usual. Nothing else is opened for it.
+
+   The clipboard is written only on a click on Copy transcript, and nothing plays a sound. A
+   meeting with no speech shows `No speech was recorded.` and Copy transcript is off. If a
+   channel could not be transcribed, the window says `Others was not transcribed. The audio is
+   in the meeting folder.` without the error, which names the speech engine. The error is in
+   `transcript.md` and on stderr. Every recorded meeting gets one window. It stays open when the
+   daemon exits, but Copy transcript then turns off, because the daemon does the copying.
+
+   A notification "Meeting transcript ready" with Copy transcript and Open folder stands in for
+   the window where the window would take the focus (Sway, Hyprland and other Wayland
+   compositors that are not GNOME or KDE), and where it can't show (no `shepetal-transcript`,
+   python3-gi or X display; the daemon says why on stderr). It asks the notification server to
+   keep it until it is clicked or dismissed (`--expire-time=0`), and "Transcript copied" comes
+   as a second, short notification. Both ask for no sound (`suppress-sound`).
 
 Nothing leaves the machine.
 
@@ -151,27 +169,40 @@ the error.
 - The recorder and whisper-cli arguments, and whisper output parsing.
 - Transcript formatting: the header with the local start (DD.MM.YY, in a child with its own
   `TZ`) and the length, `No speech was recorded.`, and what Copy transcript copies.
-- The transcript notification: Copy transcript only with speech, Open folder always, no sound.
-- The transcript window against fake `xdg-open`, `notify-send`, `wl-copy`, `xclip` and `xsel`:
-  closed without a click copies nothing, Copy transcript copies the turns and confirms, and
-  Open folder opens the folder.
+- The headline, which leaves out an unknown app or time, and `- Apps: not named`.
+- Where the window may show: X11, GNOME and KDE, and not Sway, Hyprland or other Wayland
+  compositors.
+- The transcript notification: Copy transcript only with speech, Open folder always, no sound,
+  no expiry.
+- The transcript window against fake `shepetal-transcript`, `notify-send`, `xdg-open`,
+  `whisper-cli`, `wl-copy`, `xclip` and `xsel`: closed without a click copies, notifies and opens
+  nothing. Two clicks on Copy transcript copy the turns twice and the window is told each time,
+  also when the copy fails. No speech and failed channels show no engine name. A window that
+  can't show, and Sway, get the notification, whose Open folder opens the folder.
 - The `notify-send` arguments, the 20 s default, and that only `"auto_record": true` turns
   auto-record on: a missing file, other features' keys, and `false` ask first, and a typo is an
   error.
 - Whole meetings against fake `pw-dump`, `pw-record`, `whisper-cli` and `notify-send`, each run
   in a child copy of the test binary so it can set its own PATH:
-  - Record clicked: recorded and transcribed, then the transcript window and its
-    notification once, and nothing copied.
+  - Record clicked: recorded and transcribed, then the transcript window once, with no
+    notification, nothing opened and nothing copied.
   - Dismissed: no recorder runs and no folder is made, and it is not asked again.
   - No answer: the prompt is withdrawn at the timeout, and nothing is recorded.
   - Call ended first: the prompt is withdrawn, and nothing is recorded.
   - Auto-record on: recorded with no prompt.
 - On Linux only: the recorder gets SIGINT when the thread that started it ends.
 
+`linux/indicator/check.sh` (Docker, by hand) runs the real window under Mutter, i3 and xfwm4 on
+Xvfb. A text field has the focus and is being typed in when the window shows. The typing must go
+on into the field, `_NET_WM_USER_TIME` must be 0, and the window must be in front (not on i3,
+which tiles it). Then a click on Copy transcript must focus the window and print `copy`, and
+Ctrl+C on a double-clicked word must copy just that word. Screenshots go to the out dir.
+
 ## Hand test (Ubuntu 24.04 desktop, GNOME)
 
 Prerequisites: steps 1 to 3 of the manual test in docs/linux.md, plus `whisper-cli` on PATH,
-`ggml-large-v3-turbo-q5_0.bin` in `~/.local/share/shepetal/` and `notify-send` (libnotify-bin).
+`ggml-large-v3-turbo-q5_0.bin` in `~/.local/share/shepetal/`, `notify-send` (libnotify-bin) and
+`shepetal-transcript` on PATH (linux/README.md).
 Do Not Disturb off. Use headphones for steps 2 to 5 (see the known gaps). In steps 7 to 9,
 click Record on the prompt.
 
@@ -193,8 +224,8 @@ click Record on the prompt.
    then unmute. The recording must go on: no `meeting ended` line.
 5. Leave the call. About 4 to 6 s later (15 s after the start at the earliest) the daemon must
    print `meeting ended, transcribing ...`, then `meeting transcript .../transcript.md`. The
-   transcript must open by itself, with the "Meeting transcript ready" notification
-   (docs/manual-test.md, L-MEET-11).
+   Meeting transcript window must show, without taking the focus (docs/manual-test.md,
+   L-MEET-11).
 6. Check the folder:
    - `ls -la ~/.local/share/shepetal/meetings/ ~/.local/share/shepetal/meetings/<ms>/`: both
      dirs are `drwx------`, and `Me.wav`, `Others.wav` and `transcript.md` are `-rw-------`.
@@ -228,16 +259,15 @@ click Record on the prompt.
 - No live transcript. The final pass runs only after the call (section 7 asks for streaming
   ASR per channel).
 - Others is one speaker. The system channel is not diarized yet, and calendar names are not used.
-- There is no summary yet, so the transcript window has no summary, no action items and no
-  Copy summary. The non-LLM summarizer (`summarize/`) reads `Speaker: text` lines, so the
-  `[hh:mm:ss] ` prefix must be stripped first.
-- The transcript window is whatever app `xdg-open` picks. Whether it takes keyboard focus is up
-  to that app and the desktop's focus-stealing prevention, which shepetal can't control. It is
-  not tested on hardware yet. L-MEET-11 checks it.
-- A notification closes after one click, so Copy transcript and Open folder are one or the
-  other. The transcript window and the folder hold the rest.
-- Each unanswered transcript notification keeps one `notify-send` waiting until it is clicked
-  or dismissed.
+- There is no summary yet, so the transcript window has no summary, no action items, no
+  "Summarizing…" and no Copy summary (#200). The non-LLM summarizer (`summarize/`) reads
+  `Speaker: text` lines, so the `[hh:mm:ss] ` prefix must be stripped first.
+- On Sway, Hyprland and other Wayland compositors that are not GNOME or KDE, the transcript is
+  a notification, not the window (#201). Its buttons work once: it closes after one click.
+- That KWin leaves the focus alone for a window with `_NET_WM_USER_TIME` 0 is from its
+  documented focus-stealing prevention, not tested yet. L-MEET-11 step 9 checks it.
+- Each open transcript window, and each unanswered transcript notification, keeps one daemon
+  thread waiting until it is closed.
 - Others.wav follows the system default sink. If the call app sends audio to a device other
   than the default, Others.wav is silent. Linking to the call app's output stream would fix this.
 - Without headphones, Me.wav also picks up the other side from the speakers, because

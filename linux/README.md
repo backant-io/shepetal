@@ -30,8 +30,10 @@ real hotkey, mic, speech-to-text and typing tools need a real desktop and are no
 ## 🤫 indicator
 
 `shepetal daemon` starts `indicator/shepetal-indicator` (GTK 3, X11 and wlr-layer-shell) from
-PATH; on GNOME Wayland, `gnome-extension/` draws 🤫 instead. Its checks, including real X11 (Xvfb)
-and Sway runs with screenshots, run in Docker from the repo root:
+PATH; on GNOME Wayland, `gnome-extension/` draws 🤫 instead. After a recorded meeting it starts
+`indicator/shepetal-transcript` (GTK 3), the Meeting transcript window (docs/linux-meetings.md).
+Their checks, including real X11 (Xvfb) and Sway runs with screenshots and the transcript window
+under Mutter, i3 and xfwm4, run in Docker from the repo root:
 
 ```sh
 linux/indicator/check.sh            # prints where the screenshots went
@@ -45,7 +47,7 @@ Design, IPC and manual steps: [docs/linux.md, "🤫 indicator"](../docs/linux.md
 sudo usermod -aG input $USER              # then log out and in: evdev needs /dev/input access
 sudo apt install pipewire-bin wtype xdotool ydotool wl-clipboard xclip   # whichever apply
 sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-gtklayershell-0.1 fonts-noto-color-emoji
-ln -s "$PWD/indicator/shepetal-indicator" ~/.local/bin/   # the daemon starts it from PATH
+ln -s "$PWD/indicator/shepetal-indicator" "$PWD/indicator/shepetal-transcript" ~/.local/bin/   # the daemon starts them from PATH
 # sherpa-onnx-offline (or whisper-cli on Vulkan) on PATH, and the model `probe` names
 # in ~/.local/share/shepetal/ (see docs/linux.md, manual test step 2)
 cargo build --release

@@ -3,8 +3,8 @@
 //! shows a Record? notification. Only a click on Record starts the recording of the mic and
 //! the default sink's monitor into two WAVs (`{"meetings": {"auto_record": true}}` in config.json
 //! records without asking). When the call ends, it stops them and writes a Me / Others transcript next to them.
-//! The audio is always kept (rule 4). The transcript then opens in the user's default viewer, with
-//! a notification that offers Copy transcript and Open folder.
+//! The audio is always kept (rule 4). The transcript then shows in a window that does not take
+//! the focus, with Copy transcript and Open folder.
 
 use serde_json::Value;
 use shepetal::{insert, meeting, model, shortcuts};
@@ -319,7 +319,8 @@ const NO_SPEECH: &str = "No speech was recorded.";
 fn transcript(apps: &[&str], started: &str, secs: u64, channels: &[(&str, Vec<(u64, String)>)], notes: &[String]) -> String {
     let mut segs: Vec<_> = channels.iter().flat_map(|(who, s)| s.iter().map(move |(t, x)| (*t, *who, x.as_str()))).collect();
     segs.sort_by_key(|s| s.0); // stable, so the channel order breaks ties
-    let mut out = format!("# Meeting\n\n- Apps: {}\n- Started: {started}\n- Duration: {}\n- Audio: {ME} (microphone), {OTHERS} (system audio)\n", apps.join(", "), duration(secs));
+    let apps = if apps.is_empty() { "not named".into() } else { apps.join(", ") };
+    let mut out = format!("# Meeting\n\n- Apps: {apps}\n- Started: {started}\n- Duration: {}\n- Audio: {ME} (microphone), {OTHERS} (system audio)\n", duration(secs));
     for n in notes {
         out += &format!("- {n}\n");
     }
@@ -351,6 +352,13 @@ fn save(dir: &Path, md: &str) -> std::io::Result<PathBuf> {
 /// speakers. Only turns start with `[`: the header lines start with `#` or `-`.
 fn turns(md: &str) -> String {
     md.lines().filter(|l| l.starts_with('[')).map(|l| format!("{l}\n")).collect()
+}
+
+/// The window's and the notification's title line, `Zoom, 21.10.26 17:30, 12 min`, without what
+/// is not known: a recording started in the poll where the app let go of the mic has no app.
+fn headline(apps: &[&str], when: &str, secs: u64) -> String {
+    let (apps, secs) = (apps.join(", "), duration(secs));
+    [apps.as_str(), when, &secs].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", ")
 }
 
 /// `32 s`, `12 min`, `1 h 05 min`.
@@ -396,18 +404,18 @@ fn local_time(secs: i64) -> String {
 
 const QUIET: &str = "--hint=boolean:suppress-sound:true";
 
-/// The notification that comes with the transcript window. notify-send waits and prints the
-/// name of the clicked action. Copy transcript is offered only when there are turns to copy.
-/// Without them the body says why: no speech, or the transcription error.
-fn ready_cmd(head: &str, turns: &str, note: Option<&String>) -> Command {
+/// The notification in place of the transcript window. notify-send waits and prints the name of
+/// the clicked action. Copy transcript is offered only when there are turns to copy. Without
+/// them the body says why. It asks the server to keep it until it is clicked or dismissed.
+fn ready_cmd(head: &str, turns: &str, note: Option<&str>) -> Command {
     let mut c = Command::new("notify-send");
-    c.args(["--app-name=shepetal", QUIET]);
+    c.args(["--app-name=shepetal", QUIET, "--expire-time=0"]);
     if !turns.is_empty() {
         c.arg("--action=copy=Copy transcript");
     }
     c.args(["--action=open=Open folder", "Meeting transcript ready"]);
     if turns.is_empty() {
-        c.arg(format!("{head}\n{}", note.map_or(NO_SPEECH, |n| n.as_str())));
+        c.arg(format!("{head}\n{}", note.unwrap_or(NO_SPEECH)));
     } else {
         c.arg(head);
     }
@@ -435,15 +443,58 @@ fn open(p: &Path) {
     }
 }
 
-/// The transcript window: `path` (transcript.md) in the user's default viewer, and the `ask`
-/// notification with Copy transcript and Open folder. The clipboard is written only when Copy
-/// transcript is clicked, and then gets `turns`. The click can come much later, from the
-/// notification list, so this holds the meeting's own thread until then.
+/// Whether the transcript window shows here without taking the keyboard focus: on X11, and
+/// through XWayland on GNOME and KDE, whose window managers do not focus a window mapped with
+/// `_NET_WM_USER_TIME` 0. Sway, Hyprland and other Wayland compositors focus every new window.
+fn window_keeps_focus(session: &str, desktop: &str) -> bool {
+    let d = desktop.to_ascii_uppercase();
+    session != "wayland" || d.contains("GNOME") || d.contains("KDE")
+}
+
+/// The transcript window, `shepetal-transcript` (linux/indicator/), shows `show` and prints `copy`
+/// for each click on Copy transcript. Only then is the clipboard written, with `turns`, and the
+/// window told how it went. Returns whether the window was shown. It holds the meeting's own
+/// thread until the window is closed.
+fn window(show: &Value, turns: &str) -> bool {
+    let spawned = Command::new("shepetal-transcript").stdin(Stdio::piped()).stdout(Stdio::piped()).spawn();
+    let mut child = match spawned {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("shepetal: no transcript window: shepetal-transcript: {e} (docs/linux-meetings.md)");
+            return false;
+        }
+    };
+    let (mut to, from) = (child.stdin.take().unwrap(), child.stdout.take().unwrap());
+    let _ = writeln!(to, "{show}");
+    let mut shown = false;
+    for line in std::io::BufRead::lines(std::io::BufReader::new(from)).map_while(Result::ok) {
+        match line.as_str() {
+            "shown" => shown = true,
+            "copy" => {
+                let reply = match crate::copy(turns) {
+                    Ok(()) => serde_json::json!({ "copied": true }),
+                    Err(e) => {
+                        eprintln!("shepetal: meeting transcript not copied: {e}");
+                        serde_json::json!({ "error": format!("Not copied: {e}") })
+                    }
+                };
+                let _ = writeln!(to, "{reply}");
+            }
+            _ => {}
+        }
+    }
+    let status = child.wait().map_or_else(|e| e.to_string(), |s| s.to_string());
+    if !shown {
+        eprintln!("shepetal: no transcript window ({status}): shepetal-transcript needs python3-gi, gir1.2-gtk-3.0 and X11 or XWayland (docs/linux-meetings.md)");
+    }
+    shown
+}
+
+/// The notification with Copy transcript and Open folder, for one click.
 // ponytail: one waiting notify-send per meeting until it is answered or dismissed.
-fn present(path: &Path, mut ask: Command, turns: &str) {
-    open(path);
+fn notify(dir: &Path, mut ask: Command, turns: &str) {
     if !insert::on_path("notify-send") {
-        return eprintln!("shepetal: no Copy transcript button: install notify-send (libnotify-bin)");
+        return eprintln!("shepetal: no transcript notification: install notify-send (libnotify-bin). The transcript is in {}", dir.display());
     }
     let out = match ask.output() {
         Ok(o) => o,
@@ -460,22 +511,47 @@ fn present(path: &Path, mut ask: Command, turns: &str) {
             };
             let _ = Command::new("notify-send").args(["--app-name=shepetal", QUIET, "--hint=boolean:transient:true", "--expire-time=3000", &said]).status();
         }
-        "open" => open(path.parent().unwrap_or(path)),
+        "open" => open(dir),
         _ if out.status.success() => {} // closed without a click
         _ => eprintln!("shepetal: transcript notification: notify-send failed ({}). Its buttons need libnotify 0.7.10 or later", out.status),
     }
+}
+
+/// Show the finished transcript of the meeting in `dir`: the window where it leaves the focus
+/// alone, else (or when it can't show) the notification. `note` says, without engine names,
+/// which channel was not transcribed. The clipboard is written only on a click on Copy transcript.
+fn present(dir: &Path, head: &str, turns: &str, note: Option<&str>) {
+    let (session, desktop) = (crate::env("XDG_SESSION_TYPE"), crate::env("XDG_CURRENT_DESKTOP"));
+    if !window_keeps_focus(&session, &desktop) {
+        eprintln!("shepetal: this Wayland desktop ({desktop:?}) gives every new window the focus, so the transcript comes as a notification (#201)");
+    } else {
+        // One turn per paragraph, as in transcript.md.
+        let turns_shown = turns.trim_end().replace('\n', "\n\n");
+        let text = match (note, turns.is_empty()) {
+            (None, true) => NO_SPEECH.to_string(),
+            (Some(n), true) => n.to_string(),
+            (None, false) => turns_shown,
+            (Some(n), false) => format!("{n}\n\n{turns_shown}"),
+        };
+        if window(&serde_json::json!({ "head": head, "text": text, "copy": !turns.is_empty(), "folder": dir.to_string_lossy() }), turns) {
+            return;
+        }
+    }
+    notify(dir, ready_cmd(head, turns, note), turns);
 }
 
 fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
     // `start` names the folder by its start time in ms, and this runs as soon as the recorders stop.
     let started = dir.file_name().and_then(|n| n.to_str()?.parse::<u128>().ok()).unwrap_or_else(crate::now_ms);
     let (when, secs) = (local_time((started / 1000) as i64), (crate::now_ms().saturating_sub(started) / 1000) as u64);
-    let mut channels = vec![];
-    let mut notes = vec![];
+    let (mut channels, mut notes, mut failed) = (vec![], vec![], vec![]);
     for (who, file) in [("Me", ME), ("Others", OTHERS)] {
         match whisper(model, &dir.join(file)) {
             Ok(s) => channels.push((who, s)),
-            Err(e) => notes.push(format!("{who} was not transcribed: {e}")),
+            Err(e) => {
+                failed.push(who);
+                notes.push(format!("{who} was not transcribed: {e}"));
+            }
         }
     }
     for n in &notes {
@@ -485,9 +561,13 @@ fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
     match save(dir, &md) {
         Ok(p) => {
             eprintln!("shepetal: meeting transcript {}", p.display());
-            let turns = turns(&md);
-            let head = format!("{}, {when}, {}", apps.join(", "), duration(secs));
-            present(&p, ready_cmd(&head, &turns, notes.first()), &turns);
+            // The error itself names the engine, so it stays on stderr and in transcript.md.
+            let note = match failed[..] {
+                [] => None,
+                [who] => Some(format!("{who} was not transcribed. The audio is in the meeting folder.")),
+                _ => Some("Not transcribed. The audio is in the meeting folder.".to_string()),
+            };
+            present(dir, &headline(apps, &when, secs), &turns(&md), note.as_deref());
         }
         Err(e) => eprintln!("shepetal: meeting transcript in {}: {e}", dir.display()),
     }
@@ -872,11 +952,12 @@ mod tests {
     }
 
     /// One Zoom call (the first 12 pw-dump reads, 0.1 s apart) through the whole loop against
-    /// fake pw-dump, pw-record, whisper-cli, notify-send, xdg-open and clipboard tools. It runs in a
-    /// child copy of this test binary, because the tests in main.rs swap PATH for their own fakes.
-    /// The fake notify-send does `answer` to the Record? prompt: `record` (Record clicked),
-    /// `dismiss`, or `ignore` (waits until SIGINT). It closes the transcript notification without
-    /// a click. `extra` adds thresholds. Returns the fakes' dir in the parent, None in the child.
+    /// fake pw-dump, pw-record, whisper-cli, notify-send, shepetal-transcript, xdg-open and
+    /// clipboard tools, in an X11 session. It runs in a child copy of this test binary, because the
+    /// tests in main.rs swap PATH for their own fakes. The fake notify-send does `answer` to the
+    /// Record? prompt: `record` (Record clicked), `dismiss`, or `ignore` (waits until SIGINT). The
+    /// fake window is closed without a click. `extra` adds thresholds. Returns the fakes' dir in
+    /// the parent, None in the child.
     fn call(test: &str, auto_record: bool, answer: &str, extra: &str) -> Option<PathBuf> {
         const HOME: &str = "SHEPETAL_TEST_MEETING_HOME";
         if let Ok(home) = std::env::var(HOME) {
@@ -889,10 +970,11 @@ mod tests {
             for _ in 0..400 {
                 std::thread::sleep(Duration::from_millis(50));
                 // Done when the call is long over and every meeting recorded has its transcript
-                // notification, which comes after the transcript is written.
+                // window or notification, which come after the transcript is written.
                 let n: u32 = std::fs::read_to_string(&reads).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
                 let dirs = std::fs::read_dir(home.join("shepetal/meetings")).into_iter().flatten().count();
-                let shown = std::fs::read_to_string(reads.with_file_name("ready.args")).map_or(0, |s| s.lines().count());
+                let lines = |f: &str| std::fs::read_to_string(reads.with_file_name(f)).map_or(0, |s| s.lines().count());
+                let shown = lines("window") + lines("ready.args");
                 if n >= 30 && shown == dirs {
                     std::thread::sleep(Duration::from_millis(200)); // let the write finish
                     return None;
@@ -923,6 +1005,7 @@ mod tests {
             ("whisper-cli", format!("cat \"$4\" >> {dd}/heard\ncase \"$4\" in\n\
                 *Me.wav) printf '\\n[00:00:01.000 --> 00:00:02.000]   Hello from me.\\n' ;;\n\
                 *) printf '\\n[00:00:01.500 --> 00:00:03.000]   Hi from them. [Music]\\n' ;;\nesac\n")),
+            ("shepetal-transcript", format!("IFS= read -r show; printf '%s\\n' \"$show\" >> {dd}/window; echo shown\n")),
             ("xdg-open", format!("echo \"$1\" >> {dd}/opened\n")),
             ("wl-copy", format!("cat >> {dd}/clipboard\n")),
             ("xclip", format!("cat >> {dd}/clipboard\n")),
@@ -935,6 +1018,8 @@ mod tests {
         let out = Command::new(std::env::current_exe().unwrap())
             .args([test, "--exact", "--nocapture"])
             .env("PATH", format!("{dd}/bin:{}", std::env::var("PATH").unwrap_or_default()))
+            .env("XDG_SESSION_TYPE", "x11")
+            .env("XDG_CURRENT_DESKTOP", "")
             .env(HOME, d.join("home"))
             .output().unwrap();
         let log = String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout);
@@ -950,7 +1035,7 @@ mod tests {
     fn nothing_recorded(d: &Path) {
         assert!(!d.join("rec.args").exists(), "a recorder ran: {}", std::fs::read_to_string(d.join("rec.args")).unwrap_or_default());
         assert!(!d.join("home/shepetal/meetings").exists());
-        assert!(!d.join("opened").exists() && !d.join("ready.args").exists(), "no transcript window without a recording");
+        assert!(!d.join("window").exists() && !d.join("ready.args").exists(), "no transcript window without a recording");
         std::fs::remove_dir_all(d).unwrap();
     }
 
@@ -975,10 +1060,14 @@ mod tests {
         assert_eq!(md, format!("# Meeting\n\n- Apps: Zoom\n- Started: {when}\n- Duration: {secs} s\n- Audio: Me.wav (microphone), Others.wav (system audio)\n\n\
             [00:00:01] Me: Hello from me.\n\n[00:00:01] Others: Hi from them.\n"));
         assert!((1..10).contains(&secs), "the recording lasted about 1.5 s, not {secs} s");
-        // Then the window and its notification, once, and nothing copied without a click.
-        assert_eq!(std::fs::read_to_string(d.join("opened")).unwrap(), format!("{}\n", dir.join("transcript.md").display()));
-        assert_eq!(std::fs::read_to_string(d.join("ready.args")).unwrap(), format!("--app-name=shepetal --hint=boolean:suppress-sound:true \
-            --action=copy=Copy transcript --action=open=Open folder Meeting transcript ready Zoom, {when}, {secs} s\n"));
+        // Then the transcript window, once. Nothing else opens (an app opened for it could take
+        // the focus), no notification stands in for it, and nothing is copied without a click.
+        let shown = std::fs::read_to_string(d.join("window")).unwrap();
+        assert_eq!(shown.lines().count(), 1, "one window per meeting: {shown}");
+        assert_eq!(serde_json::from_str::<Value>(&shown).unwrap(), json!({ "head": format!("Zoom, {when}, {secs} s"),
+            "text": "[00:00:01] Me: Hello from me.\n\n[00:00:01] Others: Hi from them.", "copy": true, "folder": dir }));
+        assert!(!d.join("opened").exists(), "opened by itself: {}", std::fs::read_to_string(d.join("opened")).unwrap_or_default());
+        assert!(!d.join("ready.args").exists(), "a notification instead of the window");
         assert!(!d.join("clipboard").exists(), "copied without a click");
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!([mode(dir), mode(&dir.join(ME)), mode(&dir.join("transcript.md"))], [0o700, 0o600, 0o600]);
@@ -1096,21 +1185,45 @@ mod tests {
     fn the_ready_notification_offers_copy_only_with_speech_and_never_a_sound() {
         let argv = |c: Command| std::iter::once(c.get_program()).chain(c.get_args()).map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>();
         let head = "Zoom, 21.10.26 17:30, 12 min";
-        let base = ["notify-send", "--app-name=shepetal", "--hint=boolean:suppress-sound:true"];
+        // It stays until it is clicked: an expired banner's buttons are dead on dunst or Plasma.
+        let base = ["notify-send", "--app-name=shepetal", "--hint=boolean:suppress-sound:true", "--expire-time=0"];
         assert_eq!(argv(ready_cmd(head, "[00:00:01] Me: Hi.\n", None)),
             [&base[..], &["--action=copy=Copy transcript", "--action=open=Open folder", "Meeting transcript ready", head]].concat());
         // No turns: nothing to copy, the folder can still be opened, and the body says why.
         assert_eq!(argv(ready_cmd(head, "", None)),
             [&base[..], &["--action=open=Open folder", "Meeting transcript ready", "Zoom, 21.10.26 17:30, 12 min\nNo speech was recorded."]].concat());
-        let note = "Me was not transcribed: whisper-cli: not found".to_string();
-        assert_eq!(argv(ready_cmd(head, "", Some(&note))).last().unwrap(), "Zoom, 21.10.26 17:30, 12 min\nMe was not transcribed: whisper-cli: not found");
+        let note = "Me was not transcribed. The audio is in the meeting folder.";
+        assert_eq!(argv(ready_cmd(head, "", Some(note))).last().unwrap(), &format!("{head}\n{note}"));
         // With turns, a failed channel's note stays in the transcript, out of the banner.
-        assert_eq!(argv(ready_cmd(head, "[00:00:01] Me: Hi.\n", Some(&note))).last().unwrap(), head);
+        assert_eq!(argv(ready_cmd(head, "[00:00:01] Me: Hi.\n", Some(note))).last().unwrap(), head);
     }
 
-    /// `present` against fake xdg-open, notify-send and clipboard tools, in a child copy of this
-    /// test binary with its own PATH, on Wayland. The fake notify-send prints the file `answer`
-    /// as the clicked action.
+    #[test]
+    fn the_headline_leaves_out_what_is_not_known() {
+        assert_eq!(headline(&["Zoom", "Browser (Firefox)"], "21.10.26 17:30", 720), "Zoom, Browser (Firefox), 21.10.26 17:30, 12 min");
+        // No app seen (Record clicked in the poll where the app let go), or no local time.
+        assert_eq!(headline(&[], "21.10.26 17:30", 720), "21.10.26 17:30, 12 min");
+        assert_eq!(headline(&["Zoom"], "", 40), "Zoom, 40 s");
+        assert!(transcript(&[], "21.10.26 17:30", 40, &[], &[]).contains("\n- Apps: not named\n"));
+    }
+
+    #[test]
+    fn the_window_shows_only_where_it_leaves_the_focus_alone() {
+        // Rule 8 spirit: the window maps with _NET_WM_USER_TIME 0, which these window managers
+        // read as "do not focus". Sway and Hyprland focus every new window, XWayland ones too.
+        for (session, desktop) in [("x11", "ubuntu:GNOME"), ("x11", "i3"), ("", ""), ("tty", "XFCE"), ("wayland", "ubuntu:GNOME"), ("wayland", "KDE")] {
+            assert!(window_keeps_focus(session, desktop), "{session} {desktop}");
+        }
+        for (session, desktop) in [("wayland", "sway"), ("wayland", "Hyprland"), ("wayland", "river"), ("wayland", "")] {
+            assert!(!window_keeps_focus(session, desktop), "{session} {desktop}");
+        }
+    }
+
+    /// `present` against fake shepetal-transcript, notify-send, xdg-open and clipboard tools, in a
+    /// child copy of this test binary with its own PATH. The fake window does what the file
+    /// `answer` says: nothing (closed without a click), `copy` (two clicks on Copy transcript),
+    /// or `fail` (it can't show, as without python3-gi or a display). The fake notify-send prints
+    /// `answer` as the clicked action.
     #[test]
     fn the_transcript_window_copies_only_on_a_click() {
         const CHILD: &str = "SHEPETAL_TEST_PRESENT";
@@ -1121,62 +1234,118 @@ mod tests {
             std::fs::create_dir_all(d.join("bin")).unwrap();
             std::fs::create_dir_all(d.join("meeting")).unwrap();
             let dd = d.display();
+            let reply = format!("IFS= read -r r; printf '%s\\n' \"$r\" >> {dd}/replies");
             let mut tools = vec![
+                ("shepetal-transcript", format!("IFS= read -r show; printf '%s\\n' \"$show\" >> {dd}/window\ncase $(cat {dd}/answer) in\n\
+                    fail) echo 'no display' >&2; exit 1 ;;\ncopy) echo shown; echo copy; {reply}; echo copy; {reply} ;;\n*) echo shown ;;\nesac\n")),
                 ("notify-send", format!("echo \"$*\" >> {dd}/notify.args\ncase \"$*\" in *'Meeting transcript ready'*) cat {dd}/answer ;; esac\n")),
                 ("xdg-open", format!("echo \"$1\" >> {dd}/opened\n")),
+                // As without the Whisper model: Others fails, Me too when `deaf` exists.
+                ("whisper-cli", format!("case \"$4\" in\n*Me.wav) [ -e {dd}/deaf ] || {{ printf '[00:00:01.000 --> 00:00:02.000]  Hello.\\n'; exit 0; }} ;;\nesac\n\
+                    echo 'whisper_init_from_file_with_params_no_state: loading model' >&2; echo 'error: failed to initialize whisper context' >&2; exit 2\n")),
             ];
             for tool in ["wl-copy", "xclip", "xsel"] {
-                tools.push((tool, format!("{{ echo {tool}; cat; }} >> {dd}/clipboard\n")));
+                tools.push((tool, format!("[ -e {dd}/broken ] && exit 1\n{{ echo {tool}; cat; }} >> {dd}/clipboard\n")));
             }
             for (bin, body) in tools {
                 std::fs::write(d.join("bin").join(bin), format!("#!/bin/sh\n{body}")).unwrap();
                 std::fs::set_permissions(d.join("bin").join(bin), std::fs::Permissions::from_mode(0o700)).unwrap();
             }
-            let out = Command::new(std::env::current_exe().unwrap())
+            let mut child = Command::new(std::env::current_exe().unwrap())
                 .args(["meeting_rec::tests::the_transcript_window_copies_only_on_a_click", "--exact", "--nocapture"])
                 .env("PATH", format!("{dd}/bin:{}", std::env::var("PATH").unwrap_or_default()))
-                .env("XDG_SESSION_TYPE", "wayland")
                 .env(CHILD, &d)
-                .output().unwrap();
+                .stdout(Stdio::piped()).stderr(Stdio::piped())
+                .spawn().unwrap();
+            // A window that never gets its answer would wait forever: fail instead.
+            let t = Instant::now();
+            while child.try_wait().unwrap().is_none() {
+                if t.elapsed() > Duration::from_secs(60) {
+                    let _ = child.kill();
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            let out = child.wait_with_output().unwrap();
             let log = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
             assert!(out.status.success() && log.contains("1 passed"), "{log}");
             return std::fs::remove_dir_all(&d).unwrap();
         };
         let d = PathBuf::from(d);
-        let (folder, md) = (d.join("meeting"), d.join("meeting/transcript.md"));
-        // xdg-open is waited for on another thread, so its line can come after `present` returns.
-        let lines = |f: &str, n: usize| {
-            for _ in 0..200 {
-                let got: Vec<String> = std::fs::read_to_string(d.join(f)).unwrap_or_default().lines().map(String::from).collect();
-                if got.len() >= n {
-                    return got;
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            panic!("{f}: fewer than {n} lines");
-        };
-        let turns = "[00:00:01] Me: Hello.\n[00:00:02] Others: Hi.\n";
-        let show = |answer: &str| {
+        let folder = d.join("meeting");
+        let file = |f: &str| std::fs::read_to_string(d.join(f)).unwrap_or_default();
+        // The last window shown, as the JSON it was given.
+        let shown = || serde_json::from_str::<Value>(file("window").lines().last().unwrap()).unwrap();
+        let (head, turns) = ("Zoom, 21.10.26 17:30, 12 min", "[00:00:01] Me: Hello.\n[00:00:02] Others: Hi.\n");
+        let show = |session: &str, desktop: &str, answer: &str, turns: &str, note: Option<&str>| {
+            std::env::set_var("XDG_SESSION_TYPE", session);
+            std::env::set_var("XDG_CURRENT_DESKTOP", desktop);
             std::fs::write(d.join("answer"), answer).unwrap();
-            present(&md, ready_cmd("Zoom, 21.10.26 17:30, 12 min", turns, None), turns);
+            present(&folder, head, turns, note);
         };
-        // Closed without a click: the window opened and the notification showed, nothing copied.
-        show("");
-        assert_eq!(lines("opened", 1), [md.display().to_string()]);
-        assert_eq!(lines("notify.args", 1), ["--app-name=shepetal --hint=boolean:suppress-sound:true --action=copy=Copy transcript \
-            --action=open=Open folder Meeting transcript ready Zoom, 21.10.26 17:30, 12 min"]);
-        assert!(!d.join("clipboard").exists(), "copied without a click");
-        // Copy transcript: the turns with their times and speakers go to wl-copy, then a short,
-        // silent "Transcript copied".
-        show("copy");
-        assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), format!("wl-copy\n{turns}"));
-        assert_eq!(lines("notify.args", 3)[2], "--app-name=shepetal --hint=boolean:suppress-sound:true --hint=boolean:transient:true --expire-time=3000 Transcript copied");
-        // Open folder: the meeting folder in the user's file manager, and no second copy.
-        show("open");
-        let mut last = lines("opened", 4)[2..].to_vec();
-        last.sort();
-        assert_eq!(last, [folder.display().to_string(), md.display().to_string()]);
-        assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), format!("wl-copy\n{turns}"));
-        assert_eq!(lines("notify.args", 4).len(), 4, "no confirmation without a copy");
+
+        // GNOME Wayland, closed without a click: the window showed the turns, one per paragraph.
+        // Nothing was copied, notified or opened (an editor would have taken the focus).
+        show("wayland", "ubuntu:GNOME", "", turns, None);
+        assert_eq!(shown(), json!({ "head": head, "text": "[00:00:01] Me: Hello.\n\n[00:00:02] Others: Hi.", "copy": true, "folder": folder }));
+        assert_eq!([file("clipboard"), file("notify.args"), file("opened")], ["", "", ""]);
+
+        // Copy transcript, twice: the turns with their times and speakers go to wl-copy each time,
+        // and the window is told, for its inline "Copied". Still no notification, so no sound.
+        show("wayland", "ubuntu:GNOME", "copy", turns, None);
+        assert_eq!(file("clipboard"), format!("wl-copy\n{turns}wl-copy\n{turns}"));
+        assert_eq!(file("replies"), "{\"copied\":true}\n{\"copied\":true}\n");
+        assert_eq!(file("notify.args"), "");
+        // A copy that fails says so in the window, and xclip is used on X11.
+        std::fs::write(d.join("broken"), "").unwrap();
+        show("x11", "ubuntu:GNOME", "copy", turns, None);
+        std::fs::remove_file(d.join("broken")).unwrap();
+        let replies: Vec<Value> = file("replies").lines().skip(2).map(|l| serde_json::from_str(l).unwrap()).collect();
+        assert_eq!(replies, vec![json!({ "error": "Not copied: xclip failed: exit status: 1" }); 2]);
+
+        // No speech, or no transcript: nothing to copy, and no engine name on screen.
+        show("x11", "", "", "", None);
+        assert_eq!(shown(), json!({ "head": head, "text": "No speech was recorded.", "copy": false, "folder": folder }));
+        let note = "Me was not transcribed. The audio is in the meeting folder.";
+        show("x11", "", "", "", Some(note));
+        assert_eq!((shown()["text"].clone(), shown()["copy"].clone()), (json!(note), json!(false)));
+        assert_eq!(file("window").lines().count(), 5);
+
+        // The window can't show: the notification stands in, and it stays until clicked.
+        show("x11", "", "fail", turns, None);
+        assert_eq!(file("window").lines().count(), 6);
+        assert_eq!(file("notify.args"), format!("--app-name=shepetal --hint=boolean:suppress-sound:true --expire-time=0 \
+            --action=copy=Copy transcript --action=open=Open folder Meeting transcript ready {head}\n"));
+        // Sway focuses every new window, so the window is not even started there. Open folder on
+        // the notification opens the meeting folder, and nothing is copied.
+        show("wayland", "sway", "open", turns, None);
+        assert_eq!(file("window").lines().count(), 6, "a window on Sway");
+        assert_eq!(file("notify.args").lines().count(), 2);
+        for _ in 0..200 {
+            if !file("opened").is_empty() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10)); // xdg-open is waited for on another thread
+        }
+        assert_eq!(file("opened"), format!("{}\n", folder.display()));
+        assert_eq!(file("clipboard").matches("wl-copy").count(), 2, "copied without a click");
+
+        // A channel the engine could not read: the window names no engine (whisper-cli's error
+        // stays in transcript.md and on stderr), and the other channel's turns can be copied.
+        let meeting = |name: &str| {
+            let m = d.join(name);
+            std::fs::create_dir(&m).unwrap();
+            std::env::set_var("XDG_SESSION_TYPE", "x11");
+            std::fs::write(d.join("answer"), "").unwrap();
+            write_transcript(&m, &["Zoom"], Path::new("/models/ggml.bin"));
+            (shown(), std::fs::read_to_string(m.join("transcript.md")).unwrap())
+        };
+        let (window, md) = meeting("one-failed");
+        assert_eq!((&window["text"], &window["copy"]), (&json!("Others was not transcribed. The audio is in the meeting folder.\n\n[00:00:01] Me: Hello."), &json!(true)));
+        assert!(md.contains("- Others was not transcribed: whisper-cli: error: failed to initialize whisper context\n"), "{md}");
+        std::fs::write(d.join("deaf"), "").unwrap();
+        let (window, md) = meeting("both-failed");
+        assert_eq!((&window["text"], &window["copy"]), (&json!("Not transcribed. The audio is in the meeting folder."), &json!(false)));
+        assert!(md.contains("- Me was not transcribed: whisper-cli: error"), "{md}");
+        assert!(!file("window").to_lowercase().contains("whisper"), "an engine name on screen: {}", file("window"));
     }
 }
