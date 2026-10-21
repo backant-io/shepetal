@@ -105,3 +105,4 @@
   .s-page *, .s-page *::before, .s-page *::after { transition: none !important; }
 }
 .s-prose .s-caps { text-transform: uppercase; font-size: .9375rem; letter-spacing: .01em; }
+.s-dialog .s-alert { margin-top: .75rem; color: #a3300a; }

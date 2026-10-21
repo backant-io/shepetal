@@ -64,9 +64,8 @@ function Hero() {
                   <span className="kc-wx">
                     <span className="kc-wy">
                       <span className="kc-wi">{w}</span>
-                      <span className="kc-wo" aria-hidden="true">
-                        {w}
-                      </span>
+                      {/* the orange copy that fades as the word lands: drawn by CSS, so the page text has each word once */}
+                      <span className="kc-wo" aria-hidden="true" data-w={w} />
                     </span>
                   </span>
                 </span>
@@ -111,7 +110,15 @@ function Corner() {
 }
 
 /** A pinned chapter: the sticky stage and its two-column grid. */
-function Chapter({ track, label, children }: { track: 't1' | 't2' | 't3' | 't4'; label: string; children: React.ReactNode }) {
+function Chapter({
+  track,
+  label,
+  children,
+}: {
+  track: 't1' | 't2' | 't3' | 't4';
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <section className={`kc-track kc-${track}`} aria-labelledby={label}>
       <div className="kc-stage kc-chs">
@@ -129,7 +136,13 @@ const FIELDS: { app: string; id: FlowId; kind: 'mail' | 'chat' | 'code' | 'termi
   { app: 'Doc', id: 'f4', kind: 'doc' },
 ];
 
-const FIELD_CLASS = { mail: 'kc-say', chat: 'kc-say kc-say-chat', code: 'kc-say-code', terminal: 'kc-say-code', doc: 'kc-say-doc' };
+const FIELD_CLASS = {
+  mail: 'kc-say',
+  chat: 'kc-say kc-say-chat',
+  code: 'kc-say-code',
+  terminal: 'kc-say-code',
+  doc: 'kc-say-doc',
+};
 const FIELD_PREFIX = { mail: '', chat: '', code: '// ', terminal: '$ git commit -m "', doc: '' };
 
 /** 1 · Every app: five fields, each with its own sentence. */

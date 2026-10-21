@@ -1,21 +1,22 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 
 export type CheckoutPlan = 'lifetime' | 'monthly';
+type Opened = { url: string } | { error: string };
+type Done = { ok: true } | { error: string };
+
+const SIGNED_OUT = 'You were signed out. Reload the page and sign in again.';
 
 /** POST /api/checkout (API.md) with the web session and the plan. The url to open, or what to tell the user. */
-export async function startCheckout(
-  plan: CheckoutPlan,
-  fetchImpl: typeof fetch = fetch,
-): Promise<{ url: string } | { error: string }> {
+export async function startCheckout(plan: CheckoutPlan, fetchImpl: typeof fetch = fetch): Promise<Opened> {
   try {
     const res = await fetchImpl('/api/checkout', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ plan }),
     });
-    if (res.status === 401) return { error: 'You were signed out. Reload the page and sign in again.' };
+    if (res.status === 401) return { error: SIGNED_OUT };
     if (res.status === 409) {
       const body = (await res.json().catch(() => ({}))) as { error?: unknown };
       return body.error === 'already_subscribed'
@@ -30,30 +31,56 @@ export async function startCheckout(
   return { error: 'Checkout did not open. Try again in a moment.' };
 }
 
-/** POST /api/billing/portal: the Stripe Billing Portal url, or what to tell the user. */
-export async function startPortal(fetchImpl: typeof fetch = fetch): Promise<{ url: string } | { error: string }> {
+/** POST /api/billing/portal: the Stripe Billing Portal url (card, invoices), or what to tell the user. */
+export async function startPortal(fetchImpl: typeof fetch = fetch): Promise<Opened> {
   try {
     const res = await fetchImpl('/api/billing/portal', { method: 'POST' });
-    if (res.status === 401) return { error: 'You were signed out. Reload the page and sign in again.' };
+    if (res.status === 401) return { error: SIGNED_OUT };
     const body = (await res.json().catch(() => ({}))) as { url?: unknown };
     if (res.ok && typeof body.url === 'string') return { url: body.url };
   } catch {
     // network failure: same message as a server error
   }
-  return { error: 'The subscription page did not open. Try again in a moment.' };
+  return { error: 'Billing did not open. Try again in a moment.' };
 }
 
-export const PRICE_LABEL: Record<CheckoutPlan, string> = { lifetime: '$23.99 once', monthly: '$0.99 a month' };
+/** POST /api/billing/cancel or /api/billing/resume (API.md): cancel at period end, or undo it before the period ends. */
+export async function changeRenewal(action: 'cancel' | 'resume', fetchImpl: typeof fetch = fetch): Promise<Done> {
+  try {
+    const res = await fetchImpl(`/api/billing/${action}`, { method: 'POST' });
+    if (res.status === 401) return { error: SIGNED_OUT };
+    if (res.ok) return { ok: true };
+    if (res.status === 409) return { error: 'Your subscription changed. Reload the page to see it.' };
+  } catch {
+    // network failure: same message as a server error
+  }
+  return {
+    error:
+      action === 'cancel'
+        ? 'Your subscription is still on. Try again in a moment.'
+        : 'Your subscription did not resume. Try again in a moment.',
+  };
+}
 
-/** A button that opens a Stripe page: `go` returns its url or the line to show. */
-function StripeButton({ label, busyLabel, quiet, go }: { label: string; busyLabel: string; quiet: boolean; go: () => ReturnType<typeof startPortal> }) {
+/** A button that runs `go` and opens the url it returns, or shows its line. */
+function GoButton({
+  label,
+  busyLabel,
+  className,
+  go,
+}: {
+  label: string;
+  busyLabel: string;
+  className: string;
+  go: () => Promise<Opened>;
+}) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   return (
     <div>
       <button
         type="button"
-        className={quiet ? 'btn btn-quiet' : 'btn'}
+        className={className}
         disabled={busy}
         onClick={async () => {
           setBusy(true);
@@ -67,7 +94,7 @@ function StripeButton({ label, busyLabel, quiet, go }: { label: string; busyLabe
         {busy ? busyLabel : label}
       </button>
       {error && (
-        <p role="alert" className="mt-3 text-sm text-[var(--rec)]">
+        <p role="alert" className="s-alert">
           {error}
         </p>
       )}
@@ -75,32 +102,102 @@ function StripeButton({ label, busyLabel, quiet, go }: { label: string; busyLabe
   );
 }
 
-export function BuyButton({ plan = 'lifetime', quiet = false }: { plan?: CheckoutPlan; quiet?: boolean }) {
-  return <StripeButton label={PRICE_LABEL[plan]} busyLabel="Opening checkout…" quiet={quiet} go={() => startCheckout(plan)} />;
-}
-
-/** Subscribers: cancel, resume or change the card in the Stripe Billing Portal. */
-export function ManageButton({ quiet = true }: { quiet?: boolean }) {
-  return <StripeButton label="Manage subscription" busyLabel="Opening…" quiet={quiet} go={() => startPortal()} />;
+/** A Stripe Checkout for one plan. */
+export function BuyButton({
+  plan,
+  label,
+  className = 's-btn',
+}: {
+  plan: CheckoutPlan;
+  label: string;
+  className?: string;
+}) {
+  return <GoButton label={label} busyLabel="Opening checkout…" className={className} go={() => startCheckout(plan)} />;
 }
 
 /**
- * The plan choice (/account#plans, where the apps' Buy button lands): $23.99 once or $0.99 a month.
- * A Product Hunt code goes in on the Stripe page and takes the one-time price to $4.99.
+ * The two plans side by side, as on the landing page: $23.99 once, or $0.99 a month. The apps' Buy button lands here
+ * (/account#plans). A Product Hunt code goes in on the Stripe page and takes the one-time price to $4.99.
  */
-export function PlanPicker({ quiet = false }: { quiet?: boolean }) {
+export function PlanPicker() {
   return (
-    <div id="plans" className="grid w-full gap-3 sm:grid-cols-2">
-      <div className="rounded-xl border border-[var(--line)] p-5">
-        <p className="font-semibold">Yours forever.</p>
-        <p className="mb-4 mt-1 text-sm text-[var(--hush)]">One payment. Updates included.</p>
-        <BuyButton plan="lifetime" quiet={quiet} />
+    <div id="plans" className="s-plans">
+      <div className="s-plan">
+        <p className="s-price">$23.99</p>
+        <p className="s-price-line">once. Yours forever.</p>
+        <BuyButton plan="lifetime" label="Buy once" />
       </div>
-      <div className="rounded-xl border border-[var(--line)] p-5">
-        <p className="font-semibold">Month to month.</p>
-        <p className="mb-4 mt-1 text-sm text-[var(--hush)]">Cancel anytime.</p>
-        <BuyButton plan="monthly" quiet />
+      <div className="s-plan">
+        <p className="s-price">$0.99</p>
+        <p className="s-price-line">a month.</p>
+        <BuyButton plan="monthly" label="Subscribe" className="s-btn s-btn-line" />
       </div>
     </div>
+  );
+}
+
+/** Switch to lifetime: a checkout for the $23.99 price. Once paid, the subscription ends with no further charge. */
+export function SwitchToLifetime() {
+  return <BuyButton plan="lifetime" label="Switch to lifetime" className="s-btn" />;
+}
+
+/**
+ * Cancel subscription, with a confirmation. It cancels at the end of the period: nothing is charged again, and the
+ * license works until `until`.
+ */
+export function CancelSubscription({ until }: { until: string }) {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  return (
+    <>
+      <button type="button" className="s-btn s-btn-line" onClick={() => dialog.current?.showModal()}>
+        Cancel subscription
+      </button>
+      <dialog ref={dialog} className="s-dialog" aria-labelledby="cancel-title" onClose={() => setError('')}>
+        <h2 id="cancel-title">Cancel your subscription?</h2>
+        <p>It ends on {until}. shepetal works until then, and nothing is charged again.</p>
+        <div className="s-actions">
+          <button
+            type="button"
+            className="s-btn"
+            disabled={busy}
+            onClick={async () => {
+              setBusy(true);
+              setError('');
+              const r = await changeRenewal('cancel');
+              if ('ok' in r) return window.location.reload();
+              setError(r.error);
+              setBusy(false);
+            }}
+          >
+            {busy ? 'Cancelling…' : 'Cancel subscription'}
+          </button>
+          <button type="button" className="s-btn s-btn-line" autoFocus onClick={() => dialog.current?.close()}>
+            Keep it
+          </button>
+        </div>
+        {error && (
+          <p role="alert" className="s-alert">
+            {error}
+          </p>
+        )}
+      </dialog>
+    </>
+  );
+}
+
+/** Resume: undo the cancel before the period ends, so it renews again. */
+export function ResumeSubscription() {
+  return (
+    <GoButton
+      label="Resume subscription"
+      busyLabel="Resuming…"
+      className="s-btn s-btn-line"
+      go={async () => {
+        const r = await changeRenewal('resume');
+        return 'ok' in r ? { url: window.location.pathname } : r;
+      }}
+    />
   );
 }

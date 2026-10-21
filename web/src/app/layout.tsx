@@ -18,7 +18,15 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://shepetal.backant.io'),
   title: { default: title, template: '%s - shepetal' },
   description,
-  openGraph: { title, description, url: '/', siteName: 'shepetal', type: 'website', locale: 'en_US', images: [ogImage] },
+  openGraph: {
+    title,
+    description,
+    url: '/',
+    siteName: 'shepetal',
+    type: 'website',
+    locale: 'en_US',
+    images: [ogImage],
+  },
   twitter: { card: 'summary_large_image', title, description, images: [ogImage] },
   // The tab and app icons are the Noto 🤫 (BRAND.md).
   icons: {

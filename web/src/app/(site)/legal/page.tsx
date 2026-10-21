@@ -26,8 +26,8 @@ export default function Legal() {
 
           <h2>Emoji</h2>
           <p>
-            The <img className="s-shush" src="/brand/emoji/emoji_u1f92b.svg" alt="🤫" width={18} height={18} /> artwork is
-            Noto Color Emoji by Google, under the Apache License 2.0:{' '}
+            The <img className="s-shush" src="/brand/emoji/emoji_u1f92b.svg" alt="🤫" width={18} height={18} /> artwork
+            is Noto Color Emoji by Google, under the Apache License 2.0:{' '}
             <a href="/brand/emoji/LICENSE-Apache-2.0.txt">license</a> and <a href="/brand/emoji/NOTICE.txt">notice</a>.
           </p>
 

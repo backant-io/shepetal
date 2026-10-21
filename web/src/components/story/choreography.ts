@@ -18,7 +18,14 @@ type Fill = 'both' | 'none';
 type Entry = { k: string; t: Track; a: number; b: number; range: Range; fill: Fill };
 
 /** How far each pinned chapter scrolls, on top of its own screen: max(37.5rem, 100vh) + this. */
-export const TRACK_LENGTH: Record<Track, string> = { t0: '130vh', t1: '125vh', t2: '100vh', t3: '120vh', t4: '115vh', t5: '55vh' };
+export const TRACK_LENGTH: Record<Track, string> = {
+  t0: '130vh',
+  t1: '125vh',
+  t2: '100vh',
+  t3: '120vh',
+  t4: '115vh',
+  t5: '55vh',
+};
 
 /**
  * A sentence the page writes word by word: its track, the window it is written in (from, to), and when its caret
@@ -28,17 +35,73 @@ export type Flow = { track: Track; from: number; to: number; caretFrom: number; 
 
 export const FLOWS = {
   // 1 · Every app
-  f0: { track: 't1', from: 0.06, to: 0.2, caretFrom: -1, caretTo: 0.22, text: 'Hi Maja, can you send me the address for Saturday?' },
-  f1: { track: 't1', from: 0.24, to: 0.38, caretFrom: 0.22, caretTo: 0.4, text: 'Running ten minutes late, start without me.' },
-  f2: { track: 't1', from: 0.42, to: 0.56, caretFrom: 0.4, caretTo: 0.58, text: 'Retry once before showing the error.' },
-  f3: { track: 't1', from: 0.6, to: 0.74, caretFrom: 0.58, caretTo: 0.76, text: 'Fix the date picker on small screens"' },
+  f0: {
+    track: 't1',
+    from: 0.06,
+    to: 0.2,
+    caretFrom: -1,
+    caretTo: 0.22,
+    text: 'Hi Maja, can you send me the address for Saturday?',
+  },
+  f1: {
+    track: 't1',
+    from: 0.24,
+    to: 0.38,
+    caretFrom: 0.22,
+    caretTo: 0.4,
+    text: 'Running ten minutes late, start without me.',
+  },
+  f2: {
+    track: 't1',
+    from: 0.42,
+    to: 0.56,
+    caretFrom: 0.4,
+    caretTo: 0.58,
+    text: 'Retry once before showing the error.',
+  },
+  f3: {
+    track: 't1',
+    from: 0.6,
+    to: 0.74,
+    caretFrom: 0.58,
+    caretTo: 0.76,
+    text: 'Fix the date picker on small screens"',
+  },
   f4: { track: 't1', from: 0.78, to: 0.92, caretFrom: 0.76, caretTo: 9, text: 'Plans for the spring garden' },
   // 3 · Private
-  b3: { track: 't3', from: 0.48, to: 0.9, caretFrom: 0.44, caretTo: 9, text: 'Note to self: ask the doctor about the new prescription.' },
+  b3: {
+    track: 't3',
+    from: 0.48,
+    to: 0.9,
+    caretFrom: 0.44,
+    caretTo: 9,
+    text: 'Note to self: ask the doctor about the new prescription.',
+  },
   // 4 · Meetings
-  t0: { track: 't4', from: 0.3, to: 0.47, caretFrom: 0.27, caretTo: 0.5, text: 'Can we push the launch review to Thursday?' },
-  t1: { track: 't4', from: 0.53, to: 0.7, caretFrom: 0.5, caretTo: 0.73, text: 'Thursday works, I’ll bring the numbers.' },
-  t2: { track: 't4', from: 0.76, to: 0.93, caretFrom: 0.73, caretTo: 9, text: 'Great, then we lock the plan on Friday.' },
+  t0: {
+    track: 't4',
+    from: 0.3,
+    to: 0.47,
+    caretFrom: 0.27,
+    caretTo: 0.5,
+    text: 'Can we push the launch review to Thursday?',
+  },
+  t1: {
+    track: 't4',
+    from: 0.53,
+    to: 0.7,
+    caretFrom: 0.5,
+    caretTo: 0.73,
+    text: 'Thursday works, I’ll bring the numbers.',
+  },
+  t2: {
+    track: 't4',
+    from: 0.76,
+    to: 0.93,
+    caretFrom: 0.73,
+    caretTo: 9,
+    text: 'Great, then we lock the plan on Friday.',
+  },
 } as const satisfies Record<string, Flow>;
 export type FlowId = keyof typeof FLOWS;
 
@@ -60,15 +123,31 @@ export function table(): Table {
   const anim = new Map<string, Entry[]>();
   const carets: [string, number, number][] = [];
   const write: [Track, number, number][] = [];
-  const add = (sel: string, k: string, t: Track, a: number, b: number, range: Range = 'contain', fill: Fill = 'both') => {
+  const add = (
+    sel: string,
+    k: string,
+    t: Track,
+    a: number,
+    b: number,
+    range: Range = 'contain',
+    fill: Fill = 'both',
+  ) => {
     if (!anim.has(sel)) anim.set(sel, []);
     anim.get(sel)!.push({ k, t, a: r3(a), b: r3(b), range, fill });
   };
 
   // 0 · hero: press 4-12%, words 16-65%, release 70-78%, then the key shrinks into the corner 80-98%
   const W = (i: number) => [0.16 + i * 0.07, 0.31 + i * 0.07] as const;
-  for (const [s, k] of [['.kc-k-cap', 'kc-press'], ['.kc-ks-r', 'kc-shR'], ['.kc-ks-d', 'kc-shD'], ['.kc-k-led', 'kc-led'], ['.kc-k-glow', 'kc-glow']]) add(s, k, 't0', 0, 1);
-  for (const i of [0, 1, 2, 3, 4, 5]) for (const k of ['wx', 'wy', 'wi', 'wo']) add(`.kc-w${i} .kc-${k}`, `kc-${k}`, 't0', ...W(i));
+  for (const [s, k] of [
+    ['.kc-k-cap', 'kc-press'],
+    ['.kc-ks-r', 'kc-shR'],
+    ['.kc-ks-d', 'kc-shD'],
+    ['.kc-k-led', 'kc-led'],
+    ['.kc-k-glow', 'kc-glow'],
+  ])
+    add(s, k, 't0', 0, 1);
+  for (const i of [0, 1, 2, 3, 4, 5])
+    for (const k of ['wx', 'wy', 'wi', 'wo']) add(`.kc-w${i} .kc-${k}`, `kc-${k}`, 't0', ...W(i));
   const land = [0, 1, 2, 3, 4, 5].map((i) => r3(W(i)[0] + 0.9 * (W(i)[1] - W(i)[0])));
   land.forEach((l, i) => carets.push([`kc-w${i}`, l, land[i + 1] ?? 9]));
   add('.kc-stagekey', 'kc-out', 't0', 0.8, 0.802);
@@ -106,7 +185,9 @@ export function table(): Table {
   // the dictated sentences, in page order: one step per word, the caret riding the last written word
   for (const id of Object.keys(FLOWS) as FlowId[]) {
     const { track: t, from: a, to: b, caretFrom: C0, caretTo: C1 } = FLOWS[id];
-    const n = flowWords(id).length, step = (b - a) / n, dur = Math.min(0.025, step * 0.8);
+    const n = flowWords(id).length,
+      step = (b - a) / n,
+      dur = Math.min(0.025, step * 0.8);
     const ts = Array.from({ length: n }, (_, j) => r3(a + step * j));
     ts.forEach((tj, j) => {
       add(`.kc-${id}-${j}`, 'kc-flow', t, tj, tj + dur);
@@ -118,7 +199,14 @@ export function table(): Table {
 
   // the docked key and the recording mark: pressed once per writing window, released in between
   for (const [t, a, b] of write.sort((x, y) => x[0].localeCompare(y[0]) || x[1] - y[1]))
-    for (const [s, k] of [['.kd-k-cap', 'kc-hold'], ['.kd-k-led', 'kc-hold-led'], ['.kd-ks-r', 'kc-hold-shR'], ['.kd-ks-d', 'kc-hold-shD'], ['.kc-dock-on', 'kc-hold-on'], ['.kc-shf', 'kc-hold-shh']])
+    for (const [s, k] of [
+      ['.kd-k-cap', 'kc-hold'],
+      ['.kd-k-led', 'kc-hold-led'],
+      ['.kd-ks-r', 'kc-hold-shR'],
+      ['.kd-ks-d', 'kc-hold-shD'],
+      ['.kc-dock-on', 'kc-hold-on'],
+      ['.kc-shf', 'kc-hold-shh'],
+    ])
       add(s, k, t, a, b, 'contain', 'none');
 
   return { anim, carets, write };
@@ -138,6 +226,7 @@ export function storyCss(): string {
     css += `  .kc ${sel} { animation-name: ${list(es, (e) => e.k)}; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: ${list(es, (e) => e.fill)}; animation-play-state: paused; animation-delay: ${list(es, (e) => `calc((var(--${e.range === 'entry' ? 'e' : 'p'}${e.t.slice(1)}) - ${e.a}) / ${r3(e.b - e.a)} * -1s)`)}; }\n`;
   css += '}\n';
   for (const [c, l, n] of carets) css += `.${c} { --l: ${r3(l)}; --n: ${r3(n)}; }\n`;
-  for (const [t, len] of Object.entries(TRACK_LENGTH)) css += `.kc-${t} { height: calc(max(37.5rem, 100vh) + ${len}); }\n`;
+  for (const [t, len] of Object.entries(TRACK_LENGTH))
+    css += `.kc-${t} { height: calc(max(37.5rem, 100vh) + ${len}); }\n`;
   return css;
 }

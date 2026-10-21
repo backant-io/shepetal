@@ -281,12 +281,36 @@ async function main() {
   assert.equal(decodeURIComponent(back?.split(';')[0].split('=')[1] ?? ''), login.url, 'after Google, next-auth returns to /app/login with the same query');
   ok(`/app/login signed out: ${out.status} to Google with redirect_uri <AUTH_URL>/api/auth/callback/google, back to the same /app/login after`);
 
+  // ---- 1b. The sign-in page: one action, Continue with Google, as a real form.
+  await check('sign-in: /login and /account signed out show Continue with Google as a sign-in form', async () => {
+    for (const path of ['/login', '/account']) {
+      const r = await browse(`${BASE}${path}`);
+      const html = await r.text();
+      assert.equal(r.status, 200, `${path}: ${r.status}`);
+      assert.ok(html.includes('Sign in.') && html.includes('Continue with Google') && /<form[^>]*action=/.test(html), `${path} is the sign-in page`);
+    }
+  });
+
   // ---- 2. Fake the Google sign-in: a next-auth JWT session cookie, as the callback would set it.
   const email = `e2e-${randomBytes(4).toString('hex')}@example.com`;
   const session = await sessionFor(email);
   const me = await (await fetch(`${BASE}/api/auth/session`, { headers: { cookie: session } })).json();
   assert.equal(me?.user?.email, email, 'the test session is accepted');
   ok(`test session for ${email}`);
+  /** The account page as the signed-in user sees it, as text with the tags stripped. */
+  const accountText = async () => {
+    const r = await browse(`${BASE}/account`, session);
+    assert.equal(r.status, 200, `/account: ${r.status}`);
+    return (await r.text()).replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+  };
+  await check('/account, trial: days left, the download, the email and the two plans; no subscription controls', async () => {
+    const t = await accountText();
+    for (const s of ['30 days left.', 'Download for Mac', 'Settings', email, 'Free trial', '$23.99', 'once. Yours forever.', '$0.99', 'a month.', 'Buy once', 'Subscribe'])
+      assert.ok(t.includes(s), `trial account shows ${s}`);
+    for (const s of ['Cancel subscription', 'Switch to lifetime', 'Manage billing']) assert.ok(!t.includes(s), `no ${s} on a trial`);
+    const r = await browse(`${BASE}/login`, session);
+    assert.deepEqual([r.status, new URL(r.headers.get('location') ?? '', BASE).pathname], [307, '/account'], '/login signed in goes to the account');
+  });
 
   // ---- 3. Signed in, a GET shows the consent page and issues nothing; Continue (a POST) redirects
   // to the app with a one-time code and the state unchanged.
@@ -295,14 +319,14 @@ async function main() {
   const html = await page.text();
   assert.equal(page.status, 200, `consent page: ${page.status} ${page.headers.get('location')}`);
   assert.equal(page.headers.get('location'), null);
-  assert.ok(html.includes(`Sign in to the Shepetal app on this computer as ${email}?`) && html.includes('Mac or iPhone app'), 'consent text');
+  assert.ok(html.includes('Sign in to the shepetal app?') && html.includes(`As ${email}`) && html.includes('The Mac or iPhone app on this computer'), 'consent text');
   assert.ok(html.includes('Not you? Use another account'));
   assert.equal(await codes(), 0, 'a GET issues no code');
   assert.match(page.headers.get('content-security-policy') ?? '', /form-action [^;]*shepetal: http:\/\/127\.0\.0\.1:\*/, 'CSP lets the form redirect to the app');
   const got = landing(await consent(login.url, session), MAC);
   assert.equal(got.state, login.state, 'state comes back unchanged');
   assert.match(got.code ?? '', /^[A-Za-z0-9_-]{43}$/, 'code');
-  ok(`/app/login signed in: GET is the consent page ("…as ${email}?", Mac or iPhone app) with no code; Continue is 302 to ${MAC}?code=…&state=… (state ${JSON.stringify(got.state)} unchanged)`);
+  ok(`/app/login signed in: GET is the consent page ("Sign in to the shepetal app?", as ${email}, the Mac or iPhone app) with no code; Continue is 302 to ${MAC}?code=…&state=… (state ${JSON.stringify(got.state)} unchanged)`);
 
   // ---- 4. The app trades the code for a token, once.
   const grant = await token({ code: got.code, code_verifier: login.verifier, redirect_uri: MAC });
@@ -447,6 +471,12 @@ async function main() {
   assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 409, body: { error: 'no_renewing_subscription' } });
   const resumed = await app('POST', '/api/billing/resume', { token: accessToken });
   assert.equal(resumed.body.subscription.status, 'active');
+  await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
+    const t = await accountText();
+    for (const s of ['$0.99 a month.', 'Monthly', 'Active', 'Next charge', 'Manage billing', 'Switch to lifetime', 'Cancel subscription', 'Cancel your subscription?', 'nothing is charged again'])
+      assert.ok(t.includes(s), `subscriber account shows ${s}`);
+    assert.ok(!t.includes('Buy once'), 'no plan choice while subscribed');
+  });
   const link = await fetch(`${BASE}/api/billing/portal`, { redirect: 'manual', headers: { authorization: `Bearer ${accessToken}` } });
   assert.deepEqual([link.status, link.headers.get('location')], [303, 'https://billing.stripe.com/p/session/test_e2e']);
   assert.equal((await app('GET', '/api/account/plan')).status, 401);
@@ -472,6 +502,12 @@ async function main() {
   plan = await app('GET', '/api/account/plan', { token: accessToken });
   assert.deepEqual([plan.body.plan, plan.body.subscription, plan.body.actions.cancel], ['lifetime', null, false]);
   assert.deepEqual(await app('POST', '/api/checkout', { token: accessToken, json: {} }), { status: 409, body: { error: 'already_active' } });
+  await check('/account, lifetime: "Yours forever." and no subscription controls', async () => {
+    const t = await accountText();
+    for (const s of ['Yours forever.', 'Lifetime', 'Download for Mac']) assert.ok(t.includes(s), `lifetime account shows ${s}`);
+    for (const s of ['Cancel subscription', 'Switch to lifetime', 'Manage billing', 'Next charge', 'Buy once']) assert.ok(!t.includes(s), `no ${s} for lifetime`);
+  });
+
   ok(`switch to lifetime: mode payment, shepetal_lifetime, client_reference_id ${userId}; the paid webhook makes it lifetime and cancels the subscription now (no invoice, no proration); checkout is 409 after`);
 
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.

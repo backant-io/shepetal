@@ -83,7 +83,14 @@ export function KeySvg({ p }: { p: 'kc' | 'kd' }) {
                 <rect x="-234" y="-228" width="468" height="456" fill={url('kdish')} />
                 <rect x="-234" y="-228" width="468" height="456" fill={url('kdishx')} />
                 <circle className={`${p}-k-glow`} cx="-172.5" cy="-183" r="90" fill={url('kglow')} />
-                <text className={`${p}-k-legend`} x="189" y="-181.5" dominantBaseline="hanging" textAnchor="end" fill="#161512">
+                <text
+                  className={`${p}-k-legend`}
+                  x="189"
+                  y="-181.5"
+                  dominantBaseline="hanging"
+                  textAnchor="end"
+                  fill="#161512"
+                >
                   fn
                 </text>
                 <g transform="translate(-147 141)" fill="none" stroke="#161512" strokeWidth="5.5" strokeLinecap="round">

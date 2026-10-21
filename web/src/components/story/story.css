@@ -42,6 +42,7 @@
 .kc-wx, .kc-wy { display: inline-block; }
 .kc-wy { position: relative; }
 .kc-wo { position: absolute; left: 0; top: 0; color: var(--signal); opacity: 0; }
+.kc-wo::before { content: attr(data-w); } /* the design writes the word inside the span; here CSS draws it, so the text is in the page once */
 .kc-w::after, .kc-w0::before { content: ''; position: absolute; top: .1em; bottom: .02em; width: .07em; background: var(--signal); transform-origin: 50% 100%; }
 .kc-w::after { right: -.14em; transform: scaleY(calc(clamp(0, (var(--p) - var(--l)) * 400, 1) * clamp(0, (var(--n) - var(--p)) * 400, 1))); }
 .kc-w0::before { left: -.02em; transform: scaleY(clamp(0, (var(--l) - var(--p)) * 400, 1)); }
@@ -214,6 +215,22 @@
   .kc-net { flex-direction: column !important; align-items: stretch !important; }
   .kc-net > div:last-child { height: 4.5rem !important; flex: none !important; }
   .kc-plans { margin-top: 3rem !important; }
+  /* The key never covers text: on a phone too short for the whole hero (the design's frame is 390x844), the key
+     shrinks so the line and the button stay clear of the corner. At 390x844 and taller this is the design's 128%. */
+  .kc-stagekey { --kw: min(128%, calc((100svh - 15rem - 3.88 * clamp(2.2rem, calc(10.4 * var(--u)), 6.0rem)) / .7097)); width: var(--kw) !important; margin: 1.1rem 0 -.5rem calc((100% - var(--kw)) / 2) !important; }
+}
+/* Phones shorter than 620 px: the chapters set a little smaller, so every line fits above the corner. */
+@media (max-width: 760px) and (max-height: 620px) {
+  .kc-chs { padding-top: 3.25rem !important; }
+  .kc-cg { row-gap: 1.25rem !important; }
+  .kc-chs .kc-h2 { font-size: clamp(1.9rem, calc(4.6 * var(--u)), 9.0rem); }
+  .kc-row { padding: .6rem 0 !important; }
+  .kc-say { font-size: clamp(1.1rem, calc(2.3 * var(--u)), 4.2rem); }
+  .kc-say-code { font-size: clamp(.95rem, calc(1.75 * var(--u)), 3.1rem); }
+  .kc-say-doc { font-size: clamp(1.3rem, calc(2.7 * var(--u)), 5.0rem); }
+  .kc-lane, .kc-note { font-size: clamp(1.15rem, calc(2.3 * var(--u)), 4.0rem); }
+  .kc-line-text { font-size: clamp(1.1rem, calc(2.05 * var(--u)), 3.6rem); }
+  .kc-script { margin-top: 1.4rem; row-gap: .8rem; padding-top: 1.1rem; }
 }
 /* Reduced motion: every chapter in its final state, nothing pinned. */
 @media (prefers-reduced-motion: reduce) {
