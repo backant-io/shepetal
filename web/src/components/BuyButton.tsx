@@ -6,7 +6,6 @@ export type CheckoutPlan = 'lifetime' | 'monthly';
 
 const CODE_ERRORS: Record<string, string> = {
   invalid_code: 'This code is not valid.',
-  code_not_applicable: 'This code has ended, or this account has used it.',
   code_lifetime_only: 'The code works on the one-time price.',
 };
 
@@ -28,7 +27,8 @@ export async function startCheckout(
     if (res.status === 401) return { error: 'You were signed out. Reload the page and sign in again.' };
     if (res.status === 400) {
       const body = (await res.json().catch(() => ({}))) as { error?: string };
-      const known = body.error && CODE_ERRORS[body.error];
+      // code_not_applicable carries its own line: "This code is for a first purchase." or "This code has ended."
+      const known = body.error === 'code_not_applicable' ? (body as { message?: string }).message : body.error && CODE_ERRORS[body.error];
       if (known) return { error: known };
     }
     if (res.status === 409) {

@@ -127,7 +127,7 @@ export async function activate(userId: number, paymentIntent: string | null = nu
 export async function revokeLifetime(paymentIntent: string): Promise<boolean> {
   const r = await db()
     .prepare(
-      `UPDATE users SET status = 'trial', purchased_at = NULL,
+      `UPDATE users SET status = 'trial', purchased_at = NULL, lifetime_payment_intent = NULL,
          plan = CASE WHEN sub_id IS NOT NULL AND sub_status NOT IN ('canceled', 'incomplete', 'incomplete_expired') THEN 'subscription' ELSE NULL END
        WHERE lifetime_payment_intent = ?1 AND status = 'active'`,
     )

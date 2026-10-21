@@ -136,8 +136,10 @@ export async function checkoutUrl(user: User, base: string, plan: CheckoutPlan =
           { ...common, mode: 'subscription', subscription_data: { metadata: tag } },
     );
   } catch (e) {
-    // Stripe refuses a code that has expired, was used, or meets a customer who has paid before.
-    if (promotion && e instanceof Stripe.errors.StripeInvalidRequestError) throw new CodeError('code_not_applicable', e.message);
+    // Stripe refuses a code that has ended or was used up, or meets a customer who has paid before.
+    if (promotion && e instanceof Stripe.errors.StripeInvalidRequestError) {
+      throw new CodeError('code_not_applicable', /prior transactions|first.time/i.test(e.message) ? 'This code is for a first purchase.' : 'This code has ended.');
+    }
     throw e;
   }
   if (!session.url) throw new Error('Stripe returned a checkout session without a url');
@@ -227,10 +229,16 @@ async function endSubscription(subId: string, refund: boolean): Promise<Stripe.S
 
 /** Refunds a payment in full, once (the idempotency key), tagged so the charge.refunded handler leaves the license alone. */
 async function refundOnce(paymentIntent: string, why: string): Promise<void> {
-  await getStripe().refunds.create(
-    { payment_intent: paymentIntent, metadata: { app: APP, reason: why } },
-    { idempotencyKey: `shepetal-refund-${paymentIntent}` },
-  );
+  try {
+    await getStripe().refunds.create(
+      { payment_intent: paymentIntent, metadata: { app: APP, reason: why } },
+      { idempotencyKey: `shepetal-refund-${paymentIntent}` },
+    );
+  } catch (e) {
+    // Run again after Stripe forgot the idempotency key (24 h): the refund is already there, nothing to do.
+    if (e instanceof Stripe.errors.StripeError && e.code === 'charge_already_refunded') return;
+    throw e;
+  }
 }
 
 /** The subscription fields the account stores. Reads the item's period on API versions that moved it there. */
@@ -270,16 +278,23 @@ async function syncSubscription(id: string, unpaidInvoice = false): Promise<void
     // A subscription that should not exist is ended and refunded: one for an owner of the lifetime license (a
     // monthly checkout paid in another tab), or a second one beside a live subscription (the later one goes).
     if (user.status === 'active') {
-      console.error(`stripe webhook: ${s.id} for lifetime user ${userId}: ended and refunded`);
-      await applySubscription(userId, snapshot(await endSubscription(s.id, true)));
+      // Made after the lifetime purchase: it should never have been paid, so it is refunded. Made before: the switch
+      // to lifetime (its cancel failed earlier and runs now), so its past months stay paid.
+      const after = !user.purchased_at || s.created * 1000 > Date.parse(user.purchased_at);
+      console.error(`stripe webhook: ${s.id} for lifetime user ${userId}: ended${after ? ' and refunded' : ''}`);
+      await applySubscription(userId, snapshot(await endSubscription(s.id, after)));
       return;
     }
     if (user.sub_id && user.sub_id !== s.id) {
       const other = await getStripe().subscriptions.retrieve(user.sub_id);
       if (!TERMINAL.has(other.status)) {
-        const [keep, extra] = other.created <= s.created ? [other, s] : [s, other];
+        // Keep the one in good standing (paid up), else the older one.
+        const good = (x: Stripe.Subscription) => (x.status === 'active' || x.status === 'trialing' ? 0 : 1);
+        const [keep, extra] = good(other) !== good(s) ? (good(other) < good(s) ? [other, s] : [s, other])
+          : other.created <= s.created ? [other, s] : [s, other];
         console.error(`stripe webhook: two subscriptions for user ${userId}: ${extra.id} ended and refunded, ${keep.id} kept`);
-        await endSubscription(extra.id, true);
+        // The later one is refunded; an older one in arrears just stops (its months were used, its open invoice is voided).
+        await endSubscription(extra.id, extra.created >= keep.created);
         await applySubscription(userId, snapshot(keep));
         return;
       }
@@ -318,12 +333,19 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       const pi = idOf(s.payment_intent);
       const before = await userById(userId);
       if (!before) return console.error(`stripe webhook: no user ${s.client_reference_id} for paid session ${s.id}`);
-      // Bought twice (two tabs): the license is the first payment's; this one is refunded.
-      if (before.status === 'active' && pi && before.lifetime_payment_intent !== pi) {
+      // Bought twice (two tabs): the license is the first payment's; this one is refunded. A purchase from before
+      // the plans has no PaymentIntent stored: this one fills it in.
+      if (before.status === 'active' && pi && before.lifetime_payment_intent && before.lifetime_payment_intent !== pi) {
         console.error(`stripe webhook: second lifetime payment ${pi} for user ${userId}: refunded`);
         return refundOnce(pi, 'duplicate_lifetime');
       }
       await activate(userId, pi);
+      // Two payments handled at the same moment: whichever did not get stored is refunded.
+      const stored = (await userById(userId))?.lifetime_payment_intent;
+      if (pi && stored && stored !== pi) {
+        console.error(`stripe webhook: concurrent lifetime payment ${pi} for user ${userId}: refunded`);
+        return refundOnce(pi, 'duplicate_lifetime');
+      }
       // Switched to lifetime while subscribed: the subscription ends now, with no further charge.
       const user = await userById(userId);
       const live = user && liveSubscription(user);

@@ -31,7 +31,7 @@ describe('Buy button', () => {
     await startCheckout('lifetime', f, 'PRODUCTHUNT');
     expect(f).toHaveBeenCalledWith('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'lifetime', code: 'PRODUCTHUNT' }) });
     expect(await startCheckout('lifetime', json(400, { error: 'invalid_code' }), 'NOPE')).toEqual({ error: 'This code is not valid.' });
-    expect(await startCheckout('lifetime', json(400, { error: 'code_not_applicable' }), 'PRODUCTHUNT')).toEqual({ error: expect.stringMatching(/used it/) });
+    expect(await startCheckout('lifetime', json(400, { error: 'code_not_applicable', message: 'This code is for a first purchase.' }), 'PRODUCTHUNT')).toEqual({ error: 'This code is for a first purchase.' });
   });
 
   it('never navigates on a server error, a missing url or a network failure', async () => {

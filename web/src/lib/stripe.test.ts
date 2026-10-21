@@ -227,10 +227,11 @@ describe('never charged twice', () => {
 
   it('ends and refunds a subscription paid by an owner of the lifetime license (a second tab)', async () => {
     await send(event(session({ payment_intent: 'pi_life' })));
+    const later = sub({ created: nowS() + 60 }); // made after the lifetime purchase
     const ended = sub({ status: 'canceled', ended_at: nowS() });
-    retrieving(sub(), sub(), ended);
+    retrieving(later, later, ended);
     const { cancel, refund } = stubEnd(ended);
-    await send(event(sub(), 'customer.subscription.updated'));
+    await send(event(later, 'customer.subscription.updated'));
     expect(cancel).toHaveBeenCalledWith('sub_1', { invoice_now: false, prorate: false }, { idempotencyKey: 'shepetal-end-sub_1' });
     expect(refund).toHaveBeenCalledWith(
       { payment_intent: 'pi_sub', metadata: { app: 'shepetal', reason: 'duplicate_subscription' } },
@@ -279,6 +280,70 @@ describe('never charged twice', () => {
     expect((await license()).plan).toBe('lifetime'); // a partial refund keeps it
     await send(event({ id: 'ch_3', object: 'charge', payment_intent: 'pi_life', refunded: true }, 'charge.refunded'));
     expect(await license()).toMatchObject({ plan: 'trial', status: 'trial' });
+  });
+
+  it('refunds nothing when a re-bought lifetime purchase is handled again, and its refund ends it', async () => {
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await send(event(session({ payment_intent: 'pi_A' })));
+    await send(event({ id: 'ch_A', object: 'charge', payment_intent: 'pi_A', refunded: true }, 'charge.refunded'));
+    expect((await license()).plan).toBe('trial');
+    await send(event(session({ id: 'cs_B', payment_intent: 'pi_B' })));
+    await send(event(session({ id: 'cs_B', payment_intent: 'pi_B' }))); // run again (a resend: a new event id)
+    expect(refund).not.toHaveBeenCalled();
+    expect((await fresh()).lifetime_payment_intent).toBe('pi_B');
+    await send(event({ id: 'ch_B', object: 'charge', payment_intent: 'pi_B', refunded: true }, 'charge.refunded'));
+    expect((await license()).plan).toBe('trial');
+  });
+
+  it('never refunds a purchase from before the plans when its event runs again', async () => {
+    await db().prepare("UPDATE users SET status = 'active', plan = 'lifetime', purchased_at = '2026-10-01T00:00:00.000Z' WHERE id = ?1").bind(user.id).run();
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await send(event(session({ payment_intent: 'pi_legacy' })));
+    expect(refund).not.toHaveBeenCalled();
+    expect((await fresh()).lifetime_payment_intent).toBe('pi_legacy');
+  });
+
+  it('keeps the past months of a subscription that began before the lifetime purchase (a switch whose cancel failed)', async () => {
+    retrieving(sub({ created: nowS() - 90 * DAY }));
+    await send(event(sub(), 'customer.subscription.updated'));
+    await db().prepare("UPDATE users SET status = 'active', plan = 'lifetime', purchased_at = ?2 WHERE id = ?1").bind(user.id, new Date().toISOString()).run();
+    const old = sub({ created: nowS() - 90 * DAY });
+    const ended = sub({ status: 'canceled', created: nowS() - 90 * DAY, ended_at: nowS() });
+    retrieving(old, old, ended);
+    const { cancel, refund } = stubEnd(ended);
+    await send(event(old, 'customer.subscription.updated'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(refund).not.toHaveBeenCalled();
+  });
+
+  it('refunds one of two lifetime payments handled at the same moment', async () => {
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await Promise.all([send(event(session({ id: 'cs_x', payment_intent: 'pi_x' }))), send(event(session({ id: 'cs_y', payment_intent: 'pi_y' })))]);
+    expect(refund).toHaveBeenCalledTimes(1);
+    const kept = (await fresh()).lifetime_payment_intent;
+    expect(refund.mock.calls[0][0]).toMatchObject({ payment_intent: kept === 'pi_x' ? 'pi_y' : 'pi_x' });
+  });
+
+  it('keeps a paid-up subscription over an older one in arrears, which just stops', async () => {
+    retrieving(sub({ id: 'sub_A', created: 100, status: 'past_due' }));
+    await send(event(sub({ id: 'sub_A' }), 'customer.subscription.updated'));
+    const b = sub({ id: 'sub_B', created: 200 });
+    const endedA = sub({ id: 'sub_A', status: 'canceled', created: 100, ended_at: nowS() });
+    retrieving(b, sub({ id: 'sub_A', created: 100, status: 'past_due' }), sub({ id: 'sub_A', created: 100, status: 'past_due' }), endedA);
+    const { cancel, refund } = stubEnd(endedA);
+    await send(event(b, 'customer.subscription.updated'));
+    expect(cancel).toHaveBeenCalledWith('sub_A', expect.anything(), expect.anything());
+    expect(refund).not.toHaveBeenCalled();
+    expect(await fresh()).toMatchObject({ sub_id: 'sub_B', sub_status: 'active' });
+    expect((await license()).status).toBe('active');
+  });
+
+  it('treats a refund Stripe already made (after its 24 h idempotency window) as done', async () => {
+    await send(event(session({ payment_intent: 'pi_first' })));
+    vi.spyOn(getStripe().refunds, 'create').mockRejectedValue(
+      new Stripe.errors.StripeInvalidRequestError({ code: 'charge_already_refunded', message: 'Charge has already been refunded.' } as never),
+    );
+    expect((await send(event(session({ id: 'cs_2', payment_intent: 'pi_second' })))).status).toBe(200);
   });
 
   it('never shows a subscription that was never paid as one that ended', async () => {
