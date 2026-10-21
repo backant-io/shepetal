@@ -25,6 +25,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=${SHEPETAL_BIN:-.build/release/shepetal}
 [ -x "$BIN" ] || swift build -c release
+# The cleanup model's library links no socket or DNS call, so it cannot reach the network even when a failed
+# call would be swallowed (the sandboxed run below only shows that nothing breaks without the network).
+LLAMA=$(dirname "$BIN")/llama.framework/llama
+[ -f "$LLAMA" ] || LLAMA=$(dirname "$BIN")/../Frameworks/llama.framework/llama
+[ -f "$LLAMA" ] || { echo "no llama.framework next to $BIN" >&2; exit 1; }
+if nm -u "$LLAMA" | grep -Eq '^_(socket|connect|getaddrinfo|gethostbyname|curl_[a-z_]+)$'; then
+  echo "$LLAMA links network calls" >&2; exit 1
+fi
+echo "llama.framework: no network calls linked"
 WORK=$PWD/.cache/e2e
 FIX=$WORK/fixtures
 # Never the user's data dir, even when SHEPETAL_HOME is exported: E2E_HOME moves the test's own.

@@ -32,8 +32,9 @@ public enum SmartCleanup {
         return Result(text: out, usedModel: true)
     }
 
+    /// "I mean it" is emphasis, not a cue; "I mean it's Wednesday" is one.
     static let corrections = try! NSRegularExpression(pattern: #"""
-        (?xi) (?:,\ )? \b(?: actually,?\ no | actually | i\ mean | no,?\ wait | wait,?\ no | scratch\ that | strike\ that
+        (?xi) (?:,\ )? \b(?: actually,?\ no | actually | i\ mean(?!\ it\b(?!['’])) | no,?\ wait | wait,?\ no | scratch\ that | strike\ that
           | cancel\ that | forget\ that | never\ mind | or\ rather | make\ that | sorry | correction | let\ me\ rephrase )\b
         | ,\ no\b
         """#)

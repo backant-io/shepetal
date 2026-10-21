@@ -169,6 +169,16 @@ final class InsertionRulesTests: XCTestCase {
         XCTAssertEqual(fit("Wait for it.", "Please ", ""), "wait for it.")
         XCTAssertEqual(fit("The cursor.", "leave ", "the cursor"), "the cursor" + nbsp)
     }
+
+    // F35: the cleanup model's numbered list must reach the cursor as lines. Fit may touch only the first line's
+    // first letter and space and the last line's end; it never joins lines or adds a period to an item.
+    func testNumberedListKeepsItsLines() {
+        let list = "Things to buy:\n1. Milk\n2. Eggs\n3. Bread"
+        XCTAssertEqual(fit(list, "", ""), list)
+        XCTAssertEqual(fit(list, "Done.", ""), " " + list)
+        XCTAssertEqual(fit(list, "Note: ", ""), "things to buy:\n1. Milk\n2. Eggs\n3. Bread")
+        XCTAssertEqual(fit(list + ".", "", "and more"), list + nbsp, "only the last line's end changes")
+    }
 }
 
 final class PasteCheckTests: XCTestCase {

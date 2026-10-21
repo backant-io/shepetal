@@ -206,6 +206,30 @@ final class SmartCleanupTests: XCTestCase {
         XCTAssertEqual(model.calls, [])
     }
 
+    // F34: a correction with a cue word is the model's job. The rules cannot tell which half is wanted, so
+    // without the model the user gets exactly what they said (cue and all), never a guess.
+    func testBacktrackNeedsTheModelAndTheRulesLeaveItAsSaid() {
+        for said in ["Let's move the review to Tuesday, actually Wednesday, at four.",
+                     "Book a table for four. Scratch that. Book a table for six."] {
+            XCTAssertTrue(SmartCleanup.needsModel(Cleanup.apply(said)), said)
+            XCTAssertEqual(SmartCleanup.apply(said, model: nil), .init(text: Cleanup.apply(said), usedModel: false), said)
+        }
+        let meant = "Let's move the review to Wednesday at four."
+        XCTAssertEqual(SmartCleanup.apply("Let's move the review to Tuesday, actually Wednesday, at four.",
+                                          model: FakeCleanupModel { _ in meant }), .init(text: meant, usedModel: true))
+    }
+
+    // "I mean it" is emphasis, not a correction: it never sends text to the model, and when another cue does,
+    // a rewrite that treats it as one ("ship on it") is rejected.
+    func testIMeanItIsNotACorrection() {
+        XCTAssertFalse(SmartCleanup.needsModel("We ship on Friday, I mean it."))
+        XCTAssertFalse(SmartCleanup.accepts("We ship on it.", for: "We ship on Friday, I mean it."))
+        let said = "We ship on Friday, I mean it. First, the docs. Second, the release."
+        let cut = FakeCleanupModel { _ in "We ship on it.\n1. The docs\n2. The release" }
+        XCTAssertEqual(SmartCleanup.apply(said, model: cut), .init(text: said, usedModel: false))
+        XCTAssertTrue(SmartCleanup.needsModel("Tuesday, I mean it's Wednesday."), "\"I mean it's\" still corrects")
+    }
+
     func testCues() {
         for text in ["Use the blue one, no, the green one.", "Book it. Scratch that.", "Gate twelve. Correction, gate fourteen.",
                      "Agenda. One, budget. Two, hiring.", "Step one, open it.", "Bullet point, sign it.",
