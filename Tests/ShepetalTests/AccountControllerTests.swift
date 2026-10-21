@@ -70,6 +70,19 @@ final class AccountControllerTests: XCTestCase {
 
     private func titles(_ a: Account) -> [String] { a.menuItems().map(\.title) }
 
+    /// Presses `keys` and releases them in reverse through the real KeyRouter, and hands its inputs to the
+    /// account the way App.key(_:at:) does: afterBlockedPress first, then the gate on pttDown and toggle.
+    private func press(_ keys: [Int], _ a: Account) {
+        var router = KeyRouter()
+        var inputs: [KeyInput] = []
+        for k in keys { inputs += router.key(k, down: true, active: false, canSwallow: true).inputs }
+        for k in keys.reversed() { inputs += router.key(k, down: false, active: false, canSwallow: true).inputs }
+        for i in inputs {
+            a.afterBlockedPress(i)
+            if i == .pttDown || i == .toggle { XCTAssertFalse(a.allowFnDown()) }
+        }
+    }
+
     func testBeforeThePaidLaunchFnAlwaysDictates() async throws {
         let a = Account(client: AccountClient(base: server.url), tokens: tokens, stateURL: stateURL, required: false)
         a.start(isDictating: { false }, hint: { [unowned self] in hints.append($0) }, showHome: { [unowned self] in homeShown += 1 })
@@ -101,7 +114,11 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertEqual(homeShown, 1, "only once per launch: the timer never takes the focus again")
         XCTAssertFalse(a.allowFnDown(), "fn is refused before the mic opens")
         XCTAssertEqual(hints.last, "Sign in with Google to start your free 30-day trial")
-        XCTAssertEqual(homeShown, 2, "a blocked fn press opens Home, where Sign in is")
+        XCTAssertEqual(homeShown, 1, "not on the press: fn may be the start of a shortcut")
+        a.afterBlockedPress(.pttUp)
+        XCTAssertEqual(homeShown, 2, "its release opens Home, where Sign in is")
+        a.afterBlockedPress(.pttUp)
+        XCTAssertEqual(homeShown, 2, "once per press")
         XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
         XCTAssertTrue(server.requests.isEmpty, "no network until the user signs in")
     }
@@ -112,9 +129,45 @@ final class AccountControllerTests: XCTestCase {
         a.signIn()
         let shown = homeShown
         XCTAssertFalse(a.allowFnDown())
+        a.afterBlockedPress(.pttUp)
         XCTAssertEqual(hints.last, "Finish signing in with Google first")
         XCTAssertEqual(homeShown, shown, "the window must not come in front of the sign-in sheet")
         a.cancelSignIn()
+    }
+
+    /// Signed out, fn+Delete, fn+arrows and fn+F-keys still reach the user's app: Home opening on them would take
+    /// the focus, and the shortcut's next key, every time. Holding fn alone, or fn+Space, asks for dictation.
+    func testFnShortcutsWhileSignedOutNeverOpenTheWindow() async throws {
+        let a = account()
+        let atLaunch = homeShown
+        for keys in [[Key.fn, Key.delete], [Key.fn, Key.left], [Key.fn, 122], [Key.fn, Key.delete]] {  // 122 is F1
+            press(keys, a)
+        }
+        XCTAssertEqual(homeShown, atLaunch, "a shortcut with fn never opens Home")
+        press([Key.fn], a)
+        XCTAssertEqual(homeShown, atLaunch + 1, "holding fn and letting go opens Home")
+        press([Key.fn, Key.space], a)
+        XCTAssertEqual(homeShown, atLaunch + 2, "so does fn+Space, the hands-free shortcut")
+    }
+
+    /// A press that dictates while the launch check runs cancels it: a later check is not the launch check, and
+    /// must not open the window in the middle of the session (reviewer probe at badf1a0: it did, hours later).
+    func testACancelledLaunchCheckNeverOpensTheWindowLater() async throws {
+        try tokens.write("tok-1")
+        try AccountState(license: License(status: .trial, trialEndsAt: Date() + 5 * day, email: "a@example.com"),
+                         lastGoodCheck: Date(), lastAttempt: Date()).save(stateURL(creating: true))
+        let gate = DispatchSemaphore(value: 0)
+        server.handler = { [unowned self] _ in gate.wait(); return license("trial", endsIn: 5 * day) }
+        let a = account()
+        try await until("launch check sent") { server.requests.count == 1 }
+        XCTAssertTrue(a.allowFnDown(), "the cached trial dictates")
+        XCTAssertNil(a.checkTask, "and the launch check is cancelled")
+        server.handler = { [unowned self] _ in license("expired", endsIn: -day) }
+        gate.signal()
+        a.now = { [day] in Date() + 1.1 * day }
+        a.tick()
+        try await until("the daily check saw it") { a.access == .expired }
+        XCTAssertEqual(homeShown, 0, "only a fn press opens Home now, not the timer")
     }
 
     func testHomeOpensOnceWhenTheLaunchCheckSaysExpired() async throws {
