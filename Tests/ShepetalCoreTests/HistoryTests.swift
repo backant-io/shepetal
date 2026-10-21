@@ -93,6 +93,10 @@ final class HistoryTests: XCTestCase {
         XCTAssertFalse(row.reverted)
         XCTAssertEqual(row.shownText, "On 06.03.")
         XCTAssertThrowsError(try history.setReverted("missing", true))
+
+        // A tag mid-sentence leaves one space, so Copy, paste last and Recent never give "Send it   to Jane.".
+        row.rawText = "Send it (music) to [MUSIC] Jane."; row.reverted = true
+        XCTAssertEqual(row.shownText, "Send it to Jane.")
     }
 
     // F33: Formatting per app lists each app once, by bundle id, under its newest name, sorted by name.
@@ -114,6 +118,7 @@ final class HistoryTests: XCTestCase {
         let history = try History(path: dbURL)
         var e = entry("a", text: "hello")
         e.app = "Safari"; e.bundleId = "com.apple.Safari"; e.url = "https://example.com/a"
+        e.reverted = true  // add is INSERT OR REPLACE: re-adding a row must keep Show raw (F48)
         try history.add(e)
         try history.add(entry("b", at: 900))
         XCTAssertEqual(try history.recent(), [e, entry("b", at: 900)])

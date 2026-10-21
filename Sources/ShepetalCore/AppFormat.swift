@@ -42,9 +42,15 @@ public struct AppFormat {
     /// it is written, and its text is inserted as written. InsertionRules fits the result to the cursor afterwards.
     public static func finish(_ raw: String, mode: FormatMode, model: CleanupModel?,
                               vocabulary: Vocabulary) -> (text: String, usedModel: Bool) {
-        let heard = SpeechGuard.stripTags(raw)
-        guard mode == .formatted else { return (vocabulary.apply(heard.trimmingCharacters(in: .whitespacesAndNewlines)), false) }
-        let cleaned = SmartCleanup.apply(heard, model: model)
+        guard mode == .formatted else { return (vocabulary.apply(asHeard(raw)), false) }
+        let cleaned = SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model)
         return (vocabulary.apply(Dates.apply(cleaned.text)), cleaned.usedModel)
+    }
+
+    /// The words as heard, for Raw and Show raw (F48): the non-speech tags removed, and the run of spaces a tag
+    /// leaves mid-text collapsed, which Formatted gets from the rule cleanup.
+    public static func asHeard(_ raw: String) -> String {
+        SpeechGuard.stripTags(raw).replacingOccurrences(of: " {2,}", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

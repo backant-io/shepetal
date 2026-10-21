@@ -37,7 +37,7 @@ public struct HistoryEntry: Equatable {
 
     /// What History shows and copies, and what paste last and copy last use: the raw transcript without its
     /// non-speech tags once the row is reverted, else the cleaned text.
-    public var shownText: String { reverted ? SpeechGuard.stripTags(rawText) : text }
+    public var shownText: String { reverted ? AppFormat.asHeard(rawText) : text }
 
     /// Play and re-transcribe need the kept WAV. It is gone after the 24 h retention ran, or when saving it failed.
     public func canReplay(fileExists: (String) -> Bool = FileManager.default.fileExists(atPath:)) -> Bool {

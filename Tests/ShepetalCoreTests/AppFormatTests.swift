@@ -89,4 +89,13 @@ final class AppFormatTests: XCTestCase {
             XCTAssertEqual(AppFormat.finish(heard, mode: .raw, model: nil, vocabulary: Vocabulary()).text, "", heard)
         }
     }
+
+    // A tag mid-sentence leaves one space in Raw, as the rule cleanup leaves in Formatted, and the dictionary
+    // still matches across it.
+    func testRawLeavesOneSpaceWhereATagStood() {
+        XCTAssertEqual(AppFormat.finish("Send it [BLANK_AUDIO] to (laughs) Jane.", mode: .raw, model: nil, vocabulary: Vocabulary()).text,
+                       "Send it to Jane.")
+        XCTAssertEqual(AppFormat.finish("deploy to cube [MUSIC] and eighties", mode: .raw, model: nil,
+                                        vocabulary: Vocabulary("cube and eighties => Kubernetes\n")).text, "deploy to Kubernetes")
+    }
 }
