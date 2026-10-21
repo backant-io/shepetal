@@ -12,6 +12,7 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     // Written by the pasteboard callback, which AppKit may call off the main thread.
     private let lock = NSLock()
     nonisolated(unsafe) private var text = ""
+    nonisolated(unsafe) private var html: String?
     nonisolated(unsafe) private var requested: TimeInterval?
     private var requestedAt: TimeInterval? { lock.withLock { requested } }
     private static let markers = [NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType"),
@@ -25,18 +26,20 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     /// `sendPaste` delivers the key events; the app posts them to the system (`postCmdV`). `mode` is the target
     /// app's (F22). `stillFocused` is rule 8's gate, asked again wherever time passes after the pipeline's own
     /// check: after the remote delay, before each typed key, and before Return. `pressReturn` (F42) presses Return
-    /// once the text landed, never otherwise.
-    func insert(_ text: String, mode: PasteMode = .local, sendPaste: (CGEvent) -> Void,
+    /// once the text landed, never otherwise. `html` (a rich snippet, F40) is offered next to `text`: a rich field
+    /// takes it, a plain one or a terminal takes `text`, and a read of either is the paste landing. Typed mode types `text`.
+    func insert(_ text: String, html: String? = nil, mode: PasteMode = .local, sendPaste: (CGEvent) -> Void,
                 stillFocused: () -> Bool = { true }, pressReturn: Bool = false) async -> Result {
         if mode == .typed { return await type(text, sendPaste: sendPaste, stillFocused: stillFocused, pressReturn: pressReturn) }
         let saved = snapshot()
         lock.withLock {
             self.text = text
+            self.html = html
             requested = nil
         }
         pasteboard.clearOnThisMac()
         let item = NSPasteboardItem()
-        item.setDataProvider(self, forTypes: [.string])
+        item.setDataProvider(self, forTypes: html == nil ? [.string] : [.html, .string])
         for m in Self.markers { item.setData(Data(), forType: m) }  // clipboard managers skip it
         pasteboard.writeObjects([item])
 
@@ -94,7 +97,7 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     nonisolated func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
         let text = lock.withLock {
             if requested == nil { requested = ProcessInfo.processInfo.systemUptime }
-            return self.text
+            return type == .html ? html ?? self.text : self.text
         }
         item.setString(text, forType: type)
     }
