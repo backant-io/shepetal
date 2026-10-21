@@ -67,5 +67,7 @@ final class InsightsFormatTests: XCTestCase {
         XCTAssertEqual(model.insights?.words, 2)
         XCTAssertEqual(model.labels.count, model.insights?.days.count, "one label per square")
         XCTAssertTrue(model.labels.last?.hasSuffix(": 2 words") == true)
+        // Switching to Home in a window that is already key makes a new model and posts nothing.
+        XCTAssertEqual(InsightsModel(history: history).insights?.words, 2, "a new model loads at once")
     }
 }

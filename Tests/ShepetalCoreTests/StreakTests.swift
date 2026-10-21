@@ -144,9 +144,10 @@ final class StreakTests: XCTestCase {
         let id = try add("first", at: at(20))
         XCTAssertEqual(Streak.notice(after: id, in: history, today: at(20, 13), calendar: berlin, defaults: defaults),
                        Milestone.firstDictation.text, "unset means on")
+        // Esc while transcribing ends with no error but no row: it must not repeat the last dictation's note.
+        XCTAssertNil(Streak.notice(after: "not-a-row", in: history, today: at(20, 13), calendar: berlin, defaults: defaults))
         defaults.set(false, forKey: Streak.noticesKey)
         XCTAssertNil(Streak.notice(after: id, in: history, today: at(20, 13), calendar: berlin, defaults: defaults))
-        XCTAssertNil(Streak.notice(after: "not-a-row", in: history, today: at(20, 13), calendar: berlin, defaults: defaults))
     }
 
     func testMilestoneWording() {
