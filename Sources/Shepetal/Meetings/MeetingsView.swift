@@ -14,6 +14,11 @@ final class MeetingsModel: ObservableObject {
     private let copy: (String) -> Void
     private let pause: () async throws -> Void
     private var pending: Task<Void, Never>?
+    /// What the list was searched for: `query` once typing pauses. The poll searches for this, never a half-typed word.
+    private var searched = ""
+    /// The store's write count, the tab, folder and query the list was read for; the poll skips the ranked search
+    /// while none of them changed.
+    private var listed: [String]?
 
     @Published var query = "" { didSet { searchSoon() } }
     @Published var tab = Tab.all { didSet { refresh() } }
@@ -43,8 +48,14 @@ final class MeetingsModel: ObservableObject {
         pending?.cancel()
         pending = Task { [weak self, pause] in
             guard (try? await pause()) != nil, !Task.isCancelled else { return }
-            self?.refresh()
+            self?.searchNow()
         }
+    }
+
+    /// Searches for what is in the field now: the pause is over.
+    func searchNow() {
+        searched = query
+        refresh()
     }
 
     /// Re-reads the folders, the list and the open meeting. It publishes only what changed, so the view can poll it.
@@ -54,12 +65,17 @@ final class MeetingsModel: ObservableObject {
             if f != folders { folders = f }
             if tab == .folders, !f.contains(where: { $0.id == folderID }) { folderID = f.first?.id }
             let folder = tab == .folders ? folderID : nil
-            let hits = tab == .folders && folder == nil ? [] : try store.search(query, folder: folder, limit: 200)
-            let list = hits.map(\.meeting)
-            if list != meetings { meetings = list }
-            let s = Dictionary(hits.map { ($0.meeting.id, $0.snippet) }, uniquingKeysWith: { a, _ in a })
-            if s != snippets { snippets = s }
-            if selectedID == nil || !list.contains(where: { $0.id == selectedID }) { selectedID = list.first?.id }
+            // The count is read before the search, so a write during it shows on the next poll.
+            let key = [String(store.changes), tab.rawValue, folder ?? "", searched]
+            if key != listed {
+                let hits = tab == .folders && folder == nil ? [] : try store.search(searched, folder: folder, limit: 200)
+                let list = hits.map(\.meeting)
+                if list != meetings { meetings = list }
+                let s = Dictionary(hits.map { ($0.meeting.id, $0.snippet) }, uniquingKeysWith: { a, _ in a })
+                if s != snippets { snippets = s }
+                listed = key
+            }
+            if selectedID == nil || !meetings.contains(where: { $0.id == selectedID }) { selectedID = meetings.first?.id }
             var r = try selectedID.flatMap(store.get)
             // Shown, copied and exported: the summary with the notes merged in. The store keeps the summary as it
             // was written, so the merge reruns whenever the notes change, also after the meeting.
@@ -73,9 +89,12 @@ final class MeetingsModel: ObservableObject {
     func select(_ id: String?) {
         guard let id, id != selectedID else { return }
         // Open in Meetings can ask for a meeting the open folder or the search hides: All, unfiltered, then.
+        // Hub.showMeeting empties the field first, so the search to undo is the one the list shows.
         if !meetings.contains(where: { $0.id == id }) {
+            if !query.isEmpty { query = "" }
+            pending?.cancel()
+            searched = ""
             if tab != .all { tab = .all }
-            if !query.isEmpty { query = ""; pending?.cancel() }
         }
         selectedID = id
         message = ""  // "copied" was about the other meeting
@@ -248,7 +267,8 @@ struct MeetingsView: View {
 /// The Folders tab's folder picker, with New folder, Rename and Delete.
 private struct FolderBar: View {
     @ObservedObject var model: MeetingsModel
-    @State private var naming: String?  // nil, or the id of the folder being renamed ("" for a new one)
+    @State private var naming = ""  // the id of the folder being renamed, "" for a new one
+    @State private var asking = false
     @State private var name = ""
     @State private var deleting = false
 
@@ -262,25 +282,24 @@ private struct FolderBar: View {
                 }
                 .labelsHidden()
             }
-            Button { name = ""; naming = "" } label: {
+            Button { name = ""; naming = ""; asking = true } label: {
                 // Its title only while there is no folder picker beside it.
                 if model.folders.isEmpty { Label("New folder", systemImage: "folder.badge.plus") } else { Image(systemName: "folder.badge.plus") }
             }
             .help("New folder")
             if let f = open {
                 Menu {
-                    Button("Rename…") { name = f.name; naming = f.id }
+                    Button("Rename…") { name = f.name; naming = f.id; asking = true }
                     Button("Delete…", role: .destructive) { deleting = true }
                 } label: { Image(systemName: "ellipsis.circle") }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Rename or delete this folder")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .alert(naming == "" ? "New folder" : "Rename folder", isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })) {
+        // The id is captured when the alert opens: the buttons never read state that dismissing it may change.
+        .alert(naming.isEmpty ? "New folder" : "Rename folder", isPresented: $asking, presenting: naming) { id in
             TextField("Name", text: $name)
-            Button(naming == "" ? "Create" : "Rename") {
-                if let id = naming { id.isEmpty ? model.createFolder(name) : model.renameFolder(id, to: name) }
-            }
+            Button(id.isEmpty ? "Create" : "Rename") { id.isEmpty ? model.createFolder(name) : model.renameFolder(id, to: name) }
             .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
             Button("Cancel", role: .cancel) {}
         }

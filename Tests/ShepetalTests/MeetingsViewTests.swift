@@ -213,7 +213,7 @@ final class MeetingsViewTests: XCTestCase {
         ended.startedAt = t0.addingTimeInterval(-3600)
         try store.save(ended)
         model.query = "facetime"
-        model.refresh()  // what the search runs once typing pauses (F120)
+        model.searchNow()  // what runs once typing pauses (F120)
         XCTAssertEqual(model.meetings.map(\.id), ["other"])
         XCTAssertEqual(model.record?.meeting.id, "other")
         model.query = ""
@@ -278,6 +278,8 @@ final class MeetingsViewTests: XCTestCase {
 
         let store = InMemoryMeetingStore([record])
         let model = MeetingsModel(store: store, copy: { _ in })
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: "a", now: ended.addingTimeInterval(86_401)), [],
+                       "the meeting being recorded keeps its transcript")
         XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: nil, now: ended.addingTimeInterval(86_401)), ["a"])
         model.refresh()
         let shown = try XCTUnwrap(model.record)
@@ -314,13 +316,13 @@ final class MeetingsViewTests: XCTestCase {
         XCTAssertEqual(model.folders.map(\.name), ["Clients"])
 
         model.query = "budget"
-        model.refresh()
+        model.searchNow()
         XCTAssertEqual(model.meetings.map(\.id), ["new", "old"], "only the folder's")
         XCTAssertEqual(model.snippets["old"], "the old budget is fine")
         model.tab = .all
         XCTAssertEqual(model.meetings.map(\.id), ["new", "mid", "old"])
         model.query = ""
-        model.refresh()
+        model.searchNow()
         XCTAssertEqual(model.snippets["old"], "")
 
         model.createFolder("Beta")
@@ -344,24 +346,49 @@ final class MeetingsViewTests: XCTestCase {
         XCTAssertTrue(model.message.hasPrefix("Folder not created"), model.message)
     }
 
-    // F120: typing "zoo" asks the store once, after the pause, not once per letter. The pause is injected and held
-    // open, so the test needs no clock.
+    // F120: typing "zoo" asks the store once, after the pause, not once per letter, and the view's 1 s poll
+    // (refresh) never searches for a half-typed word: on a large store each ranked search costs a noticeable moment
+    // on the main thread. A poll with nothing new asks the store nothing. The pause is injected and held open, so the
+    // test needs no clock.
     func testTypingAsksTheStoreOnceItPauses() async throws {
         let store = InMemoryMeetingStore()
         try store.save(meeting("a", "Zoom", at: t0))
-        try store.save(meeting("b", "Teams", at: t0))
+        try store.save(meeting("b", "Teams", at: t0.addingTimeInterval(-60)))
         var held: [CheckedContinuation<Void, Never>] = []
         let model = MeetingsModel(store: store, copy: { _ in }, pause: { await withCheckedContinuation { held.append($0) } })
+        model.refresh()  // the tab opens
         model.query = "z"
+        model.refresh()  // the poll, between keystrokes: nothing new, so no search
+        try store.setNotes("zebra", for: "b")  // a write lands while typing (a live segment, a note)
+        model.refresh()  // so the poll searches again, for what was last searched
         model.query = "zo"
         model.query = "zoo"
+        model.refresh()
         for _ in 0..<1_000 where held.count < 3 { await Task.yield() }
         XCTAssertEqual(held.count, 3)
-        XCTAssertEqual(store.searches, 0, "no keystroke asks the store at once")
+        XCTAssertEqual(store.asked, ["", ""], "neither a keystroke nor the poll asks for a half-typed word")
+        XCTAssertEqual(model.meetings.map(\.id), ["a", "b"])
         held.forEach { $0.resume() }
-        for _ in 0..<1_000 where store.searches == 0 { await Task.yield() }
+        held = []
+        for _ in 0..<1_000 where store.asked.count < 3 { await Task.yield() }
         for _ in 0..<100 { await Task.yield() }  // room for a second, wrong query
-        XCTAssertEqual(store.searches, 1)
+        XCTAssertEqual(store.asked, ["", "", "zoo"])
         XCTAssertEqual(model.meetings.map(\.id), ["a"])
+
+        model.refresh()
+        XCTAssertEqual(store.asked, ["", "", "zoo"], "nothing changed: the poll does not search again")
+        try store.save(meeting("c", "Zoom", at: t0.addingTimeInterval(60)))  // a new meeting lands
+        model.refresh()
+        XCTAssertEqual(store.asked, ["", "", "zoo", "zoo"])
+        XCTAssertEqual(model.meetings.map(\.id), ["c", "a"])
+
+        // Open in Meetings (Hub.showMeeting) empties the field, then asks for a meeting the search still hides.
+        model.query = ""
+        model.select("b")
+        XCTAssertEqual(model.record?.meeting.id, "b")
+        XCTAssertEqual(model.meetings.map(\.id), ["c", "a", "b"])
+        held.forEach { $0.resume() }  // the emptied field's pause, already cancelled
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(model.record?.meeting.id, "b")
     }
 }

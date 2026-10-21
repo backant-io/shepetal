@@ -190,6 +190,8 @@ public protocol MeetingStoring: AnyObject {
     func setSummary(_ summary: Summary, for meetingID: String) throws
     /// Replaces the meeting's notes; works while it records too.
     func setNotes(_ notes: String, for meetingID: String) throws
+    /// Goes up with every write, so a poll can tell that nothing changed since it last read.
+    var changes: Int { get }
     /// Newest first.
     func list(limit: Int) throws -> [Meeting]
     /// Meetings whose app, segment text, summary or notes contains `query` (case-insensitive), in `folder` when

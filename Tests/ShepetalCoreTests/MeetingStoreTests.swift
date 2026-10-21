@@ -369,6 +369,9 @@ final class MeetingStoreTests: XCTestCase {
         XCTAssertThrowsError(try store.setFolders([work.id, "nope"], for: "b"))
         XCTAssertEqual(try store.list(inFolder: work.id, limit: 10).map(\.id), ["c", "a"], "a failed change changes nothing")
         XCTAssertThrowsError(try store.setFolders([work.id], for: "nope"))
+        try store.setFolders([clients.id], for: "a")  // Add to folder > Work, unchecked
+        XCTAssertEqual(try store.list(inFolder: work.id, limit: 10).map(\.id), ["c"], "taken out of Work")
+        XCTAssertEqual(try store.list(inFolder: clients.id, limit: 10).map(\.id), ["a"], "and only out of Work")
 
         try store.renameFolder(clients.id, to: "Acme")
         XCTAssertEqual(try MeetingStore(path: dbURL).folders().map(\.name), ["Acme", "Work"])
@@ -392,6 +395,27 @@ final class MeetingStoreTests: XCTestCase {
     }
 
     // MARK: - F120 search results
+
+    // The Meetings tab's poll searches again only when this count moved, so every write a meeting makes while it
+    // records, or the tab makes, has to move it; otherwise a search would never show the new words.
+    func testEveryWriteMovesTheChangeCount() throws {
+        let store = try MeetingStore(path: dbURL)
+        var last = store.changes
+        func moved(_ what: String) {
+            XCTAssertGreaterThan(store.changes, last, what)
+            last = store.changes
+        }
+        try store.save(meeting("a")); moved("save")
+        try store.append([Segment(speaker: .me, start: 0, end: 1, text: "budget")], to: "a"); moved("append")
+        try store.setSummary(Summary(overview: "x"), for: "a"); moved("summary")
+        try store.setNotes("n", for: "a"); moved("notes")
+        let work = try store.createFolder("Work"); moved("folder")
+        try store.setFolders([work.id], for: "a"); moved("folders")
+        try store.delete("a"); moved("delete")
+        _ = try store.folders()
+        _ = try store.search("budget", folder: nil, limit: 10)
+        XCTAssertEqual(store.changes, last, "a read is not a write")
+    }
 
     // A result shows where it matched: the words around the match, cut at word edges with "…", on one line. The
     // app name is the row's title already, so a match on it alone shows no snippet.

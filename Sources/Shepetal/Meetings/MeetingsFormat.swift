@@ -95,10 +95,11 @@ extension Summary {
 /// MeetingStoring kept in memory: previews, tests, and the tab until the app passes its on-disk store.
 final class InMemoryMeetingStore: MeetingStoring {
     struct UnknownMeeting: Error { let id: String }
-    private var records: [String: MeetingRecord] = [:]
-    private var folderList: [String: MeetingFolder] = [:]
-    /// How often the tab asked for its list (the debounce test).
-    private(set) var searches = 0
+    private var records: [String: MeetingRecord] = [:] { didSet { changes += 1 } }
+    private var folderList: [String: MeetingFolder] = [:] { didSet { changes += 1 } }
+    private(set) var changes = 0
+    /// What the tab searched for, in order (the debounce test).
+    private(set) var asked: [String] = []
 
     init(_ records: [MeetingRecord] = []) {
         for r in records { self.records[r.meeting.id] = r }
@@ -136,7 +137,7 @@ final class InMemoryMeetingStore: MeetingStoring {
 
     /// Newest first: no rank in memory.
     func search(_ query: String, folder: String?, limit: Int) throws -> [MeetingHit] {
-        searches += 1
+        asked.append(query)
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let hits = records.values.compactMap { r -> MeetingHit? in
             if let folder, folderList[folder]?.meetingIDs.contains(r.meeting.id) != true { return nil }

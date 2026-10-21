@@ -162,6 +162,9 @@ public final class MeetingStore: MeetingStoring {
         }
     }
 
+    /// Rows written through this connection, which is the app's only writer.
+    public var changes: Int { Int(sqlite3_total_changes(db)) }
+
     public func list(limit: Int) throws -> [Meeting] {
         try meetings("SELECT \(Self.columns) FROM meetings ORDER BY started_at DESC LIMIT ?1", limit: limit)
     }

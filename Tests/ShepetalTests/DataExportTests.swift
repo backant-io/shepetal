@@ -169,6 +169,7 @@ private final class FailingStore: MeetingStoring {
     func remove(_ segments: [Segment], from meetingID: String) throws {}
     func setSummary(_ summary: Summary, for meetingID: String) throws {}
     func setNotes(_ notes: String, for meetingID: String) throws {}
+    var changes: Int { 0 }
     func list(limit: Int) throws -> [Meeting] {
         [Meeting(id: "x", app: "Zoom", startedAt: Date(), meAudioPath: "", othersAudioPath: "")]
     }
