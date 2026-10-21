@@ -189,6 +189,18 @@ final class PipelineTests: XCTestCase {
                        Cleanup.apply("call the orthodontist"), "re-transcribe applies the personal dictionary too")
     }
 
+    /// Dates run on the cleaned text: the stutter goes first, then "the first of March" becomes 01.03.
+    /// The dictionary runs after them, so text the user stored there is inserted as written.
+    @MainActor
+    func testFinishTextWritesSpokenDatesAsNumbersBeforeTheDictionary() throws {
+        let dictionary = root.appendingPathComponent("dictionary.txt")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "launch day => the first of March launch\n".write(to: dictionary, atomically: true, encoding: .utf8)
+        XCTAssertEqual(Pipeline.finishText("Let's meet on the the first of um March.", dictionary: dictionary), "Let's meet on 01.03.")
+        XCTAssertEqual(Pipeline.finishText("Twenty sixth of July twenty twenty-six.", dictionary: dictionary), "26.07.26.")
+        XCTAssertEqual(Pipeline.finishText("see you at launch day", dictionary: dictionary), "see you at the first of March launch")
+    }
+
     /// The hub's re-transcribe writes the same text step's result to the same row.
     @MainActor
     func testRetranscribeStripsTagsAndUpdatesTheRow() async throws {

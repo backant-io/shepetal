@@ -219,6 +219,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Expected: "leave the cursor the cursor right after it", with a lowercase "the cursor" and no period. Shepetal asks the app for its accessibility tree when the dictation starts. Note if VS Code then asks whether you use a screen reader, or turns on screen reader mode.
 3. If any dictation in M-INS-1 to M-INS-8 went in as dictated (capital and period), run `log show --last 10m --predicate 'eventMessage CONTAINS "shepetal: context"'` in Terminal and add the lines to the report. Each dictation logs one line: the field's role, its length and the selection, or which attribute could not be read and the AX error code. The text itself is never logged.
 
+### M-DATE-1: spoken dates become numbers (F32, docs/text-rules.md)
+1. In an empty TextEdit document, hold fn and say "Twenty sixth of July twenty twenty-six." Expected: "26.07.26."
+2. On a new line, say "Sechsundzwanzigster Juni sechsundzwanzig." Expected: "26.06.26."
+3. On a new line type "and then we rest", put the cursor at the start of the line, and say "We leave on the first of March." Expected: "We leave on 01.03. and then we rest". The date keeps its last dot.
+4. Say "May I ask a question?" Expected: it stays in words.
+
 ### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
 1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
 2. Click into a Notes note, then tap fn once to stop.
