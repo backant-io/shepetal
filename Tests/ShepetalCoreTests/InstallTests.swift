@@ -105,6 +105,8 @@ final class UninstallPlanTests: XCTestCase {
                           "the old 🌐 value is read from the settings")
         XCTAssertLessThan(s.firstIndex(of: .cancelPendingUpdate)!, s.firstIndex(of: .quit)!,
                           "a staged update would put the app back when it quits")
+        XCTAssertLessThan(s.firstIndex(of: .stopWatchdog)!, s.firstIndex(of: .trash(data))!,
+                          "the watchdog reads its clean-quit marker from the data folder; without it the quit looks like a crash")
         XCTAssertEqual(s.suffix(2), [.trash(app), .quit])
         XCTAssertFalse(plan(fn: false, deleteData: false).contains(.restoreFnKey))
     }

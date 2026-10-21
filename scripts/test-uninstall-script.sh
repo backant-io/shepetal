@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests scripts/uninstall-mac.sh (the fallback for an app that won't open; the app's own is Settings > Uninstall
-# Shepetal…) against stand-ins for `defaults`, `killall`, `open`, `osascript` and the app, so the real 🌐 key
+# Shepetal…) against stand-ins for `defaults`, `killall`, `open`, `osascript`, `pkill` and the app, so the real 🌐 key
 # setting, login items and apps are never touched.
 #   scripts/test-uninstall-script.sh
 set -euo pipefail
@@ -25,7 +25,7 @@ case $1 in
   delete) rm -f "$f" ;;
 esac
 SH
-for c in killall open osascript logger pgrep; do
+for c in killall open osascript logger pgrep pkill; do
   printf '#!/bin/bash\necho "%s $*" >> "$CALLS"\n%s\n' "$c" "$([ "$c" = pgrep ] && echo 'exit 1' || echo 'exit 0')" > "$T/bin/$c"
 done
 printf '#!/bin/bash\necho "app $*" >> "$CALLS"\n' > "$T/dest/Shepetal.app/Contents/MacOS/Shepetal"
@@ -58,6 +58,9 @@ uninstall || fail "uninstall failed: $(cat "$T/out.log")"
 [ "$(pref com.apple.HIToolbox.AppleFnUsageType)" = 3 ] || fail "uninstall did not restore 3"
 [ "$(pref io.backant.shepetal.previousAppleFnUsageType)" = unset ] || fail "uninstall kept the stored value"
 grep -qx "app --unregister-login-item" "$LOG" || fail "uninstall left the login item"
+for a in "$T/home/Applications/Shepetal.app" "$T/sysapps/Shepetal.app"; do  # none running: it may still be in its backoff
+  grep -qxF "pkill -f ^$a/Contents/MacOS/Shepetal --watchdog" "$LOG" || fail "uninstall did not stop the crash watchdog of $a"
+done
 grep -qx "killall -9 TextInputSwitcher" "$LOG" || fail "uninstall did not restart TextInputSwitcher"
 [ ! -e "$T/home/Applications/Shepetal.app" ] && [ ! -e "$T/sysapps/Shepetal.app" ] || fail "uninstall left an app"
 [ -d "$T/home/Library/Application Support/Shepetal" ] || fail "uninstall deleted the recordings"

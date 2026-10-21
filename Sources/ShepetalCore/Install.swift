@@ -85,6 +85,9 @@ public enum UninstallStep: Equatable {
     case unregisterLoginItem, restoreFnKey, signOut, resetPrivacy
     /// Stops Sparkle's installer that waits to put an update in place when the app quits.
     case cancelPendingUpdate
+    /// Stops the crash watchdog (F99): with the data folder in the Trash it cannot see the clean quit and would
+    /// treat the uninstall as a crash.
+    case stopWatchdog
     case trash(URL)
     case deleteSettings
     case quit
@@ -110,7 +113,7 @@ public enum UninstallPlan {
                              apps: [URL]) -> [UninstallStep] {
         var s: [UninstallStep] = [.unregisterLoginItem]
         if fnKeyRestorable { s.append(.restoreFnKey) }
-        s += [.signOut, .resetPrivacy, .cancelPendingUpdate, .trash(model), .trash(caches)]
+        s += [.signOut, .resetPrivacy, .cancelPendingUpdate, .stopWatchdog, .trash(model), .trash(caches)]
         if deleteData { s += [.trash(data), .deleteSettings] }
         return s + apps.map(UninstallStep.trash) + [.quit]
     }

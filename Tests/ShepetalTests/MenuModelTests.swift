@@ -6,7 +6,7 @@ import XCTest
 /// The 🤫 menu after Pavel compared it with Wispr Flow's (2026-10-21): ours had 22 items with grey status lines,
 /// account and setup items mixed in. It is now short and grouped by intent, shows what needs doing only when it
 /// does, and everything it lost lives in the shepetal window. Built from MenuState alone: no app, no screen,
-/// no clipboard (nothing here performs an item's action).
+/// and never the user's clipboard (the copy test uses a private pasteboard).
 @MainActor
 final class MenuModelTests: XCTestCase {
     private let day: TimeInterval = 86400
@@ -24,14 +24,14 @@ final class MenuModelTests: XCTestCase {
                        meAudioPath: "", othersAudioPath: "")
     }
 
-    private func entry(_ text: String, _ outcome: Outcome = .inserted) -> HistoryEntry {
-        HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: outcome, audioPath: "", durationMs: 1000, text: text)
+    private func entry(_ text: String, _ outcome: Outcome = .inserted, at date: Date = Date()) -> HistoryEntry {
+        HistoryEntry(id: UUID().uuidString, createdAt: date, outcome: outcome, audioPath: "", durationMs: 1000, text: text)
     }
 
     /// Everything that can show at once: what Pavel sees on a bad day.
     private var busy: MenuState {
         MenuState(permissionsMissing: true, engineProblem: "Loading on-device speech recognition…", canDownloadEngine: true,
-                  access: .trial(daysLeft: 3), recordingMeeting: true, meetings: (0..<12).map { meeting($0) },
+                  cleanupDownloadMB: 1281, cleanupDownloadFailed: true, access: .trial(daysLeft: 3), recordingMeeting: true, meetings: (0..<12).map { meeting($0) },
                   recent: [entry("Send the report today."), entry("", .tooShort)], canCheckForUpdates: true)
     }
 
@@ -79,9 +79,60 @@ final class MenuModelTests: XCTestCase {
 
         let groups = MenuModel.groups(busy)
         XCTAssertEqual(groups[0].map(\.title), ["Permissions needed…", "Loading on-device speech recognition…",
-                                                 "Download on-device speech recognition (about 470 MB)", "Get shepetal for $4.99…"],
+                                                 "Download on-device speech recognition (about 470 MB)",
+                                                 "Cleanup model download failed. Try again later.", "Download cleanup model (about 1.3 GB)",
+                                                 "Get shepetal for $4.99…"],
                        "every contextual item is in the first group")
         XCTAssertEqual(groups[1].first?.title, "Stop meeting recording", "then the menu as usual")
+    }
+
+    /// The local cleanup model is optional (the rules clean up without it), so the menu offers it without the
+    /// yellow mark, and only until it is downloaded. Its status is Home's Cleanup line, not a grey menu line.
+    func testTheCleanupModelIsOfferedUntilItIsDownloaded() throws {
+        func top(_ s: MenuState) -> [MenuEntry] { MenuModel.contextual(s) }
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: nil)), [], "downloaded, or an Intel Mac: nothing")
+        let offer = try XCTUnwrap(top(MenuState(cleanupDownloadMB: 1281)).first)
+        XCTAssertEqual(offer.title, "Download cleanup model (about 1.3 GB)")
+        XCTAssertEqual(offer.action, .downloadCleanup)
+        XCTAssertFalse(offer.attention, "dictation works without it")
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: 533)).map(\.title), ["Download cleanup model (about 0.5 GB)"], "8 GB Macs")
+
+        let downloading = top(MenuState(cleanupDownloadMB: 1281, downloadingCleanup: true))
+        XCTAssertEqual(downloading.map(\.title), ["Downloading the cleanup model…"],
+                       "no download item while it runs, so a second click cannot start a second download")
+        XCTAssertFalse(downloading[0].enabled)
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: 1281, cleanupDownloadFailed: true)).map(\.action), [nil, .downloadCleanup],
+                       "after a failed download: a grey line, and the item again")
+    }
+
+    /// F39 (#30): the keyword model's download is with what needs doing, only while SpeechMenu offers it (speech
+    /// recognition there, words in the dictionary, keyword model missing), and greyed out while it runs.
+    func testDictionarySupportShowsOnlyWhenOfferedAndGreysOutWhileItDownloads() throws {
+        XCTAssertEqual(MenuModel.groups(MenuState()).joined().count, 12, "a normal day keeps the 12 items")
+
+        let offered = MenuModel.contextual(MenuState(dictionarySupport: .offered))
+        XCTAssertEqual(offered, [MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport)])
+        XCTAssertEqual(MenuModel.groups(MenuState(dictionarySupport: .offered))[0], offered, "at the top")
+        let running = MenuModel.contextual(MenuState(dictionarySupport: .downloading))
+        XCTAssertEqual(running.map(\.title), ["Downloading dictionary support…"])
+        for t in offered.map(\.title) + running.map(\.title) {
+            XCTAssertTrue(ModelNameTests.offending("\"\(t)\"").isEmpty, "model name in \(t)")
+        }
+
+        let built = { (s: DictionarySupport) -> NSMenuItem? in
+            let m = NSMenu()
+            MenuModel.build(MenuModel.groups(MenuState(dictionarySupport: s)), into: m, target: self, action: #selector(self.noop(_:)))
+            return m.items.first
+        }
+        XCTAssertEqual(built(.offered)?.isEnabled, true)
+        XCTAssertEqual(built(.offered)?.representedObject as? MenuAction, .downloadDictionarySupport)
+        XCTAssertEqual(built(.downloading)?.isEnabled, false, "greyed out: a second click starts nothing")
+
+        let app = try AppSource.code("App.swift")
+        for line in ["dictionarySupport: speech.dictionarySupport(),", "case .downloadDictionarySupport: speech.downloadBoost()",
+                     "speech.notice = { [weak self] in self?.indicator.show($0, seconds: 4) }"] {
+            XCTAssertTrue(app.contains(line), "App.swift: \(line)")
+        }
     }
 
     func testMeetingsRecordAndListThePastOnesNewestFirst() throws {
@@ -114,7 +165,34 @@ final class MenuModelTests: XCTestCase {
         let everything = allTitles(Array(MenuModel.groups(busy).joined()))
         XCTAssertFalse(everything.contains { $0.contains("Copy last") }, "Copy last text left the menu")
         XCTAssertEqual(Shortcuts().chord(.copyLast), Shortcuts.defaults[.copyLast], "its shortcut, ⌃⌘C, stays")
-        XCTAssertTrue(try AppSource.code("App.swift").contains("case .copyLast: copyLast()"), "and still copies")
+        let app = try AppSource.code("App.swift")
+        XCTAssertTrue(app.contains("case .copyLast: copyLast()"), "⌃⌘C still reaches copy last")
+        XCTAssertTrue(app.contains("guard pipeline?.copyLast() != nil else"), "which copies through the pipeline (below)")
+        XCTAssertEqual(ShortcutAction.pasteLast.title, MenuModel.paste(MenuState().pasteLast).title,
+                       "the Shortcuts window and the menu name it the same")
+    }
+
+    /// What ⌃⌘C and a Recent entry put on the clipboard, on a private pasteboard: never the user's.
+    func testCopyLastAndRecentPutTheTextOnTheClipboard() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-test-\(UUID().uuidString)")
+        let board = NSPasteboard(name: .init("shepetal-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally(); try? FileManager.default.removeItem(at: root) }
+        board.clearContents()
+        board.setString("earlier", forType: .string)
+        let pipeline = try Pipeline(root: root, pasteboard: board)
+
+        XCTAssertNil(pipeline.copyLast(), "nothing dictated yet")
+        XCTAssertEqual(board.string(forType: .string), "earlier", "and the clipboard is left alone")
+
+        let now = Date()
+        try pipeline.history.add(entry("Send the report today.", .pasteFailed, at: now - 60))
+        try pipeline.history.add(entry("", .tooShort, at: now))
+        XCTAssertEqual(pipeline.copyLast(), "Send the report today.")
+        XCTAssertEqual(board.string(forType: .string), "Send the report today.",
+                       "⌃⌘C copies the paste that did not land, past a newer entry without text")
+
+        pipeline.copy("Call the dentist.")
+        XCTAssertEqual(board.string(forType: .string), "Call the dentist.", "a Recent entry's own text")
     }
 
     func testPasteLastShowsItsShortcutRightAlignedAndQuitHasCommandQ() throws {
@@ -214,6 +292,7 @@ final class MenuModelTests: XCTestCase {
         let account = try AppSource.code("AccountView.swift")
         let moved: [(menu: String, window: String, place: String)] = [
             ("On-device speech recognition", "LabeledContent(\"Speech recognition\", value: s.model)", home),
+            ("Cleanup:", "LabeledContent(\"Cleanup\", value: model.pipeline.cleanupStatus)", home),
             ("Signed in as", "Text(account.summaryLine)", account),
             ("Sign out", "Button(\"Sign out\")", account),
             ("Check license now", "Button(\"Check license now\")", account),
@@ -234,25 +313,68 @@ final class MenuModelTests: XCTestCase {
             XCTAssertFalse(menu.contains { $0.hasPrefix(m.menu) }, "\(m.menu) is still in the menu")
         }
         XCTAssertTrue(home.contains("AccountSection()"), "the account and trial line are on Home")
+        let shortcutsHint = try AppSource.code("ShortcutsWindow.swift")
+        XCTAssertTrue(shortcutsHint.contains("Shortcuts need Input Monitoring. Open Settings > Permissions… in the shepetal window."),
+                      "the Shortcuts window sends people where Permissions… is now, not to the menu")
         let app = try AppSource.code("App.swift")
         XCTAssertTrue(app.contains("loginItem: loginItem, openDictionary: { [speech] in speech.openDictionary() },"))
         XCTAssertTrue(app.contains("restoreFnKey: { [weak self] in self?.restoreFnKey() },"))
     }
 
-    /// The glue between the app and the model: the state it reads and the actions it performs.
+    /// The glue between the app and the model: the state it reads and the action each item performs. The actions
+    /// call AppKit and the account (sign-in sheet, browser, Quit), which a test cannot run, so the dispatch is
+    /// checked line for line: a wrong call, a missing case or a new one without its line here fails.
+    /// Copying is run for real above (testCopyLastAndRecentPutTheTextOnTheClipboard).
     func testTheAppFeedsTheMenuAndPerformsItsActions() throws {
         let app = try AppSource.code("App.swift")
-        for line in ["permissionsMissing: !Permission.missing.isEmpty,", "engineProblem: engine == nil ? engineStatus : nil,",
-                     "recordingMeeting: meetings.current != nil,", "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
-                     "canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)",
-                     "case .permissions: showOnboarding()", "case .meeting: meetings.toggle()",
-                     "case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { openTranscript(m) }",
-                     "openTranscript = MeetingTranscriptWindow.follow(meetingFlow)",
-                     "case .openMeetings: openedHub()?.showMeetings()", "case .checkForUpdates: updater.checkForUpdates()",
-                     "case .pasteLast: pasteLast()", "case .helpCenter: NSWorkspace.shared.open(MenuModel.helpCenter)",
-                     "case .feedback: NSWorkspace.shared.open(MenuModel.feedback)", "case .quit: NSApp.terminate(nil)"] {
-            XCTAssertTrue(app.contains(line), "App.swift: \(line)")
+        func lines(of method: String) throws -> [String] {
+            let body = try XCTUnwrap(app.range(of: method), method)
+            let rest = app[body.upperBound...]
+            return rest[..<(rest.range(of: "\n    }\n")?.lowerBound ?? rest.endIndex)]
+                .components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         }
+        let state = try lines(of: "func menuNeedsUpdate(_ menu: NSMenu) {")
+        for line in ["let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,",
+                     "engineProblem: engine == nil ? engineStatus : nil,",
+                     "canDownloadEngine: engine == nil && !downloading && !ParakeetEngine.isInstalled,",
+                     "access: Account.shared.access, signingIn: Account.shared.signingIn,",
+                     "recordingMeeting: meetings.current != nil,",
+                     "meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],",
+                     "recent: (try? pipeline?.history.recent(limit: 10)) ?? [],",
+                     "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
+                     "canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)",
+                     "cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,", "downloadingCleanup: pipeline?.downloadingCleanup == true,",
+                     "cleanupDownloadFailed: pipeline?.cleanupDownloadFailed == true,"] {
+            XCTAssertTrue(state.contains(line), "menuNeedsUpdate: \(line)")
+        }
+        XCTAssertTrue(app.contains("Task { await pipeline?.loadCleanup() }"), "the cleanup model loads at launch")
+        XCTAssertEqual(try lines(of: "@objc private func menuAction(_ sender: NSMenuItem) {").filter { $0.hasPrefix("case .") }, [
+            "case .permissions: showOnboarding()",
+            "case .download: downloadModel()",
+            "case .downloadCleanup: Task { await pipeline?.downloadCleanup() }",
+            "case .downloadDictionarySupport: speech.downloadBoost()",
+            "case .signIn: Account.shared.signIn()",
+            "case .cancelSignIn: Account.shared.cancelSignIn()",
+            "case .buy: Account.shared.buy()",
+            "case .meeting: meetings.toggle()",
+            "case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { openTranscript(m) }",
+            "case .openMeetings: openedHub()?.showMeetings()",
+            "case .openApp: openHub()",
+            "case .checkForUpdates: updater.checkForUpdates()",
+            "case .pasteLast: pasteLast()",
+            "case .copy(let text): pipeline?.copy(text)",
+            "case .shortcuts: openShortcuts()",
+            "case .helpCenter: NSWorkspace.shared.open(MenuModel.helpCenter)",
+            "case .feedback: NSWorkspace.shared.open(MenuModel.feedback)",
+            "case .quit: NSApp.terminate(nil)",
+            "case .microphone, .languages: break  // their own submenus",
+        ])
+        XCTAssertTrue(app.contains("openTranscript = MeetingTranscriptWindow.follow(meetingFlow)"))
+        XCTAssertTrue(app.contains("private func openHub() { openedHub()?.show() }"), "Open shepetal shows the window")
+        let download = try lines(of: "private func downloadModel() {")
+        XCTAssertEqual(Array(download.prefix(2)), ["guard !downloading else { return }", "downloading = true"],
+                       "a second click while it downloads starts nothing")
+        XCTAssertTrue(download.contains("defer { downloading = false }"), "and after a failed download the item is back")
     }
 
     @objc private func noop(_ sender: NSMenuItem) {}

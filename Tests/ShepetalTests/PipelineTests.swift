@@ -180,25 +180,97 @@ final class PipelineTests: XCTestCase {
 
     /// Re-transcribe in the hub runs the same text step as dictation, so it strips non-speech tags too.
     @MainActor
-    func testFinishTextStripsTagsForReTranscribeToo() {
-        XCTAssertEqual(Pipeline.finishText("[BLANK_AUDIO] um, send it", dictionary: root.appendingPathComponent("dictionary.txt")), Cleanup.apply("send it"))
-        XCTAssertEqual(Pipeline.finishText("[Music]", dictionary: root.appendingPathComponent("dictionary.txt")), "")
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try? "dentist => orthodontist\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
-        XCTAssertEqual(Pipeline.finishText("call the dentist", dictionary: root.appendingPathComponent("dictionary.txt")),
-                       Cleanup.apply("call the orthodontist"), "re-transcribe applies the personal dictionary too")
+    func testFinishTextStripsTagsForReTranscribeToo() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let tagged = await pipeline.finishText("[BLANK_AUDIO] um, send it")
+        XCTAssertEqual(tagged.text, Cleanup.apply("send it"))
+        let music = await pipeline.finishText("[Music]")
+        XCTAssertEqual(music.text, "")
+        try "dentist => orthodontist\n".write(to: pipeline.dictionary, atomically: true, encoding: .utf8)
+        let dictated = await pipeline.finishText("call the dentist")
+        XCTAssertEqual(dictated.text, Cleanup.apply("call the orthodontist"), "re-transcribe applies the personal dictionary too")
+    }
+
+    /// Dictation and the hub's re-transcribe share one text step, so a re-transcribed row gets the cleanup
+    /// model's rewrite too, not only the rules.
+    @MainActor
+    func testDictationAndRetranscribeBothUseTheCleanupModel() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        pipeline.cleanup = RewriteModel(["Send it to John, I mean Jane.": "Send it to Jane."])
+        let run = await pipeline.process(speech, engine: FakeEngine("Send it to John, I mean Jane."), context: { ("", "", "") },
+                                         sendPaste: { [unowned self] e in if e.type == .keyDown { _ = pasteboard.string(forType: .string) } })
+        XCTAssertEqual(run.entry.text, "Send it to Jane.")
+        XCTAssertEqual(run.cleanupModel, "rewrite")
+        let row = try XCTUnwrap(try pipeline.history.recent().first { $0.id == run.entry.id })
+        let again = try await pipeline.retranscribe(row, with: FakeEngine("Send it to John, I mean Jane."))
+        XCTAssertEqual(again.text, "Send it to Jane.")
+        XCTAssertEqual(try pipeline.history.recent().first { $0.id == row.id }?.text, "Send it to Jane.")
+    }
+
+    /// F35: the model's numbered list reaches the cursor as lines, through the text step, InsertionRules.fit and
+    /// the paste, and History keeps the same lines. Without the model the user gets the rules' text, as before.
+    @MainActor
+    func testSpokenListIsPastedAsNumberedLines() async throws {
+        let said = "Things to buy. First, milk. Second, eggs. Third, bread."
+        let list = "Things to buy:\n1. Milk\n2. Eggs\n3. Bread"
+        for model in [RewriteModel([said: list]), nil] {
+            let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+            pipeline.cleanup = model
+            var pasted: String?
+            let run = await pipeline.process(speech, engine: FakeEngine(said), context: { ("", "", "") },
+                                             sendPaste: { [pasteboard] e in if e.type == .keyDown { pasted = pasteboard!.string(forType: .string) } })
+            let want = model == nil ? Cleanup.apply(said) : list
+            XCTAssertEqual(pasted, want, model == nil ? "rules only" : "the list is pasted line for line")
+            XCTAssertEqual(run.inserted, want)
+            XCTAssertEqual(run.cleanupModel, model?.name)
+            XCTAssertEqual(try pipeline.history.recent().first { $0.id == run.entry.id }?.text, want)
+        }
     }
 
     /// Dates run on the cleaned text: the stutter goes first, then "the first of March" becomes 01.03.
     /// The dictionary runs after them, so text the user stored there is inserted as written.
     @MainActor
-    func testFinishTextWritesSpokenDatesAsNumbersBeforeTheDictionary() throws {
-        let dictionary = root.appendingPathComponent("dictionary.txt")
-        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try "launch day => the first of March launch\n".write(to: dictionary, atomically: true, encoding: .utf8)
-        XCTAssertEqual(Pipeline.finishText("Let's meet on the the first of um March.", dictionary: dictionary), "Let's meet on 01.03.")
-        XCTAssertEqual(Pipeline.finishText("Twenty sixth of July twenty twenty-six.", dictionary: dictionary), "26.07.26.")
-        XCTAssertEqual(Pipeline.finishText("see you at launch day", dictionary: dictionary), "see you at the first of March launch")
+    func testFinishTextWritesSpokenDatesAsNumbersBeforeTheDictionary() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        try "launch day => the first of March launch\n".write(to: pipeline.dictionary, atomically: true, encoding: .utf8)
+        let stutter = await pipeline.finishText("Let's meet on the the first of um March.")
+        XCTAssertEqual(stutter.text, "Let's meet on 01.03.")
+        let year = await pipeline.finishText("Twenty sixth of July twenty twenty-six.")
+        XCTAssertEqual(year.text, "26.07.26.")
+        let stored = await pipeline.finishText("see you at launch day")
+        XCTAssertEqual(stored.text, "see you at the first of March launch")
+    }
+
+    /// Dates run after the cleanup model too, so a date the user corrected still comes out as numbers
+    /// (the model sees spoken words, which its word guard checks).
+    @MainActor
+    func testDatesRunOnTheCleanupModelsRewrite() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        pipeline.cleanup = RewriteModel(["Meet on Tuesday, I mean the first of March.": "Meet on the first of March."])
+        let fixed = await pipeline.finishText("Meet on Tuesday, I mean the first of March.")
+        XCTAssertTrue(fixed.usedModel)
+        XCTAssertEqual(fixed.text, "Meet on 01.03.")
+    }
+
+    /// M-CLEAN-1: the 🤫 menu offers this Mac's cleanup model until it is in the data dir's models folder or a
+    /// model is loaded, and until then Home says the rules run alone.
+    @MainActor
+    func testTheCleanupModelIsOfferedUntilItIsDownloadedOrLoaded() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        guard let m = currentCleanupModel() else { return XCTAssertNil(pipeline.cleanupToDownload, "Intel: rules only, no offer") }
+        XCTAssertEqual(pipeline.cleanupToDownload, m)
+        if ProcessInfo.processInfo.environment["SHEPETAL_CLEANUP_MODEL"] == nil {
+            let status = await pipeline.loadCleanup()
+            XCTAssertEqual(status, "Rules only (download the cleanup model from the 🤫 menu)")
+            XCTAssertEqual(pipeline.cleanupStatus, status, "Home's Cleanup line")
+            XCTAssertNil(pipeline.cleanup)
+        }
+        pipeline.cleanup = RewriteModel([:])
+        XCTAssertNil(pipeline.cleanupToDownload, "a model is loaded (SHEPETAL_CLEANUP_MODEL): no offer")
+        pipeline.cleanup = nil
+        try FileManager.default.createDirectory(at: pipeline.models, withIntermediateDirectories: true)
+        XCTAssertTrue(FileManager.default.createFile(atPath: pipeline.models.appendingPathComponent(m.file).path, contents: Data()))
+        XCTAssertNil(pipeline.cleanupToDownload, "downloaded: no offer, even before it loads")
     }
 
     /// The hub's re-transcribe writes the same text step's result to the same row.
@@ -294,4 +366,12 @@ func noise(db: Float, count: Int = 16_000) -> [Float] {
     }
     let rms = (raw.reduce(0) { $0 + $1 * $1 } / Float(count)).squareRoot()
     return raw.map { $0 * pow(10, db / 20) / rms }
+}
+
+/// A cleanup model with canned rewrites.
+private final class RewriteModel: CleanupModel, @unchecked Sendable {
+    let name = "rewrite"
+    let answers: [String: String]
+    init(_ answers: [String: String]) { self.answers = answers }
+    func rewrite(_ text: String) throws -> String { answers[text] ?? text }
 }

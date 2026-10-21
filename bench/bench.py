@@ -1,7 +1,8 @@
 """Run one STT engine over bench/fixtures and print a JSON summary line.
 
 usage: bench.py ENGINE   (parakeet-v3 | parakeet-110m | moonshine-tiny | moonshine-base | sensevoice | wcpp-<ggml model name>
-                         | fluid-parakeet-v3[-int8-v2|-int4|-itn]: FluidAudio CoreML through bench/fluid, model in FluidAudio's default cache)
+                         | fluid-parakeet-v3[-int8-v2|-int4|-itn]: FluidAudio CoreML through bench/fluid, model in FluidAudio's default cache
+                         | fluid-parakeet-v3-boost: the same with the dictionary rescoring (BOOST), FluidAudio cache under .cache/home)
 Latency = wall time from "whole utterance available" to text (model load excluded), i.e. time-to-text
 after end of audio for push-to-talk dictation. RTF = latency / audio seconds.
 """
@@ -61,8 +62,20 @@ def wcpp(model):
         return out.stdout.strip(), wcpp_lat(out.stderr)
     return run, None, m
 
-def fluid(opt):  # "" (FluidAudio defaults) | "int8-v2" | "int4" encoder | "itn" (default encoder + ITN)
-    env = dict(os.environ, FLUID_ENCODER=opt if opt not in ("", "itn") else "int8", FLUID_ITN=str(int(opt == "itn")))
+# The dictionary for the boost run: fixture words Parakeet gets wrong, others it gets right, and three never spoken.
+BOOST = "useEffect,Postgres,Redis,Kubernetes,Terraform,GraphQL,JSON,npm,React,Shepetal,Supabase,Vercel"
+
+def boost_home():  # the keyword model goes here, not into the user's FluidAudio cache (the app would start using it)
+    home = os.path.join(C, "home"); models = os.path.join(home, "Library/Application Support/FluidAudio/Models")
+    mine = os.path.expanduser("~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3")
+    os.makedirs(models, exist_ok=True)
+    if os.path.isdir(mine) and not os.path.exists(os.path.join(models, "parakeet-tdt-0.6b-v3")):
+        subprocess.run(["cp", "-cR", mine, models], check=True)  # an APFS clone: no copy, no download
+    return home
+
+def fluid(opt):  # "" (FluidAudio defaults) | "int8-v2" | "int4" encoder | "itn" (default encoder + ITN) | "boost"
+    env = dict(os.environ, FLUID_ENCODER=opt if opt not in ("", "itn", "boost") else "int8", FLUID_ITN=str(int(opt == "itn")))
+    if opt == "boost": env.update(FLUID_VOCAB=BOOST, CFFIXED_USER_HOME=boost_home())
     out = subprocess.run([f"{C}/fluid-build/release/fluid-bench", *FIX], capture_output=True, text=True, check=True, env=env).stdout
     head, *rows = [json.loads(l) for l in out.splitlines() if l.startswith("{")]
     res = {r["f"]: (r["text"], r["lat"]) for r in rows}  # the CLI warms up and times every file itself

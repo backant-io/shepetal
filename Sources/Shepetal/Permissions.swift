@@ -95,9 +95,11 @@ final class OnboardingModel: ObservableObject {
     }
 
     var requiredGranted: Bool { Permission.missing.isEmpty }
+    /// Read only on the sign-in step, so the window (and its test) never touches the account before then.
+    var signedIn: Bool { flow.step == .signIn && Account.shared.signedIn }
 
     func next() {
-        guard let r = flow.next(requiredGranted: requiredGranted, signedIn: Account.shared.signedIn), r.done else { return }
+        guard let r = flow.next(requiredGranted: requiredGranted, signedIn: signedIn), r.done else { return }
         if r.registerLoginItem, !loginItem.isOn { loginItem.toggle() }
         UserDefaults.standard.set(true, forKey: OnboardingFlow.doneKey)
         close()
@@ -116,7 +118,6 @@ final class OnboardingModel: ObservableObject {
 
 private struct OnboardingView: View {
     @ObservedObject var model: OnboardingModel
-    @ObservedObject var account = Account.shared
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in  // live permission status
@@ -127,7 +128,7 @@ private struct OnboardingView: View {
                     Spacer()
                     Button(model.flow.isLast ? "Done" : "Continue", action: model.next)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(!model.flow.canContinue(requiredGranted: model.requiredGranted, signedIn: account.signedIn))
+                        .disabled(!model.flow.canContinue(requiredGranted: model.requiredGranted, signedIn: model.signedIn))
                 }
                 .padding([.horizontal, .bottom])
             }

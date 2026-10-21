@@ -1,4 +1,5 @@
 import AppKit
+import ShepetalCore
 
 /// The 🤫 indicator: about 18 pt, 8 pt in from the bottom-left corner of the main display,
 /// on every Space and over full-screen apps, click-through, never takes focus, always shown.
@@ -57,6 +58,7 @@ final class Indicator {
 
     func set(_ mode: Mode) {
         self.mode = mode
+        if mode != .recording && mode != .handsFree { status = nil }  // never outlives the dictation
         var ring: NSColor? = switch mode {
         case .idle: nil
         case .recording: .systemRed
@@ -79,18 +81,40 @@ final class Indicator {
         }
     }
 
-    /// Text next to the indicator for `seconds`, e.g. the short-press hint.
+    /// Everything `show` put next to 🤫, for the Hub's Recent notices (F100).
+    private(set) var notices = NoticeLog()
+
+    /// Text next to the indicator for `seconds`, e.g. the short-press hint. It covers `status`, which comes back after.
+    /// It is also kept in `notices`, except a 0 s show, which only clears the label (SecureInput does this), so the
+    /// notice keeps the time it showed. `status` goes through setLabel, not here, so it stays out of the log.
     func show(_ text: String, seconds: TimeInterval) {
+        if seconds > 0 { notices.append(text) }
         labelUntil?.cancel()
-        label.stringValue = " \(text) "
-        label.isHidden = false
-        layout()
-        let hide = DispatchWorkItem { [weak self] in
-            self?.label.isHidden = true
-            self?.layout()
+        setLabel(text)
+        let end = DispatchWorkItem { [weak self] in
+            self?.labelUntil = nil
+            self?.setLabel(self?.status)
         }
-        labelUntil = hide
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: hide)
+        labelUntil = end
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: end)
+    }
+
+    /// Text that stays next to the indicator while set and while recording, e.g. creator mode's label.
+    /// A hint covers it for its seconds. Any mode other than recording or hands-free clears it.
+    var status: String? { didSet { if labelUntil == nil, status != oldValue { setLabel(status) } } }
+
+    /// "Creator mode" in Settings: the label shows while recording, for screen recordings. Unset means off.
+    static let creatorModeKey = "creatorMode"
+    static let creatorLabel = "Dictating with shepetal"
+    /// The `status` to set when recording starts: the creator label, or nil when the setting is off.
+    static func creatorStatus(_ defaults: UserDefaults = .standard) -> String? {
+        defaults.bool(forKey: creatorModeKey) ? creatorLabel : nil
+    }
+
+    private func setLabel(_ text: String?) {
+        label.stringValue = " \(text ?? "") "
+        label.isHidden = text == nil
+        layout()
     }
 
     var labelText: String? { label.isHidden ? nil : label.stringValue.trimmingCharacters(in: .whitespaces) }

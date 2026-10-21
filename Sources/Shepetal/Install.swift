@@ -187,6 +187,7 @@ enum Uninstaller {
             case .signOut: Account.shared.signOut()
             case .resetPrivacy: shell("/usr/bin/tccutil", "reset", "All", UninstallPlan.bundleID)  // best effort
             case .cancelPendingUpdate: shell("/bin/launchctl", "remove", "\(UninstallPlan.bundleID)-sparkle-updater")
+            case .stopWatchdog: Watchdog.stop()
             case .trash(let url): if FileManager.default.fileExists(atPath: url.path) { trash.append(url) }
             case .deleteSettings: UserDefaults.standard.removePersistentDomain(forName: UninstallPlan.bundleID)
             case .quit: break

@@ -27,6 +27,9 @@ for a in "${SHEPETAL_APPS_DIR:-/Applications}/Shepetal.app" "$HOME/Applications/
   else echo "Skipping $a: not Shepetal (bundle ID $(defaults read "$a/Contents/Info" CFBundleIdentifier 2>/dev/null || echo unknown))"; fi
 done
 
+# Their crash watchdogs first, even with no app running (one may be about to open it again).
+for a in ${APPS[@]+"${APPS[@]}"}; do do_ pkill -f "^$a/Contents/MacOS/Shepetal --watchdog"; done
+
 # Quit the running copies of those bundles: the normal way first, then SIGTERM.
 running() { for a in ${APPS[@]+"${APPS[@]}"}; do pgrep -qf "^$a/Contents/MacOS/Shepetal" && return 0; done; return 1; }
 if running; then

@@ -8,3 +8,5 @@
 {"engine": "fluid-parakeet-v3-int8-v2", "wer_dictation": 7.8, "wer_meeting": 0.0, "latency_dictation_ms_mean": 69, "latency_meeting_ms": 303, "rtf": 0.0075, "load_s": 0.12, "peak_rss_mb": 661, "model_mb": 1029}
 {"engine": "fluid-parakeet-v3", "wer_dictation": 7.2, "wer_meeting": 0.0, "latency_dictation_ms_mean": 62, "latency_meeting_ms": 281, "rtf": 0.0068, "load_s": 0.23, "peak_rss_mb": 133, "model_mb": 1029}
 {"engine": "fluid-parakeet-v3-itn", "wer_dictation": 5.4, "wer_meeting": 1.2, "latency_dictation_ms_mean": 108, "latency_meeting_ms": 563, "rtf": 0.0126, "load_s": 0.66, "peak_rss_mb": 109, "model_mb": 1029}
+{"engine": "fluid-parakeet-v3-boost", "wer_dictation": 4.8, "wer_meeting": 0.0, "latency_dictation_ms_mean": 185, "latency_meeting_ms": 1117, "rtf": 0.0228, "load_s": 15.2, "peak_rss_mb": 514, "model_mb": 1029}
+{"engine": "fluid-parakeet-v3-boost", "wer_dictation": 4.8, "wer_meeting": 0.0, "latency_dictation_ms_mean": 249, "latency_meeting_ms": 1132, "rtf": 0.0275, "load_s": 0.19, "peak_rss_mb": 129, "model_mb": 1029}
