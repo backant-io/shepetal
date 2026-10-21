@@ -33,9 +33,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // Pin the root: stray lockfiles in parent folders otherwise become the workspace root.
   outputFileTracingRoot: __dirname,
-  // The CSS goes into the page as <style>, so the first paint waits for no stylesheet request
-  // (the X in-app browser on a phone is the slow case this is for).
-  experimental: { inlineCss: true },
+  // No experimental.inlineCss: it puts the CSS in the page twice (a <style> and the RSC payload), 49.8 KB gzip
+  // against 24.9 KB plus a cacheable stylesheet, and Lighthouse mobile scored one point lower with it.
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },
