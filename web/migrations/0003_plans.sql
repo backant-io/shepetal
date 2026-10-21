@@ -15,6 +15,9 @@ ALTER TABLE users ADD COLUMN current_period_end TEXT;
 ALTER TABLE users ADD COLUMN cancel_at_period_end INTEGER NOT NULL DEFAULT 0;
 -- The end of the last period that was paid for. The license is a subscription while now < paid_through.
 ALTER TABLE users ADD COLUMN paid_through TEXT;
+-- What each renewal charges, in the smallest unit of sub_currency (99 and 'usd' for $0.99), for the plan settings.
+ALTER TABLE users ADD COLUMN sub_amount INTEGER;
+ALTER TABLE users ADD COLUMN sub_currency TEXT;
 
 UPDATE users SET plan = 'lifetime' WHERE status = 'active';
 

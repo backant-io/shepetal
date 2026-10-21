@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
-import { checkoutUrl, getStripe, handleWebhook, portalUrl, priceFor } from './stripe';
+import { checkoutUrl, getStripe, handleWebhook, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -124,13 +124,41 @@ describe('lifetime ($23.99 once)', () => {
     expect((await fresh()).stripe_customer_id).toBe('cus_1');
   });
 
-  it('stops a running subscription from renewing when its owner buys the lifetime license', async () => {
+  it('ends a running subscription at once, with no further charge, when its owner switches to lifetime', async () => {
     retrieving(sub());
     await send(event(sub(), 'customer.subscription.updated'));
-    const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue({} as never);
+    const ended = sub({ status: 'canceled', ended_at: nowS() });
+    const retrieve = retrieving(sub(), ended, ended, ended);
+    const cancel = vi.spyOn(getStripe().subscriptions, 'cancel').mockResolvedValue(ended as never);
+    const list = vi.spyOn(getStripe().invoices, 'list').mockImplementation(
+      () => ({ async *[Symbol.asyncIterator]() { yield { id: 'in_open' }; } }) as never,
+    );
+    const voided = vi.spyOn(getStripe().invoices, 'voidInvoice').mockResolvedValue({} as never);
+    const paid = event(session(), 'checkout.session.completed', 'evt_switch');
+    await send(paid);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledWith('sub_1', { invoice_now: false, prorate: false }, { idempotencyKey: 'shepetal-lifetime-sub_1' });
+    expect(list).toHaveBeenCalledWith({ subscription: 'sub_1', status: 'open', limit: 100 });
+    expect(voided).toHaveBeenCalledWith('in_open');
+    expect(await fresh()).toMatchObject({ status: 'active', plan: 'lifetime', sub_status: 'canceled' });
+    expect(await license()).toMatchObject({ status: 'active', plan: 'lifetime', renews: false });
+    // Stripe delivers it again, or the delayed-payment event follows: nothing is cancelled twice.
+    expect(await (await send(paid)).json()).toEqual({ received: true, duplicate: true });
+    await send(event(session(), 'checkout.session.async_payment_succeeded'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(retrieve).toHaveBeenCalled();
+  });
+
+  it('also ends a subscription already cancelled to its period end, so it never runs beside the lifetime license', async () => {
+    retrieving(sub({ cancel_at_period_end: true }));
+    await send(event(sub(), 'customer.subscription.updated'));
+    const ended = sub({ status: 'canceled', ended_at: nowS() });
+    retrieving(sub({ cancel_at_period_end: true }), ended);
+    const cancel = vi.spyOn(getStripe().subscriptions, 'cancel').mockResolvedValue(ended as never);
+    vi.spyOn(getStripe().invoices, 'list').mockImplementation(() => ({ async *[Symbol.asyncIterator]() {} }) as never);
     await send(event(session()));
-    expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
-    expect(await license()).toMatchObject({ status: 'active', plan: 'lifetime' });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect((await license()).plan).toBe('lifetime');
   });
 });
 
@@ -227,6 +255,57 @@ describe('subscription ($0.99 a month)', () => {
     const create = vi.spyOn(getStripe().billingPortal.sessions, 'create').mockResolvedValue({ url: 'https://billing.stripe.com/p/session/1' } as never);
     expect(await portalUrl({ ...user, stripe_customer_id: 'cus_1' }, 'https://shepetal.backant.io')).toBe('https://billing.stripe.com/p/session/1');
     expect(create).toHaveBeenCalledWith({ customer: 'cus_1', configuration: 'bpc_test', return_url: 'https://shepetal.backant.io/account' });
+  });
+});
+
+describe('plan settings: cancel, resume, the portal', () => {
+  const subscribed = async (over = {}) => {
+    retrieving(sub(over));
+    await send(event(sub(over), 'customer.subscription.updated'));
+    return fresh();
+  };
+
+  it('cancels at period end: stored at once, still active until then, no further charge', async () => {
+    const u = await subscribed();
+    const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue(sub({ cancel_at_period_end: true }) as never);
+    expect(await setCancelAtPeriodEnd(u, true)).toBe(true);
+    expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+    expect(await license()).toMatchObject({ status: 'active', plan: 'subscription', renews: false });
+    expect(await setCancelAtPeriodEnd(await fresh(), true)).toBe(false);
+    // And back: resume before the period ends.
+    update.mockResolvedValue(sub() as never);
+    expect(await setCancelAtPeriodEnd(await fresh(), false)).toBe(true);
+    expect(update).toHaveBeenLastCalledWith('sub_1', { cancel_at_period_end: false });
+    expect((await license()).renews).toBe(true);
+    expect(await setCancelAtPeriodEnd(await fresh(), false)).toBe(false);
+  });
+
+  it('refuses to cancel without a subscription', async () => {
+    const update = vi.spyOn(getStripe().subscriptions, 'update');
+    expect(await setCancelAtPeriodEnd(user, true)).toBe(false);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('opens the portal on the cancel confirmation of the subscription', async () => {
+    const u = { ...(await subscribed()), stripe_customer_id: 'cus_1' };
+    const create = vi.spyOn(getStripe().billingPortal.sessions, 'create').mockResolvedValue({ url: 'https://billing.stripe.com/p/flow' } as never);
+    expect(await portalUrl(u, 'https://s', 'cancel')).toBe('https://billing.stripe.com/p/flow');
+    expect(create).toHaveBeenCalledWith({
+      customer: 'cus_1',
+      configuration: 'bpc_test',
+      return_url: 'https://s/account',
+      flow_data: {
+        type: 'subscription_cancel',
+        subscription_cancel: { subscription: 'sub_1' },
+        after_completion: { type: 'redirect', redirect: { return_url: 'https://s/account?cancelled=1' } },
+      },
+    });
+    expect(await portalUrl({ ...user, stripe_customer_id: 'cus_1' }, 'https://s', 'cancel')).toBeNull();
+  });
+
+  it('stores what a renewal charges, for the settings', async () => {
+    await subscribed({ items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } });
+    expect(await fresh()).toMatchObject({ sub_amount: 99, sub_currency: 'usd' });
   });
 });
 
