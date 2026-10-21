@@ -4,7 +4,8 @@ import Foundation
 /// keeps the audio of recordings that end without one (too short, cancelled) next to their history row.
 /// The shell supplies the mic and the transcriber and draws the returned actions.
 public final class Dictation {
-    public private(set) var gesture = FnGesture()
+    /// Settable for its config (`maxDuration`); its state only moves through `run`.
+    public var gesture = FnGesture()
     private let store: AudioStore
     private let history: History
     private let startMic: () throws -> Void
@@ -28,7 +29,7 @@ public final class Dictation {
             case .start:
                 do { try startMic() } catch { gesture.reset(); throw error }
                 recording = true
-            case .lockHandsFree: break
+            case .lockHandsFree, .warnDuration: break
             case .tooShort: try keep(as: .tooShort)
             case .cancel: try keep(as: .cancelled)
             case .stop: transcribe(stop())

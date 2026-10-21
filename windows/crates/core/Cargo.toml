@@ -6,3 +6,6 @@ license = "MIT"
 description = "The platform-free part of shepetal for Windows: hotkey gestures, model tiers, text rules, the focus rule and audio retention."
 
 [dependencies]
+
+[dev-dependencies]
+serde_json = "1"

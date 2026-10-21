@@ -69,10 +69,12 @@ final class Pipeline {
         do {
             run.entry.rawText = try await engine.transcribe(samples, wav: URL(fileURLWithPath: run.entry.audioPath))
         } catch {
+            if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"
         }
         run.entry.text = Self.finishText(run.entry.rawText, dictionary: dictionary)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
+        if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
         // Rule 8 first: when the text is not pasted, the field that has focus now is not read. Its AX reads
         // run on the main thread and a busy app holds them until AX times out (M-NS-1).

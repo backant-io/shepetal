@@ -34,8 +34,8 @@ final class FnReplayTests: XCTestCase {
                               startMic: { [unowned self] in opens += 1; Thread.sleep(forTimeInterval: 0.6) },
                               stopMic: { [unowned self] in closes += 1; return mic },
                               transcribe: { [unowned self] in transcribed.append($0) })
-        tap.onChange = { [unowned self] down, t in
-            actions += try! dictation.run { down ? $0.fnDown(at: t) : $0.fnUp(at: t) }
+        tap.onInput = { [unowned self] input, t in
+            actions += try! dictation.run { $0.handle(input, at: t) }
         }
     }
 
@@ -50,19 +50,24 @@ final class FnReplayTests: XCTestCase {
         let t0 = ProcessInfo.processInfo.systemUptime
         for (ms, down) in changes {
             let at = t0 + ms / 1000
-            if let deadline = dictation.gesture.deadline, deadline < at { try tick(at: deadline) }
+            if let deadline = settle, deadline < at { try tick(at: deadline) }
             wait(until: at)
             tap.handle(.flagsChanged, fnEvent(down: down, at: at))
             if globe, !down {
                 for type in [CGEventType.keyDown, .keyUp] {
-                    let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(FnKey.globe), keyDown: type == .keyDown)!
+                    let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(Key.globe), keyDown: type == .keyDown)!
                     e.timestamp = CGEventTimestamp(at * 1e9)
+                    e.setIntegerValueField(.eventSourceUnixProcessID, value: 0)  // not our own event
                     tap.handle(type, e)
                 }
             }
         }
-        if let deadline = dictation.gesture.deadline { try tick(at: deadline) }
+        if let deadline = settle { try tick(at: deadline) }
     }
+
+    private var handsFree: Bool { if case .handsFree = dictation.gesture.state { true } else { false } }
+    /// The short-press timer; the 20 min length cap is not part of a replay.
+    private var settle: TimeInterval? { if case .awaitingSecondTap(_, let d) = dictation.gesture.state { d } else { nil } }
 
     private func tick(at deadline: TimeInterval) throws {
         wait(until: deadline)
@@ -75,7 +80,8 @@ final class FnReplayTests: XCTestCase {
     }
 
     private func fnEvent(down: Bool, at t: TimeInterval) -> CGEvent {
-        let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(FnKey.keycode), keyDown: down)!
+        let e = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(Key.fn), keyDown: down)!
+        e.setIntegerValueField(.eventSourceUnixProcessID, value: 0)  // not our own event
         e.type = .flagsChanged
         e.flags = down ? .maskSecondaryFn : []
         e.timestamp = CGEventTimestamp(t * 1e9)
@@ -94,7 +100,7 @@ final class FnReplayTests: XCTestCase {
 
     func testFastDoubleTapStartsHandsFree() throws {
         try replay([(0, true), (120, false), (270, true), (390, false)])  // 120 ms press, 150 ms gap
-        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        XCTAssertTrue(handsFree)
         XCTAssertEqual(transcribed, [], "the first tap was read as a hold")
         try replay([(0, true), (100, false)])  // the tap that ends hands-free
         assertOneCapture()
@@ -102,7 +108,7 @@ final class FnReplayTests: XCTestCase {
 
     func testSlowDoubleTapStartsHandsFree() throws {
         try replay([(0, true), (350, false), (750, true), (850, false)])  // 350 ms press, 400 ms gap
-        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        XCTAssertTrue(handsFree)
         try replay([(0, true), (100, false)])
         assertOneCapture()
     }
@@ -113,8 +119,8 @@ final class FnReplayTests: XCTestCase {
     // press, before its release and without a timer or another fn event.
     func testQuickDoubleTapThenOneTapTranscribesOnThePress() throws {
         try replay([(0, true), (40, false), (90, true), (130, false)])
-        XCTAssertEqual(dictation.gesture.state, .handsFree)
-        XCTAssertNil(dictation.gesture.deadline, "nothing waits for a timer in hands-free")
+        XCTAssertTrue(handsFree)
+        XCTAssertNil(settle, "no short-press timer waits in hands-free")
         try replay([(0, true)])
         XCTAssertEqual(transcribed, [mic], "the ending tap's press transcribes")
         try replay([(40, false)])
@@ -136,7 +142,7 @@ final class FnReplayTests: XCTestCase {
     // transcribes on its press, and no new recording or too-short row follows it.
     func testGlobeEventsKeepDoubleTapAndEndingTapIntact() throws {
         try replay([(0, true), (40, false), (90, true), (130, false)], globe: true)
-        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        XCTAssertTrue(handsFree)
         try replay([(0, true), (40, false)], globe: true)
         assertOneCapture()
         XCTAssertEqual(dictation.gesture.state, .idle)
@@ -145,7 +151,7 @@ final class FnReplayTests: XCTestCase {
     // Tap, then hold the second press: hands-free locks on the second press and its release keeps recording.
     func testTapThenHoldStaysHandsFree() throws {
         try replay([(0, true), (120, false), (270, true), (1200, false)])
-        XCTAssertEqual(dictation.gesture.state, .handsFree)
+        XCTAssertTrue(handsFree)
         try replay([(0, true), (100, false)])
         assertOneCapture()
     }
