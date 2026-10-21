@@ -37,14 +37,15 @@ public struct AppFormat {
     public func mode(for bundleId: String) -> FormatMode { apps[bundleId] ?? defaultMode }
 
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription. The non-speech
-    /// tags always go. Formatted then runs the rules, the local cleanup model and spoken dates (docs/text-rules.md);
-    /// Raw skips all three. The personal dictionary (F39) runs in both modes, since it fixes what was heard, not how
-    /// it is written, and its text is inserted as written. InsertionRules fits the result to the cursor afterwards.
-    public static func finish(_ raw: String, mode: FormatMode, model: CleanupModel?,
-                              vocabulary: Vocabulary) -> (text: String, usedModel: Bool) {
+    /// tags always go. Formatted then runs the rules, the local cleanup model (given `context`, the text around the
+    /// cursor, F24), spoken dates (docs/text-rules.md) and the app category's style (F37); Raw skips all four, since
+    /// it means no formatting. The personal dictionary (F39) runs in both modes, last, since it fixes what was heard,
+    /// not how it is written, and its text is inserted as written. InsertionRules fits the result to the cursor afterwards.
+    public static func finish(_ raw: String, mode: FormatMode, model: CleanupModel?, vocabulary: Vocabulary,
+                              style: Style = .formal, context: CleanupContext = .none) -> (text: String, usedModel: Bool) {
         guard mode == .formatted else { return (vocabulary.apply(asHeard(raw)), false) }
-        let cleaned = SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model)
-        return (vocabulary.apply(Dates.apply(cleaned.text)), cleaned.usedModel)
+        let cleaned = SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model, context: context)
+        return (vocabulary.apply(Styles.apply(style, to: Dates.apply(cleaned.text))), cleaned.usedModel)
     }
 
     /// The words as heard, for Raw and Show raw (F48): the non-speech tags removed, and the run of spaces a tag

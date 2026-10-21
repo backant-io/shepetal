@@ -290,19 +290,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         transcription = Task {
             let app = await appAtStart?.value ?? AppContext()
             var shown: String?
-            // Pipeline reads the context right after its last cancel check; a cancel during the paste
-            // would cut the paste's waits short.
-            let run = await pipeline.process(samples, engine: engine, app: app, context: { [weak self] in
-                self?.inserting = true
-                return FocusedText.context()
-            }, focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
+            // willPaste runs right after Pipeline's last cancel check; a cancel during the paste would cut the
+            // paste's waits short. The field can be read before it (F24), and Esc still cancels until then.
+            let run = await pipeline.process(samples, engine: engine, app: app, context: { FocusedText.context() },
+               willPaste: { [weak self] in self?.inserting = true },
+               focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
                secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV,
                decided: { [weak self] in shown = $0; self?.finish($0) })
             busy = false
             inserting = false
             transcription = nil
             if run.error != shown { finish(run.error) }  // the WAV or the history row failed afterwards
+            // F12: Parakeet writes whatever language it heard; say so when that is not one of the chosen ones.
+            if !Task.isCancelled, run.error == nil, let hint = Speech.wrongLanguageHint(run.entry.rawText, languages: speech.languages) { indicator.show(hint, seconds: 4) }
             if !Task.isCancelled, Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
+            if run.error == nil, !Task.isCancelled {  // F61: a milestone this dictation reached, once; after the quiet-mic hint, which would cover it
+                let history = pipeline.history, id = run.entry.id
+                if let note = await Task.detached(operation: { Streak.notice(after: id, in: history) }).value { indicator.show(note, seconds: 6) }
+            }
         }
     }
 
@@ -323,7 +328,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         pasting = true
         Task {
-            let paste = await pipeline.inserter.insert(text, sendPaste: Inserter.postCmdV)
+            let mode = PasteMode.current(for: NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "")  // F22
+            let paste = await pipeline.inserter.insert(text, mode: mode, sendPaste: Inserter.postCmdV)
             pasting = false
             if !paste.landed { fail(PasteGate.notLanded) }
         }
@@ -485,6 +491,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          loginItem: loginItem, openDictionary: { [speech] in speech.openDictionary() },
                          restoreFnKey: { [weak self] in self?.restoreFnKey() },
                          meetingStore: meetingFlow?.store ?? InMemoryMeetingStore(),
+                         input: HubInput(microphone: mic.menuItem, languages: speech.languagesItem,
+                                         openShortcuts: { [weak self] in self?.openShortcuts() }),
                          updater: updater as? SparkleUpdater,
                          uninstallBlocker: { [weak self] in UninstallPlan.blocker(self?.activity ?? Activity()) },
                          openWhatsNew: { [weak self] in self?.openWhatsNew() },

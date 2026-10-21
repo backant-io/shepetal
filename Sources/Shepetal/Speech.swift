@@ -6,15 +6,8 @@ import ShepetalWhisper
 
 protocol SpeechEngine: AnyObject {
     var name: String { get }
-    /// True when `transcribe` reads `wav`. Dictation then waits for the file; otherwise it is still being
-    /// written while the samples are transcribed.
-    var readsWav: Bool { get }
     /// `wav` is the saved recording holding the same samples.
     func transcribe(_ samples: [Float], wav: URL) async throws -> String
-}
-
-extension SpeechEngine {
-    var readsWav: Bool { false }
 }
 
 struct SpeechError: LocalizedError {

@@ -25,7 +25,8 @@ final class DataExportTests: XCTestCase {
         HistoryEntry(id: "d1", createdAt: t0, outcome: .inserted, audioPath: "/a/d1.wav", durationMs: 2000, model: "some-model",
                      rawText: "um he said hi", text: "He said \"hi\", then\nleft.", app: "Mail", bundleId: "com.apple.mail"),
         HistoryEntry(id: "d2", createdAt: t0.addingTimeInterval(60), outcome: .pasteFailed, audioPath: "/a/d2.wav", durationMs: 1500,
-                     text: "Archived one", app: "Safari", bundleId: "com.apple.Safari", url: "https://example.com/page", archived: true),
+                     text: "Archived one", app: "Safari", bundleId: "com.apple.Safari", url: "https://example.com/page", archived: true,
+                     reverted: true),
         HistoryEntry(id: "d3", createdAt: t0.addingTimeInterval(120), outcome: .tooShort, audioPath: "/a/d3.wav", durationMs: 120),
     ]
 
@@ -34,7 +35,8 @@ final class DataExportTests: XCTestCase {
                          meAudioPath: "/m/m1/Me.wav", othersAudioPath: "/m/m1/Others.wav"),
         segments: [Segment(speaker: .others, start: 4, end: 9, text: "Shall we ship on Friday?"),
                    Segment(speaker: .me, start: 10, end: 12, text: "Yes.")],
-        summary: Summary(overview: "Ships Friday.", decisions: ["Ship on Friday"], actionItems: [ActionItem(owner: "Pavel", task: "Send notes")]))
+        summary: Summary(overview: "Ships Friday.", decisions: ["Ship on Friday"], actionItems: [ActionItem(owner: "Pavel", task: "Send notes")]),
+        notes: "TODO: book the venue")
     // Same app and minute as m1, and never summarized.
     private lazy var bare = MeetingRecord(
         meeting: Meeting(id: "m2", app: "Zoom", startedAt: t0.addingTimeInterval(20), endedAt: t0.addingTimeInterval(600),
@@ -49,6 +51,7 @@ final class DataExportTests: XCTestCase {
             try meetings.save(r.meeting)
             try meetings.append(r.segments, to: r.meeting.id)
             if let s = r.summary { try meetings.setSummary(s, for: r.meeting.id) }
+            if !r.notes.isEmpty { try meetings.setNotes(r.notes, for: r.meeting.id) }
         }
         let txt = dir.appendingPathComponent("dictionary.txt")
         if let dictionary { try dictionary.write(to: txt, atomically: true, encoding: .utf8) }
@@ -97,12 +100,14 @@ final class DataExportTests: XCTestCase {
         XCTAssertEqual(history.map(\.createdAt), rows.reversed().map(\.createdAt))
         XCTAssertEqual(history[1].url, "https://example.com/page")
         XCTAssertEqual(history[1].outcome, "paste_failed")
+        XCTAssertEqual(history.map(\.reverted), [false, true, false], "History's Show raw (F48) is kept")
         let json = try String(contentsOf: folder.appendingPathComponent("history.json"), encoding: .utf8)
         XCTAssertFalse(json.contains("some-model"), "model names never reach the user")
 
         let meetings = try decoder().decode([DataExport.MeetingExport].self, from: Data(contentsOf: folder.appendingPathComponent("meetings.json")))
-        XCTAssertEqual(meetings, [bare, summarized].map { DataExport.MeetingExport(meeting: $0.meeting, segments: $0.segments, summary: $0.summary) },
+        XCTAssertEqual(meetings, [bare, summarized].map { DataExport.MeetingExport(meeting: $0.meeting, segments: $0.segments, summary: $0.summary, notes: $0.notes) },
                        "newest first, the one without a summary too")
+        XCTAssertEqual(meetings[1].notes, "TODO: book the venue", "the meeting's notes (F71) are the user's data too")
         XCTAssertNil(meetings[0].summary)
 
         let words = try decoder().decode(DataExport.DictionaryFile.self, from: Data(contentsOf: folder.appendingPathComponent("dictionary.json")))
@@ -163,6 +168,7 @@ private final class FailingStore: MeetingStoring {
     func append(_ segments: [Segment], to meetingID: String) throws {}
     func remove(_ segments: [Segment], from meetingID: String) throws {}
     func setSummary(_ summary: Summary, for meetingID: String) throws {}
+    func setNotes(_ notes: String, for meetingID: String) throws {}
     func list(limit: Int) throws -> [Meeting] {
         [Meeting(id: "x", app: "Zoom", startedAt: Date(), meAudioPath: "", othersAudioPath: "")]
     }

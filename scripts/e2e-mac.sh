@@ -21,6 +21,9 @@
 # The c* clips need the local cleanup model: SHEPETAL_CLEANUP_MODEL (default: Qwen3.5 2B in bench/.cache/cleanup,
 # downloaded there on the first run, about 1.3 GB, so run once with the network on). CLEANUP=rules skips them
 # and says so.
+# FIELD=1 adds c05 (F24): c04 dictated into a field with 596 characters on each side of the cursor, with "Use the
+# text around the cursor" on, under the same 700 ms bar; the field must be read, and read before cleanup ends. It is
+# opt-in because it misses the bar on the M4 Pro today (726 to 800 ms, #235) until the context limit is decided.
 # Languages (F12), last: with English and Japanese chosen, whisper large-v3-turbo runs in process on e01 and on j01,
 # Japanese made with `say -v Kyoko`, and each must come out in its own language. With English and Korean chosen,
 # whisper hears j01 as Japanese first and must still be told one of the two (#31). Then Parakeet, with German and
@@ -47,7 +50,7 @@ FIX=$WORK/fixtures
 # Never the user's data dir, even when SHEPETAL_HOME is exported: E2E_HOME moves the test's own.
 export SHEPETAL_HOME=${E2E_HOME:-$WORK/home}
 mkdir -p "$FIX" "$SHEPETAL_HOME"
-rm -f "$FIX"/c*.gone
+rm -f "$FIX"/c*.gone "$FIX"/c*.field "$FIX"/c05.*  # c05 is made from c04 only with FIELD=1
 DICT=$SHEPETAL_HOME/dictionary.txt
 if [ -e "$DICT" ] && ! head -1 "$DICT" | grep -q '^# e2e-mac'; then
   echo "e2e-mac: $DICT is not ours, refusing to overwrite it" >&2; exit 1
@@ -104,6 +107,14 @@ c02|Daniel|Send the contract to Laura, I mean Linda, before lunch.|Send the cont
 c03|Samantha|We need three things for the trip. First, the tickets. Second, the hotel booking. Third, the travel insurance.|We need three things for the trip:\n1. The tickets\n2. The hotel booking\n3. The travel insurance|first second third
 c04|Daniel|I think we should ship the new search page on Monday, no wait, on Thursday, so the support team has enough time to read the new docs and test the export with a few customers.|I think we should ship the new search page on Thursday, so the support team has enough time to read the new docs and test the export with a few customers.|monday wait
 CLEANUP
+  if [ "${FIELD:-}" = 1 ]; then
+    # F24: c05 is c04 dictated into a full field (596 characters on each side of the cursor) with the text around
+    # the cursor on, so the 700 ms bar covers the most context the model gets. E2E reads c05.field: before, a tab, after.
+    for ext in wav txt gone; do cp "$FIX/c04.$ext" "$FIX/c05.$ext"; done
+    python3 -c 'import sys; s = "The venue holds about eighty people, and the caterer wants the final count by noon the day before. " * 6
+open(sys.argv[1], "w").write(s + "\n\n\t\n\n" + s)' "$FIX/c05.field"
+    CLIPS+=("$FIX/c05.wav")
+  fi
 fi
 
 # A clip with an error exits 1; the checks below name it.
@@ -181,7 +192,13 @@ for r in rows:
     app = (r["history_app"], r["history_bundle_id"], r["history_url"])
     assert app == ("E2E Browser", "com.apple.Safari", "https://example.com/e2e/page"), (name, "app at dictation start", app)
     assert r["app_resolve_ms"] < 100, (name, "page-URL lookup held the main thread", r["app_resolve_ms"])
-    assert r["retranscribed_text"] == r["text"] and r["retranscribed_row_kept"], (name, "re-transcribe", r)
+    field = os.path.join(fix, name[:-4] + ".field")
+    if os.path.exists(field):  # F24: the model got the field (re-transcribing has none, so its text may differ)
+        assert r["field_chars_read"] >= 1000, (name, "the field was not read", r["field_chars_read"])
+        assert r["field_read_ms"] < r["ready_ms"], (name, "the field was read after cleanup", r["field_read_ms"])
+    else:
+        assert r["retranscribed_text"] == r["text"], (name, "re-transcribe", r)
+    assert r["retranscribed_row_kept"], (name, "re-transcribe", r)
     assert r["retranscribed_model"] == r["model"], (name, "re-transcribe model", r["retranscribed_model"])
     data = open(p, "rb").read()
     fmt, ch, rate = struct.unpack("<HHI", data[20:28])

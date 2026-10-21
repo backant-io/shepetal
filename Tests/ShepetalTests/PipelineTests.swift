@@ -294,6 +294,62 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(e.text, Cleanup.apply("call the orthodontist"))
     }
 
+    /// F37: a style picked for work messages reaches Slack's paste and its history row. Settings are read from
+    /// a throwaway defaults suite, never the app's own.
+    @MainActor
+    func testSlackDictationWithCasualDropsTheFinalPeriod() async throws {
+        let suite = "shepetal-styles-pipeline-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Style.casual.rawValue, forKey: Styles.key(.work))
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        pipeline.styleDefaults = defaults
+        var pasted: String?
+        let slack = AppContext(name: "Slack", bundleId: "com.tinyspeck.slackmacgap")
+        let run = await pipeline.process(speech, engine: FakeEngine("Hey Anna, the build is green."), app: slack,
+                                         context: { ("", "", "") },
+                                         sendPaste: { [pasteboard] e in if e.type == .keyDown { pasted = pasteboard!.string(forType: .string) } })
+        XCTAssertEqual(run.entry.text, "Hey Anna the build is green")
+        XCTAssertEqual(pasted, "Hey Anna the build is green")
+        XCTAssertEqual(try pipeline.history.recent().first { $0.id == run.entry.id }?.text, "Hey Anna the build is green")
+        let other = await pipeline.finishText("Hey Anna, the build is green.", bundleId: "com.apple.TextEdit")
+        XCTAssertEqual(other.text, "Hey Anna, the build is green.", "TextEdit is Other, which was never picked")
+    }
+
+    /// F37: until a style is picked, every app gets the text it got before styles existed.
+    @MainActor
+    func testWithoutAPickTheOutputIsUnchanged() async throws {
+        let suite = "shepetal-styles-pipeline-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        pipeline.styleDefaults = defaults
+        for id in ["com.tinyspeck.slackmacgap", "com.apple.mail", "com.apple.MobileSMS", "com.apple.TextEdit", ""] {
+            let styled = await pipeline.finishText("Hey Anna, I will send it at 5 p.m.", bundleId: id)
+            XCTAssertEqual(styled.text, Cleanup.apply("Hey Anna, I will send it at 5 p.m."), id)
+        }
+    }
+
+    /// F37: re-transcribing a row uses that row's app and page, not the app in front now, and Very casual keeps
+    /// the dictionary's casing because the dictionary runs after the style.
+    @MainActor
+    func testRetranscribeStylesByTheRowsAppAndKeepsDictionaryCasing() async throws {
+        let suite = "shepetal-styles-pipeline-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(Style.veryCasual.rawValue, forKey: Styles.key(.work))
+        let (_, row) = try await process(speech, FakeEngine("Send it."))
+        var slackWeb = row
+        slackWeb.bundleId = "com.google.Chrome"
+        slackWeb.url = "https://app.slack.com/client"
+        try "GitHub\n".write(to: root.appendingPathComponent("dictionary.txt"), atomically: true, encoding: .utf8)
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        pipeline.styleDefaults = defaults
+        let e = try await pipeline.retranscribe(slackWeb, with: FakeEngine("I pushed it to github."))
+        XCTAssertEqual(e.text, "i pushed it to GitHub")
+        XCTAssertEqual(try pipeline.history.recent().first { $0.id == row.id }?.text, "i pushed it to GitHub")
+    }
+
     @MainActor
     func testNoEngineAndEngineErrorKeepAudio() async throws {
         let (none, noneRow) = try await process(speech, nil)
@@ -308,28 +364,120 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(pastes, 0)
     }
 
-    // The WAV is written off the main thread while Parakeet works on the samples. whisper-cli reads the file,
-    // so it must get it written in full, even from a slow disk.
+    // MARK: F42 and F22 through the pipeline (mac80 W2 INSERT)
+
+    /// Runs one dictation with "press enter" on or off. `read`: the app takes the paste at ⌘V.
     @MainActor
-    func testAnEngineThatReadsTheWavGetsItWritten() async throws {
+    func pressEnterRun(_ said: String, read: Bool = true, on: Bool = true, focusKept: Bool? = nil)
+        async throws -> (run: Pipeline.Run, keys: [Int64], pasted: String?) {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let write = pipeline.writeAudio
-        pipeline.writeAudio = { Thread.sleep(forTimeInterval: 0.2); return try write($0, $1) }  // a slow disk
-        let engine = WavReadingEngine()
-        let run = await pipeline.process(speech, engine: engine, context: { ("", "", "") }, sendPaste: { _ in })
-        XCTAssertEqual(engine.read, AudioStore.wav(speech))
-        XCTAssertEqual(run.entry.rawText, "from the file")
+        pipeline.pressEnterCommand = { on }
+        var keys: [Int64] = [], pasted: String?
+        let run = await pipeline.process(speech, engine: FakeEngine(said), context: { ("", "", "") },
+                                         focusKept: { focusKept }, sendPaste: { [pasteboard] e in
+            guard e.type == .keyDown else { return }
+            let code = e.getIntegerValueField(.keyboardEventKeycode)
+            keys.append(code)
+            if read, code != 36 { pasted = pasteboard!.string(forType: .string) }
+        })
+        return (run, keys, pasted)
     }
-}
 
-private final class WavReadingEngine: SpeechEngine {
-    let name = "reads wav"
-    let readsWav = true
-    private(set) var read: Data?
+    /// F42: the phrase never reaches the field or the history text, and Return follows a landed paste once.
+    @MainActor
+    func testPressEnterPastesWithoutThePhraseThenPressesReturnOnce() async throws {
+        let (run, keys, pasted) = try await pressEnterRun("See you soon, press enter.")
+        XCTAssertEqual(run.entry.text, "See you soon.", "history keeps the text without the command")
+        XCTAssertEqual(run.entry.rawText, "See you soon, press enter.", "and the raw transcript as heard")
+        XCTAssertEqual(pasted, run.inserted)
+        XCTAssertFalse(run.inserted.lowercased().contains("enter"))
+        XCTAssertEqual(run.entry.outcome, .inserted)
+        XCTAssertEqual(keys.filter { $0 == 36 }.count, 1, "exactly one Return")
+        XCTAssertEqual(keys.last, 36, "after the paste")
+    }
 
-    func transcribe(_ samples: [Float], wav: URL) async throws -> String {
-        read = try Data(contentsOf: wav)
-        return "from the file"
+    /// F42 and rule 8: a paste that did not land, or a window that changed, gets no Return; the text without
+    /// the phrase waits on the clipboard for ⌘V.
+    @MainActor
+    func testPressEnterNeverPressesReturnWhenThePasteFailedOrFocusMoved() async throws {
+        let failed = try await pressEnterRun("See you soon press enter", read: false)
+        XCTAssertEqual(failed.run.error, PasteGate.notLanded)
+        XCTAssertFalse(failed.keys.contains(36))
+        XCTAssertEqual(pasteboard.string(forType: .string), failed.run.inserted)
+        XCTAssertFalse(failed.run.inserted.lowercased().contains("enter"))
+        let moved = try await pressEnterRun("Talk to you later press enter", focusKept: false)
+        XCTAssertEqual(moved.run.error, PasteGate.focusMoved)
+        XCTAssertTrue(moved.keys.isEmpty, "nothing pasted, nothing pressed")
+        XCTAssertNotEqual(moved.run.inserted, failed.run.inserted, "another text, so the clipboard check below can fail")
+        XCTAssertEqual(pasteboard.string(forType: .string), moved.run.inserted)
+    }
+
+    /// F42: re-transcribing a row keeps the command out of its text too, as the dictation did.
+    @MainActor
+    func testRetranscribeLeavesPressEnterOutOfTheText() async throws {
+        let (_, row) = try await process(speech, FakeEngine("See you soon."))
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        pipeline.pressEnterCommand = { true }
+        let e = try await pipeline.retranscribe(row, with: FakeEngine("See you soon, press enter."))
+        XCTAssertEqual(e.text, "See you soon.")
+        XCTAssertEqual(e.rawText, "See you soon, press enter.", "the raw transcript as heard")
+    }
+
+    /// F42 off (the default): "press enter" is text like any other, and no Return is pressed.
+    @MainActor
+    func testPressEnterOffPastesThePhraseAsText() async throws {
+        let (run, keys, pasted) = try await pressEnterRun("See you soon press enter", on: false)
+        XCTAssertTrue(run.entry.text.lowercased().hasSuffix("press enter"))
+        XCTAssertEqual(pasted, run.inserted)
+        XCTAssertFalse(keys.contains(36))
+    }
+
+    /// F42: only the phrase leaves nothing to paste, so no Return either (no paste confirms the window takes text).
+    @MainActor
+    func testPressEnterAloneSendsNothing() async throws {
+        let change = pasteboard.changeCount
+        let (run, keys, _) = try await pressEnterRun("Press enter.")
+        XCTAssertEqual(run.error, PressEnter.nothingToSend)
+        XCTAssertTrue(keys.isEmpty)
+        XCTAssertEqual(pasteboard.changeCount, change, "the clipboard is not touched")
+        XCTAssertEqual(run.entry.rawText, "Press enter.")
+    }
+
+    /// F22: the dictation's app picks the paste mode. Windows App syncs the clipboard during the delay, before the
+    /// chord; that read is the paste, not paste_failed.
+    @MainActor
+    func testRemoteViewerReadBeforeTheChordIsInserted() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let pb = pasteboard!, start = pb.changeCount
+        var keyDownsBeforeRead = -1, keyDowns = 0
+        let viewer = Task { @MainActor in
+            while pb.changeCount == start, !Task.isCancelled { try? await Task.sleep(for: .milliseconds(5)) }
+            keyDownsBeforeRead = keyDowns
+            _ = pb.string(forType: .string)
+        }
+        defer { viewer.cancel() }
+        let run = await pipeline.process(speech, engine: FakeEngine("Hello over there."),
+                                         app: AppContext(name: "Windows App", bundleId: "com.microsoft.rdc.macos"),
+                                         context: { ("", "", "") }, sendPaste: { if $0.type == .keyDown { keyDowns += 1 } })
+        XCTAssertEqual(keyDownsBeforeRead, 0, "the viewer read before the chord")
+        XCTAssertEqual(run.entry.outcome, .inserted)
+        XCTAssertNil(run.error)
+        XCTAssertEqual(pasteboard.string(forType: .string), "earlier")
+    }
+
+    /// F22 and rule 8: focus that moves during the remote delay gets no chord; the text waits for ⌘V.
+    @MainActor
+    func testRemoteViewerFocusMovedDuringTheDelayPostsNothing() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        var asked = 0, keyDowns = 0
+        let run = await pipeline.process(speech, engine: FakeEngine("Hello over there."),
+                                         app: AppContext(name: "Screen Sharing", bundleId: "com.apple.ScreenSharing"),
+                                         context: { ("", "", "") }, focusKept: { asked += 1; return asked <= 2 },
+                                         sendPaste: { if $0.type == .keyDown { keyDowns += 1 } })
+        XCTAssertEqual(asked, 3, "the pipeline's two checks, then the one after the delay")
+        XCTAssertEqual(keyDowns, 0)
+        XCTAssertEqual(run.entry.outcome, .pasteFailed)
+        XCTAssertEqual(pasteboard.string(forType: .string), run.inserted)
     }
 }
 

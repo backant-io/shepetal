@@ -19,12 +19,13 @@ enum DataExport {
         var rawText: String
         var text: String
         var archived: Bool
+        var reverted: Bool  // History's Show raw (F48)
         var audioPath: String
 
         init(_ e: HistoryEntry) {
             id = e.id; createdAt = e.createdAt; outcome = e.outcome.rawValue; app = e.app; bundleId = e.bundleId
             url = e.url; durationMs = e.durationMs; rawText = e.rawText; text = e.text; archived = e.archived
-            audioPath = e.audioPath
+            reverted = e.reverted; audioPath = e.audioPath
         }
     }
 
@@ -43,6 +44,7 @@ enum DataExport {
         var segments: [Segment]
         /// Absent until the meeting was summarized.
         var summary: Summary?
+        var notes: String  // typed in the Meetings tab (F71)
     }
 
     static let csvColumns = ["created", "outcome", "app", "url", "text", "raw_text", "duration_ms", "archived", "audio_path", "id"]
@@ -88,7 +90,7 @@ enum DataExport {
         if let text = fm.contents(atPath: dictionary.path) { try save("dictionary.txt", text) }
 
         let records = try meetings.list(limit: Int.max).compactMap { try meetings.get($0.id) }
-        try save("meetings.json", json.encode(records.map { MeetingExport(meeting: $0.meeting, segments: $0.segments, summary: $0.summary) }))
+        try save("meetings.json", json.encode(records.map { MeetingExport(meeting: $0.meeting, segments: $0.segments, summary: $0.summary, notes: $0.notes) }))
         let dir = folder.appendingPathComponent("meetings")
         try fm.createDirectory(at: dir, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
         var used: Set<String> = []

@@ -8,15 +8,14 @@ import ShepetalCore
 /// A recognizer that always fails, like whisper.cpp that is not installed or a model that cannot run.
 private final class BrokenEngine: SpeechEngine {
     let name = SpeechModel.parakeetV3.rawValue
-    let readsWav = false
     func transcribe(_ samples: [Float], wav: URL) async throws -> String { throw SpeechError("could not run") }
 }
 
 /// The shepetal window's buttons (issue #38), below the SwiftUI views: History's search, Archive and Show
 /// archived, Re-transcribe, Settings' Recordings choice, the Dictionary tab (F91) and the input settings it
 /// mirrors from the 🤫 menu. Each test gets a temp data dir and a private pasteboard; nothing is put on
-/// screen, takes focus, touches the clipboard or reads Pavel's dictionary.txt. Copy is not called here while
-/// HubModel.copy still writes NSPasteboard.general; its test comes with the wiring that routes it through the pipeline.
+/// screen, takes focus, touches the clipboard or reads Pavel's dictionary.txt. Copy goes through the pipeline's
+/// pasteboard, which here is the private one.
 @MainActor
 final class HubTests: XCTestCase {
     private var root: URL!
@@ -143,6 +142,34 @@ final class HubTests: XCTestCase {
         XCTAssertTrue(model.message.hasPrefix("Re-transcribe failed: "), model.message)
         XCTAssertEqual(try pipeline.history.search("").first, e, "time, text, model and audio stay")
         XCTAssertTrue(FileManager.default.fileExists(atPath: e.audioPath), "raw audio is always kept")
+    }
+
+    /// M-HUB-2: Copy puts the row's text on the pipeline's pasteboard: the clipboard in the app, a private one here.
+    func testCopyPutsTheRowsTextOnThePipelinesPasteboard() throws {
+        let e = try dictation("Send the quarterly report today")
+        let model = hub()
+        model.copy(e)
+        XCTAssertEqual(pasteboard.string(forType: .string), "Send the quarterly report today")
+        XCTAssertEqual(model.message, "Copied")
+    }
+
+    /// The app delegate and the window cannot run in a test, so the wiring is pinned by its source: the Dictionary
+    /// tab edits the pipeline's dictionary.txt and is read again each time the window opens, and Settings gets the
+    /// 🤫 menu's own Microphone and Languages controllers and the shortcuts window.
+    func testHubWiresTheDictionaryTabAndTheInputSettings() throws {
+        let hub = try AppSource.code("Hub.swift")
+        for line in ["dictionary = DictionaryModel(url: pipeline.dictionary, editAsText: openDictionary)",
+                     "DictionaryTab(model: dictionary).tabItem { Text(\"Dictionary\") }.tag(\"dictionary\")",
+                     "SettingsTab(model: model, meetings: meetings.store, input: input)"] {
+            XCTAssertTrue(hub.contains(line), "Hub.swift lacks \(line)")
+        }
+        XCTAssertTrue(try AppSource.body(of: "    func show() {", in: hub).contains("dictionary.reload()"))
+        XCTAssertTrue(try AppSource.body(of: "private struct SettingsTab: View {", in: hub).contains("HubInputSettings(input: input)"))
+        XCTAssertFalse(hub.contains("NSPasteboard.general"), "Copy goes through the pipeline's pasteboard")
+        let app = try AppSource.code("App.swift")
+        XCTAssertTrue(app.contains("input: HubInput(microphone: mic.menuItem, languages: speech.languagesItem,\n"
+                                   + "                                         openShortcuts: { [weak self] in self?.openShortcuts() }),"),
+                      "openedHub() must hand the Hub the menu's own controllers")
     }
 
     // MARK: Dictionary tab (F91)

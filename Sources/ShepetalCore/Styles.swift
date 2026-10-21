@@ -28,7 +28,7 @@ public enum Styles {
     static let hosts: [String: AppCategory] = [
         "slack.com": .work, "teams.microsoft.com": .work, "teams.live.com": .work, "teams.cloud.microsoft": .work,
         "mail.google.com": .email, "outlook.live.com": .email, "outlook.office.com": .email,
-        "outlook.office365.com": .email, "mail.superhuman.com": .email,
+        "outlook.office365.com": .email, "outlook.cloud.microsoft": .email, "mail.superhuman.com": .email,
         "web.whatsapp.com": .personal, "web.telegram.org": .personal, "messenger.com": .personal,
     ]
 

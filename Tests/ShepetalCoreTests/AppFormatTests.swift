@@ -98,4 +98,21 @@ final class AppFormatTests: XCTestCase {
         XCTAssertEqual(AppFormat.finish("deploy to cube [MUSIC] and eighties", mode: .raw, model: nil,
                                         vocabulary: Vocabulary("cube and eighties => Kubernetes\n")).text, "deploy to Kubernetes")
     }
+
+    // F37 and F24 meet F33 here: Raw means no formatting, so neither the app's style nor the text around the
+    // cursor reaches a Raw app. Formatted gives the model the field and styles the text before the dictionary,
+    // so a dictionary word keeps its casing in Very casual.
+    func testStyleAndFieldContextApplyOnlyWhenFormatted() {
+        let field = CleanupContext(before: "To: Ksenia\n\n", after: "", selected: "")
+        let vocabulary = Vocabulary("GitHub\n")
+        let said = "I pushed it to gitlab, I mean github."
+        let model = FakeCleanupModel { _ in "I pushed it to github." }
+        let raw = AppFormat.finish(said, mode: .raw, model: model, vocabulary: vocabulary, style: .veryCasual, context: field)
+        XCTAssertEqual(raw.text, "I pushed it to gitlab, I mean GitHub.", "Raw: as heard, only the dictionary")
+        XCTAssertEqual(model.calls, [], "Raw never runs the model")
+        let formatted = AppFormat.finish(said, mode: .formatted, model: model, vocabulary: vocabulary,
+                                         style: .veryCasual, context: field)
+        XCTAssertEqual(model.contexts, [field], "the model gets the field only in Formatted")
+        XCTAssertEqual(formatted.text, "i pushed it to GitHub", "styled, then the dictionary")
+    }
 }

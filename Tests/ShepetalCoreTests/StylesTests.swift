@@ -36,7 +36,7 @@ final class StylesTests: XCTestCase {
             ("https://app.slack.com/client/T1/C2", .work), ("https://acme.slack.com/archives/C2", .work),
             ("https://teams.microsoft.com/v2/", .work),
             ("https://mail.google.com/mail/u/0/", .email), ("https://outlook.office.com/mail/", .email),
-            ("https://outlook.live.com/mail/0/", .email),
+            ("https://outlook.live.com/mail/0/", .email), ("https://outlook.cloud.microsoft/mail/", .email),
             ("https://web.whatsapp.com/", .personal), ("https://www.messenger.com/t/1", .personal),
             ("https://news.ycombinator.com/", .other), ("https://notslack.com/", .other),
             ("https://slack.com.evil.example/", .other), ("", .other),

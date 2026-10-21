@@ -3,20 +3,22 @@ import AVFoundation
 import ShepetalCore
 import SwiftUI
 
-/// The one Shepetal window: Home, History, Meetings and Settings. It opens from the 🤫 menu and when the app is
-/// opened again while it runs. It opens by itself on Home only when dictation needs sign-in: once at launch,
-/// and on a blocked fn press. Shortcuts, the mic and the languages are in the 🤫 menu; every other setting is here.
+/// The one Shepetal window: Home, History, Dictionary, Meetings and Settings. It opens from the 🤫 menu and when the
+/// app is opened again while it runs. It opens by itself on Home only when dictation needs sign-in: once at launch,
+/// and on a blocked fn press. Every setting is here; Shortcuts…, the mic and the languages are in the 🤫 menu too.
 @MainActor
 final class Hub {
     private let window: NSWindow
     private let model: HubModel
     private let meetings: MeetingsModel
+    private let dictionary: DictionaryModel
 
     init(pipeline: Pipeline, engine: @escaping () -> SpeechEngine?,
          status: @escaping () -> (model: String, fnWatched: Bool),
          retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void,
          openPermissions: @escaping () -> Void, loginItem: LoginItem, openDictionary: @escaping () -> Void,
          restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore(),
+         input: HubInput = .none,
          updater: SparkleUpdater? = nil, uninstallBlocker: @escaping () -> String? = { nil },
          openWhatsNew: @escaping () -> Void = {}, notices: @escaping () -> [NoticeLog.Notice] = { [] }) {
         model = HubModel(pipeline: pipeline, engine: engine, status: status, retention: retention,
@@ -26,11 +28,12 @@ final class Hub {
         model.updater = updater
         model.uninstallBlocker = uninstallBlocker
         meetings = MeetingsModel(store: meetingStore)
+        dictionary = DictionaryModel(url: pipeline.dictionary, editAsText: openDictionary)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Shepetal"
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: HubView(model: model, meetings: meetings))
+        window.contentView = NSHostingView(rootView: HubView(model: model, meetings: meetings, dictionary: dictionary, input: input))
         window.center()
     }
 
@@ -39,6 +42,7 @@ final class Hub {
 
     func show() {
         model.reload()
+        dictionary.reload()  // Edit as text… may have changed the file
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -72,7 +76,9 @@ extension Pipeline {
         var e = entry
         let samples = try AudioStore.read(wav)
         e.rawText = try await engine.transcribe(await Task.detached { VoiceIsolation.apply(samples) }.value, wav: wav)
-        e.text = await finishText(e.rawText).text
+        // The row's app picks the format and the style (F33, F37); the command stays out of the text (F42).
+        let text = await finishText(e.rawText, bundleId: e.bundleId, url: e.url).text
+        e.text = pressEnterCommand() ? PressEnter.split(text, raw: e.rawText).text : text
         e.model = engine.name
         try history.update(e)
         return e
@@ -125,8 +131,7 @@ final class HubModel: ObservableObject {
     }
 
     func copy(_ e: HistoryEntry) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(e.text, forType: .string)
+        pipeline.copy(e.shownText)  // the pipeline's pasteboard: the clipboard in the app, a private one in tests
         message = "Copied"
     }
 
@@ -139,6 +144,12 @@ final class HubModel: ObservableObject {
 
     func setArchived(_ e: HistoryEntry, _ archived: Bool) {
         do { try pipeline.history.setArchived(e.id, archived) } catch { message = "Archive: \(error.localizedDescription)" }
+        reload()
+    }
+
+    /// Show raw / Show cleaned (F48): the row's Copy, and paste last and copy last, follow it.
+    func setReverted(_ e: HistoryEntry, _ reverted: Bool) {
+        do { try pipeline.history.setReverted(e.id, reverted) } catch { message = "Show raw: \(error.localizedDescription)" }
         reload()
     }
 
@@ -190,14 +201,17 @@ final class HubModel: ObservableObject {
 private struct HubView: View {
     @ObservedObject var model: HubModel
     let meetings: MeetingsModel
+    let dictionary: DictionaryModel
+    let input: HubInput
     @AppStorage("hubTab") private var tab = "home"  // `-hubTab history` at launch picks one (screenshots)
 
     var body: some View {
         TabView(selection: $tab) {
             HomeTab(model: model).tabItem { Text("Home") }.tag("home")
             HistoryTab(model: model).tabItem { Text("History") }.tag("history")
+            DictionaryTab(model: dictionary).tabItem { Text("Dictionary") }.tag("dictionary")
             MeetingsView(model: meetings).tabItem { Text("Meetings") }.tag("meetings")
-            SettingsTab(model: model).tabItem { Text("Settings") }.tag("settings")
+            SettingsTab(model: model, meetings: meetings.store, input: input).tabItem { Text("Settings") }.tag("settings")
         }
         .padding()
         .frame(minWidth: 640, minHeight: 420)
@@ -224,6 +238,7 @@ private struct HomeTab: View {
                                                      : "Missing: " + missing.map(\.title).joined(separator: ", "))
                 if !missing.isEmpty { Button("Open Permissions…", action: model.openPermissions) }
                 StatsSection(history: model.pipeline.history)
+                InsightsSection(history: model.pipeline.history)  // F61, F62: streak, heatmap, card
                 Section("Recent notices") {
                     let notices = model.notices()
                     if notices.isEmpty { Text("None yet").foregroundStyle(.secondary) }
@@ -263,15 +278,16 @@ private struct HistoryTab: View {
         let header = [e.createdAt.formatted(date: .abbreviated, time: .shortened),
                       e.outcome.rawValue.replacingOccurrences(of: "_", with: " "),
                       e.app.isEmpty ? "unknown app" : e.app,
-                      URL(string: e.url)?.host ?? "", e.archived ? "archived" : "",
+                      URL(string: e.url)?.host ?? "", e.archived ? "archived" : "", e.reverted ? "raw" : "",
                       replay ? "" : "recording deleted"].filter { !$0.isEmpty }
         return HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(header.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
-                Text(e.text.isEmpty ? "Nothing transcribed" : e.text).lineLimit(3).textSelection(.enabled)
+                Text(e.shownText.isEmpty ? "Nothing transcribed" : e.shownText).lineLimit(3).textSelection(.enabled)
             }
             Spacer()
-            Button("Copy") { model.copy(e) }.disabled(e.text.isEmpty)
+            Button("Copy") { model.copy(e) }.disabled(e.shownText.isEmpty)
+            Button(e.reverted ? "Show cleaned" : "Show raw") { model.setReverted(e, !e.reverted) }.disabled(e.text.isEmpty)
             Button("Play") { model.play(e) }.disabled(!replay)
             Menu("Re-transcribe") {
                 ForEach(model.retryChoices, id: \.title) { c in Button(c.title) { model.retry(e, with: c.model) } }
@@ -286,6 +302,8 @@ private struct HistoryTab: View {
 
 private struct SettingsTab: View {
     @ObservedObject var model: HubModel
+    let meetings: MeetingStoring
+    let input: HubInput
     static let version: String = {
         let i = Bundle.main.infoDictionary ?? [:]
         return "\(i["CFBundleShortVersionString"] as? String ?? "dev") (\(i["CFBundleVersion"] as? String ?? "0"))"
@@ -294,6 +312,9 @@ private struct SettingsTab: View {
     @AppStorage(Indicator.creatorModeKey) private var creatorMode = false
     @AppStorage(MediaControl.muteKey) private var muteWhileDictating = false
     @AppStorage(MediaControl.pauseKey) private var pauseWhileDictating = false
+    @AppStorage(PressEnter.key) private var pressEnterCommand = false
+    @AppStorage(Streak.noticesKey) private var milestoneNotices = true
+    @AppStorage(CleanupContext.settingKey) private var useTextAroundCursor = false
 
     var body: some View {
         Form {
@@ -305,21 +326,34 @@ private struct SettingsTab: View {
             Toggle("Pause media while dictating", isOn: $pauseWhileDictating)
             Text("Only while another app is playing, and never during a meeting or a call. When you stop, shepetal turns the sound back on and resumes what it paused. Pause presses the play/pause key, so a video you paused just before dictating may start instead.")
                 .font(.caption).foregroundStyle(.secondary)
+            Toggle("End a dictation with “press enter” to press Return", isOn: $pressEnterCommand)
+            Text("Return is pressed only after the text landed in the window you dictated into. Handy to send a chat message or a prompt.")
+                .font(.caption).foregroundStyle(.secondary)
             Picker("Recordings", selection: Binding(get: model.retention, set: model.changeRetention)) {
                 Text("Keep recordings").tag(Retention.keep)
                 Text("Delete recordings after 24 hours").tag(Retention.delete24h)
             }
             Button("Open recordings folder") { NSWorkspace.shared.open(Paths.audio) }
+            DataExportButton(history: model.pipeline.history, meetings: meetings)
             Toggle("Creator mode: show “\(Indicator.creatorLabel)” next to 🤫 while recording", isOn: $creatorMode)
             Text("For screen recordings and streams, so viewers see when you dictate.")
                 .font(.caption).foregroundStyle(.secondary)
+            Toggle("Milestone notices", isOn: $milestoneNotices)
+            Text("A short note next to 🤫 when a dictation reaches a streak or a word count, once each time.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Start at login", isOn: Binding(get: { model.loginItem.isOn }, set: { _ in model.toggleLogin() }))
+            Toggle("Use the text around the cursor to clean up dictation", isOn: $useTextAroundCursor)
+            Text("When the cleanup model rewrites a dictation, such as one with a correction or a list, it also gets up to 500 characters on each side of the cursor and up to 500 of the selection, on this Mac. It can fix the case of a name or go on with a numbered list, never add a word you did not say. Other dictations are not affected. The field's text is never saved or logged.")
+                .font(.caption).foregroundStyle(.secondary)
             Button("Dictionary…", action: model.openDictionary)
+            HubInputSettings(input: input)
+            AIAppsSettings()
             if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
                 Button("Restore 🌐 key setting (\(FnKeySetting.describe(previous)))", action: model.restoreFnKey)
             }
             Button("Permissions…", action: model.openPermissions)
-            Text("Shortcuts, the microphone and languages are in the 🤫 menu.").font(.caption).foregroundStyle(.secondary)
+            StylesSection()  // F37
+            AppFormatSection(history: model.pipeline.history)  // F33
             if model.updater != nil { Toggle("Install updates automatically", isOn: $model.automaticallyInstalls) }
             LabeledContent("Version", value: Self.version)
             UninstallSection(blocker: model.uninstallBlocker)  // last and quiet: never clicked by accident

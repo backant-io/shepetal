@@ -75,15 +75,27 @@ final class E2E: NSObject, NSApplicationDelegate {
         let app = await lookup.value
         var failed = false
         for wav in wavs {
-            textView.string = ""
+            // F24: a clip with a .field file (the text before the cursor, a tab, the text after it) is dictated into
+            // that text with "Use the text around the cursor" on; every other clip into an empty field, with it off.
+            let field = (try? String(contentsOfFile: String(wav.dropLast(4)) + ".field", encoding: .utf8))?
+                .components(separatedBy: "\t")
+            let (before, after) = (field?.first ?? "", field?.last ?? "")
+            textView.string = before + after
+            textView.setSelectedRange(NSRange(location: (before as NSString).length, length: 0))
+            pipeline.useFieldContext = { field != nil }
+            var fieldRead = 0, readMs = 0.0
             let samples: [Float]
             do { samples = try Resampler.read(URL(fileURLWithPath: wav)) } catch {
                 print(json(["wav": wav, "error": error.localizedDescription]))
                 failed = true
                 continue
             }
+            let start = ProcessInfo.processInfo.systemUptime
             let run = await pipeline.process(samples, engine: engine, app: app, context: { [textView] in
-                FocusedText.context(FocusedText.Field(textView!))
+                readMs = (ProcessInfo.processInfo.systemUptime - start) * 1000
+                let c = FocusedText.context(FocusedText.Field(textView!))
+                fieldRead = c.before.count + c.after.count + c.selected.count
+                return c
             }, sendPaste: { event in
                 // The same Cmd+V the app posts system-wide, delivered through this process's menu instead.
                 guard !dropPaste, event.type == .keyDown, let e = NSEvent(cgEvent: event) else { return }
@@ -97,7 +109,11 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["ready_ms"] = Int(run.readyMs)
             out["raw_text"] = run.entry.rawText
             out["text"] = run.entry.text
-            out["inserted_text"] = textView.string
+            let typed = textView.string  // the dictation only: the field's own text around it is left out
+            out["inserted_text"] = typed.hasPrefix(before) && typed.hasSuffix(after)
+                ? String(typed.dropFirst(before.count).dropLast(after.count)) : typed
+            out["field_chars_read"] = fieldRead
+            out["field_read_ms"] = Int(readMs)
             out["paste_landed"] = run.paste?.landed ?? false
             out["clipboard_restored"] = run.paste?.restored ?? false
             out["audio_path"] = run.entry.audioPath
