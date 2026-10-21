@@ -148,6 +148,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// `t`: when the key moved (`FnClock`), which can be well before the main thread reads it.
     private func key(_ input: KeyInput, at t: TimeInterval) {
+        Account.shared.afterBlockedPress(input)  // the release of a refused press opens Home
         let idle = dictation?.gesture.state == .idle
         switch input {
         case .pasteLast: pasteLast()
