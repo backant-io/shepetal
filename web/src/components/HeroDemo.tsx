@@ -1,33 +1,41 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Ind, Win, Words, type IndState } from './landing/Mac';
 
-// What the demo "hears". Each press pastes the next one, like the app does.
-const SENTENCES = [
-  'Running ten minutes late, start without me.',
-  'Can you send me the slides from Tuesday?',
-  'Pick up oat milk and the good coffee on the way home.',
-  'Ship it on Friday if the tests pass.',
+// What the visitor "says", and the text that lands. A spoken date lands as numbers, as in the app.
+const LINES = [
+  {
+    said: 'The beta goes out on Friday, and I’ll send you the release notes on the twenty-third of October.',
+    text: 'The beta goes out on Friday, and I’ll send you the release notes on 23.10.26.',
+  },
+  { said: 'Can you check the new screenshots before lunch?', text: 'Can you check the new screenshots before lunch?' },
+  { said: 'Thanks for testing it this week.', text: 'Thanks for testing it this week.' },
 ];
 
-// The app's own timings: a hold under 0.5 s is a tap and shows the hint for 2 s.
+// The app's timings: a hold of 0.5 s or more is push-to-talk, a shorter tap shows the hint for 3 s.
 const HOLD_MS = 500;
-const PROCESS_MS = 450;
-const HINT_MS = 2000;
+const HINT_MS = 3000;
+const WORD_MS = 330; // a calm speaking pace
+const WRITE_MS = 240; // long enough to see the blue ring; the app needs about 0.1 s
+const AUTO_LINES = 2; // plays two lines on its own, then waits for the visitor
 
-type Phase = 'rest' | 'hold' | 'talk' | 'process';
+type Phase = 'rest' | 'hold' | 'talk' | 'write';
+const RING: Record<Phase, IndState> = { rest: 'idle', hold: 'idle', talk: 'rec', write: 'write' };
+const STATE: Record<Phase, string> = { rest: '', hold: '', talk: 'Recording', write: 'Writing' };
 
-const WORDS = ['hold fn,', 'talk,', 'done.'];
-// How many headline words are lit in each phase. At rest the whole line is lit.
-const LIT: Record<Phase, number> = { rest: 3, hold: 1, talk: 2, process: 2 };
-
-export function HeroDemo() {
+export function HeroDemo({ wallpaper }: { wallpaper: React.ReactNode }) {
   const [phase, setPhase] = useState<Phase>('rest');
-  const [text, setText] = useState('');
+  const [heard, setHeard] = useState(0); // words of the current line said so far
+  const [line, setLine] = useState(0);
+  const [landed, setLanded] = useState<{ key: number; text: string }[]>([]);
   const [hint, setHint] = useState(false);
-  const count = useRef(0);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const phaseRef = useRef<Phase>('rest');
+  const heardRef = useRef(0);
+  const lineRef = useRef(0);
+  const auto = useRef(false);
+  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const root = useRef<HTMLDivElement>(null);
 
   const go = (p: Phase) => {
     phaseRef.current = p;
@@ -38,13 +46,30 @@ export function HeroDemo() {
     timers.current.forEach(clearTimeout);
     timers.current = [];
   };
+  const words = () => LINES[lineRef.current % LINES.length].said.split(' ').length;
+
+  const speak = () => {
+    if (phaseRef.current !== 'talk') return;
+    if (heardRef.current < words()) {
+      heardRef.current += 1;
+      setHeard(heardRef.current);
+      later(WORD_MS, speak);
+    } else if (auto.current) {
+      later(450, release);
+    }
+  };
 
   const press = () => {
     if (phaseRef.current !== 'rest') return;
     clear();
     setHint(false);
+    heardRef.current = 0;
+    setHeard(0);
     go('hold');
-    later(HOLD_MS, () => go('talk'));
+    later(HOLD_MS, () => {
+      go('talk');
+      speak();
+    });
   };
 
   const release = () => {
@@ -55,96 +80,163 @@ export function HeroDemo() {
       setHint(true);
       later(HINT_MS, () => setHint(false));
     } else if (p === 'talk') {
-      go('process');
-      later(PROCESS_MS, () => {
-        const next = SENTENCES[count.current++ % SENTENCES.length];
-        setText((t) => (t ? `${t} ${next}` : next));
+      clear();
+      if (heardRef.current === 0) return go('rest');
+      go('write');
+      later(WRITE_MS, () => {
+        const n = lineRef.current;
+        const text = LINES[n % LINES.length].text;
+        setLanded((l) => (l.length >= 3 ? [{ key: n, text }] : [...l, { key: n, text }]));
+        lineRef.current = n + 1;
+        setLine(n + 1);
         go('rest');
+        if (auto.current && n + 1 < AUTO_LINES) later(2600, press);
+        else auto.current = false;
       });
     }
   };
 
-  // One run on load, unless the visitor asked for less motion.
+  // Plays when the screen comes into view. With reduced motion it shows the result instead.
   useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setText(SENTENCES[count.current++]);
+      setLanded([{ key: 0, text: LINES[0].text }]);
+      lineRef.current = 1;
+      setLine(1);
       return;
     }
-    const t1 = setTimeout(press, 700);
-    const t2 = setTimeout(release, 2500);
+    const el = root.current;
+    if (!el) return;
+    const io = new IntersectionObserver(
+      ([e]) => {
+        if (!e.isIntersecting) return;
+        io.disconnect();
+        auto.current = true;
+        later(900, press);
+      },
+      { threshold: 0.4 },
+    );
+    io.observe(el);
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
+      io.disconnect();
       clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const down = phase === 'hold' || phase === 'talk';
-  const mode = phase === 'talk' ? 'rec' : phase === 'process' ? 'busy' : 'idle';
+  const speaking = phase === 'talk' || phase === 'write';
+  const said = LINES[line % LINES.length].said.split(' ');
 
   return (
-    <>
-      <h1 className="display text-[clamp(4rem,13vw,10.5rem)] leading-[0.88]">
-        {WORDS.map((w, i) => (
-          <span key={w} className="hero-word block" data-dim={i >= LIT[phase]}>
-            {w}
-          </span>
-        ))}
-      </h1>
-
-      <p
-        className="mt-10 min-h-[4.5rem] max-w-[32ch] text-[clamp(1.35rem,2.6vw,1.9rem)] leading-snug"
-        aria-live="polite"
+    <div ref={root} className="demo">
+      <div
+        className="screen"
+        role="img"
+        aria-label="Illustration: a Mac with a new email open. While fn is held, the 🤫 in the bottom-left corner of the screen shows a red ring. On release it pulses blue and the spoken words land in the email, with the spoken date written as 23.10.26."
       >
-        {text}
-        <span className="caret" aria-hidden="true" />
-      </p>
+        {wallpaper}
+        <div className="menubar" aria-hidden="true">
+          <b>Mail</b>
+          <span className="mb-hide">File</span>
+          <span className="mb-hide">Edit</span>
+          <span className="mb-hide">View</span>
+          <span className="mb-end">
+            <img className="mb-shush" src="/brand/emoji/emoji_u1f92b.svg" alt="" width={14} height={14} />
+            <span>Wed 09:41</span>
+          </span>
+        </div>
+        <Win title="Beta on Friday" className="mail-win">
+          <div className="field">
+            <span>To:</span>
+            <span>Maja Novak</span>
+          </div>
+          <div className="field">
+            <span>Subject:</span>
+            <span>Beta on Friday</span>
+          </div>
+          <div className="mail-body">
+            <p>Hi Maja,</p>
+            {landed.map((l, i) => (
+              <p key={l.key}>
+                <Words text={l.text} />
+                {i === landed.length - 1 && <span className="caret" />}
+              </p>
+            ))}
+            {landed.length === 0 && (
+              <p>
+                <span className="caret" />
+              </p>
+            )}
+          </div>
+        </Win>
+        <Ind state={RING[phase]} hint={hint ? <span className="ind-hint">Hold fn to talk · double-tap for hands-free</span> : null} />
+        <span className="illus">Illustration</span>
+      </div>
 
-      <div className="mt-8 flex items-end gap-2" role="group" aria-label="Bottom-left keys of a Mac keyboard">
-        <button
-          type="button"
-          className="key key-fn"
-          aria-pressed={down}
-          aria-label="fn key. Press and hold to try dictation"
-          onPointerDown={(e) => {
-            press();
-            e.currentTarget.setPointerCapture(e.pointerId); // the release still lands if the pointer slides off
-          }}
-          onPointerUp={release}
-          onPointerCancel={release}
-          onKeyDown={(e) => {
-            if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
-              e.preventDefault();
+      <div className="keys">
+        <div className="keycaps" role="group" aria-label="The bottom-left keys of a Mac keyboard">
+          <button
+            type="button"
+            className="key key-fn"
+            aria-pressed={down}
+            aria-label="fn key. Press and hold to try dictation, then let go"
+            onPointerDown={(e) => {
+              auto.current = false;
               press();
-            }
-          }}
-          onKeyUp={(e) => {
-            if (e.key === ' ' || e.key === 'Enter') release();
-          }}
-          onContextMenu={(e) => e.preventDefault()}
-        >
-          <span className="self-end">fn</span>
-          <Globe />
-        </button>
-        <span className="key key-ghost" aria-hidden="true">
-          <span className="self-end">⌃</span>
-          <span>control</span>
-        </span>
-        <span className="key key-ghost" aria-hidden="true">
-          <span className="self-end">⌥</span>
-          <span>option</span>
-        </span>
-        <p className="ml-3 pb-1 text-sm text-[var(--hush)]">Press and hold fn to try it</p>
+              e.currentTarget.setPointerCapture(e.pointerId); // the release still lands if the pointer slides off
+            }}
+            onPointerUp={release}
+            onPointerCancel={release}
+            onKeyDown={(e) => {
+              if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) {
+                e.preventDefault();
+                auto.current = false;
+                press();
+              }
+            }}
+            onKeyUp={(e) => {
+              if (e.key === ' ' || e.key === 'Enter') release();
+            }}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            <span className="key-top">fn</span>
+            <Globe />
+          </button>
+          <span className="key key-ghost" aria-hidden="true">
+            <span className="key-top">⌃</span>
+            <span>control</span>
+          </span>
+          <span className="key key-ghost key-hide" aria-hidden="true">
+            <span className="key-top">⌥</span>
+            <span>option</span>
+          </span>
+        </div>
+        <div className="said" aria-live="off">
+          {speaking ? (
+            <>
+              <span className="said-state" data-state={RING[phase]}>
+                <i aria-hidden="true" />
+                {STATE[phase]}
+              </span>
+              <span className="said-text">
+                “
+                {said.slice(0, heard).map((w, i) => (
+                  <span key={`${line}-${i}`} className="said-word">
+                    {w}{' '}
+                  </span>
+                ))}
+                ”
+              </span>
+            </>
+          ) : (
+            <span className="said-hint">Press and hold fn to try it, then let go.</span>
+          )}
+        </div>
       </div>
-
-      <div className="shush" data-mode={mode} aria-hidden="true">
-        <span className="shush-face">
-          <img src="/brand/emoji/emoji_u1f92b.svg" alt="" width={13} height={13} />
-        </span>
-        {hint && <span className="shush-hint">Hold fn to talk</span>}
-      </div>
-    </>
+      <p className="sr" aria-live="polite">
+        {landed.length ? landed[landed.length - 1].text : ''}
+      </p>
+    </div>
   );
 }
 
