@@ -1,19 +1,20 @@
 import ShepetalCore
 import SwiftUI
 
-/// The Account section on Home: trial days left, "Yours forever", or why dictation is off and how to fix it.
+/// The Account section at the top of Home: who is signed in and the trial days left or "Yours forever", or the
+/// sign-in call to action, and why dictation is off and how to fix it.
 struct AccountSection: View {
     @ObservedObject var account = Account.shared
 
     var body: some View {
         Section("Account") {
-            LabeledContent("License", value: account.summaryLine)
+            Text(account.summaryLine).font(.headline)
             switch account.access {
             case .signedOut:
                 if account.signingIn {
                     Button("Cancel sign-in") { account.cancelSignIn() }
                 } else {
-                    Button(AccountText.signIn) { account.signIn() }
+                    Button(AccountText.signIn) { account.signIn() }.buttonStyle(.borderedProminent).controlSize(.large)
                 }
             case .trial:
                 Button(AccountText.buy) { account.buy() }

@@ -186,8 +186,8 @@ final class AccountTests: XCTestCase {
     }
 
     func testWhatTheUserSees() {
-        XCTAssertEqual(Access.trial(daysLeft: 12).summary, "Free trial: 12 days left")
-        XCTAssertEqual(Access.trial(daysLeft: 1).summary, "Free trial: 1 day left")
+        XCTAssertEqual(Access.trial(daysLeft: 12).summary, "Trial, 12 days left")
+        XCTAssertEqual(Access.trial(daysLeft: 1).summary, "Trial, 1 day left")
         XCTAssertEqual(Access.lifetime.summary, "Yours forever")
         XCTAssertEqual(Access.signedOut.blockedHint, "Sign in with Google to start your free 30-day trial")
         XCTAssertEqual(Access.expired.blockedHint, "Trial ended: get Shepetal for $4.99")

@@ -199,7 +199,7 @@ public enum Access: Equatable, Sendable {
     public var summary: String {
         switch self {
         case .signedOut: "Not signed in"
-        case let .trial(days): "Free trial: \(days) \(days == 1 ? "day" : "days") left"
+        case let .trial(days): "Trial, \(days) \(days == 1 ? "day" : "days") left"
         case .lifetime: "Yours forever"
         case .expired: "Trial ended"
         case .unchecked: "License not checked"
