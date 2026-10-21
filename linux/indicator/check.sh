@@ -204,13 +204,15 @@ w.connect("destroy", Gtk.main_quit); w.show_all(); Gtk.main()' 2>/dev/null &
     xdotool type --delay 20 "after"
     sleep 0.5
     [ "$(cat /tmp/typed)" = "before after" ] || fail "$wm: the typing went elsewhere: '$(cat /tmp/typed)'"
+    front=
     if [ "$wm" != i3 ]; then  # i3 tiles it next to the app
+        front=" in front"
         stack=$(xprop -root _NET_CLIENT_LIST_STACKING | sed 's/.*# //; s/,//g' | tr ' ' '\n')
         [ "$(echo "$stack" | grep -n -e "$(printf 0x%x "$win")" -e "$(printf 0x%x "$work")" | tail -1 | cut -d: -f2)" = "$(printf 0x%x "$win")" ] ||
             fail "$wm: the transcript window is not in front of the app"
     fi
     import -window root "/out/transcript-$wm-shown.png"
-    echo "ok $wm: the transcript window showed in front without the focus, and the typing went on into the app"
+    echo "ok $wm: the transcript window showed$front without the focus, and the typing went on into the app"
     # A click on Copy transcript focuses it and asks the daemon to copy; the answer shows inline.
     x=$(at "$win" X) y=$(at "$win" Y) h=$(xwininfo -id "$win" | sed -n 's/.*Height: *//p')
     xdotool mousemove $((x + 70)) $((y + h - 30)) click 1
