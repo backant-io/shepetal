@@ -57,6 +57,7 @@ final class Indicator {
 
     func set(_ mode: Mode) {
         self.mode = mode
+        if mode != .recording && mode != .handsFree { status = nil }  // never outlives the dictation
         var ring: NSColor? = switch mode {
         case .idle: nil
         case .recording: .systemRed
@@ -79,18 +80,34 @@ final class Indicator {
         }
     }
 
-    /// Text next to the indicator for `seconds`, e.g. the short-press hint.
+    /// Text next to the indicator for `seconds`, e.g. the short-press hint. It covers `status`, which comes back after.
     func show(_ text: String, seconds: TimeInterval) {
         labelUntil?.cancel()
-        label.stringValue = " \(text) "
-        label.isHidden = false
-        layout()
-        let hide = DispatchWorkItem { [weak self] in
-            self?.label.isHidden = true
-            self?.layout()
+        setLabel(text)
+        let end = DispatchWorkItem { [weak self] in
+            self?.labelUntil = nil
+            self?.setLabel(self?.status)
         }
-        labelUntil = hide
-        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: hide)
+        labelUntil = end
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: end)
+    }
+
+    /// Text that stays next to the indicator while set and while recording, e.g. creator mode's label.
+    /// A hint covers it for its seconds. Any mode other than recording or hands-free clears it.
+    var status: String? { didSet { if labelUntil == nil, status != oldValue { setLabel(status) } } }
+
+    /// "Creator mode" in Settings: the label shows while recording, for screen recordings. Unset means off.
+    static let creatorModeKey = "creatorMode"
+    static let creatorLabel = "Dictating with shepetal"
+    /// The `status` to set when recording starts: the creator label, or nil when the setting is off.
+    static func creatorStatus(_ defaults: UserDefaults = .standard) -> String? {
+        defaults.bool(forKey: creatorModeKey) ? creatorLabel : nil
+    }
+
+    private func setLabel(_ text: String?) {
+        label.stringValue = " \(text ?? "") "
+        label.isHidden = text == nil
+        layout()
     }
 
     var labelText: String? { label.isHidden ? nil : label.stringValue.trimmingCharacters(in: .whitespaces) }
