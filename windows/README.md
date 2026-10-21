@@ -29,7 +29,7 @@ STT thread (model fetch + load, whisper) --Text----+        |  Mic.start/stop, S
 
 `crates/app/src/flow.rs` is one dictation, from the gesture's action to the text at the cursor:
 - Start: remember the foreground window first, then start the mic. The 🤫 turns red (orange for hands-free).
-- Stop: keep the clip, turn the 🤫 blue, and send the samples to the STT thread. The text goes through `shepetal_core::text::cleanup`, then `insert::insert`, which pastes only into the window remembered at Start. Otherwise the text stays on the clipboard and the hint says why and to press Ctrl+V.
+- Stop: keep the clip, turn the 🤫 blue, and send the samples to the STT thread. The text goes through `flow::rules` (`shepetal_core::text::cleanup`, then spoken dates become `DD.MM.YY`, docs/text-rules.md), then `insert::insert`, which pastes only into the window remembered at Start. Otherwise the text stays on the clipboard and the hint says why and to press Ctrl+V.
 - Too short: the clip is kept as `<stamp>.tooshort.wav`, nothing is transcribed, and "Hold Ctrl+Win to talk · double-tap for hands-free" shows for 2 s. A cancel (Esc, or Ctrl+Win used as a shortcut such as Ctrl+Win+D) is kept as `<stamp>.cancelled.wav`.
 - A press while the last clip is still transcribing is ignored. If saving the clip fails, the text is still inserted and the error shows after.
 

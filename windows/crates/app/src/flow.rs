@@ -76,8 +76,6 @@ pub struct Flow<M, S, I, O> {
     pub store: S,
     pub insert: I,
     pub show: O,
-    /// Text clean-up from the core crate, applied before insertion.
-    pub rules: fn(&str) -> String,
     state: State,
     /// When the error ring goes back to idle.
     error_until: Option<u64>,
@@ -86,8 +84,8 @@ pub struct Flow<M, S, I, O> {
 }
 
 impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
-    pub fn new(mic: M, store: S, insert: I, show: O, rules: fn(&str) -> String) -> Self {
-        Flow { mic, store, insert, show, rules, state: State::Idle, error_until: None, pending: None }
+    pub fn new(mic: M, store: S, insert: I, show: O) -> Self {
+        Flow { mic, store, insert, show, state: State::Idle, error_until: None, pending: None }
     }
 
     /// True while a clip is being recorded or transcribed.
@@ -144,7 +142,7 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
             return;
         }
         self.state = State::Idle;
-        let inserted = match text.map(|t| (self.rules)(&t)) {
+        let inserted = match text.map(|t| rules(&t)) {
             Ok(t) if t.is_empty() => Ok(None),
             Ok(t) => self.insert.insert(&t),
             Err(e) => Err(e),
@@ -239,7 +237,6 @@ mod tests {
             FakeStore(log.clone(), store),
             FakeInsert(log.clone(), clipboard),
             FakeShow(log.clone()),
-            rules,
         );
         (f, log)
     }
@@ -312,6 +309,7 @@ mod tests {
     #[test]
     fn dates_read_what_cleanup_leaves_around_a_filler() {
         assert_eq!(rules("the the first of, um, March"), "01.03.");
+        assert_eq!(rules("Um, the first of, um, March."), "01.03.");
         assert_eq!(rules("the twenty, uh, sixth of July twenty twenty six"), "the twenty, sixth of July twenty twenty six");
         assert_eq!(rules("Meet on March 5, uh, 10:30."), "Meet on 05.03., 10:30.");
     }

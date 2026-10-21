@@ -233,7 +233,6 @@ pub fn run() {
         AppStore(store),
         AppInsert(None),
         ui,
-        flow::rules,
     );
     let mut gesture = Gesture::default();
     let t0 = Instant::now();
