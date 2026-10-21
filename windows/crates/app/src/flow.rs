@@ -5,7 +5,7 @@
 //! caller passes the result to `transcribed`.
 
 use input::{Key, KeyEvent, Mode};
-use shepetal_core::gesture::{short_press_hint, Action, Gesture, HINT_MS, VK_ESCAPE};
+use shepetal_core::gesture::{short_press_hint, Action, Gesture, HINT_MS, MAX_LENGTH_WARNING, VK_ESCAPE};
 use shepetal_core::text;
 
 /// The dictation hotkey. Windows keyboards don't report fn, so it is Ctrl+Win, the default of
@@ -110,6 +110,7 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
                 }
             }
             (State::Recording, LockHandsFree) => self.mode(Mode::HandsFree),
+            (State::Recording, WarnDuration) => self.show.hint(MAX_LENGTH_WARNING),
             (State::Recording, Stop) => {
                 let samples = self.mic.stop();
                 self.pending = self.store.keep(&samples, Kept::Dictation).err();
@@ -340,6 +341,26 @@ mod tests {
         f.action(Action::LockHandsFree, 300);
         assert_eq!(take(&log).last().unwrap(), "mode HandsFree");
         assert!(f.busy());
+    }
+
+    #[test]
+    fn the_length_cap_warns_then_stops_and_transcribes() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        let mut g = Gesture::default();
+        let run = |f: &mut Fake, actions: Vec<Action>, t| actions.into_iter().filter_map(|a| f.action(a, t)).count();
+        run(&mut f, g.hotkey_down(0), 0);
+        run(&mut f, g.hotkey_up(100), 100);
+        run(&mut f, g.hotkey_down(300), 300);
+        take(&log);
+        assert_eq!(run(&mut f, g.tick(19 * 60_000), 19 * 60_000), 0);
+        assert_eq!(take(&log), ["hint Recording stops in 1 minute"], "the ring stays orange");
+        assert_eq!(run(&mut f, g.tick(20 * 60_000), 20 * 60_000), 1, "the 20 minutes go to speech-to-text");
+        assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "mode Processing"]);
+        f.transcribed(Ok("a long one".into()), 20 * 60_000 + 500);
+        assert_eq!(take(&log), ["insert a long one", "mode Idle"]);
+        // A warning that arrives when nothing records shows nothing.
+        f.action(Action::WarnDuration, 30 * 60_000);
+        assert!(take(&log).is_empty());
     }
 
     #[test]
