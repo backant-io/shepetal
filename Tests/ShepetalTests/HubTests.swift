@@ -278,7 +278,7 @@ final class HubTests: XCTestCase {
         let micMenu = try XCTUnwrap(menus.first { $0.contains("Test USB Mic") }, "\(menus)")
         XCTAssertEqual(micMenu, try XCTUnwrap(mic.menuItem().submenu).items.map(\.title))
         XCTAssertTrue(micMenu.contains("Prefer Test USB Mic"), "\(micMenu)")
-        XCTAssertEqual(menus.first { !$0.contains("Test USB Mic") }?.first, "Automatic", "the Languages menu")
+        XCTAssertTrue(menus.first { !$0.contains("Test USB Mic") }?.contains("Automatic") == true, "the Languages menu")  // F41's Translate to English comes first on macOS 15
         _ = buttons.map { $0.menu }
         XCTAssertEqual(languageBuilds, 2, "each click builds the menu again, so its ticks are current")
         XCTAssertEqual(shortcuts, 0)
