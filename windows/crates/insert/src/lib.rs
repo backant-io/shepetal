@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
-pub use win::{foreground, insert};
+pub use win::{copy, foreground, insert};
 
 /// The foreground window when a dictation starts: its handle and its process.
 /// The process id guards against a closed window whose handle was reused.

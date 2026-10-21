@@ -4,17 +4,21 @@
 //!   keyboard (Tab, Enter, Esc) and screen readers work.
 //! - `Card`: the one-click Record? offer for a detected meeting, just above the 🤫. It never
 //!   takes focus, so a click on it leaves the call (and a running dictation's window) in front.
+//! - `Transcripts`: the Meeting transcript window, shown once a recorded meeting is transcribed.
+//!   It comes up in front without taking the focus, and takes it only when clicked.
 
 use crate::meeting;
+use crate::transcript::{self, Button, Meeting};
 use std::cell::{Cell, RefCell};
 use std::mem::size_of;
+use std::path::Path;
 use std::ptr::{null, null_mut};
 use std::sync::mpsc::{sync_channel, Sender};
 use std::thread;
 use windows_sys::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows_sys::Win32::Graphics::Gdi::*;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows_sys::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+use windows_sys::Win32::UI::Input::KeyboardAndMouse::{EnableWindow, SetFocus};
 use windows_sys::Win32::UI::HiDpi::{GetDpiForMonitor, SetThreadDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, MDT_EFFECTIVE_DPI};
 use windows_sys::Win32::UI::WindowsAndMessaging::*;
 
@@ -51,9 +55,7 @@ pub fn ask(text: &str, buttons: &[&str]) -> Option<usize> {
         };
         RegisterClassW(&wc); // fails harmlessly on the second call
 
-        let mut ncm = NONCLIENTMETRICSW { cbSize: size_of::<NONCLIENTMETRICSW>() as u32, ..Default::default() };
-        SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, ncm.cbSize, (&raw mut ncm).cast(), 0);
-        let font = CreateFontIndirectW(&ncm.lfMessageFont);
+        let font = message_font();
         let text = wide(text);
         let mut t = RECT { left: 0, top: 0, right: TEXT_W, bottom: 0 };
         let dc = GetDC(null_mut());
@@ -105,6 +107,13 @@ pub fn ask(text: &str, buttons: &[&str]) -> Option<usize> {
         DeleteObject(font);
         CHOICE.take()
     }
+}
+
+/// The font of the system's own dialogs.
+unsafe fn message_font() -> HFONT {
+    let mut ncm = NONCLIENTMETRICSW { cbSize: size_of::<NONCLIENTMETRICSW>() as u32, ..Default::default() };
+    SystemParametersInfoW(SPI_GETNONCLIENTMETRICS, ncm.cbSize, (&raw mut ncm).cast(), 0);
+    CreateFontIndirectW(&ncm.lfMessageFont)
 }
 
 unsafe extern "system" fn dialog_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
@@ -300,4 +309,174 @@ impl CardState {
         SelectObject(dc, old);
         EndPaint(hwnd, &ps);
     }
+}
+
+/// Shows meetings in the Meeting transcript window from any thread. Its window runs on its own
+/// thread; one window serves every meeting, the latest replacing the one before.
+pub struct Transcripts {
+    hwnd: isize,
+}
+
+/// A boxed `Meeting` to show.
+const WM_TRANSCRIPT: u32 = WM_APP;
+const ID_TEXT: usize = 200;
+const ID_STATUS: usize = 201;
+const ID_BUTTON: usize = 210;
+const BUTTONS: [(&str, Button); 3] =
+    [("Copy transcript", Button::CopyTranscript), ("Copy summary", Button::CopySummary), ("Open folder", Button::OpenFolder)];
+const WIDE_BUTTON: i32 = 120;
+/// How long "Copied" stays.
+const STATUS_MS: u32 = 2000;
+
+thread_local! {
+    static TRANSCRIPT: RefCell<Option<transcript::Window<Win>>> = const { RefCell::new(None) };
+}
+
+impl Transcripts {
+    pub fn spawn() -> Result<Transcripts, String> {
+        let (tx, rx) = sync_channel(1);
+        thread::Builder::new()
+            .name("shepetal-transcript".into())
+            .spawn(move || unsafe {
+                // ponytail: DPI-unaware like `ask`, so Windows scales it up (a bit soft at 150 %).
+                let inst = GetModuleHandleW(null());
+                let class = wide("ShepetalTranscript");
+                let wc = WNDCLASSW {
+                    lpfnWndProc: Some(transcript_proc),
+                    hInstance: inst,
+                    lpszClassName: class.as_ptr(),
+                    hCursor: LoadCursorW(null_mut(), IDC_ARROW),
+                    hbrBackground: GetSysColorBrush(COLOR_3DFACE),
+                    ..Default::default()
+                };
+                RegisterClassW(&wc);
+                let title = wide(transcript::TITLE);
+                let (x, size) = (CW_USEDEFAULT, (680, 560));
+                let hwnd = CreateWindowExW(0, class.as_ptr(), title.as_ptr(), WS_OVERLAPPEDWINDOW, x, x, size.0, size.1, null_mut(), null_mut(), inst, null());
+                if hwnd.is_null() {
+                    let _ = tx.send(Err(std::io::Error::last_os_error().to_string()));
+                    return;
+                }
+                let font = message_font();
+                let child = |class: &str, label: &str, style: u32, id: usize| {
+                    let c = CreateWindowExW(0, wide(class).as_ptr(), wide(label).as_ptr(), WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, hwnd, id as _, inst, null());
+                    SendMessageW(c, WM_SETFONT, font as usize, 0);
+                };
+                // Read-only but selectable, so Ctrl+C copies a selection.
+                let text = (ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL) as u32;
+                child("EDIT", "", WS_BORDER | WS_VSCROLL | WS_TABSTOP | text, ID_TEXT);
+                for (i, (label, _)) in BUTTONS.iter().enumerate() {
+                    child("BUTTON", label, WS_TABSTOP | BS_PUSHBUTTON as u32, ID_BUTTON + i);
+                }
+                child("STATIC", "", SS_NOPREFIX, ID_STATUS);
+                layout(hwnd);
+                TRANSCRIPT.set(Some(transcript::Window::new(Win { hwnd })));
+                let _ = tx.send(Ok(hwnd as isize));
+                let mut msg = MSG::default();
+                while GetMessageW(&mut msg, null_mut(), 0, 0) > 0 {
+                    // Tab between the text and the buttons, Esc closes.
+                    if IsDialogMessageW(hwnd, &msg) == 0 {
+                        TranslateMessage(&msg);
+                        DispatchMessageW(&msg);
+                    }
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        let hwnd = rx.recv().map_err(|_| "the transcript window's thread died".to_string())??;
+        Ok(Transcripts { hwnd })
+    }
+
+    pub fn show(&self, m: Meeting) {
+        let boxed = Box::into_raw(Box::new(m));
+        if unsafe { PostMessageW(self.hwnd as HWND, WM_TRANSCRIPT, 0, boxed as LPARAM) } == 0 {
+            drop(unsafe { Box::from_raw(boxed) });
+        }
+    }
+}
+
+/// Text on top, the buttons and the status in a row under it.
+unsafe fn layout(hwnd: HWND) {
+    let mut r = RECT::default();
+    GetClientRect(hwnd, &mut r);
+    let row = r.bottom - PAD - BUTTON_H;
+    let place = |id: usize, x: i32, y: i32, w: i32, h: i32| MoveWindow(GetDlgItem(hwnd, id as i32), x, y, w.max(0), h.max(0), 1);
+    place(ID_TEXT, PAD, PAD, r.right - 2 * PAD, row - 2 * PAD);
+    let mut x = PAD;
+    for i in 0..BUTTONS.len() {
+        place(ID_BUTTON + i, x, row, WIDE_BUTTON, BUTTON_H);
+        x += WIDE_BUTTON + 8;
+    }
+    place(ID_STATUS, x + 8, row + 6, r.right - x - 8 - PAD, BUTTON_H - 6);
+}
+
+/// The transcript window as `transcript::Window` sees it.
+struct Win {
+    hwnd: HWND,
+}
+
+impl transcript::Shell for Win {
+    fn present(&mut self, text: &str, summary: bool) {
+        unsafe {
+            // An edit control shows a bare "\n" as nothing.
+            SetWindowTextW(GetDlgItem(self.hwnd, ID_TEXT as i32), wide(&text.replace('\n', "\r\n")).as_ptr());
+            EnableWindow(GetDlgItem(self.hwnd, (ID_BUTTON + 1) as i32), summary as i32);
+            // Never steals the keyboard from the app in front (rule 8): shown without activating,
+            // then raised above that app by a TOPMOST and NOTOPMOST round trip, still without.
+            ShowWindow(self.hwnd, SW_SHOWNOACTIVATE);
+            let keep = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+            SetWindowPos(self.hwnd, HWND_TOPMOST, 0, 0, 0, 0, keep);
+            SetWindowPos(self.hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, keep);
+        }
+    }
+
+    fn copy(&mut self, text: &str) -> Result<(), String> {
+        insert::copy(text).map_err(|e| e.to_string())
+    }
+
+    fn open(&mut self, dir: &Path) {
+        // Off this thread: Explorer's handler may pump messages while the window's state is in use.
+        let dir = dir.to_string_lossy().into_owned();
+        thread::spawn(move || crate::win::open(&dir));
+    }
+
+    fn status(&mut self, text: &str) {
+        unsafe {
+            SetWindowTextW(GetDlgItem(self.hwnd, ID_STATUS as i32), wide(text).as_ptr());
+            if !text.is_empty() {
+                SetTimer(self.hwnd, 1, STATUS_MS, None);
+            }
+        }
+    }
+}
+
+/// Runs `f` on the window's state, unless a message further up this thread's stack holds it.
+fn with_window(f: impl FnOnce(&mut transcript::Window<Win>)) {
+    TRANSCRIPT.with(|t| t.try_borrow_mut().ok().and_then(|mut t| t.as_mut().map(f)));
+}
+
+unsafe extern "system" fn transcript_proc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_TRANSCRIPT => {
+            let m = *Box::from_raw(lp as *mut Meeting);
+            with_window(|w| w.show(m));
+        }
+        WM_COMMAND => match wp & 0xFFFF {
+            id if (ID_BUTTON..ID_BUTTON + BUTTONS.len()).contains(&id) => with_window(|w| w.click(BUTTONS[id - ID_BUTTON].1)),
+            id if id == IDCANCEL as usize => {
+                ShowWindow(hwnd, SW_HIDE);
+            }
+            _ => {}
+        },
+        WM_TIMER => {
+            KillTimer(hwnd, wp);
+            SetWindowTextW(GetDlgItem(hwnd, ID_STATUS as i32), wide("").as_ptr());
+        }
+        WM_SIZE => layout(hwnd),
+        // Closing only hides it: the next meeting shows in the same window.
+        WM_CLOSE => {
+            ShowWindow(hwnd, SW_HIDE);
+        }
+        _ => return DefWindowProcW(hwnd, msg, wp, lp),
+    }
+    0
 }

@@ -8,6 +8,7 @@ mod dialog;
 mod flow;
 mod meeting;
 mod system;
+mod transcript;
 #[cfg(windows)]
 mod win;
 

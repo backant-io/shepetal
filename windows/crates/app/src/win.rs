@@ -1,13 +1,16 @@
 //! The Windows side of shepetal.exe: single instance, first-run onboarding (mic privacy and the
 //! model download), start at login, and the wiring of the sibling crates. Threads: input runs
 //! the hook, the 🤫 overlay and the tray on its own thread; this one runs the gesture and
-//! `flow::Flow`; one more loads the model and transcribes; meetings poll on another.
+//! `flow::Flow`; one more loads the model and transcribes; meetings poll on another, and one
+//! more transcribes each recorded meeting for the Meeting transcript window.
 
-use crate::dialog::{self, Card};
+use crate::dialog::{self, Card, Transcripts};
 use crate::flow::{self, Flow, Kept};
 use crate::meeting::{self, Show};
 use crate::system::{self, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RUN_KEY, RUN_VALUE};
+use crate::transcript::Meeting;
 use shepetal_core::gesture::{Action, Gesture, HINT_MS};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::ptr::{null, null_mut};
 use std::sync::mpsc::{self, RecvTimeoutError, Sender};
@@ -80,7 +83,7 @@ fn ask(text: &str) -> bool {
 }
 
 /// Opens a folder, a URL or an ms-settings: page with its default handler.
-fn open(target: &str) {
+pub(crate) fn open(target: &str) {
     unsafe { ShellExecuteW(null_mut(), wide("open").as_ptr(), wide(target).as_ptr(), null(), null(), SW_SHOWNORMAL) };
 }
 
@@ -174,6 +177,35 @@ fn spawn_stt(dir: PathBuf, model: &'static audio::model::Model, tx: Sender<Msg>)
     clips
 }
 
+/// Transcribes each recorded meeting once it is saved, keeps transcript.md next to its audio and
+/// shows it in the Meeting transcript window. Jobs are a meeting folder and its app.
+fn spawn_meeting_stt(model: PathBuf, window: Option<Transcripts>, tx: Sender<Msg>) -> Sender<(PathBuf, String)> {
+    let (jobs, rx) = mpsc::channel::<(PathBuf, String)>();
+    thread::spawn(move || {
+        for (dir, app) in rx {
+            // ponytail: a second copy of the model, loaded per meeting so dictation never waits
+            // for an hour of audio; share the dictation thread's if memory gets tight.
+            let mut whisper = audio::Whisper::load(&model);
+            let m = Meeting::transcribe(dir.clone(), app, |file| {
+                let (samples, rate) = audio::wav::read(&dir.join(file)).map_err(|e| format!("could not read {file}: {e}"))?;
+                let samples = if rate == audio::RATE { samples } else { audio::resample(&samples, rate, audio::RATE) };
+                let w = whisper.as_mut().map_err(|e| e.clone())?;
+                Ok((w.segments(&samples)?, samples.len() as u64 / audio::RATE as u64))
+            });
+            drop(whisper);
+            // The text stays when the audio is deleted later. The folder's owner-only ACL is inherited.
+            let kept = std::fs::File::create_new(dir.join("transcript.md")).and_then(|mut f| f.write_all(m.transcript().as_bytes()));
+            if let Err(e) = kept {
+                let _ = tx.send(Msg::Meeting(meetings::Notice::Failed(format!("Could not keep the meeting transcript: {e}"))));
+            }
+            if let Some(w) = &window {
+                w.show(m);
+            }
+        }
+    });
+    jobs
+}
+
 /// First run, and every run until it is done: the mic switches, then the model download (the one
 /// network step, only on a yes). False if the user declined the model.
 fn onboarding(models: &Path, model: &audio::model::Model) -> bool {
@@ -226,6 +258,9 @@ pub fn run() {
     let card = Card::spawn(record);
     let meeting = tx.clone();
     thread::spawn(move || meetings::watch(meetings::Config::default(), clicks, move |n| drop(meeting.send(Msg::Meeting(n)))));
+    let transcripts = Transcripts::spawn();
+    let transcript_error = transcripts.as_ref().err().cloned();
+    let meeting_stt = spawn_meeting_stt(data.join("models").join(model.file), transcripts.ok(), tx.clone());
     let stt = spawn_stt(data.join("models"), model, tx);
 
     let mut flow = Flow::new(
@@ -241,6 +276,9 @@ pub fn run() {
     let mut paused = false;
     let mut meeting_app = String::new();
     let card = card.map_err(|e| flow.error(&format!("Shepetal can't offer to record meetings: {e}"), 0)).ok();
+    if let Some(e) = transcript_error {
+        flow.error(&format!("Shepetal can't show meeting transcripts: {e}. They are kept in each meeting's folder."), 0);
+    }
     loop {
         let msg = rx.recv_timeout(Duration::from_millis(50));
         let now = ms(Instant::now());
@@ -284,7 +322,11 @@ pub fn run() {
                         (Show::Hint(text), _) => flow.show.show_hint(text, HINT),
                         _ => {}
                     },
-                    meetings::Notice::Saved(dir) => flow.show.show_hint(&format!("Meeting saved in {}", dir.display()), HINT),
+                    // The Meeting transcript window opens once it is transcribed.
+                    meetings::Notice::Saved(dir) => {
+                        flow.show.show_hint("Transcribing the meeting", HINT);
+                        let _ = meeting_stt.send((dir, meeting_app.clone()));
+                    }
                     meetings::Notice::Failed(e) => flow.error(&e, now),
                 }
                 vec![]
