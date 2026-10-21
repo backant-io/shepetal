@@ -1,12 +1,12 @@
 # meetings (Windows)
 
-Detects calls and offers a one-click "Record?" (`Event::OfferRecording`). Nothing records until the user clicks it (`Detector::accept`, or a `()` on the receiver passed to `watch`). Then it records the call as two 16 kHz mono WAVs: `Me.wav` (default mic) and `Others.wav` (WASAPI loopback of the default output), in `%LOCALAPPDATA%\Shepetal\meetings\<yyyyMMdd-HHmmss>\`. The folder's DACL grants only the current user, and recordings are never deleted.
+Detects meetings and offers a one-click "Record?" (`Event::OfferRecording`). Nothing records until the user clicks it (`Detector::accept`, or a `()` on the receiver passed to `watch`). Then it records the call as two 16 kHz mono WAVs: `Me.wav` (default mic) and `Others.wav` (WASAPI loopback of the default output), in `%LOCALAPPDATA%\Shepetal\meetings\<yyyyMMdd-HHmmss>\`. The folder's DACL grants only the current user, and recordings are never deleted.
 
-- Mic holders: active audio sessions on every active capture device.
-- Apps: `zoom.exe`, `ms-teams.exe` / `Teams.exe`, Webex (`webex.exe`, `CiscoCollabHost.exe`, `atmgr.exe`) and `discord.exe` count on their own. `slack.exe` counts only while a Slack window title says "huddle". Chrome, Edge, Firefox, Brave and Arc count only while the browser's own window is in front with a Meet, Teams or Zoom web title. shepetal's own process never counts.
-- Thresholds (`Config`): start after 5 s, no end in the first 15 s, after the mic is released, end after 3 s (raised to the 4 s reacquire window) when nothing still proves the call, or after 30 s while the browser tab or huddle window is still there; no end within 10 s of a default-device change.
+- A meeting is any other app using the mic or the camera (Pavel, 2026-10-21): no app lists and no window titles. Who uses them comes from `HKCU\Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\{microphone,webcam}`, the records behind Windows' own mic and camera indicators, so detection needs no permission. A packaged app's key is its package family name; a desktop app's, under `NonPackaged`, is its exe path with `#` for `\`. LastUsedTimeStop is 0 while it uses the device. The card names the app: the exe name without `.exe`, or the package name.
+- shepetal itself never counts, by its exact exe path (`current_exe()`, any case), never by name: it keeps its mic open the whole time it runs.
+- Thresholds (`Config`): offer after 5 s of use; an unanswered offer goes away after 20 s, and no new one comes until the mic and camera are released and used again; the meeting ends once neither has been used by another app for 4 s, never in its first 15 s, and never within 10 s of a default-device change.
 
-The detector, the offer and the record start/stop decision are pure (`Detector::update`, `Detector::accept`), so they are tested on any OS. The Win32 code is `#[cfg(windows)]`.
+The detector, the offer and the record start/stop decision are pure (`Detector::update`, `Detector::accept`), and `in_use` reads the ConsentStore through the `Registry` trait, so they are tested on any OS, the registry with fixtures. On Windows one more test runs the real registry calls on a scratch HKCU key. The Win32 code is `#[cfg(windows)]`.
 
 ```sh
 cd windows

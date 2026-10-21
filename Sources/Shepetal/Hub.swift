@@ -32,6 +32,14 @@ final class Hub {
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
+
+    /// The Meetings tab with this meeting open (the transcript window's Open in Meetings).
+    func showMeeting(_ id: String) {
+        UserDefaults.standard.set("meetings", forKey: "hubTab")
+        meetings.query = ""  // a search could hide it
+        meetings.select(id)
+        show()
+    }
 }
 
 extension Pipeline {
