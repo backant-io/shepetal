@@ -71,7 +71,7 @@ final class FnWatch {
         timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self else { return }
-                let down = self.active() && CGEventSource.keyState(.hidSystemState, key: CGKeyCode(FnKey.keycode))
+                let down = self.active() && CGEventSource.keyState(.hidSystemState, key: CGKeyCode(Key.fn))
                 if self.health.poll(hidFnDown: down, at: ProcessInfo.processInfo.systemUptime) { self.onUnreported?() }
             }
         }
