@@ -55,7 +55,11 @@ The colors are Apple's system red, orange, blue and yellow, which the Mac indica
 | GNOME Wayland | `linux/gnome-extension/`, a GNOME Shell extension (GNOME 45 and later), because Mutter has no layer-shell and lets no app place an overlay. It adds 🤫 as top chrome (above all windows, also full-screen ones), not part of the input region and not reactive, so clicks go through. |
 
 `shepetal daemon` starts `shepetal-indicator` from PATH, except on GNOME Wayland, where it says
-that 🤫 comes from the extension. If the program is missing, the daemon says so once on stderr.
+that 🤫 comes from the extension. The daemon looks the program up on PATH before each start,
+because Rust 1.75 (Ubuntu 24.04) spawns a missing program as a child that exits 127 instead of
+failing (#130). If it is missing (or exits 127, which `env` does when python3 is missing), the
+daemon says so once on stderr and looks again with the same backoff as below, so installing it
+brings 🤫 up without a restart.
 Whenever the indicator exits while the daemon runs (a crash, an X server or compositor restart, a
 display that was not ready yet), the daemon reports it on stderr, reaps it and starts it again
 after 2 s, doubling the wait up to 64 s while it keeps exiting within 30 s (goal rule 3: 🤫 is

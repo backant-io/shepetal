@@ -5,6 +5,10 @@ edition = "2021"
 license = "MIT"
 description = "shepetal for Windows: hold Ctrl+Win, talk, and the text lands at the cursor. Fully local."
 
+[features]
+# The release build once the account service is live: Ctrl+Win needs a trial or a license.
+require-sign-in = []
+
 [[bin]]
 name = "shepetal"
 path = "src/main.rs"
@@ -13,6 +17,8 @@ path = "src/main.rs"
 [dependencies]
 input = { path = "../input" }
 meetings = { path = "../meetings" }
+serde_json = "1"
+sha2 = "0.10"
 shepetal-core = { path = "../core" }
 
 [target.'cfg(windows)'.dependencies]
@@ -21,7 +27,11 @@ insert = { path = "../insert" }
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
+    "Win32_Networking_WinHttp",
     "Win32_Security",
+    "Win32_Security_Credentials",
+    "Win32_Security_Cryptography",
+    "Win32_System_Com",
     "Win32_System_LibraryLoader",
     "Win32_System_Registry",
     "Win32_System_Threading",
