@@ -262,8 +262,8 @@ pub fn ring_alpha(mode: Mode, ms: u64) -> f32 {
     1.0 - (1.0 - PULSE_MIN) * t
 }
 
-/// How long a hint stays next to 🤫 (product rule 2: about 2 s).
-pub const HINT_MS: u64 = 2000;
+/// How long a hint stays next to 🤫 (product rule 2: about 3 s, as on the Mac).
+pub const HINT_MS: u64 = 3000;
 
 /// The indicator's state over time. Pure: times are milliseconds on any monotonic clock.
 #[derive(Debug, Default)]
@@ -714,17 +714,17 @@ mod tests {
             v.frame(1000).label.as_deref(),
             Some("Hold Ctrl+Win to talk")
         );
-        assert!(v.animating(2999));
+        assert!(v.animating(3999));
         v.show_hint("Copied, press Ctrl+V", HINT_MS, 2500);
         assert_eq!(
-            v.frame(3500).label.as_deref(),
+            v.frame(4500).label.as_deref(),
             Some("Copied, press Ctrl+V"),
             "old timer is gone"
         );
-        assert_eq!(v.frame(4499).label.as_deref(), Some("Copied, press Ctrl+V"));
-        assert_eq!(v.frame(4500).label, None);
+        assert_eq!(v.frame(5499).label.as_deref(), Some("Copied, press Ctrl+V"));
+        assert_eq!(v.frame(5500).label, None);
         assert!(
-            !v.animating(4500),
+            !v.animating(5500),
             "nothing left to redraw, the timer can stop"
         );
     }

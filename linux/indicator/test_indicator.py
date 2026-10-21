@@ -53,10 +53,10 @@ class States(unittest.TestCase):
         self.assertEqual(ind.parse("processing"), ("processing", None, 0))
         self.assertEqual(ind.parse("idle"), ("idle", None, 0))
 
-    def test_hint_shows_for_about_2_s_and_keeps_the_ring(self):
-        # Goal rule 2: the short-press hint sits next to 🤫 for about 2 s.
+    def test_hint_shows_for_about_3_s_and_keeps_the_ring(self):
+        # Goal rule 2: the short-press hint sits next to 🤫 for about 3 s.
         hint = "Hold fn to talk · double-tap for hands-free"
-        self.assertEqual(ind.parse(f"hint {hint}\n"), (None, hint, 2))
+        self.assertEqual(ind.parse(f"hint {hint}\n"), (None, hint, 3))
 
     def test_error_is_yellow_with_its_text_for_4_s(self):
         self.assertEqual(ind.parse("error Transcription failed"), ("error", "Transcription failed", 4))

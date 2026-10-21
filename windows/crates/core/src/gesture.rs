@@ -42,8 +42,8 @@ pub const DOUBLE_TAP_MS: u64 = 500;
 /// Another key in the first second of a hold makes the hotkey part of a shortcut, not a dictation
 /// (docs/re/dictation-input.md 2.3, "Chord collision").
 pub const CHORD_WINDOW_MS: u64 = 1000;
-/// How long the short-press hint shows.
-pub const HINT_MS: u64 = 2000;
+/// How long the short-press hint shows (product rule 2: about 3 s, `Hint.seconds` on the Mac).
+pub const HINT_MS: u64 = 3000;
 
 /// Shown next to the 🤫 indicator after a too-short press. Our own wording, as on the Mac and Linux.
 pub fn short_press_hint(hotkey: &str) -> String {
@@ -185,7 +185,7 @@ mod tests {
     #[test]
     fn hint_wording_and_duration() {
         assert_eq!(short_press_hint("Ctrl+Win"), "Hold Ctrl+Win to talk · double-tap for hands-free");
-        assert!((1500..=2500).contains(&HINT_MS), "about 2 s, rule 2");
+        assert_eq!(HINT_MS, 3000, "about 3 s, rule 2, as on the Mac");
     }
 
     // The input crate reports keys as Windows VK codes.

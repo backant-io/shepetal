@@ -596,7 +596,7 @@ In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from
 
 ### L-FN-3: too-short press and its hint
 1. Tap fn once, briefly (under half a second), and don't tap again.
-2. Expected: nothing is typed. About half a second after the release the daemon prints `shepetal: hint: Hold fn to talk · double-tap for hands-free` (with the L-KEY-3 key's name in place of fn). A new `<unix-ms>.tooshort.wav` is in `~/.local/share/shepetal/audio/`.
+2. Expected: nothing is typed. About half a second after the release the daemon prints `shepetal: hint: Hold fn to talk · double-tap for hands-free` (with the L-KEY-3 key's name in place of fn), and the same text shows next to 🤫 for about 3 s, then goes. A new `<unix-ms>.tooshort.wav` is in `~/.local/share/shepetal/audio/`.
 3. Tap fn and type a word right after it. Expected: the same hint, nothing transcribed.
 4. Tap fn and then hold a letter key down so it repeats. Expected: the hint still comes about half a second after the tap, not when you let go of the letter.
 (Automated: `single_tap_is_too_short_once_window_expires`, `typing_after_a_tap_is_still_too_short`, `a_tap_ends_as_too_short_on_time_while_a_key_repeats`, `too_short_press_keeps_the_clip_and_shows_the_hint`.)

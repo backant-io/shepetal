@@ -358,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn mic_error_shows_for_2_s_and_clears() {
+    fn mic_error_shows_for_3_s_and_clears() {
         let (mut f, log) = flow(Err("No microphone found".into()), Ok(()), None);
         f.action(Action::Start, 0);
         assert_eq!(take(&log), ["remember focus", "mic start", "mode Error", "hint No microphone found"]);
