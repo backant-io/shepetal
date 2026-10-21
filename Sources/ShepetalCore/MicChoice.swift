@@ -32,7 +32,7 @@ public enum MicChoice {
     /// real one. Not CoreAudio's order alone: it can list an iPhone's Continuity mic before the built-in one.
     public static func pick(_ devices: [MicDevice], forced: String?, ranking: [String], systemDefault: String?,
                             lidClosed: Bool) throws -> MicDevice {
-        let usable = lidClosed ? devices.filter { $0.transport != .builtIn } : devices
+        let usable = Self.usable(devices, lidClosed: lidClosed)
         guard let first = usable.first else { throw devices.isEmpty ? MicError.noMic : MicError.lidClosed }
         for uid in [forced].compactMap({ $0 }) + ranking {
             if let d = usable.first(where: { $0.uid == uid }) { return d }
@@ -40,6 +40,12 @@ public enum MicChoice {
         let real = usable.first { $0.transport == .builtIn } ?? usable.first { $0.transport != .virtual }
         if let d = usable.first(where: { $0.uid == systemDefault }), d.transport != .virtual || real == nil { return d }
         return real ?? first
+    }
+
+    /// The devices a dictation can record from, and the Microphone menu lists: not the built-in mic while the lid
+    /// is closed.
+    public static func usable(_ devices: [MicDevice], lidClosed: Bool) -> [MicDevice] {
+        lidClosed ? devices.filter { $0.transport != .builtIn } : devices
     }
 
     /// A new AVAudioEngine already records from the system default input. Moving it there anyway makes it

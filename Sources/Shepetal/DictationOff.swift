@@ -40,6 +40,7 @@ final class DictationOff: NSObject {
         let apps = list.apps.sorted { ($0.value.lowercased(), $0.key) < ($1.value.lowercased(), $1.key) }
         guard !apps.isEmpty else { return items }
         let menu = NSMenu()
+        menu.autoenablesItems = false  // every item is enabled (#207)
         for (id, name) in apps {
             let i = NSMenuItem(title: name, action: #selector(turnOn(_:)), keyEquivalent: "")
             i.target = self

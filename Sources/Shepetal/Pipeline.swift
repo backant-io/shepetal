@@ -30,7 +30,6 @@ final class Pipeline {
     /// Home's Cleanup line. It names no model, file or path.
     private(set) var cleanupStatus = "Loading…"
     private(set) var downloadingCleanup = false
-    private(set) var cleanupDownloadFailed = false
     let models: URL  // the downloaded cleanup model's dir
     let dictionary: URL  // dictionary.txt in this pipeline's data dir
     /// Writes a recording's WAV. Runs off the main thread: on Pavel's nearly full disk, while macOS purged
@@ -197,7 +196,6 @@ final class Pipeline {
     func downloadCleanup() async {
         guard !downloadingCleanup, let m = currentCleanupModel() else { return }
         downloadingCleanup = true
-        cleanupDownloadFailed = false
         cleanupStatus = "Downloading the cleanup model…"
         defer { downloadingCleanup = false }
         do {
@@ -208,7 +206,6 @@ final class Pipeline {
             try await Task.detached { try m.install(tmp, into: models) }.value  // hashing 1.3 GB stays off the main thread
         } catch {
             FileHandle.standardError.write(Data("cleanup model download: \(error)\n".utf8))
-            cleanupDownloadFailed = true
             cleanupStatus = "Rules only (the download failed; try again from the 🤫 menu)"
             return
         }
