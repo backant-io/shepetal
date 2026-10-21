@@ -22,8 +22,13 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
         self.pasteboard = pasteboard
     }
 
-    /// `sendPaste` delivers the Cmd+V chord; the app posts it to the system (`postCmdV`).
-    func insert(_ text: String, sendPaste: (CGEvent) -> Void) async -> Result {
+    /// `sendPaste` delivers the key events; the app posts them to the system (`postCmdV`). `mode` is the target
+    /// app's (F22). `stillFocused` is rule 8's gate, asked again wherever time passes after the pipeline's own
+    /// check: after the remote delay, before each typed key, and before Return. `pressReturn` (F42) presses Return
+    /// once the text landed, never otherwise.
+    func insert(_ text: String, mode: PasteMode = .local, sendPaste: (CGEvent) -> Void,
+                stillFocused: () -> Bool = { true }, pressReturn: Bool = false) async -> Result {
+        if mode == .typed { return await type(text, sendPaste: sendPaste, stillFocused: stillFocused, pressReturn: pressReturn) }
         let saved = snapshot()
         lock.withLock {
             self.text = text
@@ -35,21 +40,44 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
         for m in Self.markers { item.setData(Data(), forType: m) }  // clipboard managers skip it
         pasteboard.writeObjects([item])
 
+        if mode.syncsClipboard {
+            try? await Task.sleep(for: .seconds(PasteMode.delay()))  // the viewer sends the clipboard across
+            guard stillFocused() else { return notPasted(text) }
+        }
+        let chord = mode == .shiftInsert ? Self.shiftInsert() : Self.cmdV()
         let posted = now
-        for event in Self.cmdV() { sendPaste(event) }
-        while PasteCheck.verdict(postedAt: posted, requestedAt: requestedAt, now: now) == .waiting {
+        chord.forEach(sendPaste)
+        while PasteMode.verdict(mode, postedAt: posted, requestedAt: requestedAt, now: now) == .waiting {
             try? await Task.sleep(for: .milliseconds(10))
         }
-        let landed = PasteCheck.verdict(postedAt: posted, requestedAt: requestedAt, now: now) == .landed
-        if !landed {
-            // Nothing took the paste (focus moved, or the app ignores Cmd+V).
-            leaveOnClipboard(text)
-            return Result(landed: false, restored: false)
-        }
-        let wait = PasteCheck.restoreAt(postedAt: posted, requestedAt: requestedAt) - now
+        // Nothing took the paste (focus moved, or the app ignores Cmd+V).
+        guard PasteMode.verdict(mode, postedAt: posted, requestedAt: requestedAt, now: now) == .landed else { return notPasted(text) }
+        let wait = PasteMode.restoreAt(mode, postedAt: posted, requestedAt: requestedAt) - now
         if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
         restore(saved)
-        return Result(landed: landed, restored: snapshot() == saved)
+        let restored = snapshot() == saved
+        // After the restore wait, so an app that inserts the paste late has it in the field before Return.
+        if pressReturn, stillFocused() { Self.returnKey().forEach(sendPaste) }
+        return Result(landed: true, restored: restored)
+    }
+
+    /// F22 typed mode: one key press per character, rule 8 asked before each, the clipboard never touched. A
+    /// character the layout cannot type, or focus that moved, leaves the whole text on the clipboard instead.
+    /// ponytail: one AX focus read per key; read every few keys if long dictations type slowly.
+    private func type(_ text: String, sendPaste: (CGEvent) -> Void, stillFocused: () -> Bool, pressReturn: Bool) async -> Result {
+        guard let keys = PasteMode.keystrokes(text, layout: Self.layout()) else { return notPasted(text) }
+        for k in keys {
+            guard stillFocused() else { return notPasted(text) }
+            Self.events(k).forEach(sendPaste)
+            await Task.yield()  // fn events keep their main-thread time during a long text
+        }
+        if pressReturn, stillFocused() { Self.returnKey().forEach(sendPaste) }
+        return Result(landed: true, restored: true)
+    }
+
+    private func notPasted(_ text: String) -> Result {
+        leaveOnClipboard(text)
+        return Result(landed: false, restored: false)
     }
 
     /// Rule 8: text that is not pasted stays on the clipboard as plain text, so the user can press ⌘V.
@@ -91,13 +119,35 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
 
     /// Key down and up for Cmd plus the key that types "v" in the current layout.
     /// Only the Command flag is set, so a held fn or other modifier does not leak into the chord.
-    static func cmdV() -> [CGEvent] {
+    static func cmdV() -> [CGEvent] { chord(vKeyCode(), .maskCommand) }
+
+    /// F22: Shift+Insert. Insert is the PC key at the Help key's code, 0x72; remote viewers send it as Insert.
+    static func shiftInsert() -> [CGEvent] { chord(0x72, .maskShift) }
+
+    /// F42: Return with no flag at all, so a held fn or Shift does not make it Enter or a line break.
+    static func returnKey() -> [CGEvent] { chord(36, []) }
+
+    /// A typed key with its modifier keys pressed around it, as a keyboard sends them (CGEventCreateKeyboardEvent's
+    /// documentation), so a remote viewer that tracks modifier keys sees them too. Only these flags are set.
+    static func events(_ k: PasteMode.Keystroke) -> [CGEvent] {
         let source = CGEventSource(stateID: .hidSystemState)
-        return [true, false].compactMap { down in
-            let e = CGEvent(keyboardEventSource: source, virtualKey: vKeyCode(), keyDown: down)
-            e?.flags = .maskCommand
-            return e
-        }
+        let mods: [(CGKeyCode, CGEventFlags)] = (k.shift ? [(56, .maskShift)] : []) + (k.option ? [(58, .maskAlternate)] : [])
+        var held: CGEventFlags = [], events: [CGEvent?] = []
+        for (code, flag) in mods { held.insert(flag); events.append(key(code, down: true, held, source)) }
+        events += [key(CGKeyCode(k.code), down: true, held, source), key(CGKeyCode(k.code), down: false, held, source)]
+        for (code, flag) in mods.reversed() { held.remove(flag); events.append(key(code, down: false, held, source)) }
+        return events.compactMap { $0 }
+    }
+
+    private static func chord(_ code: CGKeyCode, _ flags: CGEventFlags) -> [CGEvent] {
+        let source = CGEventSource(stateID: .hidSystemState)
+        return [true, false].compactMap { key(code, down: $0, flags, source) }
+    }
+
+    private static func key(_ code: CGKeyCode, down: Bool, _ flags: CGEventFlags, _ source: CGEventSource?) -> CGEvent? {
+        let e = CGEvent(keyboardEventSource: source, virtualKey: code, keyDown: down)
+        e?.flags = flags
+        return e
     }
 
     static func postCmdV(_ event: CGEvent) {
@@ -107,20 +157,45 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
 
     /// Reverse lookup of "v" in the active keyboard layout; 9 (ANSI V) when there is none.
     static func vKeyCode() -> CGKeyCode {
-        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
-              let ptr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return 9 }
-        let data = Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue() as Data
-        return data.withUnsafeBytes { raw -> CGKeyCode in
-            guard let layout = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return 9 }
-            for code in 0..<128 {
-                var dead: UInt32 = 0
-                var length = 0
-                var chars = [UniChar](repeating: 0, count: 4)
-                let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), 0, UInt32(LMGetKbdType()),
-                                            OptionBits(1 << kUCKeyTranslateNoDeadKeysBit), &dead, 4, &length, &chars)
-                if status == noErr, length == 1, chars[0] == 0x76 { return CGKeyCode(code) }
+        guard let type = keyboardLayout() else { return 9 }
+        return (0..<128).first { type($0, 0) == 0x76 }.map { CGKeyCode($0) } ?? 9
+    }
+
+    /// Each character the active keyboard layout types, and its key: no modifier first, then Shift, Option and
+    /// Shift+Option, so a character gets its simplest key. The keypad is left out (a remote side may have Num Lock
+    /// off), and so are control characters but Tab. Dead keys give their accent alone. Empty without a layout.
+    static func layout() -> [Character: PasteMode.Keystroke] {
+        guard let type = keyboardLayout() else { return [:] }
+        var map: [Character: PasteMode.Keystroke] = [:]
+        // UCKeyTranslate takes Carbon's modifier bits shifted right by 8: Shift is 2, Option 8.
+        for (state, shift, option) in [(UInt32(0), false, false), (2, true, false), (8, false, true), (10, true, true)] {
+            for code in 0..<128 where !(65...92).contains(code) {
+                guard let u = type(code, state), u >= 0x20 && u != 0x7F || u == 0x09, let scalar = Unicode.Scalar(u) else { continue }
+                let c = Character(scalar)
+                if map[c] == nil { map[c] = PasteMode.Keystroke(code: UInt16(code), shift: shift, option: option) }
             }
-            return 9
+        }
+        return map
+    }
+
+    /// What one key types on the active layout with a Carbon modifier state, or nil; nil without a layout.
+    private static func keyboardLayout() -> ((_ code: Int, _ state: UInt32) -> UniChar?)? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let ptr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let data = Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue() as Data
+        let kbd = UInt32(LMGetKbdType())
+        return { code, state in
+            withExtendedLifetime(source) {
+                data.withUnsafeBytes { raw -> UniChar? in
+                    guard let layout = raw.bindMemory(to: UCKeyboardLayout.self).baseAddress else { return nil }
+                    var dead: UInt32 = 0
+                    var length = 0
+                    var chars = [UniChar](repeating: 0, count: 4)
+                    let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), state, kbd,
+                                                OptionBits(1 << kUCKeyTranslateNoDeadKeysBit), &dead, 4, &length, &chars)
+                    return status == noErr && length == 1 ? chars[0] : nil
+                }
+            }
         }
     }
 }
