@@ -37,9 +37,9 @@ final class Pipeline {
     /// Writes a recording's WAV. Runs off the main thread: on Pavel's nearly full disk, while macOS purged
     /// space, one such write took 86 s, and fn, the menu and rule 8 froze with it (M-NS-1). Tests stall it.
     var writeAudio: @Sendable (_ samples: [Float], _ id: String) throws -> URL
-    /// Settings' "Use the text around the cursor to clean up dictation" (F24, off by default), read at each
+    /// Settings' "Use the text around the cursor to clean up dictation" (F24, on by default), read at each
     /// dictation. Tests set it.
-    var useFieldContext: () -> Bool = { UserDefaults.standard.bool(forKey: CleanupContext.settingKey) }
+    var useFieldContext: () -> Bool = { CleanupContext.isOn(.standard) }
     /// F42's Settings toggle: a dictation that ends with "press enter" presses Return after a landed paste.
     var pressEnterCommand: () -> Bool = { UserDefaults.standard.bool(forKey: PressEnter.key) }
     /// Where Settings' style picks are read (F37). Tests pass a throwaway suite.

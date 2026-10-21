@@ -4,6 +4,12 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### F24 on by default (Pavel, 2026-10-21)
+
+- **Decision:** F24's latency bar is 800 ms instead of 700 ms, and "Use the text around the cursor to clean up dictation" is on by default with 500 characters on each side; Settings can still switch it off. Every other latency target stays at 700 ms.
+- **Changed:** the default in `CleanupContext.isOn` and Settings, `scripts/e2e-mac.sh` c05 runs by default (FIELD=0 skips it) under an 800 ms bar, agent/goal.md, docs/models.md and M-CTX-2. There is no runtime fallback that skips the field when reading it is slow; the cleanup model's 1 s deadline is unchanged.
+- **Mac column:** 68 of 124 cells counted before, 69 after: F24 is `hand-test`, waiting on M-CTX-2.
+
 ### mac80 wave 2 (integration PR #242)
 
 - **Merged:** #230 (F91), #238 (F12), #229 (F71), #235 (F24), #234 (F42, F22), #233 (F48, F33), #236 (F86, F64), #232 (F61, F62) and #231 (F37). Their hot-file wiring, wiring tests, manual steps and ledger rows came in #242, with the #239 follow-ups (a failed model download says so next to 🤫, the whole menuNeedsUpdate body is pinned) and the window title in lowercase.

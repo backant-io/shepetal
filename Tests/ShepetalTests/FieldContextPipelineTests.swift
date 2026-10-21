@@ -4,8 +4,8 @@ import ShepetalCore
 @testable import Shepetal
 
 /// F24: with Settings' "Use the text around the cursor to clean up dictation" on, the field is read once, before
-/// cleanup, and the cleanup model gets it cut down; off (the default) the model gets nothing and the field is read
-/// after cleanup, as before. Rule 8 is checked before the read, Esc still counts until the paste starts, and the
+/// cleanup, and the cleanup model gets it cut down (on by default); switched off, the model gets nothing and the field
+/// is read after cleanup, as before. Rule 8 is checked before the read, Esc still counts until the paste starts, and the
 /// field's text never reaches History. A temp data dir and a private pasteboard: never the user's clipboard or data.
 final class FieldContextPipelineTests: XCTestCase {
     var root: URL!
@@ -52,10 +52,11 @@ final class FieldContextPipelineTests: XCTestCase {
         return (pipeline, model, run)
     }
 
-    // Off by default: the model gets nothing from the field, and the field is read after cleanup, as before F24.
+    // On by default (Pavel, 2026-10-21). Switched off: the model gets nothing from the field, and the field is read
+    // after cleanup, as before F24.
     @MainActor
-    func testOffByDefaultTheModelGetsNothing() async throws {
-        XCTAssertFalse(try Pipeline(root: root, pasteboard: pasteboard).useFieldContext(), "off unless the user turns it on")
+    func testOnByDefaultAndSwitchedOffTheModelGetsNothing() async throws {
+        XCTAssertTrue(try Pipeline(root: root, pasteboard: pasteboard).useFieldContext(), "on unless the user switches it off")
         let (_, model, run) = try await dictate(on: false, field: ksenia)
         XCTAssertEqual(model.contexts, [.none])
         XCTAssertEqual(model.log, ["cleanup", "paste", "read"])
