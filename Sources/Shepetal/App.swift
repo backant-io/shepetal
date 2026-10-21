@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let tap = FnTap()
     private let mic = Mic()
     private let speech = SpeechMenu()
+    private let dictationOff = DictationOff()  // F102: per-app off switch
     private var dictation: Dictation?
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
@@ -20,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
     private var shortcuts: ShortcutsWindow?
+    private var whatsNew: WhatsNewWindow?
     private var transcription: Task<Void, Never>?
     private var inserting = false { didSet { syncTap() } }  // the paste is under way, too late for Esc
     private var timers: [Timer] = []
@@ -33,6 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let updater: any UpdateChecking = NoUpdateChecker()
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
+    /// F09: mute or pause other audio while dictating (Settings, both off by default); never during a meeting.
+    private lazy var media = MediaControl(meeting: { [weak self] in self?.meetings.current != nil || self?.meetings.detector.active != nil })
     /// Past meetings in the 🤫 menu: the meeting in the transcript window.
     private var openTranscript: (Meeting) -> Void = { _ in }
     private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
@@ -55,7 +59,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let crashHint = Watchdog.start()  // F99: first, so a crash in the rest of the launch is caught too
         indicator = Indicator()
+        let updated = WhatsNewWindow.atLaunch()  // before Pipeline creates history.sqlite (how an update from 0.1.0 is told from a first install)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.title = "🤫"
         statusItem.menu = NSMenu()
@@ -86,6 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
+        Task { await pipeline?.loadCleanup() }
         do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
             meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
             meetingFlow?.attach(meetings)
@@ -100,6 +107,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         meetings.watch()
         applyRetention()
 
+        if let updated { indicator.show(WhatsNew.hint(updated), seconds: 6) }  // once; the account and permission hints below replace it
         // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
         Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },
                              hint: { [weak self] in self?.indicator.show($0, seconds: 6) },
@@ -116,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if hintAtLaunch { indicator.show(holdHint, seconds: Hint.seconds) }
         if CommandLine.arguments.contains("--show-shortcuts") { openShortcuts() }
         applyFnKeySetting()
+        if let crashHint { indicator.show(crashHint, seconds: 8) }
     }
 
     /// "Press 🌐 key to" must be Do Nothing, or fn switches the input source instead of dictating.
@@ -145,7 +154,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Closes the meeting files so their WAV headers are written (rule 4).
-    func applicationWillTerminate(_ notification: Notification) { meetings.stop() }
+    func applicationWillTerminate(_ notification: Notification) {
+        Watchdog.quitting()  // F99: first, so a crash in meetings.stop() still stays quit
+        meetings.stop()
+        media.end()  // F09: the sound back on, what it paused resumed
+    }
 
     // MARK: keys → gestures
 
@@ -153,6 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func key(_ input: KeyInput, at t: TimeInterval) {
         Account.shared.afterBlockedPress(input)  // the release of a refused press opens Home
         let idle = dictation?.gesture.state == .idle
+        if let off = dictationOff.hint(for: input, idle: idle) { return indicator.show(off, seconds: Hint.seconds) }  // F102: fn still reaches the app; nothing records
         switch input {
         case .pasteLast: pasteLast()
         case .copyLast: copyLast()
@@ -178,6 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         do {
             for action in try dictation.run(event) { show(action) }
         } catch {
+            media.end()  // the throw skipped show(.tooShort or .cancel), which restores
             fail(error.localizedDescription)
         }
         syncTap()
@@ -205,14 +220,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .start:
             focusAtStart = FocusedText.window()
             indicator.set(.recording)
+            indicator.status = Indicator.creatorStatus()  // creator mode; any mode but recording or hands-free clears it
             appAtStart = AppContext.capture()
-        case .lockHandsFree: indicator.set(.handsFree)
+            media.begin(mute: dictation?.gesture.holdThreshold ?? 0.5, pause: dictation?.gesture.chordWindow ?? 1) { [weak self] in
+                self?.fnHeldOrLocked == true
+            }
+        case .lockHandsFree:
+            indicator.set(.handsFree)
+            media.begin(mute: 0, pause: 0) { [weak self] in self?.fnHeldOrLocked == true }
         case .tooShort:
+            media.end()
             indicator.set(.idle)
             indicator.show(holdHint, seconds: Hint.seconds)
-        case .cancel: indicator.set(.idle)
+        case .cancel:
+            media.end()
+            indicator.set(.idle)
         case .warnDuration: indicator.show(Hint.oneMinuteLeft, seconds: 5)
-        case .stop: break  // transcribe(_:) shows processing
+        case .stop: media.end()  // transcribe(_:) shows processing
+        }
+    }
+
+    /// fn held past the threshold, or hands-free: not fn+Delete, and not a short tap still waiting for its second tap.
+    private var fnHeldOrLocked: Bool {
+        switch dictation?.gesture.state {
+        case .holding?, .handsFree?: true
+        default: false
         }
     }
 
@@ -236,6 +268,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             Task { await self?.loadEngine() }
         }
         speech.fail = { [weak self] in self?.fail($0) }
+        speech.notice = { [weak self] in self?.indicator.show($0, seconds: 4) }
         mic.watch()
     }
 
@@ -358,6 +391,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,
                               engineProblem: engine == nil ? engineStatus : nil,
                               canDownloadEngine: engine == nil && !ParakeetEngine.isInstalled,
+                              cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,
+                              downloadingCleanup: pipeline?.downloadingCleanup == true,
+                              cleanupDownloadFailed: pipeline?.cleanupDownloadFailed == true,
+                              dictionarySupport: speech.dictionarySupport(),
                               access: Account.shared.access, signingIn: Account.shared.signingIn,
                               recordingMeeting: meetings.current != nil,
                               meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],
@@ -371,6 +408,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             default: nil
             }
         }
+        // F102: the off switch for the front app goes with the input items, after Languages.
+        let input = menu.items.firstIndex { $0.representedObject as? MenuAction == .helpCenter }.map { $0 - 1 } ?? menu.numberOfItems
+        for (n, i) in dictationOff.menuItems().enumerated() { menu.insertItem(i, at: input + n) }
     }
 
     @objc private func menuAction(_ sender: NSMenuItem) {
@@ -378,6 +418,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch action {
         case .permissions: showOnboarding()
         case .download: downloadModel()
+        case .downloadCleanup: Task { await pipeline?.downloadCleanup() }
+        case .downloadDictionarySupport: speech.downloadBoost()
         case .signIn: Account.shared.signIn()
         case .cancelSignIn: Account.shared.cancelSignIn()
         case .buy: Account.shared.buy()
@@ -396,6 +438,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .quit: NSApp.terminate(nil)
         case .microphone, .languages: break  // their own submenus
         }
+    }
+
+    private func openWhatsNew() {
+        whatsNew = whatsNew ?? WhatsNewWindow()
+        NSApp.activate(ignoringOtherApps: true)
+        whatsNew?.window?.center()
+        whatsNew?.showWindow(nil)
     }
 
     private func openShortcuts() {
@@ -422,7 +471,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          openPermissions: { [weak self] in self?.showOnboarding() },
                          loginItem: loginItem, openDictionary: { [speech] in speech.openDictionary() },
                          restoreFnKey: { [weak self] in self?.restoreFnKey() },
-                         meetingStore: meetingFlow?.store ?? InMemoryMeetingStore())
+                         meetingStore: meetingFlow?.store ?? InMemoryMeetingStore(),
+                         openWhatsNew: { [weak self] in self?.openWhatsNew() },
+                         notices: { [weak self] in self?.indicator.notices.newestFirst ?? [] })
         return hub
     }
 

@@ -53,4 +53,24 @@ final class WhatsNewNotesTests: XCTestCase {
         XCTAssertEqual(at, at.sorted())
         for line in WhatsNewWindow.notes.flatMap(\.lines) { XCTAssertTrue(text.contains("• \(line)")) }
     }
+
+    /// The app delegate cannot run in a test, so this pins the What's new wiring in App.swift by its source.
+    /// atLaunch() must look for history.sqlite before Pipeline creates it, or every update from 0.1.0 is silent.
+    /// The update hint comes before Account.shared.start, so the account and permission hints replace it.
+    /// What's new… is on Home (the 🤫 menu stays at its 12 items), and the hint says so.
+    func testTheAppChecksForAnUpdateBeforePipelineAndHintsBeforeTheAccount() throws {
+        let app = try AppSource.code("App.swift")
+        let launch = try AppSource.body(of: "func applicationDidFinishLaunching(", in: app)
+        func at(_ line: String) throws -> String.Index {
+            try XCTUnwrap(launch.range(of: line), "applicationDidFinishLaunching: \(line)").lowerBound
+        }
+        XCTAssertLessThan(try at("let updated = WhatsNewWindow.atLaunch()"), try at("Pipeline(pasteboard: .general)"),
+                          "atLaunch() must run before Pipeline creates history.sqlite")
+        XCTAssertLessThan(try at("if let updated { indicator.show(WhatsNew.hint(updated), seconds: 6) }"),
+                          try at("Account.shared.start("), "the account hint must replace the update hint, not the reverse")
+        XCTAssertTrue(app.contains("openWhatsNew: { [weak self] in self?.openWhatsNew() },"), "the Hub gets the window")
+        let home = try AppSource.body(of: "private struct HomeTab: View {", in: try AppSource.code("Hub.swift"))
+        XCTAssertTrue(home.contains("Button(\"What's new…\", action: model.openWhatsNew)"), "What's new… is not on Home")
+        XCTAssertTrue(WhatsNew.hint("0.1.1").contains("on Home"), "the hint names where the notes are")
+    }
 }

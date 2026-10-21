@@ -1,7 +1,8 @@
 import AppKit
 import ShepetalCore
 
-/// What's new… in the 🤫 menu: the release notes, newest first. Only the menu opens it; nothing opens at launch.
+/// What's new… on Home in the shepetal window: the release notes, newest first. Only that button opens it;
+/// nothing opens at launch.
 final class WhatsNewWindow: NSWindowController {
     /// In our own words, newest first, dates DD.MM.YY. The default VERSION in scripts/make-app.sh and
     /// scripts/make-pkg.sh must have an entry (WhatsNewNotesTests), so a version bump comes with its notes.

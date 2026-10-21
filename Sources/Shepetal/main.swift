@@ -10,9 +10,11 @@ import ServiceManagement
 //                                       (the release check that Quit works; nothing is clicked on screen)
 // shepetal --postinstall              run by the installer as the user: turns on Start at login, then exits
 // shepetal --unregister-login-item    run by the uninstaller: turns Start at login off, then exits
+// shepetal --watchdog <pid>           started by the app at launch: opens it again if <pid> crashes (F99)
 let args = CommandLine.arguments
 ParakeetEngine.stayOffline()  // before any model load, in every mode (#78)
 if let i = args.firstIndex(of: "--e2e-meeting") { MeetingE2E.main(Array(args[(i + 1)...])) }
+if let i = args.firstIndex(of: Watchdog.flag) { Watchdog.main(Array(args[(i + 1)...])) }
 if args.contains("--postinstall") || args.contains("--unregister-login-item") {
     let service = SMAppService.mainApp
     do {

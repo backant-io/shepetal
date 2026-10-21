@@ -36,7 +36,8 @@ final class AppearanceTests: XCTestCase {
             return XCTFail("an earlier test fixed the data dir, so the Hub would read the real account")
         }
         let hub = Hub(pipeline: try Pipeline(root: root, pasteboard: pasteboard), engine: { nil },
-                      status: { ("", false) }, retention: { .keep }, setRetention: { _ in }, openPermissions: {})
+                      status: { ("", false) }, retention: { .keep }, setRetention: { _ in }, openPermissions: {},
+                      loginItem: LoginItem(say: { _ in }), openDictionary: {}, restoreFnKey: {})
         let window = try XCTUnwrap(Mirror(reflecting: hub).descendant("window") as? NSWindow,
                                    "Hub's window was renamed: update this test")
         assertFollowsTheSystem(window, "the Shepetal window")

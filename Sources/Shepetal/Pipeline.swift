@@ -1,4 +1,5 @@
 import AppKit
+import ShepetalCleanup
 import ShepetalCore
 
 enum Paths {
@@ -17,12 +18,20 @@ final class Pipeline {
         var readyMs: Double = 0      // release to text ready (STT + cleanup)
         var inserted: String = ""
         var paste: Inserter.Result?
+        var cleanupModel: String?    // set when the local model's rewrite was used
         var error: String?
     }
 
     let store: AudioStore
     let history: History
     let inserter: Inserter
+    /// The local cleanup model (docs/models.md, Cleanup). nil: the rules run alone.
+    var cleanup: CleanupModel?
+    /// Home's Cleanup line. It names no model, file or path.
+    private(set) var cleanupStatus = "Loading…"
+    private(set) var downloadingCleanup = false
+    private(set) var cleanupDownloadFailed = false
+    let models: URL  // the downloaded cleanup model's dir
     let dictionary: URL  // dictionary.txt in this pipeline's data dir
     /// Writes a recording's WAV. Runs off the main thread: on Pavel's nearly full disk, while macOS purged
     /// space, one such write took 86 s, and fn, the menu and rule 8 froze with it (M-NS-1). Tests stall it.
@@ -38,6 +47,7 @@ final class Pipeline {
         writeAudio = { try store.save($0, id: $1) }
         history = try History(path: root.appendingPathComponent("history.sqlite"))
         dictionary = root.appendingPathComponent("dictionary.txt")
+        models = root.appendingPathComponent("models")
     }
 
     /// `app` is the frontmost app at dictation start (history only). `context` is the text around the cursor and
@@ -85,7 +95,9 @@ final class Pipeline {
             if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"
         }
-        run.entry.text = Self.finishText(run.entry.rawText, dictionary: dictionary)
+        let cleaned = await finishText(run.entry.rawText)
+        run.entry.text = cleaned.text
+        run.cleanupModel = cleaned.usedModel ? cleanup?.name : nil
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
@@ -117,11 +129,74 @@ final class Pipeline {
         return "No speech heard"
     }
 
-    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
-    /// Cleanup, spoken dates as numbers (docs/text-rules.md), then the personal dictionary (F39), whose text is
-    /// inserted as written; InsertionRules fits the result to the cursor afterwards.
-    static func finishText(_ raw: String, dictionary: URL) -> String {
-        Vocabulary.load(dictionary).apply(Dates.apply(Cleanup.apply(SpeechGuard.stripTags(raw))))
+    /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub): tags
+    /// stripped, the rules, the local cleanup model when it is loaded, spoken dates as numbers
+    /// (docs/text-rules.md), then the personal dictionary (F39), whose text is inserted as written.
+    /// InsertionRules fits the result to the cursor afterwards. Runs off the main thread.
+    func finishText(_ raw: String) async -> (text: String, usedModel: Bool) {
+        let model = cleanup, dictionary = dictionary
+        return await Task.detached {
+            let cleaned = SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model)
+            return (Vocabulary.load(dictionary).apply(Dates.apply(cleaned.text)), cleaned.usedModel)
+        }.value
+    }
+
+    // MARK: cleanup model
+
+    /// SHEPETAL_CLEANUP_MODEL, else this Mac's default in <data>/models.
+    var cleanupPath: String? {
+        ProcessInfo.processInfo.environment["SHEPETAL_CLEANUP_MODEL"]
+            ?? currentCleanupModel().map { models.appendingPathComponent($0.file).path }
+    }
+
+    /// This Mac's cleanup model while it is neither loaded nor downloaded: the 🤫 menu offers it. nil on Intel.
+    var cleanupToDownload: CleanupModelFile? {
+        guard cleanup == nil, let m = currentCleanupModel(),
+              !FileManager.default.fileExists(atPath: models.appendingPathComponent(m.file).path) else { return nil }
+        return m
+    }
+
+    /// Loads the cleanup model when its file is there. Returns Home's Cleanup line (E2E prints it too).
+    @discardableResult
+    func loadCleanup() async -> String {
+        cleanupStatus = await load()
+        return cleanupStatus
+    }
+
+    private func load() async -> String {
+        guard let path = cleanupPath else { return "Rules only on this Mac" }
+        guard FileManager.default.fileExists(atPath: path) else { return "Rules only (download the cleanup model from the 🤫 menu)" }
+        do {
+            cleanup = try await Task.detached { try LlamaCleanup(path: path) }.value
+            return "On"
+        } catch {
+            // The UI names no model, file or path; the detail goes to stderr.
+            FileHandle.standardError.write(Data("cleanup model: \(error)\n".utf8))
+            return "Rules only (the model could not be loaded)"
+        }
+    }
+
+    /// User action only (the 🤫 menu): this Mac's cleanup model from Hugging Face into <data>/models, checked
+    /// against its SHA-256, then loaded. A second call while one runs does nothing.
+    func downloadCleanup() async {
+        guard !downloadingCleanup, let m = currentCleanupModel() else { return }
+        downloadingCleanup = true
+        cleanupDownloadFailed = false
+        cleanupStatus = "Downloading the cleanup model…"
+        defer { downloadingCleanup = false }
+        do {
+            let (tmp, response) = try await URLSession.shared.download(from: m.url)
+            defer { try? FileManager.default.removeItem(at: tmp) }
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SpeechError("Download failed: \(response)") }
+            let models = models
+            try await Task.detached { try m.install(tmp, into: models) }.value  // hashing 1.3 GB stays off the main thread
+        } catch {
+            FileHandle.standardError.write(Data("cleanup model download: \(error)\n".utf8))
+            cleanupDownloadFailed = true
+            cleanupStatus = "Rules only (the download failed; try again from the 🤫 menu)"
+            return
+        }
+        await loadCleanup()
     }
 
     private func saved(_ saving: Task<URL, Error>, _ run: inout Run) async -> String? {

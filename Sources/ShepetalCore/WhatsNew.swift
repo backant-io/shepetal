@@ -27,5 +27,6 @@ public enum WhatsNew {
     }
 
     /// Next to the corner 🤫, once after an update. Nothing opens and nothing takes focus (rule 8).
-    public static func hint(_ version: String) -> String { "Updated to \(version) · What's new is in the 🤫 menu" }
+    /// What's new… is on Home, not in the 🤫 menu, which stays at its 12 items (#210).
+    public static func hint(_ version: String) -> String { "Updated to \(version) · What's new… is on Home in the shepetal window" }
 }
