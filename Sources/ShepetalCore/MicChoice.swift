@@ -28,7 +28,8 @@ public enum MicChoice {
     /// 1. the forced device, if present; 2. the first present device in the ranking; 3. the system default.
     /// With the lid closed the built-in mic is skipped (it is covered or switched off). Forced and ranked are the
     /// user's own choice; a virtual system default (a meeting app's loopback driver, an aggregate) is not, so it is
-    /// never taken over a real mic: it records no voice.
+    /// never taken over a real mic: it records no voice. In its place comes the built-in mic, then the first other
+    /// real one. Not CoreAudio's order alone: it can list an iPhone's Continuity mic before the built-in one.
     public static func pick(_ devices: [MicDevice], forced: String?, ranking: [String], systemDefault: String?,
                             lidClosed: Bool) throws -> MicDevice {
         let usable = lidClosed ? devices.filter { $0.transport != .builtIn } : devices
@@ -36,10 +37,14 @@ public enum MicChoice {
         for uid in [forced].compactMap({ $0 }) + ranking {
             if let d = usable.first(where: { $0.uid == uid }) { return d }
         }
-        let real = usable.first { $0.transport != .virtual }
+        let real = usable.first { $0.transport == .builtIn } ?? usable.first { $0.transport != .virtual }
         if let d = usable.first(where: { $0.uid == systemDefault }), d.transport != .virtual || real == nil { return d }
         return real ?? first
     }
+
+    /// A new AVAudioEngine already records from the system default input. Moving it there anyway makes it
+    /// reconfigure right after the start (the 21.10.26 empty recordings), so it is moved only to another device.
+    public static func needsMove(_ pick: MicDevice, systemDefault: String?) -> Bool { pick.uid != systemDefault }
 
     /// "Prefer <name>": that device goes to the top of the ranking.
     public static func prefer(_ uid: String, in ranking: [String]) -> [String] {
@@ -95,6 +100,7 @@ public struct MicHealth {
         case silent       // zeros for `warnAfter`: warn next to 🤫
         case stillSilent  // zeros for `escalateAfter`: a stronger warning
         case noAudio      // no buffer at all `noAudioAfter` after the start: stop, keep the audio, show an error
+        case stalled      // buffers came, then none for `noAudioAfter`: stop, transcribe what came, show an error
     }
 
     public var reopenAfter: TimeInterval = 1
@@ -103,7 +109,7 @@ public struct MicHealth {
     public var noAudioAfter: TimeInterval = 5
 
     private let start: TimeInterval
-    private var buffers = 0
+    private var last: TimeInterval?        // the newest buffer's time
     private var heard = false              // a non-zero sample since the start
     private var zerosSince: TimeInterval?
     private var fired: Set<Event> = []
@@ -111,7 +117,7 @@ public struct MicHealth {
     public init(start: TimeInterval) { self.start = start }
 
     public mutating func buffer(_ samples: UnsafeBufferPointer<Float>, at t: TimeInterval) -> [Event] {
-        buffers += 1
+        last = t
         if samples.contains(where: { $0 != 0 }) {
             heard = true
             zerosSince = nil
@@ -131,7 +137,7 @@ public struct MicHealth {
     }
 
     public mutating func tick(at t: TimeInterval) -> [Event] {
-        buffers == 0 && t - start >= noAudioAfter ? once(.noAudio) : []
+        t - (last ?? start) >= noAudioAfter ? once(last == nil ? .noAudio : .stalled) : []
     }
 
     private mutating func once(_ e: Event) -> [Event] {

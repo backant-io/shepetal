@@ -23,14 +23,23 @@ final class DeadRecorder: Recorder {
 /// profile once, on the first open.
 final class MovedEngineRecorder: Recorder {
     var opens = 0, restarts = 0
-    var running = false, newFormat = false
+    var running = false, newFormat = false, changesAfterRestart = false
     var opened: XCTestExpectation?
     override func open(_ device: MicDevice?) throws {
         opens += 1
         engineChanged(running: running, formatKept: !(newFormat && opens == 1))
         if opens == 1 { opened?.fulfill() }
     }
-    override func restart() throws { restarts += 1 }
+    override func restart() throws {
+        restarts += 1
+        if changesAfterRestart { engineChanged(running: false, formatKept: true) }
+    }
+}
+
+/// A mic whose buffers stopped partway.
+final class StalledRecorder: Recorder {
+    override func open(_ device: MicDevice?) throws {}
+    override func healthEvents() -> [MicHealth.Event] { [.stalled] }
 }
 
 /// A reopen closes the engine before it opens it again. When that open fails, the dictation must still end
@@ -55,6 +64,19 @@ final class RecorderTests: XCTestCase {
 
         mic.checkHealth()
         XCTAssertEqual(ends.count, 1, "an ended dictation is not ended again")
+    }
+
+    /// Buffers that stop partway end the dictation with a message, and what came before is transcribed.
+    func testStalledMicEndsTheDictationAndKeepsTheAudio() {
+        let recorder = StalledRecorder()
+        let mic = Mic(recorder: recorder)
+        var ends: [(Bool, String)] = []
+        mic.end = { ends.append(($0, $1)); _ = mic.stop() }
+        recorder.start(MicDevice(uid: "usb-1", name: "desk mic", transport: .usb))
+        mic.checkHealth()
+        XCTAssertEqual(ends.count, 1)
+        XCTAssertEqual(ends.first?.0, true, "what was said before the stall is transcribed")
+        XCTAssertEqual(ends.first?.1, "Desk mic stopped sending audio")
     }
 
     /// The mic opens off the main thread, after the recording has started. When that open fails, the dictation
@@ -124,5 +146,18 @@ final class RecorderTests: XCTestCase {
         XCTAssertEqual(recorder.opens, 2, "the old engine has the old format")
         XCTAssertEqual(recorder.restarts, 1, "only the new engine's own change after its move")
         XCTAssertTrue(ends.isEmpty, "got \(ends)")
+    }
+
+    /// An engine that changes again after every restart must not restart forever: after the restarts come the
+    /// rebuilds, and after those the dictation ends with what it has.
+    func testEngineThatKeepsChangingEndsTheDictation() {
+        let recorder = MovedEngineRecorder()
+        recorder.changesAfterRestart = true
+        let ends = dictate(recorder)
+        XCTAssertEqual(recorder.restarts, 3)
+        XCTAssertEqual(recorder.opens, 4, "the first engine and three rebuilds")
+        XCTAssertEqual(ends.count, 1, "got \(ends)")
+        XCTAssertEqual(ends.first?.0, true)
+        XCTAssertEqual(ends.first?.1, "Mic stopped: MacBook Pro Microphone keeps changing its format")
     }
 }
