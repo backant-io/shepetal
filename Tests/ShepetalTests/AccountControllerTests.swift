@@ -68,7 +68,11 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertTrue(condition(), what)
     }
 
-    private func titles(_ a: Account) -> [String] { a.menuItems().map(\.title) }
+    /// The account line on Home, then the account items of the 🤫 menu.
+    private func titles(_ a: Account) -> [String] {
+        a.refresh()
+        return [a.summaryLine] + MenuModel.account(a.access, signingIn: a.signingIn).map(\.title)
+    }
 
     /// Presses `keys` and releases them in reverse through the real KeyRouter, and hands its inputs to the
     /// account the way App.key(_:at:) does: afterBlockedPress first, then the gate on pttDown and toggle.
@@ -96,7 +100,7 @@ final class AccountControllerTests: XCTestCase {
         try await until("checked at launch") { b.access == .expired }
         XCTAssertTrue(b.allowFnDown())
         XCTAssertEqual(homeShown, 0, "nor after its launch check")
-        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"], "sign-in is still offered")
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in to start your free trial…"], "sign-in is still offered")
 
         XCTAssertFalse(Account.signInRequired(env: [:], info: [:]), "off unless the release turns it on")
         XCTAssertTrue(Account.signInRequired(env: [:], info: ["ShepetalRequiresSignIn": true]))
@@ -119,7 +123,7 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertEqual(homeShown, 2, "its release opens Home, where Sign in is")
         a.afterBlockedPress(.pttUp)
         XCTAssertEqual(homeShown, 2, "once per press")
-        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in to start your free trial…"])
         XCTAssertTrue(server.requests.isEmpty, "no network until the user signs in")
     }
 
@@ -237,8 +241,7 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertEqual(server.requests.map(\.path), ["/api/app/token", "/api/license"])
         XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer tok-1")
         XCTAssertTrue(a.allowFnDown())
-        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Trial, 12 days left",
-                                   "Get Shepetal for $4.99 (lifetime, updates included)…", "Sign out"])
+        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Trial, 12 days left"], "no Buy in the menu with 12 days left")
         XCTAssertEqual(AccountState.load(stateURL).license?.status, .trial, "the status is cached")
 
         // Each sign-in sends a fresh state and challenge.
@@ -267,7 +270,7 @@ final class AccountControllerTests: XCTestCase {
         a.signIn()
         try await until("sign-in ended") { !a.signingIn }
         XCTAssertEqual(a.message, "")
-        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in to start your free trial…"])
         XCTAssertTrue(server.requests.isEmpty)
     }
 
@@ -283,7 +286,7 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertEqual(titles(a), ["Signing in with Google…", "Cancel sign-in"])
         a.cancelSignIn()
         XCTAssertFalse(a.signingIn)
-        XCTAssertEqual(titles(a), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
+        XCTAssertEqual(titles(a), ["Not signed in", "Sign in to start your free trial…"])
         try await Task.sleep(nanoseconds: 100_000_000)
         XCTAssertEqual(a.message, "", "cancelling is not an error")
         XCTAssertTrue(server.requests.isEmpty)
@@ -305,7 +308,7 @@ final class AccountControllerTests: XCTestCase {
         let a = account()
         try await until("checked at launch") { a.access == .lifetime }
         XCTAssertTrue(a.allowFnDown())
-        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever", "Sign out"])
+        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever"])
     }
 
     func testExpiredBlocksFnAndBuyOpensCheckout() async throws {
@@ -317,7 +320,7 @@ final class AccountControllerTests: XCTestCase {
         try await until("checked at launch") { a.access == .expired }
         XCTAssertFalse(a.allowFnDown())
         XCTAssertEqual(hints.last, "Trial ended: get Shepetal for $4.99")
-        XCTAssertTrue(titles(a).contains("Get Shepetal for $4.99 (lifetime, updates included)…"))
+        XCTAssertTrue(titles(a).contains("Get shepetal for $4.99…"))
         a.buy()
         try await until("checkout opened") { !opened.isEmpty }
         XCTAssertEqual(opened, [URL(string: "https://checkout.stripe.com/c/pay/cs_test_1")!])
@@ -330,7 +333,7 @@ final class AccountControllerTests: XCTestCase {
         server.handler = { [unowned self] _ in license(status, endsIn: -day) }
         let a = account()
         try await until("checked at launch") { a.access == .expired }
-        XCTAssertTrue(titles(a).contains("Check license now"))
+        XCTAssertTrue(titles(a).contains("Get shepetal for $4.99…"))
         status = "active"  // paid on shepetal.backant.io
         let sent = server.requests.count
         XCTAssertFalse(a.allowFnDown(), "this press is still blocked")
@@ -356,7 +359,7 @@ final class AccountControllerTests: XCTestCase {
         a.now = { Date() + 120 }
         a.tick()  // a minute later, not 24 h
         try await until("re-checked after checkout") { a.access == .lifetime }
-        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever", "Sign out"])
+        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever"])
     }
 
     /// Bought, then Buy pressed again before the re-check ran: the service answers 409 already_active.
@@ -374,7 +377,7 @@ final class AccountControllerTests: XCTestCase {
         try await until("re-checked after the 409") { a.access == .lifetime }
         XCTAssertEqual(a.message, "")
         XCTAssertTrue(opened.isEmpty)
-        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever", "Sign out"])
+        XCTAssertEqual(titles(a), ["Signed in as a@example.com · Yours forever"])
     }
 
     func testCheckoutWithARevokedTokenSignsOut() async throws {
@@ -385,7 +388,7 @@ final class AccountControllerTests: XCTestCase {
         a.buy()
         try await until("signed out") { a.access == .signedOut }
         XCTAssertNil(tokens.read())
-        XCTAssertEqual(titles(a).prefix(2), ["Not signed in", "Sign in with Google to start your free 30-day trial…"])
+        XCTAssertEqual(titles(a).prefix(2), ["Not signed in", "Sign in to start your free trial…"])
     }
 
     func testUnauthorizedSignsOut() async throws {

@@ -7,7 +7,7 @@ public enum EngineLabel {
         modelName == tier.primary.rawValue ? "standard" : "alternative"
     }
 
-    /// The status line for the menu and Home.
+    /// The status line on Home.
     public static func status(_ modelName: String, tier: ModelTier = currentModelTier()) -> String {
         "On-device speech recognition (\(of(modelName, tier: tier)) engine)"
     }

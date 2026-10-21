@@ -183,14 +183,8 @@ final class MeetingRecorder: NSObject {
         onEnded(meeting)
     }
 
-    var menuItem: NSMenuItem {
-        let i = NSMenuItem(title: current == nil ? "Start meeting recording" : "Stop meeting recording",
-                           action: #selector(toggle), keyEquivalent: "")
-        i.target = self
-        return i
-    }
-
-    @objc private func toggle() {
+    /// The 🤫 menu's Record meeting / Stop meeting recording.
+    func toggle() {
         guard current == nil else { return stop() }
         apply(offer.notNow())  // recording by hand answers the card too
         start()

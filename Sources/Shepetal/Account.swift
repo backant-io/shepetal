@@ -241,38 +241,14 @@ final class Account: NSObject, ObservableObject {
 
     @objc func checkNow() { check() }
 
-    /// One line for the menu and Home: "Signed in as <email> · Trial, 12 days left", or "Not signed in".
+    /// One line for Home: "Signed in as <email> · Trial, 12 days left", or "Not signed in".
     var summaryLine: String {
         if signingIn { return "Signing in with Google…" }
         guard signedIn else { return access.summary }
         return (email.isEmpty ? "Signed in" : "Signed in as \(email)") + " · " + access.summary
     }
 
-    /// The account part of the 🤫 menu.
-    func menuItems() -> [NSMenuItem] {
-        refresh()
-        var items = [NSMenuItem(title: summaryLine, action: nil, keyEquivalent: "")]
-        func add(_ title: String, _ action: Selector) {
-            let i = NSMenuItem(title: title, action: action, keyEquivalent: "")
-            i.target = self
-            items.append(i)
-        }
-        switch access {
-        case .signedOut:
-            if signingIn { add("Cancel sign-in", #selector(cancelSignIn)) } else { add(AccountText.signIn + "…", #selector(signIn)) }
-        case .trial: add(AccountText.buy + "…", #selector(buy))
-        case .expired:
-            add(AccountText.buy + "…", #selector(buy))
-            add("Check license now", #selector(checkNow))  // bought on the website
-        case .unchecked: add("Check license now", #selector(checkNow))
-        case .lifetime: break
-        }
-        if signedIn { add("Sign out", #selector(signOut)) }
-        if !message.isEmpty, !signingIn { items.append(NSMenuItem(title: message, action: nil, keyEquivalent: "")) }
-        return items
-    }
-
-    private func refresh() {
+    func refresh() {
         let a = AccountPolicy.access(signedIn: signedIn, state: state, now: now())
         if a != access { access = a }
     }
