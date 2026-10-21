@@ -255,7 +255,8 @@ public struct KeyRouter {
 
 /// The text paste-last and copy-last use: the newest history row with text (a paste that did not land is the
 /// main case). Rows without text (too short, no speech) are skipped, and so is a dictation cancelled with Esc:
-/// the user threw it away, so paste last gives the one before it, as Wispr does.
+/// the user threw it away, so paste last gives the one before it, as Wispr does. A row switched to Show raw
+/// gives its raw words (F48).
 public func lastText(in rows: [HistoryEntry]) -> String? {
-    rows.filter { !$0.text.isEmpty && $0.outcome != .cancelled }.max { $0.createdAt < $1.createdAt }?.text
+    rows.filter { !$0.text.isEmpty && $0.outcome != .cancelled }.max { $0.createdAt < $1.createdAt }?.shownText
 }
