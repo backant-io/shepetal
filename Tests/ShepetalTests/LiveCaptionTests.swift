@@ -72,6 +72,31 @@ final class LiveCaptionTests: XCTestCase {
         XCTAssertEqual(heard.count, 1, "no pass after the stop")
     }
 
+    /// The final pass waits for the engine, so a partial still on the model at the release would hold up the text by
+    /// a whole pass. The release cancels it: the model gives up at its next step, and the final pass goes ahead.
+    func testStopCancelsThePassOnTheModel() async throws {
+        var entered = false, cancelled = false
+        let slow = ParakeetEngine(recognize: { _ in
+            entered = true
+            do { try await Task.sleep(for: .seconds(2)) } catch { cancelled = true; throw error }  // a model step checks
+            return ASRResult(text: "too late", confidence: 0.9, duration: 1, processingTime: 0, tokenTimings: [])
+        }, dictionary: { Vocabulary("") })
+        var shown: [String] = []
+        let live = LiveCaption(recorded: { [speech] in speech }, engine: { slow }, enabled: { true }) { shown.append($0) }
+        live.start(at: 0, tick: nil)
+        live.tick(at: 1)
+        for _ in 0..<100 where !entered { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(entered, "the partial is on the model")
+        XCTAssertEqual(live.running, 1)
+        let released = ProcessInfo.processInfo.systemUptime
+        live.stop()
+        await live.pass?.value
+        XCTAssertLessThan(ProcessInfo.processInfo.systemUptime - released, 1, "the release does not wait out the pass")
+        XCTAssertTrue(cancelled, "the partial was cancelled, not left to finish")
+        XCTAssertEqual(live.running, 0)
+        XCTAssertEqual(shown, [])
+    }
+
     /// A dictation can end without a stop (saving a too-short one failed): the recorder stopped, so live text does too.
     func testEndsWhenTheRecordingStopped() async {
         var recording = false
@@ -169,6 +194,17 @@ extension IndicatorTests {
         XCTAssertGreaterThanOrEqual(label.frame.minX, indicator.emoji.frame.maxX, "the words must not cover 🤫")
         indicator.set(.idle)  // Esc
         XCTAssertNil(indicator.labelText, "Esc clears the words")
+    }
+
+    /// Creator mode (F114) is for viewers to see the label the whole recording: live words come after it, never
+    /// instead of it.
+    func testLiveWordsKeepTheCreatorLabel() throws {
+        let name = "shepetal-live-creator-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        XCTAssertEqual(Indicator.liveStatus("…the design team", defaults), "…the design team")
+        defaults.set(true, forKey: Indicator.creatorModeKey)
+        XCTAssertEqual(Indicator.liveStatus("…the design team", defaults), "Dictating with shepetal · …the design team")
     }
 
     /// A partial that comes back after the release must not show over "processing", an error, or idle.

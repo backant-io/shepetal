@@ -116,6 +116,11 @@ final class Indicator {
     static func creatorStatus(_ defaults: UserDefaults = .standard) -> String? {
         defaults.bool(forKey: creatorModeKey) ? creatorLabel : nil
     }
+    /// The `status` for live words (F13): after the creator label when creator mode is on, so viewers still see it
+    /// for the whole recording.
+    static func liveStatus(_ words: String, _ defaults: UserDefaults = .standard) -> String {
+        creatorStatus(defaults).map { "\($0) · \(words)" } ?? words
+    }
 
     private func setLabel(_ text: String?) {
         label.stringValue = " \(text ?? "") "

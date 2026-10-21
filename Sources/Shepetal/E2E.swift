@@ -91,8 +91,9 @@ final class E2E: NSObject, NSApplicationDelegate {
                 continue
             }
             // F13 with live text on: the clip comes in as it would record, a second at a time, and each second may
-            // run a partial on what was heard so far. At release one more is still running, the worst case for the
-            // final pass, which waits behind it; that one must be dropped, never shown and never inserted.
+            // run a partial on what was heard so far. At release one more is still running on the model, the worst
+            // case for the final pass, which waits for the model step it is in; it is cancelled, never shown and
+            // never inserted.
             var heard = 0, lastPartial = ""
             let live = LiveCaption(recorded: { Array(samples.prefix(heard).suffix(LiveText.windowSamples)) },
                                    engine: { engine }, enabled: { true }) { lastPartial = $0 }
@@ -105,7 +106,8 @@ final class E2E: NSObject, NSApplicationDelegate {
             }
             heard = samples.count
             live.tick(at: Double(seconds + 1))
-            let partials = live.shown
+            try? await Task.sleep(for: .milliseconds(15))  // the key comes up once that partial is on the model
+            let partials = live.shown, releasePartial = live.running > 0
             live.stop()
             let start = ProcessInfo.processInfo.systemUptime
             let run = await pipeline.process(samples, engine: engine, app: app, context: { [textView] in
@@ -128,6 +130,7 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["partials"] = partials
             out["last_partial"] = lastPartial
             out["late_partial_shown"] = live.shown != partials
+            out["release_partial_running"] = releasePartial
             out["raw_text"] = run.entry.rawText
             out["text"] = run.entry.text
             let typed = textView.string  // the dictation only: the field's own text around it is left out
