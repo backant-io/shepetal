@@ -123,20 +123,51 @@ final class SpeechMenu: NSObject {
             fail("Dictionary: \(error.localizedDescription)")
         }
     }
+
+    /// Shows a notice next to 🤫.
+    var notice: (String) -> Void = { _ in }
+    private var downloadingBoost = false
+
+    /// F39: the keyword model's download, offered once on-device speech recognition is there and only until the
+    /// keyword model is. Whisper takes the dictionary as a prompt and needs none of it.
+    func boostItem(speechInstalled: Bool = ParakeetEngine.isInstalled, booster: VocabularyBooster = KeywordBooster.shared) -> NSMenuItem? {
+        guard speechInstalled, !booster.isInstalled else { return nil }
+        let i = NSMenuItem(title: downloadingBoost ? "Downloading dictionary support…" : "Download dictionary support (about 100 MB)",
+                           action: downloadingBoost ? nil : #selector(downloadBoost), keyEquivalent: "")
+        i.target = self
+        return i
+    }
+
+    @objc private func downloadBoost() {
+        downloadingBoost = true
+        notice("Downloading dictionary support…")
+        Task {
+            defer { downloadingBoost = false }
+            do { try await KeywordBooster.download() } catch {
+                fail("Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""))
+                return
+            }
+            notice("Dictionary support is ready")
+        }
+    }
 }
 
 /// Parakeet TDT 0.6B v3 through FluidAudio (CoreML, Neural Engine), from FluidAudio's model cache.
 final class ParakeetEngine: SpeechEngine {
     let name = SpeechModel.parakeetV3.rawValue
-    private let asr: AsrManager
-    private let decoderLayers: Int
+    /// The model itself. A seam, so tests run without it.
+    private let recognize: ([Float]) async throws -> ASRResult
+    private let booster: VocabularyBooster
+    private let dictionary: () -> Vocabulary
 
     static var directory: URL { AsrModels.defaultCacheDirectory(for: .v3) }
     static var isInstalled: Bool { AsrModels.modelsExist(at: directory, version: .v3) }
 
-    private init(asr: AsrManager, decoderLayers: Int) {
-        self.asr = asr
-        self.decoderLayers = decoderLayers
+    init(recognize: @escaping ([Float]) async throws -> ASRResult, booster: VocabularyBooster = KeywordBooster.shared,
+         dictionary: @escaping () -> Vocabulary = { Vocabulary.load(Paths.dictionary) }) {
+        self.recognize = recognize
+        self.booster = booster
+        self.dictionary = dictionary
     }
 
     static func load() async throws -> ParakeetEngine {
@@ -145,7 +176,11 @@ final class ParakeetEngine: SpeechEngine {
         let models = try await AsrModels.load(from: directory, version: .v3)
         let asr = AsrManager()
         try await asr.loadModels(models)
-        let engine = ParakeetEngine(asr: asr, decoderLayers: models.version.decoderLayers)
+        let layers = models.version.decoderLayers
+        let engine = ParakeetEngine(recognize: { samples in
+            var state = TdtDecoderState.make(decoderLayers: layers)
+            return try await asr.transcribe(samples, decoderState: &state)
+        })
         // The first inference compiles and warms the CoreML graph; do it before the user speaks.
         _ = try? await engine.transcribe([Float](repeating: 0, count: 16_000), wav: URL(fileURLWithPath: "/dev/null"))
         _ = await Task.detached { VoiceIsolation.apply([Float](repeating: 0, count: 16_000)) }.value  // the same for the effect
@@ -164,12 +199,64 @@ final class ParakeetEngine: SpeechEngine {
     }
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
-        var state = TdtDecoderState.make(decoderLayers: decoderLayers)
         // A hold can end with under 300 ms of audio while the mic was still opening; Parakeet refuses that.
         let minimum = ASRConstants.minimumRequiredSamples(forSampleRate: AudioStore.sampleRate)
-        do { return try await asr.transcribe(MicAudio.padded(samples, to: minimum), decoderState: &state).text } catch {
+        let heard = MicAudio.padded(samples, to: minimum)
+        let result: ASRResult
+        do { result = try await recognize(heard) } catch {
             throw SpeechError(plain: error, "On-device speech recognition could not read this recording")
         }
+        // The dictionary (F39, #30), read fresh for every dictation like the replacements. The load's warm-up
+        // gets here too, with no timings, so the keyword model loads before the user speaks.
+        let terms = dictionary().promptTerms
+        guard !terms.isEmpty, booster.isInstalled else { return result.text }
+        return await booster.boost(result.text, timings: result.tokenTimings ?? [], samples: heard, terms: terms) ?? result.text
+    }
+}
+
+/// Parakeet takes no prompt, so the dictionary reaches it afterwards (F39, #30): a small keyword model listens to
+/// the same audio for the dictionary's words, and rescoring writes the ones it hears into Parakeet's text.
+protocol VocabularyBooster: AnyObject, Sendable {
+    /// False until the user downloads the keyword model. Then nothing is boosted and nothing is fetched.
+    var isInstalled: Bool { get }
+    /// The rescored text, or nil to keep the model's own.
+    func boost(_ text: String, timings: [TokenTiming], samples: [Float], terms: [String]) async -> String?
+}
+
+/// FluidAudio's CTC 110M keyword model and its VocabularyBoostingSession. Never downloads on its own.
+actor KeywordBooster: VocabularyBooster {
+    static let shared = KeywordBooster()
+    static var directory: URL { CtcModels.defaultCacheDirectory(for: .ctc110m) }
+
+    nonisolated let directory: URL
+    private var models: CtcModels?
+    private var session: (terms: [String], session: VocabularyBoostingSession)?
+
+    init(directory: URL = KeywordBooster.directory) { self.directory = directory }
+
+    nonisolated var isInstalled: Bool { CtcModels.modelsExist(at: directory) }
+
+    func boost(_ text: String, timings: [TokenTiming], samples: [Float], terms: [String]) async -> String? {
+        guard isInstalled else { return nil }  // checked first so FluidAudio never fetches missing files
+        do {
+            if self.models == nil { self.models = try await CtcModels.load(from: directory) }
+            guard let models = self.models else { return nil }
+            if session?.terms != terms {  // rebuilt only when the dictionary changes
+                let vocabulary = CustomVocabularyContext(terms: terms.map { CustomVocabularyTerm(text: $0) })
+                session = (terms, try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: models))
+            }
+            return await session?.session.rescore(text: text, tokenTimings: timings, audioSamples: samples)?.text
+        } catch {
+            NSLog("shepetal: dictionary boost: %@", String(describing: error))  // the plain text goes in
+            return nil
+        }
+    }
+
+    /// User action only: about 100 MB into FluidAudio's cache. Offline mode is lifted for it alone, as for Parakeet.
+    static func download(to directory: URL = KeywordBooster.directory) async throws {
+        ModelHub.offlineMode = false
+        defer { ParakeetEngine.stayOffline() }
+        try await CtcModels.download(to: directory)
     }
 }
 
