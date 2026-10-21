@@ -80,6 +80,20 @@ final class SpeechBoostTests: XCTestCase {
         XCTAssertEqual(failing.calls.count, 1)
     }
 
+    /// The rescorer's own text drops the punctuation of a word it replaces; the user's sentence must keep it.
+    func testRescoredTermsKeepTheSentencePunctuation() {
+        XCTAssertEqual(KeywordBooster.replacing([("postgars.", "Postgres"), ("redisc", "Redis")],
+                                                in: "We moved the redisc cache to postgars."),
+                       "We moved the Redis cache to Postgres.")
+        XCTAssertEqual(KeywordBooster.replacing([("use effect", "useEffect")], in: "Call the use effect hook, then log."),
+                       "Call the useEffect hook, then log.")
+        XCTAssertEqual(KeywordBooster.replacing([("PostGer's", "Postgres")], in: "the PostGer's replica, and"),
+                       "the Postgres replica, and")
+        XCTAssertEqual(KeywordBooster.replacing([("postgars", "Postgres")], in: "xpostgars and postgarsy, postgars?"),
+                       "xpostgars and postgarsy, Postgres?", "whole words only")
+        XCTAssertEqual(KeywordBooster.replacing([("nowhere", "Redis"), (".", "Redis")], in: "Nothing to do."), "Nothing to do.")
+    }
+
     func testMissingKeywordModelFetchesNothing() async throws {
         let hub = try StubServer()
         ModelRegistry.baseURL = hub.url.absoluteString

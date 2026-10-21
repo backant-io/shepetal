@@ -226,6 +226,13 @@ protocol VocabularyBooster: AnyObject, Sendable {
 /// FluidAudio's CTC 110M keyword model and its VocabularyBoostingSession. Never downloads on its own.
 actor KeywordBooster: VocabularyBooster {
     static let shared = KeywordBooster()
+    /// How close Parakeet's word must be to a dictionary term to be replaced. FluidAudio's own 0.52 wrote "edits" as
+    /// "Redis" and "percent" as "Vercel" on bench/fixtures; 0.6 still wrote "edits" as "Redis", 0.8 missed
+    /// "Postgres". bench/fluid uses the same values (docs/models.md).
+    static let minSimilarity: Float = 0.7
+    /// No acoustic-only rescue, which replaces words that look nothing like the term: with only "dentist" in the
+    /// dictionary it wrote "copy the finance lead" as "copy the dentist" in scripts/e2e-mac.sh.
+    static let config = VocabularyRescorer.Config(spotterRescueEnabled: false)
     static var directory: URL { CtcModels.defaultCacheDirectory(for: .ctc110m) }
 
     nonisolated let directory: URL
@@ -242,13 +249,31 @@ actor KeywordBooster: VocabularyBooster {
             if self.models == nil { self.models = try await CtcModels.load(from: directory) }
             guard let models = self.models else { return nil }
             if session?.terms != terms {  // rebuilt only when the dictionary changes
-                let vocabulary = CustomVocabularyContext(terms: terms.map { CustomVocabularyTerm(text: $0) })
-                session = (terms, try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: models))
+                let vocabulary = CustomVocabularyContext(terms: terms.map { CustomVocabularyTerm(text: $0) },
+                                                         minSimilarity: Self.minSimilarity)
+                session = (terms, try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: models, config: Self.config))
             }
-            return await session?.session.rescore(text: text, tokenTimings: timings, audioSamples: samples)?.text
+            guard let out = await session?.session.rescore(text: text, tokenTimings: timings, audioSamples: samples),
+                  out.wasModified else { return nil }
+            return Self.replacing(out.replacements.compactMap { r in
+                r.shouldReplace ? r.replacementWord.map { (r.originalWord, $0) } : nil
+            }, in: text)
         } catch {
             NSLog("shepetal: dictionary boost: %@", String(describing: error))  // the plain text goes in
             return nil
+        }
+    }
+
+    /// FluidAudio rebuilds its rescored text from its words, and a word it replaces loses its punctuation
+    /// ("postgars." came back as "Postgres"). So the terms go into the model's own text instead: the original
+    /// phrase without its punctuation, whole words only, first occurrence.
+    /// ponytail: the first occurrence, not the one the keyword model heard; both are the same words.
+    static func replacing(_ replacements: [(original: String, term: String)], in text: String) -> String {
+        replacements.reduce(text) { text, r in
+            let phrase = r.original.trimmingCharacters(in: .punctuationCharacters.union(.whitespaces))
+            let pattern = #"(?<!\w)"# + NSRegularExpression.escapedPattern(for: phrase) + #"(?!\w)"#
+            guard !phrase.isEmpty, let range = text.range(of: pattern, options: .regularExpression) else { return text }
+            return text.replacingCharacters(in: range, with: r.term)
         }
     }
 
