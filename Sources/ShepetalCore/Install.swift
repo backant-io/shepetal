@@ -36,6 +36,14 @@ public enum UpdateGate {
 
     /// Next to 🤫 while a manual install waits.
     public static func waiting(_ a: Activity) -> String? { a.work.map { "Shepetal restarts to update when \($0) ends" } }
+
+    /// Next to 🤫 when Sparkle gives up on an update (`SPUUpdaterDelegate.updater(_:didAbortWithError:)`): a failed
+    /// download, a bad signature, a failed install. Never a menu status line. A check that finds nothing or cannot
+    /// read the feed stays quiet (a manual check shows Sparkle's own alert), and so does the user's own cancel.
+    public static func failure(code: Int, _ description: String) -> String? {
+        guard (2000..<5000).contains(code), ![4007, 4008].contains(code) else { return nil }  // SUInstallationCanceledError, …AuthorizeLater
+        return "Update failed: \(description)"
+    }
 }
 
 /// The first-run window (docs/install-and-update.md 2): permissions, then sign-in when the build needs it and the user

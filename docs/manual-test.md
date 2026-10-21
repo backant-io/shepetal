@@ -43,6 +43,7 @@ Test feed: a pre-release whose assets hold `appcast.xml` and the DMG (pre-releas
 2. Expected: no restart during the dictation; after Install and Relaunch, "Shepetal restarts to update when the dictation ends" next to 🤫, and the restart comes right after it ends. The same during a meeting recording and its transcription ("…when the meeting ends").
 3. A background-downloaded update installs only once fn has been left alone for 20 minutes (or when you quit).
 4. Turn Install updates automatically off. Expected: a found update shows as "Update to <version>…" in the 🤫 menu instead of a window popping up.
+5. Point `ShepetalFeedURL` at an appcast whose DMG does not match its signature (edit one byte of a copy of the DMG and upload it to a pre-release with that appcast). Expected: "Update failed: …" next to 🤫 for a few seconds, nothing installs, and the 🤫 menu shows no status line.
 
 ### M-UNINST-1: uninstall, recordings kept
 1. Open shepetal › Settings and scroll to the bottom. Expected: a small grey "Uninstall Shepetal…" link is the last item; there is no uninstall in the 🤫 menu.

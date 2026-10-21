@@ -6,6 +6,16 @@ import XCTest
 final class UpdateGateTests: XCTestCase {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
 
+    /// A failed download, signature or install says so next to 🤫 (the menu has no status lines); a check that
+    /// found nothing, an unreachable feed (it 404s until the Worker serves it) or the user's own cancel must not
+    /// nag every day.
+    func testOnlyAFailedUpdateIsANotice() {
+        XCTAssertEqual(UpdateGate.failure(code: 2001, "The network connection was lost."), "Update failed: The network connection was lost.")
+        XCTAssertNotNil(UpdateGate.failure(code: 3001, "bad signature"), "an EdDSA mismatch")
+        XCTAssertNotNil(UpdateGate.failure(code: 4005, "install"))
+        for quiet in [1001, 1002, 1000, 4007, 4008, 5000] { XCTAssertNil(UpdateGate.failure(code: quiet, "x"), "\(quiet)") }
+    }
+
     func testAnyWorkBlocksBothScheduledAndManualInstalls() {
         for a in [Activity(dictating: true), Activity(meeting: true), Activity(retranscribing: true)] {
             XCTAssertFalse(UpdateGate.allows(a, now: now), "\(a)")

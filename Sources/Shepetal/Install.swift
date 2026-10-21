@@ -82,6 +82,11 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, @preco
         return true
     }
 
+    func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
+        let e = error as NSError
+        if e.domain == SUSparkleErrorDomain, let notice = UpdateGate.failure(code: e.code, e.localizedDescription) { hint(notice) }
+    }
+
     // MARK: SPUStandardUserDriverDelegate: gentle reminders, so no update window opens at a random moment
 
     var supportsGentleScheduledUpdateReminders: Bool { true }
