@@ -382,7 +382,7 @@ and `mkdir -p ~/.local/bin && ln -s "$PWD/linux/indicator/shepetal-indicator" ~/
    Firefox: it stays on top. Click on 🤫: the click reaches what is below, and the focused
    window does not change. Hold fn and talk: red ring. Release: blue pulsing ring, then 🤫 alone
    when the text is typed. Double-tap fn: orange ring until the next press. Tap fn once:
-   `Hold fn to talk · double-tap for hands-free` shows to the right of 🤫 for about 2 s.
+   `Hold fn to talk · double-tap for hands-free` shows to the right of 🤫 for about 3 s.
 2. **I-2, KDE Plasma Wayland**: the same as I-1. 🤫 sits over the bottom panel, and a click on
    it reaches the panel button below it.
 3. **I-3, Sway or Hyprland**: the same as I-1, with a full-screen window (`fullscreen` in Sway,
@@ -398,7 +398,7 @@ and `mkdir -p ~/.local/bin && ln -s "$PWD/linux/indicator/shepetal-indicator" ~/
    primary. Make the other one primary (Settings > Displays): 🤫 moves there. At 200% scale,
    🤫 is about 36 physical pixels, 16 from the corner.
 6. **I-6, without the hotkey**: on any of the desktops, `printf 'recording\nhint Hello from shepetal\n' | (cat; sleep 5) | shepetal indicator`
-   shows a red ring and the text for about 2 s, then 🤫 disappears when the command ends.
+   shows a red ring and the text for about 3 s, then 🤫 disappears when the command ends.
 
 ## Known gaps
 
