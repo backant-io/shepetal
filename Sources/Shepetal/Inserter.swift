@@ -34,7 +34,7 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
             self.text = text
             requested = nil
         }
-        pasteboard.clearContents()
+        pasteboard.clearOnThisMac()
         let item = NSPasteboardItem()
         item.setDataProvider(self, forTypes: [.string])
         for m in Self.markers { item.setData(Data(), forType: m) }  // clipboard managers skip it
@@ -84,7 +84,7 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     /// The user's old clipboard is not restored then.
     /// The Concealed and Transient markers stay on it: clipboard managers skip it, and ⌘V still pastes it.
     func leaveOnClipboard(_ text: String) {
-        pasteboard.clearContents()
+        pasteboard.clearOnThisMac()
         let item = NSPasteboardItem()
         item.setString(text, forType: .string)
         for m in Self.markers { item.setData(Data(), forType: m) }
@@ -108,7 +108,7 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     }
 
     private func restore(_ saved: [[NSPasteboard.PasteboardType: Data]]) {
-        pasteboard.clearContents()
+        pasteboard.clearOnThisMac()
         let items = saved.map { types -> NSPasteboardItem in
             let item = NSPasteboardItem()
             for (t, d) in types { item.setData(d, forType: t) }
@@ -203,6 +203,12 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
             }
         }
     }
+}
+
+extension NSPasteboard {
+    /// Every shepetal write starts here, never with `clearContents()`: the pasteboard is emptied and what is written
+    /// next stays on this Mac, so Universal Clipboard never offers it to the user's other Apple devices (#253).
+    func clearOnThisMac() { _ = prepareForNewContents(with: .currentHostOnly) }
 }
 
 /// Text around the cursor of the focused field, and the selection the paste replaces, through Accessibility

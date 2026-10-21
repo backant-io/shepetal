@@ -96,7 +96,7 @@ final class Pipeline {
 
     /// Copy last and the 🤫 menu's Recent: plain text on the clipboard, the user's to keep.
     func copy(_ text: String) {
-        inserter.pasteboard.clearContents()
+        inserter.pasteboard.clearOnThisMac()
         inserter.pasteboard.setString(text, forType: .string)
     }
 

@@ -18,7 +18,7 @@ final class MeetingsModel: ObservableObject {
 
     /// `copy` writes the general pasteboard; tests pass their own. It runs only from the Copy summary button.
     init(store: MeetingStoring, copy: @escaping (String) -> Void = { text in
-        NSPasteboard.general.clearContents()
+        NSPasteboard.general.clearOnThisMac()
         NSPasteboard.general.setString(text, forType: .string)
     }) {
         self.store = store

@@ -165,7 +165,7 @@ struct AIAppsSettings: View {
         Text("An AI app set up with shepetal can search and read your meeting notes and dictations. shepetal answers only on this Mac; what the AI app does with the text is up to that app.")
             .font(.caption).foregroundStyle(.secondary)
         Button(copied ? "Copied: paste it into the AI app's MCP settings" : "Copy setup for AI apps") {
-            NSPasteboard.general.clearContents()
+            NSPasteboard.general.clearOnThisMac()
             NSPasteboard.general.setString(MCPServer.setup(), forType: .string)
             copied = true
         }
