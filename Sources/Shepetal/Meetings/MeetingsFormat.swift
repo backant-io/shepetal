@@ -30,12 +30,25 @@ enum MeetingFormat {
     }
 
     /// "2026-10-20 15:00" in `timeZone`: the same on every locale.
-    static func date(_ d: Date, timeZone: TimeZone = .current) -> String {
+    static func date(_ d: Date, timeZone: TimeZone = .current, format: String = "yyyy-MM-dd HH:mm") -> String {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         f.timeZone = timeZone
-        f.dateFormat = "yyyy-MM-dd HH:mm"
+        f.dateFormat = format
         return f.string(from: d)
+    }
+
+    /// "Zoom · 20.10.26 15:00 · 42 min" (dates as DD.MM.YY). A meeting recorded by hand has no app to name.
+    static func headline(_ m: Meeting, timeZone: TimeZone = .current, now: Date = Date()) -> String {
+        let app = m.app == MeetingRecorder.manualApp ? [] : [m.app]
+        return (app + [date(m.startedAt, timeZone: timeZone, format: "dd.MM.yy HH:mm"), duration(m, now: now)])
+            .joined(separator: " · ")
+    }
+
+    /// Copy transcript: the headline, then one plain-text line per segment with its speaker and time.
+    static func transcript(_ r: MeetingRecord, timeZone: TimeZone = .current, now: Date = Date()) -> String {
+        ([headline(r.meeting, timeZone: timeZone, now: now), ""]
+            + r.segments.map { "\($0.speaker.rawValue) (\(clock($0.start))): \($0.text)" }).joined(separator: "\n") + "\n"
     }
 
     /// The Markdown file. Copy summary uses it without the transcript. Empty sections are left out.
