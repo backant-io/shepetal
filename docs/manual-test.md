@@ -575,7 +575,7 @@ The automated part of every step runs with the Docker command in `linux/README.m
 2. In the clone's `linux` folder: `mkdir -p ~/.local/bin && ln -s "$PWD/indicator/shepetal-indicator" ~/.local/bin/`. If `~/.local/bin` is new, log out and back in so it is on PATH. Check that `command -v shepetal-indicator` prints it.
 3. For GNOME Wayland only, in the same folder: `cp -r gnome-extension ~/.local/share/gnome-shell/extensions/shepetal-indicator@backant.io`, log out and back in, then `gnome-extensions enable shepetal-indicator@backant.io`.
 4. `shepetal daemon`. Expected: a small 🤫 in the bottom-left corner of the screen. On GNOME Wayland the daemon also prints `shepetal: on GNOME Wayland 🤫 comes from the shepetal GNOME Shell extension (linux/gnome-extension/)`.
-(Automated: `socket_is_owner_only_in_a_private_runtime_dir`, `the_indicator_is_started_again_when_it_exits`.)
+(Automated: `socket_is_owner_only_in_a_private_runtime_dir`, `the_indicator_is_started_again_when_it_exits`, `an_indicator_that_keeps_crashing_backs_off_and_one_that_ran_long_restarts_soon`.)
 
 ### L-KEY-1: fn visible on an Apple keyboard
 1. Connect an Apple keyboard (Magic Keyboard, USB or Bluetooth) and run `shepetal probe`.
@@ -845,6 +845,13 @@ The dictionary and snippets live in `~/.config/shepetal/` and are read again at 
 1. With no daemon running, on any of the desktops: `printf 'recording\nhint Hello from shepetal\n' | (cat; sleep 5) | shepetal indicator`.
 2. Expected: a red ring and `Hello from shepetal` next to 🤫 for about 2 s, then 🤫 disappears when the command ends.
 (Automated: `every_indicator_gets_the_state_and_late_ones_the_current_one`.)
+
+### L-IND-7: shepetal-indicator not installed, then installed (#130)
+1. On Ubuntu 24.04 in "Ubuntu on Xorg", move the link away: `mv ~/.local/bin/shepetal-indicator ~/.local/bin/shepetal-indicator.off`, then run `shepetal daemon` and leave it running for 2 min.
+2. Expected: no 🤫, dictation still works, and stderr has exactly one line `shepetal: 🤫 indicator not started: shepetal-indicator: not installed, or python3 is missing (see docs/linux.md); looking for it again every 64s at most`. No `indicator exited (exit status: 127)` lines, and `top` shows the daemon idle.
+3. `mv ~/.local/bin/shepetal-indicator.off ~/.local/bin/shepetal-indicator`. Expected: 🤫 appears within about 64 s without restarting the daemon.
+4. `pkill -f shepetal-indicator`. Expected: one `indicator exited (...)` line and 🤫 back after about 2 s.
+(Automated: `a_missing_indicator_is_looked_up_on_path_and_never_spawned`, `a_missing_indicator_is_reported_once_and_looked_for_with_backoff`, `an_indicator_that_keeps_crashing_backs_off_and_one_that_ran_long_restarts_soon`, `the_indicator_is_started_again_when_it_exits`.)
 
 ### L-MEET-1: a Zoom call in probe
 1. Install the Zoom `.deb` from zoom.us and join a call (zoom.us/test, or a call with a second device). Unmute.
