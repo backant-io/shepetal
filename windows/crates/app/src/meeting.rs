@@ -16,18 +16,13 @@ pub enum Show {
     Nothing,
 }
 
-/// `app` keeps the meeting app that started last, for the card's label: the detector reports
-/// `Started` right before the `OfferRecording` it causes.
-pub fn show(event: &Event, app: &mut String) -> Show {
+/// The card names the app that uses the mic or the camera.
+pub fn show(event: &Event) -> Show {
     match event {
-        Event::Started(a) => {
-            a.clone_into(app);
-            Show::Nothing
-        }
-        Event::OfferRecording => Show::Offer(format!("Meeting detected · {app}")),
+        Event::OfferRecording(app) => Show::Offer(format!("Meeting detected · {app}")),
         Event::WithdrawOffer => Show::Withdraw,
         Event::StartRecording => Show::Hint("Recording the meeting"),
-        Event::Ended(_) | Event::StopRecording => Show::Nothing,
+        Event::StopRecording => Show::Nothing,
     }
 }
 
@@ -44,22 +39,11 @@ mod tests {
 
     #[test]
     fn nothing_says_recording_before_the_record_click() {
-        let mut app = String::new();
-        assert_eq!(show(&Event::Started("Zoom".into()), &mut app), Show::Nothing);
-        assert_eq!(show(&Event::OfferRecording, &mut app), Show::Offer("Meeting detected · Zoom".into()));
-        assert_eq!(show(&Event::WithdrawOffer, &mut app), Show::Withdraw, "an unanswered offer goes away");
+        assert_eq!(show(&Event::OfferRecording("Zoom".into())), Show::Offer("Meeting detected · Zoom".into()));
+        assert_eq!(show(&Event::WithdrawOffer), Show::Withdraw, "an unanswered offer goes away");
         // Only the recording that really started (after the click) says so.
-        assert_eq!(show(&Event::StartRecording, &mut app), Show::Hint("Recording the meeting"));
-        assert_eq!(show(&Event::Ended("Zoom".into()), &mut app), Show::Nothing);
-    }
-
-    #[test]
-    fn the_card_names_the_app_that_started_last() {
-        let mut app = String::new();
-        show(&Event::Started("Zoom".into()), &mut app);
-        show(&Event::WithdrawOffer, &mut app);
-        show(&Event::Started("Microsoft Teams".into()), &mut app);
-        assert_eq!(show(&Event::OfferRecording, &mut app), Show::Offer("Meeting detected · Microsoft Teams".into()));
+        assert_eq!(show(&Event::StartRecording), Show::Hint("Recording the meeting"));
+        assert_eq!(show(&Event::StopRecording), Show::Nothing);
     }
 
     #[test]

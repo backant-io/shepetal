@@ -6,20 +6,23 @@ import MeetingMac
 let args = CommandLine.arguments.dropFirst()
 switch args.first {
 case "probe":
-    let clients = Probes.micClients()
-    if clients.isEmpty { print("no process is using the mic") }
-    for c in clients { print("\(c.bundleID.isEmpty ? "-" : c.bundleID)\t\(c.name)") }
-    let detector = MeetingDetector()
+    // Only app names, bundle IDs and pids: no window titles or URLs.
+    let users = Probes.micUsers()
+    if users.isEmpty { print("no process is using the mic") }
+    for u in users {
+        let app = MeetingDetector.appName(u.path) ?? MeetingDetector.appName(u.responsiblePath) ?? "-"
+        print("mic\t\(u.bundleID.isEmpty ? "-" : u.bundleID)\t\(app)\tpid \(u.pid)")
+    }
     let snapshot = Probes.snapshot()
-    print("calendar event now: \(snapshot.calendarEvent ?? "none (or no Calendar access)")")
-    print("meeting apps now: \(detector.meetingApps(in: snapshot).sorted())")
+    print("camera in use: \(snapshot.cameraInUse ? "yes" : "no")")
+    let detector = MeetingDetector(ownPID: getpid())
+    print("meeting now: \(detector.app(in: snapshot) ?? "none")")
 case "watch":
-    var detector = MeetingDetector()
+    var detector = MeetingDetector(ownPID: getpid())
     let env = ProcessInfo.processInfo.environment
     detector.startAfter = Double(env["START_AFTER"] ?? "") ?? detector.startAfter
-    detector.endWithoutEvidence = Double(env["END_AFTER"] ?? "") ?? detector.endWithoutEvidence
-    let bound = max(detector.endWithEvidence, detector.reacquire)
-    print("watching (start after \(detector.startAfter)s, end after \(bound)s or \(detector.endWithoutEvidence)s), ctrl-c to stop")
+    detector.endAfter = Double(env["END_AFTER"] ?? "") ?? detector.endAfter
+    print("watching (start after \(detector.startAfter)s, end after \(detector.endAfter)s), ctrl-c to stop")
     let t0 = Date()
     while true {
         for e in detector.update(Probes.snapshot(), now: Date().timeIntervalSince(t0)) {
