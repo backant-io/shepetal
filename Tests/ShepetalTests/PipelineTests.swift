@@ -52,7 +52,7 @@ final class PipelineTests: XCTestCase {
     func process(_ samples: [Float], _ engine: SpeechEngine?, before: String = "",
                  sendPaste: @escaping (CGEvent) -> Void = { _ in }) async throws -> (Pipeline.Run, HistoryEntry) {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let run = await pipeline.process(samples, engine: engine, context: { (before, "") }, sendPaste: { [unowned self] in
+        let run = await pipeline.process(samples, engine: engine, context: { (before, "", "") }, sendPaste: { [unowned self] in
             self.pastes += 1
             sendPaste($0)
         })
@@ -232,7 +232,7 @@ final class PipelineTests: XCTestCase {
         let write = pipeline.writeAudio
         pipeline.writeAudio = { Thread.sleep(forTimeInterval: 0.2); return try write($0, $1) }  // a slow disk
         let engine = WavReadingEngine()
-        let run = await pipeline.process(speech, engine: engine, context: { ("", "") }, sendPaste: { _ in })
+        let run = await pipeline.process(speech, engine: engine, context: { ("", "", "") }, sendPaste: { _ in })
         XCTAssertEqual(engine.read, AudioStore.wav(speech))
         XCTAssertEqual(run.entry.rawText, "from the file")
     }

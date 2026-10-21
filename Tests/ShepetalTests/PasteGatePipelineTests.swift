@@ -31,7 +31,7 @@ final class PasteGatePipelineTests: XCTestCase {
     private func process(_ engine: StubEngine, context: @escaping () -> Void = {}, focusKept: @escaping () -> Bool?,
                          secureInput: @escaping () -> String?) async throws -> (Pipeline.Run, HistoryEntry) {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let run = await pipeline.process(samples, engine: engine, context: { context(); return ("", "") },
+        let run = await pipeline.process(samples, engine: engine, context: { context(); return ("", "", "") },
                                          focusKept: focusKept, secureInput: secureInput, sendPaste: { [unowned self] event in
             // The target app reading the promised item is what makes the paste land.
             if event.type == .keyDown { pastes += 1; _ = pasteboard.string(forType: .string) }
@@ -72,8 +72,7 @@ final class PasteGatePipelineTests: XCTestCase {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         var reads = 0
         let run = await pipeline.process(samples, engine: StubEngine("hello there"),
-                                         context: { reads += 1; return ("Earlier text", "") },
-                                         selection: { reads += 1; return "" },
+                                         context: { reads += 1; return ("Earlier text", "", "") },
                                          focusKept: { false }, secureInput: { nil },
                                          sendPaste: { [unowned self] _ in pastes += 1 })
         XCTAssertEqual(reads, 0, "the field that took focus must not be read")
@@ -107,7 +106,7 @@ final class PasteGatePipelineTests: XCTestCase {
             return try write(samples, id)
         }
         var writtenAtDecision: Bool?
-        let run = await pipeline.process(samples, engine: StubEngine("hello there"), context: { ("", "") },
+        let run = await pipeline.process(samples, engine: StubEngine("hello there"), context: { ("", "", "") },
                                          focusKept: { false }, secureInput: { nil },
                                          sendPaste: { [unowned self] _ in pastes += 1 }, decided: {
             XCTAssertEqual($0, PasteGate.focusMoved)

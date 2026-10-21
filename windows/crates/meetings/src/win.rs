@@ -1,16 +1,19 @@
-//! Win32 side: who holds the mic (WASAPI audio sessions), window titles, the polling loop, and
-//! the capture of the mic (Me.wav) plus the default render device's loopback (Others.wav).
+//! Win32 side: who uses the mic or the camera (HKCU's ConsentStore), the polling loop, and the
+//! capture of the mic (Me.wav) plus the default render device's loopback (Others.wav).
 
 use crate::wav::{Wav, RATE};
-use crate::{gap_frames, owner_only_sddl, Config, Detector, Event, MicClient, Snapshot, Window};
+use crate::{gap_frames, in_use, owner_only_sddl, Config, Detector, Event, Registry, Snapshot};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use windows::core::{Interface, BOOL, HSTRING, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, HLOCAL, HWND, LPARAM};
+use windows::core::{HSTRING, PWSTR};
+use windows::Win32::Foundation::{
+    CloseHandle, LocalFree, ERROR_FILE_NOT_FOUND, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS, HANDLE,
+    HLOCAL, WIN32_ERROR,
+};
 use windows::Win32::Media::Audio::*;
 use windows::Win32::Security::Authorization::{
     ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -24,14 +27,12 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
 };
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
+    RRF_RT_REG_QWORD,
+};
 use windows::Win32::System::SystemInformation::GetLocalTime;
-use windows::Win32::System::Threading::{
-    GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
-    PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
-};
-use windows::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible,
-};
+use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 /// What [`watch`] reports.
 #[derive(Debug)]
@@ -50,13 +51,23 @@ pub enum Notice {
 pub fn watch(cfg: Config, record: mpsc::Receiver<()>, mut on: impl FnMut(Notice)) -> ! {
     // An STA thread returns RPC_E_CHANGED_MODE here; these APIs work there too.
     let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    // Without its own path shepetal's always-open mic would look like a meeting at every start.
+    let own = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(e) => {
+            on(Notice::Failed(format!("meeting detection is off: {e}")));
+            loop {
+                thread::park();
+            }
+        }
+    };
     let mut detector = Detector::new(cfg);
     let t0 = Instant::now();
     let mut recording: Option<Recording> = None;
     let mut probe_ok = true;
     loop {
         let tick = Instant::now() + Duration::from_secs(1);
-        match snapshot() {
+        match snapshot(&own) {
             // Keep the last state; report once, not every second.
             Err(e) => {
                 if probe_ok {
@@ -114,46 +125,70 @@ fn handle(events: Vec<Event>, recording: &mut Option<Recording>, on: &mut impl F
     }
 }
 
-/// One observation: active sessions on every active capture device, visible window titles,
-/// the foreground window and the default device IDs. COM must be initialised on this thread.
-pub fn snapshot() -> windows::core::Result<Snapshot> {
-    unsafe {
+const CONSENT_STORE: &str =
+    r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore";
+
+/// One observation: the other apps using the mic or the camera, and the default device IDs. COM
+/// must be initialised on this thread.
+pub fn snapshot(own_exe: &Path) -> io::Result<Snapshot> {
+    let apps = in_use(&Hkcu(CONSENT_STORE.into()), own_exe)?;
+    let devices = unsafe {
         let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-        let mut mic = vec![];
-        // Every active mic, not only the default: a call app may use its own device.
-        let devices = en.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE)?;
-        for i in 0..devices.GetCount()? {
-            let manager: IAudioSessionManager2 = devices.Item(i)?.Activate(CLSCTX_ALL, None)?;
-            let sessions = manager.GetSessionEnumerator()?;
-            for j in 0..sessions.GetCount()? {
-                let session = sessions.GetSession(j)?;
-                if session.GetState()? != AudioSessionStateActive {
-                    continue;
-                }
-                let pid = session.cast::<IAudioSessionControl2>()?.GetProcessId()?;
-                if pid != 0 {
-                    mic.push(MicClient {
-                        exe: exe_name(pid),
-                        pid,
-                    });
-                }
-            }
+        [eCapture, eRender].map(|flow| default_device_id(&en, flow))
+    };
+    Ok(Snapshot {
+        apps,
+        devices: devices.to_vec(),
+    })
+}
+
+/// HKCU's keys under this path: the ConsentStore, or a scratch key in the test.
+struct Hkcu(String);
+
+fn os_error(e: WIN32_ERROR) -> io::Error {
+    io::Error::from_raw_os_error(e.0 as i32)
+}
+
+impl Registry for Hkcu {
+    fn subkeys(&self, path: &str) -> io::Result<Vec<String>> {
+        let mut key = HKEY::default();
+        let path = HSTRING::from(format!(r"{}\{path}", self.0));
+        match unsafe { RegOpenKeyExW(HKEY_CURRENT_USER, &path, None, KEY_READ, &mut key) } {
+            ERROR_SUCCESS => {}
+            ERROR_FILE_NOT_FOUND => return Ok(vec![]), // e.g. no app ever used the camera
+            e => return Err(os_error(e)),
         }
-        let mut windows: Vec<Window> = vec![];
-        EnumWindows(
-            Some(collect_window),
-            LPARAM(&mut windows as *mut Vec<Window> as isize),
-        )?;
-        let foreground = window(GetForegroundWindow());
-        let devices = [eCapture, eRender]
-            .map(|flow| default_device_id(&en, flow))
-            .to_vec();
-        Ok(Snapshot {
-            mic,
-            windows,
-            foreground,
-            devices,
-        })
+        let mut names = vec![];
+        let listed = loop {
+            let mut name = [0u16; 256]; // a key name has at most 255 characters
+            let mut len = name.len() as u32;
+            let i = names.len() as u32;
+            let at = Some(PWSTR(name.as_mut_ptr()));
+            match unsafe { RegEnumKeyExW(key, i, at, &mut len, None, None, None, None) } {
+                ERROR_SUCCESS => names.push(String::from_utf16_lossy(&name[..len as usize])),
+                ERROR_NO_MORE_ITEMS => break Ok(names),
+                e => break Err(os_error(e)),
+            }
+        };
+        let _ = unsafe { RegCloseKey(key) };
+        listed
+    }
+
+    fn qword(&self, path: &str, name: &str) -> Option<u64> {
+        let (mut value, mut size) = (0u64, 8u32);
+        let path = HSTRING::from(format!(r"{}\{path}", self.0));
+        let read = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                &path,
+                &HSTRING::from(name),
+                RRF_RT_REG_QWORD,
+                None,
+                Some((&mut value as *mut u64).cast()),
+                Some(&mut size),
+            )
+        };
+        (read == ERROR_SUCCESS).then_some(value)
     }
 }
 
@@ -167,52 +202,6 @@ unsafe fn default_device_id(en: &IMMDeviceEnumerator, flow: EDataFlow) -> String
     let s = id.to_string().unwrap_or_default();
     CoTaskMemFree(Some(id.0 as _));
     s
-}
-
-/// Lowercase file name of a process's executable, or "" when it cannot be read.
-fn exe_name(pid: u32) -> String {
-    unsafe {
-        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else {
-            return String::new();
-        };
-        let mut buf = [0u16; 1024];
-        let mut len = buf.len() as u32;
-        let read = QueryFullProcessImageNameW(
-            process,
-            PROCESS_NAME_WIN32,
-            PWSTR(buf.as_mut_ptr()),
-            &mut len,
-        );
-        let _ = CloseHandle(process);
-        if read.is_err() {
-            return String::new();
-        }
-        let path = String::from_utf16_lossy(&buf[..len as usize]);
-        path.rsplit('\\').next().unwrap_or_default().to_lowercase()
-    }
-}
-
-unsafe extern "system" fn collect_window(hwnd: HWND, out: LPARAM) -> BOOL {
-    if IsWindowVisible(hwnd).as_bool() {
-        if let Some(w) = window(hwnd) {
-            (*(out.0 as *mut Vec<Window>)).push(w);
-        }
-    }
-    true.into()
-}
-
-unsafe fn window(hwnd: HWND) -> Option<Window> {
-    let mut buf = [0u16; 512];
-    let len = GetWindowTextW(hwnd, &mut buf);
-    if hwnd.is_invalid() || len <= 0 {
-        return None;
-    }
-    let mut pid = 0;
-    GetWindowThreadProcessId(hwnd, Some(&mut pid));
-    Some(Window {
-        exe: exe_name(pid),
-        title: String::from_utf16_lossy(&buf[..len as usize]),
-    })
 }
 
 /// A running meeting recording: two capture threads writing Me.wav and Others.wav.
@@ -420,5 +409,55 @@ fn create_owner_only_dir(dir: &Path) -> io::Result<()> {
         let made = CreateDirectoryW(&HSTRING::from(dir.as_os_str()), Some(&attrs));
         LocalFree(Some(HLOCAL(sd.0)));
         Ok(made?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use windows::Win32::System::Registry::{RegDeleteTreeW, RegSetKeyValueW, REG_QWORD};
+
+    /// The real registry calls, on a scratch HKCU key laid out like the ConsentStore (the unit
+    /// tests in lib.rs cover what the keys mean).
+    #[test]
+    fn reads_a_consent_store_layout_from_the_registry() {
+        let base = format!(r"Software\Shepetal-test-{}", std::process::id());
+        let set = |key: &str, start: u64, stop: u64| {
+            for (name, value) in [("LastUsedTimeStart", start), ("LastUsedTimeStop", stop)] {
+                let key = HSTRING::from(format!(r"{base}\{key}"));
+                let data = Some((&value as *const u64).cast());
+                let r = unsafe {
+                    RegSetKeyValueW(
+                        HKEY_CURRENT_USER,
+                        &key,
+                        &HSTRING::from(name),
+                        REG_QWORD.0,
+                        data,
+                        8,
+                    )
+                };
+                assert_eq!(r, ERROR_SUCCESS, "{key}");
+            }
+        };
+        let t = 134_000_000_000_000_000;
+        set(
+            r"microphone\NonPackaged\C:#Program Files#Zoom#bin#Zoom.exe",
+            t,
+            0,
+        );
+        set(r"microphone\NonPackaged\C:#Shepetal#shepetal.exe", t, 0);
+        set(
+            r"microphone\NonPackaged\C:#Program Files#Chrome#chrome.exe",
+            t,
+            t,
+        );
+        set(r"webcam\Microsoft.WindowsCamera_8wekyb3d8bbwe", t, 0);
+        let apps = in_use(&Hkcu(base.clone()), Path::new(r"C:\Shepetal\shepetal.exe"));
+        let gone = Hkcu(base.clone())
+            .subkeys("no such key")
+            .map_err(|e| e.to_string());
+        let _ = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, &HSTRING::from(&base)) };
+        assert_eq!(apps.unwrap(), ["Zoom", "WindowsCamera"]);
+        assert_eq!(gone, Ok(vec![]), "a missing key is no apps, not an error");
     }
 }

@@ -24,7 +24,7 @@ final class VoiceIsolationTests: XCTestCase {
         let raw = noise(db: -30, count: 32_000)
         let engine = FakeEngine("hello")
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let run = await pipeline.process(raw, engine: engine, context: { ("", "") }, sendPaste: { _ in })
+        let run = await pipeline.process(raw, engine: engine, context: { ("", "", "") }, sendPaste: { _ in })
         XCTAssertEqual(engine.heard.count, raw.count)
         XCTAssertLessThan(db(engine.heard), db(raw) - 10, "the model got the isolated audio")
         XCTAssertEqual(try AudioStore.read(URL(fileURLWithPath: run.entry.audioPath)), raw, "the kept WAV is the raw recording")

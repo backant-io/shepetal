@@ -125,57 +125,132 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
     }
 }
 
-/// Text around the cursor of the focused field, and the selection the paste replaces, through
-/// Accessibility (`AXValue` and `AXSelectedTextRange`). Empty when unreadable.
+/// Text around the cursor of the focused field, and the selection the paste replaces, through Accessibility
+/// (docs/re/insertion-context.md 2.4.2). Empty when unreadable, or when the range and the text disagree: the
+/// text then goes in as dictated, since a guessed cursor would change its case and punctuation on a guess.
 enum FocusedText {
-    static func context() -> (before: String, after: String) {
-        read().map { split($0, $1) } ?? ("", "")
+    typealias Context = (before: String, after: String, selected: String)
+
+    /// One element's AX attributes, so tests can stand in for an app's answers without an AX call.
+    struct Field {
+        var get: (_ attribute: String) -> (AXError, CFTypeRef?)
+        var string: (_ range: CFRange) -> String?  // AXStringForRange
     }
 
-    static func selected() -> String {
-        read().map { selection($0, $1) } ?? ""
+    /// Read once per dictation, after transcription.
+    static func context() -> Context {
+        focused().map { context($0) } ?? ("", "", "")
+    }
+
+    static func context(_ field: Field, log: (String) -> Void = { NSLog("shepetal: context: %@", $0) }) -> Context {
+        guard let (s, r) = read(field, log: log) else { return ("", "", "") }
+        let (before, after) = split(s, r)
+        return (before, after, selection(s, r))
     }
 
     /// The focused app's pid and its focused window, to tell at paste time whether focus moved (rule 8).
     /// Without Accessibility only the frontmost app is known, and the window is nil.
     static func window() -> (app: Int32, window: AXUIElement?)? {
         let frontmost = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        var app: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute as CFString,
-                                            &app) == .success, let app else {
+        guard let app = element(AXUIElementCreateSystemWide(), kAXFocusedApplicationAttribute).0 else {
             return PasteGate.focus(axPid: nil, frontmostPid: frontmost, window: nil as AXUIElement?)
         }
-        let element = app as! AXUIElement
         // This runs on the main thread at fn-down: a hung app must not stall fn handling for AX's default 6 s.
-        AXUIElementSetMessagingTimeout(element, 0.1)
+        AXUIElementSetMessagingTimeout(app, 0.1)
+        askForTree { AXUIElementSetAttributeValue(app, $0 as CFString, $1) }
         var pid: pid_t = 0
-        let axPid: Int32? = AXUIElementGetPid(element, &pid) == .success ? pid : nil
-        var window: CFTypeRef?
-        let ok = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success
-        return PasteGate.focus(axPid: axPid, frontmostPid: frontmost, window: ok ? (window as! AXUIElement) : nil)
+        let axPid: Int32? = AXUIElementGetPid(app, &pid) == .success ? pid : nil
+        return PasteGate.focus(axPid: axPid, frontmostPid: frontmost, window: element(app, kAXFocusedWindowAttribute).0)
     }
 
-    /// An unreadable field logs which attribute failed and the AX error code, never the text.
-    private static func read() -> (String, NSRange)? {
-        var focused: CFTypeRef?
-        var err = AXUIElementCopyAttributeValue(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute as CFString, &focused)
-        guard err == .success, let focused else { return unreadable(kAXFocusedUIElementAttribute, err) }
-        let el = focused as! AXUIElement
+    /// Electron apps (VS Code, Slack, Obsidian) build the AX tree of their text fields only when asked (2.4.9).
+    /// Asked at dictation start, the tree is there when the text is ready; before, the read found no text and
+    /// every dictation went in as dictated. Apps without the attribute ignore it.
+    /// ponytail: AXEnhancedUserInterface (VoiceOver's switch) is not set: with it, window managers' moves and
+    /// resizes of the app turn slow and animated. Set it for browsers if Chrome fields still read empty.
+    static func askForTree(_ set: (_ attribute: String, _ value: CFTypeRef) -> AXError) {
+        _ = set("AXManualAccessibility", kCFBooleanTrue)
+    }
+
+    /// An attribute that holds an element. Another type is nil, not a crashing cast.
+    private static func element(_ of: AXUIElement, _ attribute: String) -> (AXUIElement?, AXError) {
         var value: CFTypeRef?
-        err = AXUIElementCopyAttributeValue(el, kAXValueAttribute as CFString, &value)
-        guard err == .success, let string = value as? String else { return unreadable(kAXValueAttribute, err) }
-        var rangeRef: CFTypeRef?
-        var range = CFRange()
-        err = AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef)
-        guard err == .success, let rangeRef, AXValueGetValue(rangeRef as! AXValue, .cfRange, &range) else {
-            return unreadable(kAXSelectedTextRangeAttribute, err)
-        }
-        return (string, NSRange(location: range.location, length: range.length))
+        let err = AXUIElementCopyAttributeValue(of, attribute as CFString, &value)
+        guard err == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return (nil, err) }
+        return ((value as! AXUIElement), err)
     }
 
-    private static func unreadable(_ attribute: String, _ err: AXError) -> (String, NSRange)? {
-        NSLog("shepetal: context: %@ unreadable (AX %d), text goes in as dictated", attribute, err.rawValue)
-        return nil
+    private static func focused() -> Field? {
+        let (el, err) = element(AXUIElementCreateSystemWide(), kAXFocusedUIElementAttribute)
+        guard let el else {
+            NSLog("shepetal: context: no focused element (AX %d), text goes in as dictated", err.rawValue)
+            return nil
+        }
+        return Field(get: { name in
+            var v: CFTypeRef?
+            return (AXUIElementCopyAttributeValue(el, name as CFString, &v), v)
+        }, string: { range in
+            var range = range
+            var v: CFTypeRef?
+            guard let param = AXValueCreate(.cfRange, &range),
+                  AXUIElementCopyParameterizedAttributeValue(el, kAXStringForRangeParameterizedAttribute as CFString,
+                                                             param, &v) == .success else { return nil }
+            return v as? String
+        })
+    }
+
+    /// The field's text and selection. Every read logs one line: the role, the length and the selection, or what
+    /// failed with its AX code. Never the text. An app that does not answer costs one AX timeout, not one per
+    /// attribute: the read stops at the first call that times out.
+    static func read(_ field: Field, log: (String) -> Void) -> (String, NSRange)? {
+        var hung = false
+        let f = Field(get: { name in
+            if hung { return (.cannotComplete, nil) }
+            let answer = field.get(name)
+            hung = answer.0 == .cannotComplete
+            return answer
+        }, string: { hung ? nil : field.string($0) })
+        let (roleErr, roleRef) = f.get(kAXRoleAttribute)
+        let role = roleRef as? String ?? "no role"
+        func unreadable(_ why: String) -> (String, NSRange)? {
+            log("\(role): \(why), text goes in as dictated")
+            return nil
+        }
+        if hung { return unreadable("no answer (AX \(roleErr.rawValue))") }  // not shown: logged
+        let (rangeErr, rangeRef) = f.get(kAXSelectedTextRangeAttribute)
+        var cf = CFRange()
+        guard let rangeRef, CFGetTypeID(rangeRef) == AXValueGetTypeID(), AXValueGetValue(rangeRef as! AXValue, .cfRange, &cf) else {
+            return unreadable("\(kAXSelectedTextRangeAttribute) unreadable (AX \(rangeErr.rawValue))")  // not shown: logged
+        }
+        // The text is AXValue, unless AXNumberOfCharacters, which counts in the range's units, disagrees with it:
+        // then it is AXStringForRange over all of them (2.4.2).
+        let (valueErr, valueRef) = f.get(kAXValueAttribute)
+        var text = valueRef as? String
+        if let n = f.get(kAXNumberOfCharactersAttribute).1 as? Int, n >= 0, n != text.map({ ($0 as NSString).length }) {
+            text = f.string(CFRange(location: 0, length: n))
+            if text == nil { return unreadable("\(kAXValueAttribute) is not its \(n) characters") }
+        }
+        guard let text else { return unreadable("\(kAXValueAttribute) unreadable (AX \(valueErr.rawValue))") }  // not shown: logged
+        let ns = text as NSString
+        var range = NSRange(location: cf.location, length: cf.length)
+        guard valid(range, in: text) else { return unreadable("selection \(cf.location)+\(cf.length) outside its \(ns.length) characters") }
+
+        // A range inside the text can still be wrong: stale, or counted on another node. The selected text, when
+        // the app gives it, says where the selection is; a selection found once in the text is used (as Flow does).
+        if let sel = f.get(kAXSelectedTextAttribute).1 as? String, sel != ns.substring(with: range) {
+            let at = ns.range(of: sel)
+            guard !sel.isEmpty, at.location != NSNotFound, ns.range(of: sel, options: .backwards) == at else {
+                return unreadable("\(kAXSelectedTextAttribute) does not match \(kAXSelectedTextRangeAttribute)")
+            }
+            range = at
+        }
+        // And the app's own text around the cursor must be the text read.
+        let lo = max(0, range.location - 20), around = NSRange(location: lo, length: min(ns.length, NSMaxRange(range) + 20) - lo)
+        if let s = f.string(CFRange(location: around.location, length: around.length)), s != ns.substring(with: around) {
+            return unreadable("AXStringForRange does not match \(kAXValueAttribute) at the cursor")
+        }
+        log("\(role), \(ns.length) characters, selection \(range.location)+\(range.length)")
+        return (text, range)
     }
 
     /// The selected text, or "" when the range is not inside the text.
