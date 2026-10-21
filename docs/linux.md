@@ -19,7 +19,7 @@ PipeWire bindings are less mature. Python would need a runtime and a virtualenv 
 | Part | v0 | Later |
 | --- | --- | --- |
 | Hotkey | fn (evdev `KEY_FN`). Read only the `/dev/input/event*` keyboards whose sysfs key capabilities include the hotkey (see "fn hotkey" below). Their key events go to one state machine. User must be in the `input` group. | GlobalShortcuts portal first (press and release, GNOME 48+, Plasma, Hyprland), evdev as the opt-in fallback, `evdev` crate for hotplug |
-| Gesture | Recording starts on the fn press. Hold fn at least 500 ms for push-to-talk. Two taps with at most 500 ms between the release and the second press for hands-free, next press stops. A shorter press with no second tap is too short: nothing is transcribed or typed, the clip is kept as too short, and the hint `Hold fn to talk · double-tap for hands-free` shows next to 🤫 for about 2 s (and goes to stderr). A chord (fn+F1) cancels without a hint, and the clip is kept as cancelled. The 500/500 ms values match the Mac (`Sources/ShepetalCore/FnGesture.swift`) and the 500 ms debounce in `docs/re/dictation-input.md` section 2.3. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code), or a combo of up to 3 keys or a mouse button with `dictation` in config.json (docs/linux-shortcuts.md). | Config file, tunable thresholds |
+| Gesture | Recording starts on the fn press. Hold fn at least 500 ms for push-to-talk. Two taps with at most 500 ms between the release and the second press for hands-free, next press stops. A shorter press with no second tap is too short: nothing is transcribed or typed, the clip is kept as too short, and the hint `Hold fn to talk · double-tap for hands-free` shows next to 🤫 for about 3 s (and goes to stderr). A chord (fn+F1) cancels without a hint, and the clip is kept as cancelled. The 500/500 ms values match the Mac (`Sources/ShepetalCore/FnGesture.swift`) and the 500 ms debounce in `docs/re/dictation-input.md` section 2.3. Set another key with `SHEPETAL_KEY` (`rightalt`, `rightmeta`, `capslock`, `f13`, `rightctrl` or an evdev code), or a combo of up to 3 keys or a mouse button with `dictation` in config.json (docs/linux-shortcuts.md). | Config file, tunable thresholds |
 | Mic | `pw-record` at 16 kHz mono s16, falling back to `parecord` (PulseAudio). Stopped with SIGINT so the WAV header is written. | `pipewire-rs` stream, no temp file |
 | STT | `sherpa-onnx-offline` (Parakeet) or `whisper-cli` from whisper.cpp (Whisper), run on the kept WAV. sherpa-onnx prints one JSON line per file on stdout, and shepetal reads its `text`. | `sherpa-rs` / `whisper-rs` in-process, model kept warm, sherpa-onnx streaming for meetings |
 | Model | The Linux rows of the tier table in `docs/models.md` (goal rule 5). CPU: Parakeet TDT 0.6B v3 int8 on sherpa-onnx, or Parakeet TDT-CTC 110M int8 below 4 GB RAM. CUDA (`/dev/nvidia0`, 8 GB RAM or more): Parakeet TDT 0.6B v3 with `--provider=cuda`. Vulkan (an ICD in `/usr/share/vulkan/icd.d`, 8 GB RAM or more): Whisper large-v3-turbo q5_0 on whisper.cpp. | Thresholds from measured latency, VRAM check, the Whisper fallback for languages Parakeet lacks |
@@ -42,7 +42,7 @@ and lets every click through to the window below. The ring shows the state:
 | `handsfree` | orange ring (after a double tap) |
 | `processing` | blue ring, 🤫 and ring pulsing between full and 35% opacity, 0.6 s each way |
 | `error <text>` | yellow ring, and the text next to 🤫 for about 4 s (`Transcription failed`, `Could not type or copy the text`; details go to stderr) |
-| `hint <text>` | the text next to 🤫 for about 2 s, in white on a dark box; the ring stays. The short-press hint is `Hold fn to talk · double-tap for hands-free` (with the key's name when `SHEPETAL_KEY` is set) |
+| `hint <text>` | the text next to 🤫 for about 3 s, in white on a dark box; the ring stays. The short-press hint is `Hold fn to talk · double-tap for hands-free` (with the key's name when `SHEPETAL_KEY` is set) |
 
 The colors are Apple's system red, orange, blue and yellow, which the Mac indicator uses.
 
@@ -127,7 +127,7 @@ GTK 3, gtk-layer-shell, Xvfb, Sway and grim, and runs:
    that window below it (the empty input shape). Then for each daemon line a
    screenshot (ImageMagick `import`) is checked pixel by pixel: 🤫's yellow face inside the 18 px
    square 8 px in from the bottom-left corner, the ring's color at its edge, the white-on-dark
-   text box only while a hint or error shows, its removal after about 2 s (hint) and 4 s (error),
+   text box only while a hint or error shows, its removal after about 3 s (hint) and 4 s (error),
    the blue ring's opacity changing across three shots while processing, and nothing drawn
    anywhere else. Last, closing the socket must end `shepetal-indicator`.
 4. Wayland: headless Sway (`WLR_BACKENDS=headless`) at 1280x720 with a full-screen window open.
@@ -386,7 +386,7 @@ and `mkdir -p ~/.local/bin && ln -s "$PWD/linux/indicator/shepetal-indicator" ~/
    Firefox: it stays on top. Click on 🤫: the click reaches what is below, and the focused
    window does not change. Hold fn and talk: red ring. Release: blue pulsing ring, then 🤫 alone
    when the text is typed. Double-tap fn: orange ring until the next press. Tap fn once:
-   `Hold fn to talk · double-tap for hands-free` shows to the right of 🤫 for about 2 s.
+   `Hold fn to talk · double-tap for hands-free` shows to the right of 🤫 for about 3 s.
 2. **I-2, KDE Plasma Wayland**: the same as I-1. 🤫 sits over the bottom panel, and a click on
    it reaches the panel button below it.
 3. **I-3, Sway or Hyprland**: the same as I-1, with a full-screen window (`fullscreen` in Sway,
@@ -402,7 +402,7 @@ and `mkdir -p ~/.local/bin && ln -s "$PWD/linux/indicator/shepetal-indicator" ~/
    primary. Make the other one primary (Settings > Displays): 🤫 moves there. At 200% scale,
    🤫 is about 36 physical pixels, 16 from the corner.
 6. **I-6, without the hotkey**: on any of the desktops, `printf 'recording\nhint Hello from shepetal\n' | (cat; sleep 5) | shepetal indicator`
-   shows a red ring and the text for about 2 s, then 🤫 disappears when the command ends.
+   shows a red ring and the text for about 3 s, then 🤫 disappears when the command ends.
 
 ## Known gaps
 

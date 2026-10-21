@@ -1,7 +1,8 @@
 ; Per-user installer for shepetal.exe (Inno Setup 6). No admin rights: it installs to
 ; %LOCALAPPDATA%\Programs\Shepetal, adds a Start menu entry and, as a task that is on by default,
-; starts Shepetal at sign-in. The uninstaller removes what setup installed, the Run value and the
-; downloaded speech models, and keeps the recordings in %LOCALAPPDATA%\Shepetal (goal rule 4).
+; starts Shepetal at sign-in. The uninstaller removes what setup installed, the Run value, the
+; settings (HKCU\Software\Shepetal) and the downloaded speech models, and keeps the recordings
+; in %LOCALAPPDATA%\Shepetal (goal rule 4).
 ;
 ; Build after `cargo build --release`, from windows/:
 ;   ISCC.exe /DAppVersion=0.1.0 installer\shepetal.iss   ->  target\installer\shepetal-setup-0.1.0.exe
@@ -13,6 +14,7 @@
 ; The same names as windows/crates/app/src/system.rs (a test there checks them).
 #define RunKey "Software\Microsoft\Windows\CurrentVersion\Run"
 #define RunValue "Shepetal"
+#define SettingsKey "Software\Shepetal"
 
 [Setup]
 AppId={{7AE361D0-2D5F-4C5F-99A5-FD0F5BA42B9A}
@@ -56,8 +58,12 @@ Type: filesandordirs; Name: "{localappdata}\Shepetal\models"
 
 [Code]
 // The tray's start-at-login toggle writes the same value, so remove it whether or not the task ran.
+// The tray's settings (the Recordings choice) go too; the recordings themselves stay.
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
   if CurUninstallStep = usPostUninstall then
+  begin
     RegDeleteValue(HKEY_CURRENT_USER, '{#RunKey}', '{#RunValue}');
+    RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, '{#SettingsKey}');
+  end;
 end;

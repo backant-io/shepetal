@@ -15,10 +15,10 @@ case "probe":
     }
     let snapshot = Probes.snapshot()
     print("camera in use: \(snapshot.cameraInUse ? "yes" : "no")")
-    let detector = MeetingDetector(ownPID: getpid())
+    let detector = Probes.detector()
     print("meeting now: \(detector.app(in: snapshot) ?? "none")")
 case "watch":
-    var detector = MeetingDetector(ownPID: getpid())
+    var detector = Probes.detector()
     let env = ProcessInfo.processInfo.environment
     detector.startAfter = Double(env["START_AFTER"] ?? "") ?? detector.startAfter
     detector.endAfter = Double(env["END_AFTER"] ?? "") ?? detector.endAfter

@@ -52,8 +52,10 @@ check(chrome.actor === box && chrome.opts.affectsInputRegion === false && box.re
     'top chrome outside the input region, not reactive, never focused: click-through');
 check(ext._emoji.style.includes('#ff3b30'), 'red ring while recording');
 check(ext._text.text === 'Hold fn to talk · double-tap for hands-free', 'the hint shows next to 🤫');
-spin(2300, () => !ext._text.visible);
-check(!ext._text.visible, 'the hint is gone after about 2 s');
+spin(2500, () => !ext._text.visible);
+check(ext._text.visible, 'the hint still shows 2.5 s later');
+spin(800, () => !ext._text.visible);
+check(!ext._text.visible, 'the hint is gone after about 3 s');
 
 ext.disable(); // while connected: the pending read is cancelled
 spin(300);

@@ -17,6 +17,22 @@ final class DeadRecorder: Recorder {
     override func open(_ device: MicDevice?) throws { throw SpeechError("gone") }
 }
 
+/// AVAudioEngine after `open` moved it to a mic that is not its default: right after the start it posts one
+/// configuration change, `running` or stopped by itself, and every new engine does the same (Pavel's 21.10.26
+/// retest, unified log "iounit configuration changed"). `newFormat` is a Bluetooth headset that switches its
+/// profile once, on the first open.
+final class MovedEngineRecorder: Recorder {
+    var opens = 0, restarts = 0
+    var running = false, newFormat = false
+    var opened: XCTestExpectation?
+    override func open(_ device: MicDevice?) throws {
+        opens += 1
+        engineChanged(running: running, formatKept: !(newFormat && opens == 1))
+        if opens == 1 { opened?.fulfill() }
+    }
+    override func restart() throws { restarts += 1 }
+}
+
 /// A reopen closes the engine before it opens it again. When that open fails, the dictation must still end
 /// with a message (the audio so far is transcribed and kept). Otherwise the ring keeps showing recording,
 /// hands-free included, while nothing is captured.
@@ -56,5 +72,57 @@ final class RecorderTests: XCTestCase {
         recorder.start()
         wait(for: [ended], timeout: 5)
         XCTAssertFalse(recorder.isRecording)
+    }
+
+    // MARK: the engine's own configuration change (21.10.26: every dictation was empty)
+
+    private let mic = MicDevice(uid: "BuiltInMicrophoneDevice", name: "MacBook Pro Microphone", transport: .builtIn)
+
+    /// Starts a dictation and lets it settle: the first open runs on the mic queue, each rebuild after it is one
+    /// turn of the main queue. Returns how the mic ended the dictation, if it did.
+    private func dictate(_ recorder: MovedEngineRecorder) -> [(Bool, String)] {
+        let mic = Mic(recorder: recorder, inputs: { [self] in [self.mic] })
+        var ends: [(Bool, String)] = []
+        mic.end = { ends.append(($0, $1)); _ = mic.stop() }
+        recorder.opened = expectation(description: "the mic opens")
+        recorder.start(self.mic)
+        wait(for: [recorder.opened!], timeout: 5)
+        for _ in 0..<6 {
+            let turn = expectation(description: "main queue turn")
+            DispatchQueue.main.async { turn.fulfill() }
+            wait(for: [turn], timeout: 5)
+        }
+        return ends
+    }
+
+    /// The root cause of the empty recordings: a new engine for the engine's own change moved again and changed
+    /// again, until the rebuilds ran out with no buffer. The engine already sits on the mic: start it again.
+    func testEngineThatStoppedAfterTheMoveStartsAgainInsteadOfARebuild() {
+        let recorder = MovedEngineRecorder()
+        let ends = dictate(recorder)
+        XCTAssertEqual(recorder.opens, 1, "a new engine would move and change again")
+        XCTAssertEqual(recorder.restarts, 1)
+        XCTAssertTrue(ends.isEmpty, "the dictation keeps recording, got \(ends)")
+        XCTAssertTrue(recorder.isRecording)
+    }
+
+    func testEngineStillRunningAfterTheMoveIsLeftAlone() {
+        let recorder = MovedEngineRecorder()
+        recorder.running = true
+        let ends = dictate(recorder)
+        XCTAssertEqual(recorder.opens, 1)
+        XCTAssertEqual(recorder.restarts, 0, "it is still delivering buffers")
+        XCTAssertTrue(ends.isEmpty, "got \(ends)")
+    }
+
+    /// A real format change still gets a new engine, which reads the new format; restarting the old one would
+    /// keep the stale tap.
+    func testNewFormatStillBuildsANewEngine() {
+        let recorder = MovedEngineRecorder()
+        recorder.newFormat = true
+        let ends = dictate(recorder)
+        XCTAssertEqual(recorder.opens, 2, "the old engine has the old format")
+        XCTAssertEqual(recorder.restarts, 1, "only the new engine's own change after its move")
+        XCTAssertTrue(ends.isEmpty, "got \(ends)")
     }
 }

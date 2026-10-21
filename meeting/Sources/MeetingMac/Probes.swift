@@ -104,5 +104,11 @@ public enum Probes {
     public static func snapshot() -> Snapshot {
         Snapshot(micUsers: micUsers(), cameraInUse: cameraInUse(), devices: devices(), wakeMarker: wakeMarker())
     }
+
+    /// The detector `shepetal-meeting probe` and `watch` run. It skips this CLI by pid and the Shepetal app, whose
+    /// dictation and meeting capture run in another process, by its exact bundle ID.
+    public static func detector() -> MeetingDetector {
+        MeetingDetector(ownPID: getpid(), ownBundleID: "io.backant.shepetal")
+    }
 }
 #endif

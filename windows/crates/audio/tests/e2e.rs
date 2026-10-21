@@ -14,7 +14,7 @@ const SENTENCE: &str = "The quick brown fox jumps over the lazy dog.";
 #[ignore = "needs espeak-ng and the CPU speech model, see the top of tests/e2e.rs"]
 fn synthesized_speech_is_transcribed_on_the_device() {
     let models = std::env::var_os("SHEPETAL_MODELS").expect("set SHEPETAL_MODELS");
-    let model = audio::model::ensure(Path::new(&models), &audio::model::CPU).unwrap();
+    let model = audio::model::ensure(Path::new(&models), &audio::model::CPU, |_| {}).unwrap();
 
     let dir = std::env::temp_dir().join(format!("shepetal-e2e-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);

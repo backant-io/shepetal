@@ -82,6 +82,7 @@ class Recorder {
         isRecording = true
         queue.async { [self] in
             do { try open(device) } catch {
+                NSLog("shepetal: mic: %@ did not open: %@", device?.name ?? "the default input", String(describing: error))
                 let message = "Microphone: \(error.localizedDescription)"
                 DispatchQueue.main.async { self.onError?(message) }
             }
@@ -110,11 +111,12 @@ class Recorder {
         }
     }
 
-    /// On `queue`.
+    /// On `queue`. The engine already records from the system default input; it is moved only to another device,
+    /// since moving it makes AVAudioEngine reconfigure right after the start (see `engineChanged`).
     func open(_ device: MicDevice?) throws {
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        if let device {
+        if let device, device.uid != AudioDevices.defaultInputUID {
             guard var id = AudioDevices.id(forUID: device.uid), let unit = input.audioUnit,
                   AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                                        &id, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr else {
@@ -130,8 +132,36 @@ class Recorder {
             throw error
         }
         self.engine = engine
+        NSLog("shepetal: mic: opened %@ (%.0f Hz, %d ch)", device?.name ?? "the default input", format.sampleRate, format.channelCount)
         observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine,
-                                                          queue: .main) { [weak self] _ in self?.onConfigurationChange?() }
+                                                          queue: nil) { [weak self, weak engine] _ in
+            self?.queue.async {
+                guard let self, let engine, engine === self.engine else { return }  // closed since
+                self.engineChanged(running: engine.isRunning, formatKept: engine.inputNode.outputFormat(forBus: 0) == format)
+            }
+        }
+    }
+
+    /// On `queue`. AVAudioEngine posts a configuration change when its IO unit changed. Moving a new engine to a
+    /// device that is not its default does that right after the start: the engine stays on the device, still
+    /// running or stopped by itself. #39 built a new engine for every change, which moved again and changed again,
+    /// so the three rebuilds went by in under a second with no buffer, and every dictation was empty (the
+    /// 21.10.26 retest: zero-length WAVs, "No audio from the microphone"). So a running engine is left alone, a
+    /// stopped one with the same input format starts again, and only a new format (Bluetooth switching to its
+    /// headset profile) or a failed restart needs a new engine (`onConfigurationChange`).
+    func engineChanged(running: Bool, formatKept: Bool) {
+        guard !running else { return NSLog("shepetal: mic: configuration change, still recording") }
+        if formatKept {
+            do { try restart(); return NSLog("shepetal: mic: configuration change, started again") } catch {
+                NSLog("shepetal: mic: could not start again: %@", String(describing: error))
+            }
+        }
+        DispatchQueue.main.async { self.onConfigurationChange?() }
+    }
+
+    /// On `queue`: the hardware, replaced in tests.
+    func restart() throws {
+        try engine?.start()
     }
 
     /// On `queue`: stops the engine and moves what the resampler still holds into `samples`.
@@ -175,6 +205,7 @@ final class Mic: NSObject {
     var end: (_ transcribe: Bool, _ message: String) -> Void = { _, _ in }
 
     private let defaults = UserDefaults.standard
+    private let inputs: () -> [MicDevice]  // CoreAudio's, or a test's
     private var notices: MicNotices
     private var timer: Timer?
     private var rebuilds = 0
@@ -189,8 +220,9 @@ final class Mic: NSObject {
         set { defaults.set(newValue, forKey: "micRanking") }
     }
 
-    init(recorder: Recorder = Recorder()) {
+    init(recorder: Recorder = Recorder(), inputs: @escaping () -> [MicDevice] = AudioDevices.inputs) {
         self.recorder = recorder
+        self.inputs = inputs
         notices = MicNotices(seen: defaults.stringArray(forKey: "micSeen").map(Set.init),
                              bluetoothHintShown: defaults.bool(forKey: "micBluetoothHintShown"))
         super.init()
@@ -205,7 +237,7 @@ final class Mic: NSObject {
     }
 
     func open() throws {
-        let devices = AudioDevices.inputs()
+        let devices = inputs()
         let lidClosed = AudioDevices.lidClosed
         let pick = try MicChoice.pick(devices, forced: forced, ranking: ranking,
                                       systemDefault: AudioDevices.defaultInputUID, lidClosed: lidClosed)
@@ -252,11 +284,12 @@ final class Mic: NSObject {
 
     private func stopDictation(transcribe: Bool, _ message: String) {
         guard recorder.isRecording else { return }
+        NSLog("shepetal: mic: dictation ended: %@", message)
         end(transcribe, message)
     }
 
     private func devicesChanged() {
-        let devices = AudioDevices.inputs()
+        let devices = inputs()
         if let active = recorder.device, recorder.isRecording, !devices.contains(where: { $0.uid == active.uid }) {
             stopDictation(transcribe: true, "Mic disconnected")
         }
@@ -269,7 +302,7 @@ final class Mic: NSObject {
     /// headset profile does that), which needs a new engine.
     private func configurationChanged() {
         guard recorder.isRecording, let device = recorder.device else { return }
-        guard AudioDevices.inputs().contains(where: { $0.uid == device.uid }) else {
+        guard inputs().contains(where: { $0.uid == device.uid }) else {
             return stopDictation(transcribe: true, "Mic disconnected")
         }
         rebuilds += 1
@@ -291,7 +324,7 @@ final class Mic: NSObject {
 
     /// Automatic, each device (to force it), and "Prefer <name>" (moves it to the top of the ranking).
     func menuItem() -> NSMenuItem {
-        let devices = AudioDevices.inputs()
+        let devices = inputs()
         let lidClosed = AudioDevices.lidClosed
         let pick = try? MicChoice.pick(devices, forced: forced, ranking: ranking,
                                        systemDefault: AudioDevices.defaultInputUID, lidClosed: lidClosed)

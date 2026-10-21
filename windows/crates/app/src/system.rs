@@ -1,16 +1,90 @@
 //! The names shepetal.exe shares with Windows and with the installer
 //! (windows/installer/shepetal.iss), and the pure decisions made on them.
 
+use shepetal_core::retention::Retention;
 use std::path::Path;
+
+/// Next to the 🤫 when the hotkey is pressed while the speech model downloads on first run:
+/// nothing records until it is in place. Names no model, only how far along it is.
+pub fn downloading_hint(percent: u8) -> String {
+    format!("Getting the speech model ready ({percent} %). Dictation works once it's done.")
+}
+
+/// Next to the 🤫 once the first-run download is in place and loaded.
+pub fn ready_hint(hotkey: &str) -> String {
+    format!("Ready. Hold {hotkey} to talk.")
+}
 
 /// Single instance. The installer's `AppMutex` names the same mutex, so setup and the uninstaller
 /// ask the user to quit a running shepetal first. No `Global\` prefix: one instance per session.
 pub const MUTEX: &str = "Shepetal.SingleInstance";
 
+/// Whether another Shepetal holds `MUTEX`. `created`: CreateMutexW returned a handle, and
+/// `existed`: its last error was ERROR_ALREADY_EXISTS. If the create failed, `opened` asks
+/// OpenMutexW whether the name exists, so a failed create never starts a second instance next
+/// to a running one.
+pub fn already_running(created: bool, existed: bool, opened: impl FnOnce() -> bool) -> bool {
+    if created {
+        existed
+    } else {
+        opened()
+    }
+}
+
 /// Start at login: a value under HKCU, written by the installer's "start at login" task and by
 /// the tray toggle, removed by the uninstaller.
 pub const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 pub const RUN_VALUE: &str = "Shepetal";
+
+/// Shepetal's own settings: one REG_SZ per setting under HKCU. The uninstaller removes the key.
+pub const SETTINGS_KEY: &str = r"Software\Shepetal";
+/// `keep` or `delete_after_24h`, the Mac's values (`Retention::as_str`).
+pub const RETENTION_VALUE: &str = "Retention";
+
+/// The retention a stored value means. Missing, or anything else ("never store" included), is
+/// keep, the default (goal rule 4).
+pub fn retention(value: Option<&str>) -> Retention {
+    value.and_then(Retention::parse).unwrap_or_default()
+}
+
+/// The dictation hotkey, in `input::Hotkey::parse` syntax. The tray offers `input::HOTKEYS`.
+pub const HOTKEY_VALUE: &str = "Hotkey";
+
+/// The hotkey a stored value means: any hotkey `input::Hotkey::parse` takes (the tray writes one
+/// of `input::HOTKEYS`; regedit can set others), else Ctrl+Win.
+pub fn hotkey(value: Option<&str>) -> String {
+    match value.map(str::trim) {
+        Some(v) if input::Hotkey::parse(v).is_ok() => v.to_string(),
+        _ => crate::flow::HOTKEY.to_string(),
+    }
+}
+
+/// With delete after 24 h, how often the audio folder is checked while Shepetal runs, so a clip
+/// goes within a minute of turning 24 hours old.
+pub const PRUNE_EVERY_MS: u64 = 60_000;
+
+/// When the audio folder is next checked for clips 24 hours old. Due at once after `new` and
+/// after `now`, so launch and picking the setting both prune right away.
+#[derive(Debug, Default)]
+pub struct Prune {
+    next_ms: u64,
+}
+
+impl Prune {
+    /// Whether to prune at `now_ms` (any monotonic clock); if so, the next one is a minute later.
+    pub fn due(&mut self, now_ms: u64) -> bool {
+        if now_ms < self.next_ms {
+            return false;
+        }
+        self.next_ms = now_ms + PRUNE_EVERY_MS;
+        true
+    }
+
+    /// Prune at the next `due`.
+    pub fn now(&mut self) {
+        self.next_ms = 0;
+    }
+}
 
 /// The Run value's data: the exe, quoted because the install path may hold spaces.
 pub fn run_command(exe: &Path) -> String {
@@ -55,6 +129,53 @@ mod tests {
     }
 
     #[test]
+    fn retention_is_keep_unless_the_user_picked_24_h() {
+        assert_eq!(retention(None), Retention::Keep, "nothing stored: keep, the default");
+        assert_eq!(retention(Some("keep")), Retention::Keep);
+        assert_eq!(retention(Some("delete_after_24h")), Retention::Delete24h);
+        for v in ["never", "never_store", "Delete_after_24h", "24h", ""] {
+            assert_eq!(retention(Some(v)), Retention::Keep, "{v}");
+        }
+        // The value written is the one read back.
+        for r in [Retention::Keep, Retention::Delete24h] {
+            assert_eq!(retention(Some(r.as_str())), r);
+        }
+    }
+
+    #[test]
+    fn hotkey_is_ctrl_win_unless_a_valid_one_is_stored() {
+        assert_eq!(hotkey(None), "Ctrl+Win");
+        assert_eq!(hotkey(Some("Alt+Win")), "Alt+Win");
+        assert_eq!(hotkey(Some(" F13 ")), "F13");
+        assert_eq!(hotkey(Some("Ctrl+Shift+F1")), "Ctrl+Shift+F1", "set in regedit");
+        for bad in ["", "Ctrl+Nope", "Ctrl+Ctrl", "Ctrl+Alt+Shift+Win"] {
+            assert_eq!(hotkey(Some(bad)), "Ctrl+Win", "{bad:?}");
+        }
+        for h in input::HOTKEYS {
+            assert_eq!(hotkey(Some(h)), h, "every tray choice reads back");
+        }
+    }
+
+    #[test]
+    fn prune_runs_at_launch_then_every_minute_and_at_once_when_asked() {
+        let mut p = Prune::default();
+        assert!(p.due(5), "at launch");
+        assert!(!p.due(6));
+        assert!(!p.due(5 + PRUNE_EVERY_MS - 1));
+        assert!(p.due(5 + PRUNE_EVERY_MS), "a minute later");
+        assert!(!p.due(5 + PRUNE_EVERY_MS + 1));
+        p.now();
+        assert!(p.due(5 + PRUNE_EVERY_MS + 2), "right after the setting is picked");
+        assert!(!p.due(5 + PRUNE_EVERY_MS + 3));
+    }
+
+    #[test]
+    fn uninstaller_removes_the_settings_key() {
+        assert!(ISS.contains(&format!("#define SettingsKey \"{SETTINGS_KEY}\"")), "SettingsKey in shepetal.iss");
+        assert!(ISS.contains("RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, '{#SettingsKey}')"));
+    }
+
+    #[test]
     fn installer_is_per_user_and_keeps_recordings() {
         // No admin rights: the install goes to %LOCALAPPDATA%\Programs\Shepetal.
         assert!(ISS.contains("PrivilegesRequired=lowest"));
@@ -63,6 +184,14 @@ mod tests {
         // uninstaller deletes only the models, never the recordings next to them.
         let data: Vec<&str> = ISS.lines().filter(|l| l.to_ascii_lowercase().contains(r"{localappdata}\shepetal")).collect();
         assert_eq!(data, [r#"Type: filesandordirs; Name: "{localappdata}\Shepetal\models""#]);
+    }
+
+    #[test]
+    fn a_failed_create_asks_whether_the_mutex_exists() {
+        assert!(!already_running(true, false, || panic!("not asked when the create worked")), "first instance");
+        assert!(already_running(true, true, || panic!("not asked")), "second instance");
+        assert!(already_running(false, false, || true), "create failed, but a running one holds the name");
+        assert!(!already_running(false, false, || false), "create and open failed: nothing to go by, start");
     }
 
     #[test]
@@ -94,6 +223,17 @@ mod tests {
         for (file, src) in sources {
             for api in ["MessageBox", "MessageBeep", "PlaySound", "Beep(", "sndPlaySound"] {
                 assert!(!src.contains(api), "{file} uses {api}");
+            }
+        }
+    }
+
+    #[test]
+    fn download_hints_give_progress_and_name_no_model() {
+        assert_eq!(downloading_hint(40), "Getting the speech model ready (40 %). Dictation works once it's done.");
+        assert_eq!(ready_hint("Alt+Win"), "Ready. Hold Alt+Win to talk.");
+        for h in [downloading_hint(0), ready_hint("Ctrl+Win")] {
+            for name in ["ggml", "whisper", "base", "large", "turbo", "q5", ".bin"] {
+                assert!(!h.to_lowercase().contains(name), "{h} names the model ({name})");
             }
         }
     }
