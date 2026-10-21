@@ -405,8 +405,12 @@ impl<'a> Words<'a> {
     }
 
     fn date(&self, i: usize) -> Option<Found> {
-        if self.text[..self.at[i].0].ends_with('.') {
+        let before = &self.text[..self.at[i].0];
+        if before.ends_with('.') {
             return None; // inside "26.07.26": already numbers
+        }
+        if before.strip_suffix(|c| ",:/-".contains(c)).is_some_and(|b| b.ends_with(|c: char| c.is_ascii_digit())) {
+            return None; // inside a number: "10:30 July 4th"
         }
         self.day_first(i).or_else(|| self.month_first(i))
     }
@@ -469,13 +473,19 @@ impl<'a> Words<'a> {
         if self.gap(i) != " " {
             return None;
         }
-        let d = i + 1 + usize::from(self.word(i + 1) == "the" && self.gap(i + 1) == " ");
+        let the = self.word(i + 1) == "the" && self.gap(i + 1) == " ";
+        let d = i + 1 + usize::from(the);
         let (day, n) = match self.longest(d, 2, en_ordinal) {
             Some(found) => found,
             None if self.joined(d) => return None, // "June 26.07.2026", "July 10:30", "March 3-5", "July 26%"
             None => (digit_day(&self.word(d))?.0, 1),
         };
-        self.found(day, mo, d + n - 1, self.year(d + n - 1))
+        let year = self.year(d + n - 1);
+        let last = year.map_or(d + n - 1, |y| y.2 - 1);
+        if the && mo == 5 && self.gap(last) == " " && self.word(last + 1) == "be" {
+            return None; // "May the fourth be with you" is a wish
+        }
+        self.found(day, mo, d + n - 1, year)
     }
 
     /// The year after word `last` (a comma between is fine): its last two digits, the full year and the

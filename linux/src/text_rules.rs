@@ -210,8 +210,10 @@ pub fn dates(text: &str) -> String {
     let (mut out, mut last, mut k) = (String::new(), 0, 0);
     while k < w.at.len() {
         let start = w.at[k].0;
-        // A date never starts after a dot: "26.07.26" is numbers already.
-        let hit = if text[..start].ends_with('.') { None } else { w.day_first(k).or_else(|| w.month_first(k)) };
+        // A date never starts after a dot ("26.07.26" is numbers already) or inside a number ("10:30 July 4th").
+        let before = &text[..start];
+        let inside = before.strip_suffix(|c| ",:/-".contains(c)).is_some_and(|b| b.ends_with(|c: char| c.is_ascii_digit()));
+        let hit = if before.ends_with('.') || inside { None } else { w.day_first(k).or_else(|| w.month_first(k)) };
         let Some((end, date)) = hit else {
             k += 1;
             continue;
@@ -236,6 +238,8 @@ const EN_ORDINALS: [&str; 19] = [
 const DE_UNITS: [&str; 9] = ["ein", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun"];
 const DE_TEENS: [&str; 10] = ["zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn"];
 const DE_TENS: [&str; 8] = ["zwanzig", "dreißig", "vierzig", "fünfzig", "sechzig", "siebzig", "achtzig", "neunzig"];
+/// What may follow a short year: `.` `;` `:` `!` `?` `)` and closing quotes ("July 26, 26", „... sechsundzwanzig“).
+const ENDS: &str = ".;:!?)\"'’”“»«";
 const MONTHS: [[&str; 2]; 12] = [
     ["january", "januar"], ["february", "februar"], ["march", "märz"], ["april", "april"], ["may", "mai"], ["june", "juni"],
     ["july", "juli"], ["august", "august"], ["september", "september"], ["october", "oktober"], ["november", "november"],
@@ -365,6 +369,9 @@ impl<'a> Words<'a> {
             let y: u32 = raw.parse().ok()?;
             return Some((y % 100, y, k + 1));
         }
+        if w == "nineteen" && self.join(k + 1) && self.w(k + 1) == "hundred" {
+            return Some((0, 1900, k + 2));
+        }
         // twenty twenty-six, nineteen ninety nine, twenty oh nine
         let century = match w {
             "twenty" => 2000,
@@ -388,55 +395,99 @@ impl<'a> Words<'a> {
             let (n, next) = Some(j).filter(|&j| self.join(j)).and_then(|j| self.en_number(j)).unwrap_or((0, k + 2));
             return Some((n, 2000 + n, next));
         }
-        // zweitausendsechsundzwanzig, zweitausend sechsundzwanzig, zweitausendundfünf, neunzehnhundertneunundneunzig
-        for (head, century) in [("zweitausend", 2000), ("neunzehnhundert", 1900)] {
-            let Some(rest) = w.strip_prefix(head) else { continue };
-            let space = |j: usize| self.gap(j) == " ";
-            let mut tries = vec![(rest.to_string(), k + 1)];
-            if (rest.is_empty() || rest == "und") && space(k + 1) {
-                tries.insert(0, (format!("{rest}{}", self.w(k + 1)), k + 2));
-                if rest.is_empty() && self.w(k + 1) == "und" && space(k + 2) {
-                    tries.insert(0, (format!("und{}", self.w(k + 2)), k + 3));
-                }
-            }
-            let tail = |s: &str| if s.is_empty() { Some(0) } else { de_number(s.strip_prefix("und").unwrap_or(s)) };
-            return tries.iter().find_map(|(s, next)| tail(s).map(|n| (n, century + n, *next)));
+        // zweitausendsechsundzwanzig, zweitausend sechs und zwanzig, neunzehnhundert-neunundneunzig: the longest
+        // run of up to four joined words, read as one, so "sechs und zwanzig" is 26, never 6.
+        if w.starts_with("zweitausend") || w.starts_with("neunzehnhundert") {
+            let century = if w.starts_with("neunzehn") { 1900 } else { 2000 };
+            return (1..=4).rev().find_map(|len| {
+                let whole = k + len <= self.at.len() && (k + 1..k + len).all(|j| self.join(j));
+                let all: String = (k..k + len).map(|j| self.w(j)).collect();
+                let rest = all.strip_prefix("zweitausend").or_else(|| all.strip_prefix("neunzehnhundert"))?;
+                let yy = if rest.is_empty() { 0 } else { de_number(rest.strip_prefix("und").unwrap_or(rest))? };
+                whole.then_some((yy, century + yy, k + len))
+            });
         }
-        // A short year needs punctuation or the end after it: in "July fourth twenty six people" it is a count.
+        // A short year only where `ends`: in "July fourth twenty six people" it is a count.
         let (n, next) = if digits && raw.len() == 2 {
             (raw.parse().ok()?, k + 1)
         } else {
             self.en_number(k).or_else(|| de_number(w).map(|n| (n, k + 1))).filter(|&(n, _)| n >= 10)?
         };
-        let ends = self.text[self.at[next - 1].1..].chars().next().map_or(true, |c| ".,;:!?)".contains(c));
-        ends.then_some((n, 2000 + n, next))
+        self.ends(next - 1).then_some((n, 2000 + n, next))
     }
 
     /// The year that may follow word `last` (`,? YEAR`): its two digits, the full year and the word after it.
     fn year_after(&self, last: usize) -> Option<(u32, u32, usize)> {
-        if matches!(self.gap(last + 1), " " | ", ") { self.year(last + 1) } else { None }
+        if !matches!(self.gap(last + 1), " " | ", ") {
+            return None;
+        }
+        let (yy, full, next) = self.year(last + 1)?;
+        // A year ending in 00 is also a round count ("On July 4th two thousand people marched"), and a year
+        // never stops inside a hyphenated word ("nineteen twenty-first" is not 1920).
+        ((yy != 0 || self.ends(next - 1)) && !self.after(next - 1).starts_with('-')).then_some((yy, full, next))
+    }
+
+    /// The text after word k.
+    fn after(&self, k: usize) -> &str {
+        &self.text[self.at[k].1..]
+    }
+
+    /// The end of the text follows word k, or `. ; : ! ? )` or a quote without a digit right after it. A comma
+    /// does not count: in "May 15, 16, and 17" the 16 is a day, and in "March 5, 10:30" a time.
+    fn ends(&self, k: usize) -> bool {
+        let mut after = self.after(k).chars();
+        after.next().map_or(true, |c| ENDS.contains(c) && !after.next().is_some_and(|c| c.is_ascii_digit()))
+    }
+
+    /// Word k runs on into another number or a sign: only a space, the end, or `,` or what `ends` takes, without
+    /// a digit right after it, ends a day. "26.07.2026", "10:30", "3-5", "26/27" and "26%" stay.
+    fn joined(&self, k: usize) -> bool {
+        let Some(&(_, end)) = self.at.get(k) else { return false };
+        let mut after = self.text[end..].chars();
+        after.next().is_some_and(|c| {
+            !c.is_whitespace() && (!(c == ',' || ENDS.contains(c)) || after.next().is_some_and(|c| c.is_ascii_digit()))
+        })
+    }
+
+    /// Word k starts with a capital: "May", "MAY".
+    fn capital(&self, k: usize) -> bool {
+        self.raw(k).starts_with(char::is_uppercase)
     }
 
     /// `[the] DAY [of] MONTH [,] [YEAR]` from word k: the byte where it ends and the date.
     fn day_first(&self, k: usize) -> Option<(usize, String)> {
         let i = if self.w(k) == "the" && self.gap(k + 1) == " " { k + 1 } else { k };
-        // In "twenty ninth" the day is 29: "ninth" never starts a day there.
-        let after_tens = self.join(i) && matches!(self.w(i - 1), "twenty" | "thirty");
-        let (day, bare, i) = match digit_day(self.raw(i)) {
-            Some((d, bare)) => (d, bare, i + 1),
-            None => {
-                let en = if after_tens { None } else { self.en_ordinal(i) };
-                let (d, next) = en.or_else(|| de_ordinal(self.w(i)).map(|d| (d, i + 1)))?;
-                (d, false, next)
-            }
+        // A spelled day is the whole number: in "twenty ninth" the day is 29, never "ninth", and "forty first" and
+        // "sechs und zwanzigsten" are no day. Cleanup leaves "twenty, ninth" from "twenty, uh, ninth".
+        let after_tens = matches!(self.gap(i), " " | "-" | ", ") && find(&EN_TENS, self.w(i - 1), 2).is_some();
+        let after_und =
+            i > 1 && self.w(i - 1) == "und" && self.gap(i) == " " && self.gap(i - 1) == " " && find(&DE_UNITS, self.w(i - 2), 1).is_some();
+        let (day, bare, en, i) = match digit_day(self.raw(i)) {
+            Some((d, bare)) => (d, bare, false, i + 1),
+            None => match self.en_ordinal(i).filter(|_| !after_tens) {
+                Some((d, next)) => (d, false, true, next),
+                None => (de_ordinal(self.w(i)).filter(|_| !after_und)?, false, false, i + 1),
+            },
         };
         // "26. Juni": bare digits may take a German dot.
-        if !(self.gap(i) == " " || bare && self.gap(i) == ". ") {
+        let dot = bare && self.gap(i) == ". ";
+        if !(self.gap(i) == " " || dot) {
             return None;
         }
-        let of = self.w(i) == "of" && self.gap(i + 1) == " ";
+        // "of" never ends a phrase, so a comma after it is a dropped filler's: "the first of, um, March".
+        let of = self.w(i) == "of" && matches!(self.gap(i + 1), " " | ", ");
+        if en && !of {
+            return None; // an English spelled day needs "of": "my first April", "this is my third September"
+        }
         let i = i + usize::from(of);
         let month = self.month(i)?;
+        // "die erste Juli-Woche" is a week. After a German dot the month is German: in "I counted 26. May I
+        // continue?" a sentence ends. Without "of", "may" and "march" need a capital M: "the second may be better".
+        let german = MONTHS.iter().any(|m| m[1] == self.w(i));
+        let verb = !of && matches!(self.w(i), "may" | "march") && !self.capital(i);
+        if self.after(i).starts_with('-') || dot && !german || verb {
+            return None;
+        }
         let year = self.year_after(i);
         // "Fourth of July" without a year is the holiday's name (docs/text-rules.md, the decision for Pavel).
         if of && year.is_none() && day == 4 && month == 7 {
@@ -448,16 +499,24 @@ impl<'a> Words<'a> {
     /// `MONTH [the] DAY [,] [YEAR]` from word k, with an English or digit day.
     fn month_first(&self, k: usize) -> Option<(usize, String)> {
         let month = self.month(k)?;
-        // Before a day only "May" with a capital M is the month: "you may first want to check".
-        if self.w(k) == "may" && self.raw(k) != "May" || self.gap(k + 1) != " " {
+        // German puts the day first, so a German month name starts no date: "im Mai 5 Tage Urlaub". Before a day
+        // only "May" with a capital M is the month: "you may first want to check".
+        let english = MONTHS.iter().any(|m| m[0] == self.w(k));
+        if !english || self.w(k) == "may" && !self.capital(k) || self.gap(k + 1) != " " {
             return None;
         }
-        let i = if self.w(k + 1) == "the" && self.gap(k + 2) == " " { k + 2 } else { k + 1 };
-        let (day, next) = match digit_day(self.raw(i)) {
-            Some((d, _)) => (d, i + 1),
-            None => self.en_ordinal(i)?,
+        let the = self.w(k + 1) == "the" && self.gap(k + 2) == " ";
+        let i = k + 1 + usize::from(the);
+        let (day, next) = match self.en_ordinal(i) {
+            Some(found) => found,
+            None if self.joined(i) => return None, // "June 26.07.2026", "July 10:30", "March 3-5", "July 26%"
+            None => (digit_day(self.raw(i))?.0, i + 1),
         };
         let year = self.year_after(next - 1);
+        let after = year.map_or(next, |y| y.2);
+        if the && self.w(k) == "may" && self.w(after) == "be" && self.gap(after) == " " {
+            return None; // "May the fourth be with you" is a wish
+        }
         self.written(year.map_or(next - 1, |y| y.2 - 1), day, month, year)
     }
 
@@ -627,89 +686,60 @@ mod tests {
         assert_eq!(cleanup("I I think a a test and and the the fix work."), "I think a test and the fix work.");
     }
 
-    // Vectors from #176 (spec changes after the #161 reviews) that this port does not pass yet: #189. Each
-    // one must still fail, so the list shrinks as the port catches up, and it goes when it is empty.
-    const PENDING: &[&str] = &[
-        "Does May July 4th work?",
-        "Juli 26.07.2026",
-        "March 3-5",
-        "Meet on March 5, 10:30.",
-        "Am 5. März, 14:30 Uhr",
-        "Termin am 3. März, 10.30 Uhr",
-        "Am Freitag, den 5. Juni, 14:30 Uhr.",
-        "on May 15, 16, and 17.",
-        "am sechsundzwanzigsten Juni sechsundzwanzig, also bald",
-        "the twenty, sixth of July twenty twenty six",
-        "the twenty, first of March",
-        "the first of, March",
-        "The second may be better.",
-        "the first may be fine",
-        "Option 2 may work.",
-        "Step 3 may fail on Windows.",
-        "Chapter 2 may 2026 notes",
-        "The first march was long.",
-        "MAY 5th",
-        "On July 4th two thousand people marched.",
-        "On March 3rd 2000 people marched.",
-        "am 4. Juli zweitausend Leute",
-        "die erste Juli-Woche",
-        "the first of May nineteen twenty-first",
-        "Mai 26.06.2026",
-        "Termin mit August 26.06.26 passt.",
-        "Ask June 26.07.26 works.",
-        "Tell June May 5th works",
-        "Im Juni 1.000 Besucher.",
-        "Im März 3,5 Prozent mehr.",
-        "In June 1,000 people came.",
-        "In May 2,500 users signed up.",
-        "In March 3.5 million users joined.",
-        "In July 26% of users churned.",
-        "June 5-7",
-        "July 26/27",
-        "am 26. Juni 10:30 Uhr",
-        "Am 26. Juni, 14:00 Uhr.",
-        "Call me on March 3 10:30 a.m.",
-        "am sechs und zwanzigsten Juni",
-        "am dreißigsten Juni zweitausend sechs und zwanzig",
-        "forty first of March",
-        "The first may fail, the second may not.",
-        "This is my third September at the company.",
-        "My first April in Berlin was cold.",
-        "I met Mai 2 weeks ago.",
-        "We shipped version 2. March is next.",
-        "We need 5. May I ask why?",
-        "On March 3 1500 visitors came.",
-        "He said \"July 26, 26\".",
-        "„Sechsundzwanzigster Juni sechsundzwanzig“",
-        "The first of, March.",
-        "the 29th of February nineteen hundred",
-        "the first of January nineteen hundred.",
-    ];
-
     // Pavel: dates are written as numbers. Every platform passes the same vectors (docs/text-rules.md),
     // so a case added to the file is enforced here without touching this test.
     #[test]
     fn spoken_dates_become_numbers() {
         let cases: Vec<serde_json::Value> = serde_json::from_str(include_str!("../../Tests/fixtures/text-rules/dates.json")).unwrap();
         assert!(cases.len() >= 80, "only {} date vectors", cases.len());
-        let mut passing_but_pending = vec![];
         let failed: Vec<String> = cases
             .iter()
             .filter_map(|c| {
                 let s = |k: &str| c[k].as_str().unwrap_or_else(|| panic!("{k} missing in {c}"));
                 let (once, twice) = (dates(s("input")), dates(s("expected")));
-                let fails = once != s("expected") || twice != s("expected");
-                if PENDING.contains(&s("input")) {
-                    if !fails {
-                        passing_but_pending.push(s("input").to_string());
-                    }
-                    return None;
-                }
-                fails.then(|| format!("{:?} ({}): want {:?}, got {once:?}, run twice {twice:?}", s("input"), s("note"), s("expected")))
+                (once != s("expected") || twice != s("expected"))
+                    .then(|| format!("{:?} ({}): want {:?}, got {once:?}, run twice {twice:?}", s("input"), s("note"), s("expected")))
             })
             .collect();
         assert!(failed.is_empty(), "{} of {} date vectors fail:\n{}", failed.len(), cases.len(), failed.join("\n"));
-        assert!(passing_but_pending.is_empty(), "these pass now, remove them from PENDING (#189): {passing_but_pending:?}");
+    }
+
+    // docs/text-rules.md: running the rule twice changes nothing, also on text no vector holds. A month before a
+    // numeric date once re-read its first number as a day: "Juli 26.07.2026" became "26.07.07.2026", and
+    // "Does May July 4th work?" changed again on a second run.
+    #[test]
+    fn dates_on_its_own_output_changes_nothing() {
+        let vocab: Vec<&str> = "the of on am den May may March march Juli July Juni Mai 4th 26 5 26. 07. 1st first second \
+            twenty sixth ninth twenty-sixth nineteen two thousand 2026 2000 26.07.2026 04.07. 10:30 3-5 zweitausend \
+            zweitausend-sechsundzwanzig sechsundzwanzig people be Mai forty und sechs zwanzigsten hundred 26% 1.000 3,5 \" , . ?"
+            .split_whitespace()
+            .collect();
+        let mut seed = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed as usize
+        };
+        let mut changed = 0;
+        for _ in 0..50_000 {
+            let s = (0..1 + next() % 8).map(|_| vocab[next() % vocab.len()]).collect::<Vec<_>>().join(" ");
+            let s = s.replace(" ,", ",").replace(" .", ".").replace(" ?", "?") + [" ", ""][next() % 2];
+            let once = dates(&s);
+            changed += usize::from(once != s);
+            assert_eq!(dates(&once), once, "{s:?} became {once:?} on the first run");
+        }
+        assert!(changed > 5_000, "only {changed} of 50000 strings held a date, so the check proves little");
+    }
+
+    // Linux runs dates on what cleanup leaves (main.rs `transcribe`). Cleanup drops a filler but keeps the comma
+    // before it: "of, March" is the spec's own example, and "twenty, sixth" must never become day 6.
+    #[test]
+    fn dates_read_what_cleanup_leaves_around_a_filler() {
+        let rules = |s: &str| dates(&cleanup(s));
+        assert_eq!(rules("the the first of, um, March"), "01.03.");
+        assert_eq!(rules("the twenty, uh, sixth of July"), "the twenty, sixth of July");
+        assert_eq!(rules("Call me on March 5, uh, 10:30 works."), "Call me on 05.03., 10:30 works.");
     }
 
     // "Uh-huh" and "mm-hmm" are answers, not fillers.
