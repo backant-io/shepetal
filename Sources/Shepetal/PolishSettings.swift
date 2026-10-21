@@ -25,7 +25,7 @@ struct PolishSection: View {
             ForEach($rows) { $row in
                 TextField("Name", text: $row.prompt.name)
                 TextField("What to do with the selected text", text: $row.prompt.instruction, axis: .vertical).lineLimit(2...6)
-                if rows.count > 1 { Button("Remove \(row.prompt.name)") { rows.removeAll { $0.id == row.id } } }
+                if rows.count > 1 { Button("Remove this prompt") { rows.removeAll { $0.id == row.id } } }
             }
             Button("Add prompt") { rows.append(Row(prompt: PolishPrompt(name: "My prompt \(rows.count + 1)", instruction: ""))) }
             Button("Back to the built-in prompts") { rows = PolishPrompts.builtIn.map { Row(prompt: $0) } }
