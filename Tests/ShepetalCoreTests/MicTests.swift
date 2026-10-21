@@ -42,6 +42,24 @@ final class MicTests: XCTestCase {
         XCTAssertEqual(try pick([builtIn, loopback], lidClosed: true), loopback)
     }
 
+    /// Meeting apps install a loopback input (Teams: "Microsoft Teams Audio") and can leave it as the system
+    /// default. It records the app's own output, not the voice, so automatic never picks it over a real mic.
+    /// Only a deliberate choice (forced or preferred) or having nothing else records from it.
+    func testVirtualSystemDefaultIsNotPickedOverARealMic() throws {
+        let teams = MicDevice(uid: "MSLoopbackDriverDevice_UID", name: "Microsoft Teams Audio", transport: .virtual)
+        let aggregate = MicDevice(uid: "agg", name: "Aggregate Device", transport: .virtual)
+        func auto(_ devices: [MicDevice], _ systemDefault: String) throws -> MicDevice {
+            try MicChoice.pick(devices, forced: nil, ranking: [], systemDefault: systemDefault, lidClosed: false)
+        }
+        XCTAssertEqual(try auto([teams, aggregate, builtIn], teams.uid), builtIn)
+        XCTAssertEqual(try auto([aggregate, teams, usb], aggregate.uid), usb)
+        XCTAssertEqual(try auto([teams], teams.uid), teams, "nothing else to record from")
+        XCTAssertEqual(try MicChoice.pick([teams, builtIn], forced: teams.uid, ranking: [], systemDefault: builtIn.uid,
+                                          lidClosed: false), teams, "a forced device is the user's choice")
+        XCTAssertEqual(try MicChoice.pick([teams, builtIn], forced: nil, ranking: [teams.uid], systemDefault: teams.uid,
+                                          lidClosed: false), teams, "so is a preferred one")
+    }
+
     func testClamshellWithOnlyBuiltInIsAnError() {
         XCTAssertThrowsError(try pick([builtIn], lidClosed: true)) { XCTAssertEqual($0 as? MicError, .lidClosed) }
         XCTAssertThrowsError(try pick([], lidClosed: false)) { XCTAssertEqual($0 as? MicError, .noMic) }
