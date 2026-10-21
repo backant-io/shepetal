@@ -207,6 +207,31 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(try pipeline.history.recent().first { $0.id == row.id }?.text, "Send it to Jane.")
     }
 
+    /// Dates run on the cleaned text: the stutter goes first, then "the first of March" becomes 01.03.
+    /// The dictionary runs after them, so text the user stored there is inserted as written.
+    @MainActor
+    func testFinishTextWritesSpokenDatesAsNumbersBeforeTheDictionary() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        try "launch day => the first of March launch\n".write(to: pipeline.dictionary, atomically: true, encoding: .utf8)
+        let stutter = await pipeline.finishText("Let's meet on the the first of um March.")
+        XCTAssertEqual(stutter.text, "Let's meet on 01.03.")
+        let year = await pipeline.finishText("Twenty sixth of July twenty twenty-six.")
+        XCTAssertEqual(year.text, "26.07.26.")
+        let stored = await pipeline.finishText("see you at launch day")
+        XCTAssertEqual(stored.text, "see you at the first of March launch")
+    }
+
+    /// Dates run after the cleanup model too, so a date the user corrected still comes out as numbers
+    /// (the model sees spoken words, which its word guard checks).
+    @MainActor
+    func testDatesRunOnTheCleanupModelsRewrite() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        pipeline.cleanup = RewriteModel(["Meet on Tuesday, I mean the first of March.": "Meet on the first of March."])
+        let fixed = await pipeline.finishText("Meet on Tuesday, I mean the first of March.")
+        XCTAssertTrue(fixed.usedModel)
+        XCTAssertEqual(fixed.text, "Meet on 01.03.")
+    }
+
     /// The hub's re-transcribe writes the same text step's result to the same row.
     @MainActor
     func testRetranscribeStripsTagsAndUpdatesTheRow() async throws {

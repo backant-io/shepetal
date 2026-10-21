@@ -124,13 +124,14 @@ final class Pipeline {
     }
 
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub): tags
-    /// stripped, the rules, the local cleanup model when it is loaded, then the personal dictionary (F39).
+    /// stripped, the rules, the local cleanup model when it is loaded, spoken dates as numbers
+    /// (docs/text-rules.md), then the personal dictionary (F39), whose text is inserted as written.
     /// InsertionRules fits the result to the cursor afterwards. Runs off the main thread.
     func finishText(_ raw: String) async -> (text: String, usedModel: Bool) {
         let model = cleanup, dictionary = dictionary
         return await Task.detached {
             let cleaned = SmartCleanup.apply(SpeechGuard.stripTags(raw), model: model)
-            return (Vocabulary.load(dictionary).apply(cleaned.text), cleaned.usedModel)
+            return (Vocabulary.load(dictionary).apply(Dates.apply(cleaned.text)), cleaned.usedModel)
         }.value
     }
 
