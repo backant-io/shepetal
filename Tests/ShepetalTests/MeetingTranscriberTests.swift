@@ -71,8 +71,10 @@ final class MeetingTranscriberTests: XCTestCase {
 
     final class StubSummarizer: MeetingSummarizing {
         var got: [Segment]?
+        var onMain: Bool?
         func summarize(_ segments: [Segment]) -> Summary {
             got = segments
+            onMain = Thread.isMainThread
             return Summary(overview: "o", actionItems: [ActionItem(owner: "Me", task: "t")])
         }
     }
