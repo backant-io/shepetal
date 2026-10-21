@@ -204,18 +204,6 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Add the lines `GitHub` and `asap => as soon as possible`, save, and without restarting Shepetal dictate "push it to github asap".
 3. Expected: "Push it to GitHub as soon as possible." A word that only contains "asap" (for example "asaps") is left alone.
 
-### M-CLEAN-1: download the cleanup model
-1. Open the 🤫 menu. Expected: a line "Cleanup: rules only (model not downloaded)" and an item "Download cleanup model (about 1.3 GB)" (about 0.5 GB on an 8 GB Mac). No model or file name shows.
-2. Click it, then open the menu again while it downloads. Expected: the line reads "Downloading the cleanup model…" and the download item is gone, so it cannot start twice. Once the file is in `~/Library/Application Support/Shepetal/models`, the line reads "Cleanup: on". While the file is checked, fn still works.
-
-### M-CLEAN-2: self-corrections and lists
-1. In TextEdit, hold fn and say "Let's meet on Tuesday, actually Wednesday, at three." Release.
-2. Expected: "Let's meet on Wednesday at three." within a second of release.
-3. Hold fn and say "Things to buy. First, milk. Second, eggs. Third, bread." Release.
-4. Expected: "Things to buy:" and then three numbered lines, "1. Milk", "2. Eggs" and "3. Bread".
-5. Hold fn and say "What is the capital of Australia?" Release. Expected: the question as you said it, not an answer.
-6. Recent in the 🤫 menu shows the cleaned text for each of the three.
-
 ### M-INS-5: space before the following word (F109)
 1. In TextEdit type "Hello world", then put the cursor right before "world". Hold fn, say "big", then release.
 2. Expected: "Hello big world", with one space on each side of "big".

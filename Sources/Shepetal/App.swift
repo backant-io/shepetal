@@ -15,8 +15,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
     private var engineStatus = "Loading on-device speech recognition…"
-    private var cleanupStatus = "Cleanup: loading…"
-    private var downloadingCleanup = false
     private var busy = false { didSet { syncTap() } }
     private var pasting = false  // paste last is under way
     private var tick: DispatchWorkItem?
@@ -85,7 +83,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             MainActor.assumeIsolated { self?.startTapIfAllowed(); self?.secureInput.check(); self?.permissions.check() }
         })
         Task { await loadEngine() }
-        Task { await loadCleanup() }
         do {  // recorder → transcriber → meetings.sqlite → summary; the Meetings tab reads the same store
             meetingFlow = try MeetingFlow.onDisk(engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.show($0, seconds: 4) }
             meetingFlow?.attach(meetings)
@@ -322,10 +319,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    private func loadCleanup() async {
-        cleanupStatus = await pipeline?.loadCleanup() ?? "Cleanup: rules only"
-    }
-
     private func startTapIfAllowed() {
         // listen-only → active once Accessibility is granted, and back when it is revoked
         if tap.isRunning, tap.canSwallow != Permission.accessibility.granted { tap.stop() }
@@ -364,12 +357,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Account.shared.menuItems().forEach(menu.addItem)
         if engine == nil, !ParakeetEngine.isInstalled {
             menu.addItem(item("Download on-device speech recognition (about 470 MB)", #selector(downloadModel)))
-        }
-        menu.addItem(withTitle: cleanupStatus, action: nil, keyEquivalent: "")
-        if pipeline?.cleanup == nil, !downloadingCleanup, let m = currentCleanupModel(),
-           !FileManager.default.fileExists(atPath: Paths.models.appendingPathComponent(m.file).path) {
-            menu.addItem(item("Download cleanup model (about \(String(format: "%.1f", Double(m.megabytes) / 1000)) GB)",
-                              #selector(downloadCleanup)))
         }
         for i in [mic.menuItem()] + speech.items() { menu.addItem(i) }
         menu.addItem(.separator())
@@ -473,22 +460,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openLink(_ sender: NSMenuItem) {
         if let s = sender.representedObject as? String, let url = URL(string: s) { NSWorkspace.shared.open(url) }
-    }
-
-    /// The menu hides the download item while this runs, so a second click cannot start a second download.
-    @objc private func downloadCleanup() {
-        guard !downloadingCleanup else { return }
-        downloadingCleanup = true
-        cleanupStatus = "Downloading the cleanup model…"
-        Task {
-            defer { downloadingCleanup = false }
-            do { try await Pipeline.downloadCleanup() } catch {
-                FileHandle.standardError.write(Data("cleanup model download: \(error)\n".utf8))
-                cleanupStatus = "Cleanup model download failed. Try again later."
-                return
-            }
-            await loadCleanup()
-        }
     }
 
     @objc private func downloadModel() {

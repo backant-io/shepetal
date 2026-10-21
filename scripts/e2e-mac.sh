@@ -7,8 +7,8 @@
 # that history kept the app, bundle id and page URL given for each dictation. The page-URL lookup must
 # return at once and do its work off the main thread. Each clip is then re-transcribed from its kept WAV,
 # as History's re-transcribe does, and must give the same text and the engine's model name on the same row.
-# A dictionary.txt in SHEPETAL_HOME replaces one word of e03; that clip is checked for the replacement and
-# left out of the WER. SHEPETAL_HOME defaults to .cache/e2e/home.
+# A dictionary.txt in the test's own data dir replaces one word of e03; that clip is checked for the replacement
+# and left out of the WER. The data dir is .cache/e2e/home, or E2E_HOME; an exported SHEPETAL_HOME is ignored.
 # A separate run on 2 s of digital silence must paste nothing and keep the audio as "no_speech".
 # short.wav is the loudest 200 ms of e01: Parakeet refuses under 300 ms, so the engine must pad it, and a
 # clip that short must never end as "Transcription failed" (a quick hold used to).
@@ -172,7 +172,7 @@ for r in rows:
     assert abs((len(data) - 44) / 4 / 16000 - r["audio_seconds"]) < 1e-3, name
     gone = os.path.join(fix, name[:-4] + ".gone")
     if os.path.exists(gone):  # a cleanup clip: the model rewrote it and the taken-back words are gone
-        assert r["cleanup_model"], (name, "cleanup model not used", r["cleanup_status"], r["text"])
+        assert r.get("cleanup_model"), (name, "cleanup model not used", r.get("cleanup_status"), r["text"])
         left = set(open(gone).read().split()) & set(words(r["inserted_text"]))
         assert not left, (name, "taken-back words left", left, r["inserted_text"])
     print(f"{name}: {e}/{len(ref)} word errors, ready {r['ready_ms']} ms, {r['audio_seconds']:.1f} s audio, "
