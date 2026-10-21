@@ -49,6 +49,15 @@ final class LinkWatcherTests: XCTestCase {
         XCTAssertEqual(w.links(), [])
     }
 
+    // The system's URL check passes these, so the watcher's own parse must drop them: a sign-in code in the query,
+    // and text around a link.
+    func testASecretOrTextAroundALinkIsNotRemembered() async {
+        let w = LinkWatcher(pasteboard: pasteboard)
+        copy("https://example.com/login/callback?code=4f9a2c&state=xyz"); await w.check()
+        copy("see https://example.com/a"); await w.check()
+        XCTAssertEqual(w.links(), [])
+    }
+
     // Shepetal's own paste is a promised item: an app pulling its data is the paste-landed signal (Inserter), so
     // the watcher must never pull it.
     func testOurOwnPromisedPasteIsNeverPulled() async {
