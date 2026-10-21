@@ -796,6 +796,15 @@
   width: 18px;
   height: 18px;
 }
+@media (max-width: 480px) {
+  /* All five app tabs fit on a phone without scrolling */
+  .cycle-tab {
+    padding: 10px 11px 12px;
+  }
+  .cycle-tab svg {
+    display: none;
+  }
+}
 .cycle-bar {
   position: absolute;
   left: 15px;
@@ -843,9 +852,17 @@
   width: min(760px, 100%);
 }
 @media (max-width: 640px) {
+  /* One height for every scene, tall enough for the tallest (the live transcript), so nothing jumps as they cycle */
   .stage {
-    aspect-ratio: 4 / 5;
-    padding: 14% 4%;
+    aspect-ratio: auto;
+    min-height: max(112vw, 530px);
+    padding: 52px 4% 40px;
+  }
+}
+@media (min-width: 641px) and (max-width: 979px) {
+  /* Tablets: the video call is too tall for 16:9 at this width */
+  .stage {
+    aspect-ratio: 4 / 3;
   }
 }
 .scene-cap {
