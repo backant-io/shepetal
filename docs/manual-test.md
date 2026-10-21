@@ -22,9 +22,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. In the 🤫 menu choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the setting is back to that value.
 4. Run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
 
-### M-SETUP-5: fn not received
-1. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s.
-2. Expected: a yellow ring and "fn not received: re-grant Input Monitoring" next to 🤫; Open Shepetal… > Home shows the same under fn problem. Turn Shepetal back on: within 2 s fn dictates again.
+### M-SETUP-5: no false "fn not received"
+"fn not received" only shows when the 🌐 key's keycode 179 reaches Shepetal and fn's keycode 63 does not (another app took fn). Ordinary keys never show it. The positive case cannot be produced by hand; `FnHealthTests` and `FnTapTests` cover it.
+1. With all three permissions granted, type a few sentences in TextEdit. Hold Down arrow for 2 s, then Left arrow for 2 s. Press ⌘C, ⌘V, ⇧ with letters, ⌥←, ⌘Space (then Esc), ⌃⌘V. Hold ⌃⌥ together for 2 s. Press fn+Delete and fn+↓. Hold ⌃, then hold fn for 2 s, release both. Tap fn, double-tap fn, and hold fn for 2 s (a dictation, fine).
+2. Expected: no "fn not received" next to 🤫 at any point, no yellow ring, and Open Shepetal… > Home shows no fn problem.
+3. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s. Expected: "Input Monitoring access was turned off" with a yellow ring and the Permissions window, not "fn not received". Turn Shepetal back on: within 2 s fn dictates again.
 
 ### M-SETUP-2: permissions survive a rebuild
 1. With all three permissions granted, quit Shepetal, run `scripts/make-app.sh --install` (it must print "Signed with: Apple Development…" or "Developer ID…"), and open the app again.
