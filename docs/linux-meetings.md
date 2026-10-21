@@ -57,6 +57,8 @@ Record on a Record? prompt, or always with auto-record on (see Settings). The co
    # Meeting
 
    - Apps: Zoom
+   - Started: 21.10.26 14:05
+   - Duration: 32 min
    - Audio: Me.wav (microphone), Others.wav (system audio)
 
    [00:00:01] Me: Hello, can you hear me?
@@ -64,9 +66,24 @@ Record on a Record? prompt, or always with auto-record on (see Settings). The co
    [00:00:03] Others: Yes, loud and clear.
    ```
 
-   Times count from the start of the recording. Consecutive segments from one speaker are
-   joined into one turn. If a channel can't be transcribed, the reason is listed in the header
-   and the other channel is still written.
+   `Started` is the local start time (DD.MM.YY HH:MM). Times count from the start of the
+   recording. Consecutive segments from one speaker are joined into one turn. If a channel
+   can't be transcribed, the reason is listed in the header and the other channel is still
+   written. With no speech on either channel, the transcript ends with `No speech was recorded.`
+6. Then the transcript window opens: `xdg-open transcript.md`, so the user's default app for
+   text shows it (GNOME: Text Editor), where the text can be read, selected and copied. Next to
+   it, a notification "Meeting transcript ready" shows the apps, the start and the length, with
+   two buttons:
+   - Copy transcript: puts the turns on the clipboard, one `[hh:mm:ss] Speaker: text` line
+     each, without the header. It uses `wl-copy` on Wayland, else `xclip`, else `xsel`, and then
+     shows a short "Transcript copied" notification. With none of them installed, it shows
+     "Transcript not copied: no wl-copy, xclip or xsel" and says so on stderr.
+   - Open folder: opens the meeting folder (`xdg-open`), with the audio and the transcript.
+   The clipboard is written only on a click on Copy transcript. Both notifications ask for no
+   sound (`suppress-sound`). A meeting with no speech, or one that was not transcribed, has
+   only Open folder, and the notification says why. The notification stays in the notification
+   list until it is clicked or dismissed, and goes away when the daemon exits. Every recorded
+   meeting gets one window and one notification.
 
 Nothing leaves the machine.
 
@@ -133,6 +150,8 @@ the error.
 - A `meetings` directory that is a symlink or open to others is refused, and nothing is
   recorded. The audio lives under the data home, never `/tmp`. An empty or relative
   `XDG_DATA_HOME` is ignored, as for dictation.
+- The transcript reaches the clipboard only on a click on Copy transcript, over the clipboard
+  tool's stdin, never argv.
 - The recorders get SIGINT (`PR_SET_PDEATHSIG`) when the daemon exits, even by SIGKILL, so a
   dead daemon never leaves the mic recording. For dictation, that gap is still open (#45).
 
@@ -149,13 +168,19 @@ the error.
   own streams, device change, and tuned thresholds.
 - Folder and file permissions.
 - The recorder and whisper-cli arguments, and whisper output parsing.
-- Transcript formatting.
+- Transcript formatting: the header with the local start (DD.MM.YY, in a child with its own
+  `TZ`) and the length, `No speech was recorded.`, and what Copy transcript copies.
+- The transcript notification: Copy transcript only with speech, Open folder always, no sound.
+- The transcript window against fake `xdg-open`, `notify-send`, `wl-copy`, `xclip` and `xsel`:
+  closed without a click copies nothing, Copy transcript copies the turns and confirms, and
+  Open folder opens the folder.
 - The `notify-send` arguments, the app names and "An app", the 20 s default, and that only `"auto_record": true` turns
   auto-record on: a missing file, other features' keys, and `false` ask first, and a typo is an
   error.
 - Whole meetings against fake `pw-dump`, `pw-record`, `whisper-cli` and `notify-send`, each run
   in a child copy of the test binary so it can set its own PATH:
-  - Record clicked: recorded and transcribed.
+  - Record clicked: recorded and transcribed, then the transcript window and its
+    notification once, and nothing copied.
   - The camera alone (a fake /proc where Zoom holds /dev/video0): offered, and recorded after
     the click.
   - Dismissed: no recorder runs and no folder is made, and it is not asked again.
@@ -191,7 +216,9 @@ click Record on the prompt.
 4. Talk for about a minute while the other side talks too. Mute yourself in the call for 20 s,
    then unmute. The recording must go on: no `meeting ended` line.
 5. Leave the call. About 4 to 6 s later (15 s after the start at the earliest) the daemon must
-   print `meeting ended, transcribing ...`, then `meeting transcript .../transcript.md`.
+   print `meeting ended, transcribing ...`, then `meeting transcript .../transcript.md`. The
+   transcript must open by itself, with the "Meeting transcript ready" notification
+   (docs/manual-test.md, L-MEET-11).
 6. Check the folder:
    - `ls -la ~/.local/share/shepetal/meetings/ ~/.local/share/shepetal/meetings/<ms>/`: both
      dirs are `drwx------`, and `Me.wav`, `Others.wav` and `transcript.md` are `-rw-------`.
@@ -230,8 +257,16 @@ click Record on the prompt.
 - No live transcript. The final pass runs only after the call (section 7 asks for streaming
   ASR per channel).
 - Others is one speaker. The system channel is not diarized yet, and calendar names are not used.
-- There is no summary yet. The non-LLM summarizer (`summarize/`) reads `Speaker: text` lines,
-  so the `[hh:mm:ss] ` prefix must be stripped first.
+- There is no summary yet, so the transcript window has no summary, no action items and no
+  Copy summary. The non-LLM summarizer (`summarize/`) reads `Speaker: text` lines, so the
+  `[hh:mm:ss] ` prefix must be stripped first.
+- The transcript window is whatever app `xdg-open` picks. Whether it takes keyboard focus is up
+  to that app and the desktop's focus-stealing prevention, which shepetal can't control. It is
+  not tested on hardware yet. L-MEET-11 checks it.
+- A notification closes after one click, so Copy transcript and Open folder are one or the
+  other. The transcript window and the folder hold the rest.
+- Each unanswered transcript notification keeps one `notify-send` waiting until it is clicked
+  or dismissed.
 - Others.wav follows the system default sink. If the call app sends audio to a device other
   than the default, Others.wav is silent. Linking to the call app's output stream would fix this.
 - Without headphones, Me.wav also picks up the other side from the speakers, because

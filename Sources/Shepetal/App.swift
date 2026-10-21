@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hub: Hub?
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
+    private var transcriptWindow: MeetingTranscriptWindow?
     private lazy var meetings: MeetingRecorder = MeetingRecorder(capture: SystemMeetingCapture(allowPrompts: allowPrompts),
                                                                  card: { [weak self] in self?.meetingCard.show($0) }) { [weak self] in self?.indicator.show($0, seconds: 4) }
     /// "Meeting detected · <app>": nothing records until Record is clicked (unless the setting says always).
@@ -71,9 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // Off the tap callback: opening the mic is slow, and a slow callback gets the tap turned off.
         tap.onInput = { [weak self] input, t in DispatchQueue.main.async { MainActor.assumeIsolated { self?.key(input, at: t) } } }
         wireMicAndSpeech()
-        fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
-        fnWatch.active = { [weak self] in self?.tap.isRunning == true }
-        fnWatch.start()
+        fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.taken) }
+        tap.onFn = { [weak self] down, t in DispatchQueue.main.async { MainActor.assumeIsolated { self?.fnReceived(down: down, at: t) } } }
+        tap.onGlobe = { [weak self] t in DispatchQueue.main.async { MainActor.assumeIsolated { self?.fnWatch.globe(at: t) } } }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -90,6 +91,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.statusItem.button?.title = $0 ? "🤫●" : "🤫"
                 self?.indicator.meeting = $0  // the red ring, for the whole recording
             }
+            meetingFlow?.onTranscript = { [weak self] in self?.showTranscript($0) }
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
         applyRetention()
@@ -123,10 +125,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// The tap delivered fn: an earlier "fn not received" no longer holds.
-    private func fnReceived() {
-        fnWatch.tapEvent()
-        guard FnDiagnostics.problem == FnHealth.hint else { return }
+    /// The tap delivered fn (keycode 63): an earlier "fn not received" no longer holds.
+    private func fnReceived(down: Bool, at t: TimeInterval) {
+        fnWatch.fn(down: down, at: t)
+        guard [FnHealth.hint, FnHealth.taken].contains(FnDiagnostics.problem) else { return }
         FnDiagnostics.problem = nil
         if indicator.mode == .error { indicator.set(.idle) }
     }
@@ -145,7 +147,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// `t`: when the key moved (`FnClock`), which can be well before the main thread reads it.
     private func key(_ input: KeyInput, at t: TimeInterval) {
         let idle = dictation?.gesture.state == .idle
-        if [.pttDown, .pttUp, .toggle].contains(input) { fnReceived() }
         switch input {
         case .pasteLast: pasteLast()
         case .copyLast: copyLast()
@@ -433,15 +434,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return false
     }
 
-    @objc private func openHub() {
-        guard let pipeline else { return fail("History is not available") }
+    @objc private func openHub() { openedHub()?.show() }
+
+    /// The meeting's transcript window, in front without taking focus from the app in use.
+    private func showTranscript(_ m: Meeting) {
+        guard let store = meetingFlow?.store else { return }
+        transcriptWindow = transcriptWindow ?? MeetingTranscriptWindow(model: MeetingsModel(store: store)) { [weak self] in
+            self?.openedHub()?.showMeeting($0)
+        }
+        transcriptWindow?.show(m)
+    }
+
+    private func openedHub() -> Hub? {
+        guard let pipeline else { fail("History is not available"); return nil }
         hub = hub ?? Hub(pipeline: pipeline, engine: { [weak self] in self?.engine },
                          status: { [weak self] in (self?.engineStatus ?? "", self?.tap.isRunning == true) },
                          retention: { [weak self] in self?.retention ?? .keep },
                          setRetention: { [weak self] in self?.retention = $0 },
                          openPermissions: { [weak self] in self?.showOnboarding() },
                          meetingStore: meetingFlow?.store ?? InMemoryMeetingStore())
-        hub?.show()
+        return hub
     }
 
     @objc private func restoreFnKey() {

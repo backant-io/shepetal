@@ -101,34 +101,41 @@ public enum FnKeySetting {
     }
 }
 
-/// Notices when fn is pressed (the HID state says so) but the event tap never reports it: the
-/// Input Monitoring grant is stale (for example it was given to an earlier build) or the tap is dead.
+/// Notices fn not reaching the tap, from the tap's own events only: the 🌐 key's keycode 179 keyDown arrived (so
+/// the key was pressed and the tap is alive) but no fn flagsChanged (keycode 63) came within `window` of it.
+/// Typing, modifiers and shortcuts never send 179, so they never alert. It cannot see a tap that gets nothing at
+/// all; a tap macOS refuses says `hint` (App), and a revoked permission says so itself (PermissionMonitor).
+/// (The HID state it used to poll was wrong: the fn flag is also set for arrows and F-keys.)
 public struct FnHealth {
-    public static let grace: TimeInterval = 1.0
-    /// A tap event this long before the HID state showed fn down still counts for that press.
-    public static let slack: TimeInterval = 0.5
+    public static let window: TimeInterval = 1.0
+    /// The tap could not be made although Input Monitoring is granted.
     public static let hint = "fn not received: re-grant Input Monitoring"
+    /// 🌐 reached the tap but fn did not: Input Monitoring works, something ahead of Shepetal took fn.
+    public static let taken = "fn not received: another app may be taking it"
 
-    private var hidDownSince: TimeInterval?
-    private var lastTapEvent: TimeInterval = -.infinity
-    private var alerted = false
+    private var fnDown = false
+    private var lastFn: TimeInterval = -.infinity
+    private var globe: TimeInterval?  // a 179 keyDown no fn event has matched yet
 
     public init() {}
 
-    /// The tap reported fn going down or up at `t`.
-    public mutating func tapEvent(at t: TimeInterval) { lastTapEvent = t }
+    /// The tap saw keycode 63 at `t`: fn went down or up.
+    public mutating func fn(down: Bool, at t: TimeInterval) {
+        fnDown = down
+        lastFn = t
+        if let g = globe, t - g <= Self.window { globe = nil }
+    }
 
-    /// Polled HID state of fn. Returns true once per press that the tap never reported, after `grace`.
-    public mutating func poll(hidFnDown: Bool, at t: TimeInterval) -> Bool {
-        guard hidFnDown else {
-            hidDownSince = nil
-            alerted = false
-            return false
-        }
-        let since = hidDownSince ?? t
-        hidDownSince = since
-        guard !alerted, t - since >= Self.grace, lastTapEvent < since - Self.slack else { return false }
-        alerted = true
+    /// The tap saw keycode 179 go down at `t`.
+    public mutating func globe(at t: TimeInterval) {
+        guard globe == nil, !fnDown, t - lastFn > Self.window else { return }
+        globe = t
+    }
+
+    /// True once per 🌐 press that no fn event came with, once `window` has passed.
+    public mutating func poll(at t: TimeInterval) -> Bool {
+        guard let g = globe, t - g >= Self.window else { return false }
+        globe = nil
         return true
     }
 }

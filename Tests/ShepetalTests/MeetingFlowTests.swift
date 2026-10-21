@@ -46,7 +46,9 @@ final class MeetingFlowTests: XCTestCase {
     private let summarizer = MeetingTranscriberTests.StubSummarizer()
     private var hints: [String] = []
     private var recording: [Bool] = []
-    private let zoom = Snapshot(micClients: [MicClient(bundleID: "us.zoom.xos", name: "zoom.us")])
+    /// What the transcript window would show when the flow opens it.
+    private var opened: [MeetingRecord?] = []
+    private let zoom = Snapshot(micUsers: [MicUser(pid: 100, bundleID: "us.zoom.xos", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us")])
 
     override func setUp() async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-flow-\(UUID().uuidString)")
@@ -54,7 +56,7 @@ final class MeetingFlowTests: XCTestCase {
         store = try MeetingStore(path: root.appendingPathComponent("meetings.sqlite"))
         capture = WavCapture()
         recorder = MeetingRecorder(dir: root.appendingPathComponent("meetings"), capture: capture,
-                                   detector: MeetingDetector(), autoRecord: { false }, card: { _ in }) { [unowned self] in hints.append($0) }
+                                   detector: MeetingDetector(ownPID: getpid()), autoRecord: { false }, card: { _ in }) { [unowned self] in hints.append($0) }
         connect(self.engine)
     }
 
@@ -64,6 +66,7 @@ final class MeetingFlowTests: XCTestCase {
         flow = MeetingFlow(store: store, summarizer: summarizer, engine: engine,
                            hint: { [unowned self] in hints.append($0) }, liveEvery: 0.05)
         flow.onRecording = { [unowned self] in recording.append($0) }
+        flow.onTranscript = { [unowned self] in opened.append(try? store.get($0.id)) }
         flow.attach(recorder)
     }
 
@@ -83,7 +86,7 @@ final class MeetingFlowTests: XCTestCase {
         recorder.record()  // the click on the card
         tab.refresh()
         let listed = try XCTUnwrap(tab.record, "the meeting is in the Meetings tab from its first second")
-        XCTAssertEqual(listed.meeting.app, "Zoom")
+        XCTAssertEqual(listed.meeting.app, "zoom.us")
         XCTAssertNil(listed.meeting.endedAt)
         XCTAssertEqual(recording, [true])
 
@@ -94,6 +97,7 @@ final class MeetingFlowTests: XCTestCase {
         tab.refresh()
         XCTAssertEqual(tab.record?.segments.map(\.speaker), [.me])
         XCTAssertNil(tab.record?.summary, "no summary before the meeting ends")
+        XCTAssertEqual(opened.count, 0, "the transcript window waits for the meeting to end")
 
         try capture.append(me: audio(4), others: audio(4, on: 0.5...1.5))
         for t in 6...40 { recorder.update(Snapshot(), now: Double(t)) }  // Zoom let go of the mic
@@ -107,6 +111,11 @@ final class MeetingFlowTests: XCTestCase {
         XCTAssertEqual(r.segments.last?.start ?? 0, 4.3, accuracy: 0.05, "Others' line is at its time in the meeting")
         XCTAssertEqual(engine.calls.count, 2, "the utterance done live is not transcribed again")
         XCTAssertEqual(summarizer.got, r.segments, "the summary sees the whole meeting")
+        XCTAssertEqual(summarizer.onMain, false, "a long summary must not hold up fn and the indicator")
+        // The window opens once, with the whole transcript and before the summary, so it never waits for it.
+        XCTAssertEqual(opened.count, 1)
+        XCTAssertEqual(opened.first??.segments, r.segments)
+        XCTAssertNil(opened.first??.summary)
         XCTAssertEqual(r.summary?.actionItems, [ActionItem(owner: "Me", task: "t")])
         XCTAssertEqual(hints, ["Meeting detected · recording", "Meeting recording saved", "Meeting notes ready · open Shepetal → Meetings"])
         XCTAssertEqual(recording, [true, false])
@@ -139,6 +148,17 @@ final class MeetingFlowTests: XCTestCase {
         XCTAssertNotNil(m.endedAt)
         XCTAssertNil(flow.finishing)
         XCTAssertEqual(hints.last, "Meeting saved · no speech model to transcribe it yet")
+        XCTAssertEqual(opened.count, 0, "no transcript, no window")
+    }
+
+    // Audio but nobody spoke: the window still opens, says no speech was recorded and links to the record.
+    func testSilentMeetingStillOpensTheTranscriptWindow() async throws {
+        recorder.start()
+        try capture.append(me: audio(2), others: audio(2))
+        recorder.stop()
+        await flow.finishing?.value
+        XCTAssertEqual(opened.count, 1)
+        XCTAssertEqual(opened.first??.segments, [])
     }
 
     // The recorder keeps nothing when no audio was written, so the tab must not keep an empty meeting either.
@@ -150,6 +170,7 @@ final class MeetingFlowTests: XCTestCase {
         XCTAssertEqual(try store.list(limit: 5).count, 0)
         XCTAssertEqual(try store.search("Manual", limit: 5).count, 0)
         XCTAssertEqual(hints.last, "Meeting not saved: no audio was captured")
+        XCTAssertEqual(opened.count, 0, "nothing kept, no window")
         XCTAssertEqual(recording, [true, false])
     }
 }
