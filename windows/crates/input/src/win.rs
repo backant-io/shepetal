@@ -34,6 +34,8 @@ const ID_COFFEE: usize = 3;
 const ID_SPONSORS: usize = 4;
 const ID_QUIT: usize = 5;
 const ID_LOGIN: usize = 6;
+/// The account lines: ID_ACCOUNT + their index in `State::account`.
+const ID_ACCOUNT: usize = 100;
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// The last mode set was Recording or HandsFree. Set on the caller's thread so the hook sees it
@@ -45,6 +47,7 @@ enum Cmd {
     Mode(Mode),
     Hint(String, u64),
     StartAtLogin(bool),
+    Account(Vec<MenuLine>),
     Quit,
 }
 
@@ -73,6 +76,12 @@ impl Ui {
     /// and calls this after spawn and after each `Event::StartAtLogin`.
     pub fn set_start_at_login(&self, on: bool) {
         self.send(Cmd::StartAtLogin(on));
+    }
+
+    /// The account lines at the top of the tray menu (trial days left, Sign in, Buy, Sign out).
+    /// The app owns the account and calls this whenever they change.
+    pub fn set_account(&self, lines: Vec<MenuLine>) {
+        self.send(Cmd::Account(lines));
     }
 
     pub fn quit(&self) {
@@ -219,6 +228,7 @@ struct State {
     icon: HICON,
     paused: bool,
     start_at_login: bool,
+    account: Vec<MenuLine>,
     /// What the overlay shows now, to skip redraws that change nothing.
     shown: Option<(Frame, Rect, u32)>,
 }
@@ -295,6 +305,7 @@ unsafe fn init(hotkey: Hotkey, events: Sender<Event>, cmds: Receiver<Cmd>) -> Re
         icon,
         paused: false,
         start_at_login: false,
+        account: Vec::new(),
         shown: None,
     };
     s.tray(NIM_ADD); // fails before Explorer runs; TaskbarCreated adds it then
@@ -332,6 +343,7 @@ impl State {
                 Cmd::Mode(m) => self.view.set_mode(m, now),
                 Cmd::Hint(text, ms) => self.view.show_hint(&text, ms, now),
                 Cmd::StartAtLogin(on) => self.start_at_login = on,
+                Cmd::Account(lines) => self.account = lines,
                 Cmd::Quit => return self.shutdown(),
             }
         }
@@ -401,10 +413,12 @@ impl State {
 
 /// The tray menu. Runs a modal loop, so the state is only borrowed before and after it.
 unsafe fn menu() {
-    let Some((ctrl, paused, login)) = with(|s| (s.ctrl, s.paused, s.start_at_login)) else {
+    let Some((ctrl, paused, login, account)) =
+        with(|s| (s.ctrl, s.paused, s.start_at_login, s.account.clone()))
+    else {
         return;
     };
-    let Ok(menu) = build_menu(paused, login) else {
+    let Ok(menu) = build_menu(paused, login, &account) else {
         return;
     };
     let mut pt = POINT::default();
@@ -431,6 +445,11 @@ unsafe fn menu() {
             s.shutdown();
             let _ = s.events.send(Event::Quit);
         }
+        id if id >= ID_ACCOUNT => {
+            if let Some(id) = account.get(id - ID_ACCOUNT).and_then(|l| l.id) {
+                let _ = s.events.send(Event::Account(id));
+            }
+        }
         _ => {}
     });
 }
@@ -446,9 +465,25 @@ fn open_url(url: &'static str) {
     });
 }
 
-unsafe fn build_menu(paused: bool, login: bool) -> Result<HMENU> {
+unsafe fn build_menu(paused: bool, login: bool, account: &[MenuLine]) -> Result<HMENU> {
     let check = |on| MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED };
     let menu = CreatePopupMenu()?;
+    for (i, line) in account.iter().enumerate() {
+        let flags = if line.id.is_some() {
+            MF_STRING
+        } else {
+            MF_STRING | MF_GRAYED
+        };
+        AppendMenuW(
+            menu,
+            flags,
+            ID_ACCOUNT + i,
+            &HSTRING::from(menu_text(&line.label)),
+        )?;
+    }
+    if !account.is_empty() {
+        AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null())?;
+    }
     let donate = CreatePopupMenu()?;
     AppendMenuW(donate, MF_STRING, ID_COFFEE, w!("Buy Me a Coffee"))?;
     AppendMenuW(donate, MF_STRING, ID_SPONSORS, w!("GitHub Sponsors"))?;

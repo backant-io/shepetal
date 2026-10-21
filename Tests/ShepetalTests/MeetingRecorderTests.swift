@@ -38,7 +38,7 @@ final class MeetingRecorderTests: XCTestCase {
     private var cards: [String?] = []
     private var autoRecord = false
 
-    private let zoom = Snapshot(micClients: [MicClient(bundleID: "us.zoom.xos", name: "zoom.us")])
+    private let zoom = Snapshot(micUsers: [MicUser(pid: 100, bundleID: "us.zoom.xos", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us")])
     private let quiet = Snapshot()
 
     override func setUp() async throws {
@@ -48,7 +48,7 @@ final class MeetingRecorderTests: XCTestCase {
         ended = []
         cards = []
         autoRecord = false
-        recorder = MeetingRecorder(dir: root, capture: capture, detector: MeetingDetector(),
+        recorder = MeetingRecorder(dir: root, capture: capture, detector: MeetingDetector(ownPID: getpid()),
                                    autoRecord: { [unowned self] in autoRecord }, card: { [unowned self] in cards.append($0) }) { [unowned self] in hints.append($0) }
         recorder.onEnded = { [unowned self] in ended.append($0) }
     }
@@ -64,7 +64,7 @@ final class MeetingRecorderTests: XCTestCase {
         feed(zoom, 0, 4)
         XCTAssertEqual(cards, [], "the 5 s start grace must pass first")
         feed(zoom, 5, 5)
-        XCTAssertEqual(cards, ["Zoom"], "Meeting detected · Zoom")
+        XCTAssertEqual(cards, ["zoom.us"], "Meeting detected · zoom.us")
         XCTAssertNil(recorder.current, "detected is not consent: nothing records before the click")
         XCTAssertTrue(capture.started.isEmpty)
         XCTAssertEqual(hints, [])
@@ -73,9 +73,9 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertTrue(capture.started.isEmpty, "still waiting for the click")
 
         recorder.record()
-        XCTAssertEqual(cards, ["Zoom", nil], "the card goes once Record is clicked")
+        XCTAssertEqual(cards, ["zoom.us", nil], "the card goes once Record is clicked")
         let meeting = try XCTUnwrap(recorder.current)
-        XCTAssertEqual(meeting.app, "Zoom")
+        XCTAssertEqual(meeting.app, "zoom.us")
         XCTAssertNil(meeting.endedAt, "running")
         XCTAssertEqual(hints, ["Meeting detected · recording"])
         XCTAssertEqual(recorder.menuItem.title, "Stop meeting recording")
@@ -123,7 +123,7 @@ final class MeetingRecorderTests: XCTestCase {
 
         feed(quiet, 61, 70)
         feed(zoom, 71, 76)
-        XCTAssertEqual(cards.last, "Zoom", "the next call is offered again")
+        XCTAssertEqual(cards.last, "zoom.us", "the next call is offered again")
         recorder.record()
         XCTAssertNotNil(recorder.current)
         XCTAssertEqual(capture.started.count, 2)
@@ -132,25 +132,25 @@ final class MeetingRecorderTests: XCTestCase {
     func testNotNowRecordsNothingForThatMeetingAndTheNextOneIsOfferedAgain() {
         feed(zoom, 0, 5)
         recorder.notNow()
-        XCTAssertEqual(cards, ["Zoom", nil])
+        XCTAssertEqual(cards, ["zoom.us", nil])
         recorder.record()  // a late click on a card that is gone
         feed(zoom, 6, 120)
         XCTAssertNil(recorder.current)
         XCTAssertTrue(capture.started.isEmpty, "Not now starts nothing for that meeting")
-        XCTAssertEqual(cards, ["Zoom", nil], "and does not ask again during it")
+        XCTAssertEqual(cards, ["zoom.us", nil], "and does not ask again during it")
 
         feed(quiet, 121, 130)
         feed(zoom, 131, 136)
-        XCTAssertEqual(cards, ["Zoom", nil, "Zoom"], "a new meeting is a new question")
+        XCTAssertEqual(cards, ["zoom.us", nil, "zoom.us"], "a new meeting is a new question")
         XCTAssertTrue(capture.started.isEmpty)
     }
 
     func testCardDismissesItselfAfter20sAndRecordsNothing() {
         feed(zoom, 0, 5)  // offered at 5 s
         feed(zoom, 6, 24)
-        XCTAssertEqual(cards, ["Zoom"], "up for the whole 20 s")
+        XCTAssertEqual(cards, ["zoom.us"], "up for the whole 20 s")
         feed(zoom, 25, 25)
-        XCTAssertEqual(cards, ["Zoom", nil], "gone at 20 s")
+        XCTAssertEqual(cards, ["zoom.us", nil], "gone at 20 s")
         recorder.record()
         feed(zoom, 26, 120)
         XCTAssertTrue(capture.started.isEmpty, "the timeout starts nothing for that meeting")
@@ -160,7 +160,7 @@ final class MeetingRecorderTests: XCTestCase {
     func testMeetingThatEndsWhileOfferedTakesTheCardAway() {
         feed(zoom, 0, 5)
         feed(quiet, 6, 22)  // Zoom let go of the mic: the meeting ends at 20 s (15 s minimum), before the timeout
-        XCTAssertEqual(cards, ["Zoom", nil])
+        XCTAssertEqual(cards, ["zoom.us", nil])
         recorder.record()
         XCTAssertTrue(capture.started.isEmpty, "a meeting that is over is not recorded")
     }
@@ -168,7 +168,7 @@ final class MeetingRecorderTests: XCTestCase {
     func testAlwaysRecordSettingStartsAtOnceWithTheHintAndStop() throws {
         autoRecord = true
         feed(zoom, 0, 5)
-        XCTAssertEqual(try XCTUnwrap(recorder.current).app, "Zoom")
+        XCTAssertEqual(try XCTUnwrap(recorder.current).app, "zoom.us")
         XCTAssertEqual(capture.started.count, 1)
         XCTAssertEqual(hints, ["Meeting detected · recording"])
         XCTAssertEqual(recorder.menuItem.title, "Stop meeting recording")
@@ -203,17 +203,17 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertTrue(MeetingRecorder.autoRecords(defaults))
 
         try XCTSkipIf(UserDefaults.standard.object(forKey: MeetingRecorder.autoRecordKey) != nil, "set in this test runner's defaults")
-        let plain = MeetingRecorder(dir: root, capture: capture, detector: MeetingDetector(),
+        let plain = MeetingRecorder(dir: root, capture: capture, detector: MeetingDetector(ownPID: getpid()),
                                     card: { [unowned self] in cards.append($0) }) { [unowned self] in hints.append($0) }
         for t in 0...5 { plain.update(zoom, now: Double(t)) }
-        XCTAssertEqual(cards, ["Zoom"])
+        XCTAssertEqual(cards, ["zoom.us"])
         XCTAssertTrue(capture.started.isEmpty)
     }
 
     func testStartingByHandAnswersTheCard() {
         feed(zoom, 0, 5)
         recorder.menuItem.performAction()
-        XCTAssertEqual(cards, ["Zoom", nil])
+        XCTAssertEqual(cards, ["zoom.us", nil])
         XCTAssertEqual(recorder.current?.app, MeetingRecorder.manualApp, "the menu item keeps working")
         XCTAssertEqual(hints, ["Recording meeting"])
         recorder.menuItem.performAction()
@@ -257,11 +257,32 @@ final class MeetingRecorderTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
         defer { defaults.removePersistentDomain(forName: name) }
         defaults.set(2.0, forKey: "meeting.startAfter")
-        defaults.set(60, forKey: "meeting.endWithoutEvidence")
+        defaults.set(60, forKey: "meeting.endAfter")
         let d = MeetingRecorder.configuredDetector(defaults)
         XCTAssertEqual(d.startAfter, 2)
-        XCTAssertEqual(d.endWithoutEvidence, 60)
-        XCTAssertEqual(d.minSession, MeetingDetector().minSession, "unset keys keep the defaults")
+        XCTAssertEqual(d.endAfter, 60)
+        XCTAssertEqual(d.minSession, MeetingDetector(ownPID: 0).minSession, "unset keys keep the defaults")
+    }
+
+    /// The app's own dictation and meeting capture run in this process: its detector must never offer them.
+    func testTheAppsDetectorIgnoresItsOwnMicUse() {
+        let d = MeetingRecorder.configuredDetector()
+        let me = MicUser(pid: ProcessInfo.processInfo.processIdentifier, path: "/Applications/Shepetal.app/Contents/MacOS/Shepetal")
+        XCTAssertNil(d.app(in: Snapshot(micUsers: [me])))
+        XCTAssertEqual(d.app(in: zoom), "zoom.us")
+    }
+
+    /// "Not now" holds while the camera stays on after the mic goes: it is the same meeting until both are free.
+    func testNotNowHoldsUntilMicAndCameraAreBothReleased() {
+        let camera = Snapshot(cameraInUse: true)
+        feed(Snapshot(micUsers: zoom.micUsers, cameraInUse: true), 0, 5)
+        recorder.notNow()
+        feed(camera, 6, 120)  // mic muted, video still on
+        XCTAssertEqual(cards, ["zoom.us", nil], "no new card while the camera runs")
+        feed(quiet, 121, 125)
+        feed(camera, 126, 131)
+        XCTAssertEqual(cards, ["zoom.us", nil, "Camera"], "used again after both were free: a new question")
+        XCTAssertTrue(capture.started.isEmpty)
     }
 }
 

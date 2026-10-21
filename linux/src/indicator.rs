@@ -82,35 +82,82 @@ impl Indicator {
 /// Keep the indicator program running for as long as the daemon runs (goal rule 3: 🤫 is always
 /// there): start it, and when it exits (a crash, an X server or compositor restart, a display that
 /// was not ready yet) start it again after `delay`. The delay doubles, up to 32 times, while it
-/// keeps exiting within 30 s. Waiting on it also reaps it, so no zombie is left. A program that
-/// cannot be started at all (not installed) is reported once and not retried.
+/// keeps exiting within 30 s. Waiting on it also reaps it, so no zombie is left. A program that is
+/// not installed is reported once, then looked for again with the same backoff, so installing it
+/// later brings 🤫 up without a daemon restart.
 pub fn supervise(program: String, delay: Duration) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        let mut wait = delay;
+        let mut sup = Supervisor::new(delay);
         loop {
             let started = Instant::now();
-            let status = match Command::new(&program).spawn() {
-                Ok(mut child) => child.wait(),
-                Err(e) => {
-                    eprintln!("shepetal: 🤫 indicator not started: {program}: {e} (see docs/linux.md)");
-                    return;
-                }
-            };
-            // 127 is "not found" too: `env` exits with it when the script's interpreter (python3)
-            // is missing, and some systems report a missing program that way instead of an error.
-            if status.as_ref().is_ok_and(|s| s.code() == Some(127)) {
-                eprintln!("shepetal: 🤫 indicator not started: {program}: not found (see docs/linux.md)");
-                return;
+            let run = start(&program, crate::insert::on_path);
+            let (wait, log) = sup.next(&program, run, started.elapsed());
+            if let Some(l) = log {
+                eprintln!("shepetal: 🤫 {l}");
             }
-            if started.elapsed() >= Duration::from_secs(30) {
-                wait = delay;
-            }
-            let how = status.map_or_else(|e| e.to_string(), |s| s.to_string());
-            eprintln!("shepetal: 🤫 indicator exited ({how}); starting it again in {wait:?}");
             std::thread::sleep(wait);
-            wait = (wait * 2).min(delay * 32);
         }
     })
+}
+
+/// How one start of the indicator ended.
+#[derive(Debug, PartialEq)]
+enum Run {
+    /// Not on PATH, or its interpreter is not: nothing ran.
+    Missing,
+    /// It ran and exited (or could not be waited on); the status or error, for the log.
+    Exited(String),
+}
+
+/// Start `program` and wait for it. Checked with `installed` (on PATH) first: Rust 1.75 (Ubuntu
+/// 24.04) spawns a missing program as a child that exits 127 instead of returning an error (#130).
+fn start(program: &str, installed: impl Fn(&str) -> bool) -> Run {
+    if !installed(program) {
+        return Run::Missing;
+    }
+    match Command::new(program).spawn().and_then(|mut c| c.wait()) {
+        // `env` exits 127 when the script's interpreter (python3) is missing.
+        Ok(s) if s.code() == Some(127) => Run::Missing,
+        Ok(s) => Run::Exited(s.to_string()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Run::Missing,
+        Err(e) => Run::Exited(e.to_string()),
+    }
+}
+
+/// The supervisor's backoff and what it logs, apart from processes and time so tests can feed it.
+struct Supervisor {
+    delay: Duration,
+    wait: Duration,
+    /// Said that it is missing, and not since seen it run: say nothing more until it runs.
+    told_missing: bool,
+}
+
+impl Supervisor {
+    fn new(delay: Duration) -> Supervisor {
+        Supervisor { delay, wait: delay, told_missing: false }
+    }
+
+    /// After a start that ended as `run` after `ran_for`: how long to wait before the next start,
+    /// and the line to log, if any.
+    fn next(&mut self, program: &str, run: Run, ran_for: Duration) -> (Duration, Option<String>) {
+        let log = match run {
+            Run::Missing if self.told_missing => None,
+            Run::Missing => {
+                self.told_missing = true;
+                Some(format!("indicator not started: {program}: not installed, or python3 is missing (see docs/linux.md); looking for it again every {:?} at most", self.delay * 32))
+            }
+            Run::Exited(how) => {
+                self.told_missing = false;
+                if ran_for >= Duration::from_secs(30) {
+                    self.wait = self.delay;
+                }
+                Some(format!("indicator exited ({how}); starting it again in {:?}", self.wait))
+            }
+        };
+        let wait = self.wait;
+        self.wait = (self.wait * 2).min(self.delay * 32);
+        (wait, log)
+    }
 }
 
 #[cfg(test)]
@@ -209,13 +256,10 @@ mod tests {
     #[test]
     fn the_indicator_is_started_again_when_it_exits() {
         // Goal rule 3: a crashed indicator comes back while the daemon runs.
-        use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("shepetal-sup-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let prog = dir.join("fake-indicator");
-        std::fs::write(&prog, format!("#!/bin/sh\necho started >> '{}/runs'\nexit 1\n", dir.display())).unwrap();
-        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let prog = fake_program(&dir, "fake-indicator", &format!("echo started >> '{}/runs'\nexit 1", dir.display()));
         let _ = supervise(prog.display().to_string(), Duration::from_millis(10));
         let runs = || std::fs::read_to_string(dir.join("runs")).map_or(0, |s| s.lines().count());
         let t = Instant::now();
@@ -223,20 +267,76 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(runs() >= 3, "started {} times", runs());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
-        // Not installed, or its interpreter is not (`env` exits 127): reported once, and the
-        // supervisor ends instead of retrying forever.
+    fn fake_program(dir: &Path, name: &str, body: &str) -> PathBuf {
+        let p = dir.join(name);
+        std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o700)).unwrap();
+        p
+    }
+
+    #[test]
+    fn a_missing_indicator_is_looked_up_on_path_and_never_spawned() {
+        // #130: on Rust 1.75 spawning a missing program "succeeds" and the child exits 127, so
+        // the PATH check has to come first. `installed` says no here, and the program, which
+        // exists, must not run.
+        let dir = std::env::temp_dir().join(format!("shepetal-start-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let ran = dir.join("ran");
+        let prog = fake_program(&dir, "fake-indicator", &format!("touch '{}'\nexit 3", ran.display()));
+        let p = prog.to_str().unwrap();
+        assert_eq!(start(p, |_| false), Run::Missing);
+        assert!(!ran.exists(), "a program not on PATH was spawned");
+        assert_eq!(start(p, |_| true), Run::Exited("exit status: 3".into()));
+        assert!(ran.exists());
+
+        // Real lookups: a name on no PATH dir, an absolute path that is not there, and a script
+        // whose interpreter is missing (`env` exits 127).
         let no_python = dir.join("no-python");
         std::fs::write(&no_python, "#!/usr/bin/env shepetal-no-such-python\n").unwrap();
         std::fs::set_permissions(&no_python, std::fs::Permissions::from_mode(0o700)).unwrap();
-        for prog in [dir.join("missing"), no_python] {
-            let h = supervise(prog.display().to_string(), Duration::from_millis(10));
-            let t = Instant::now();
-            while !h.is_finished() && t.elapsed() < Duration::from_secs(5) {
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            assert!(h.is_finished(), "{} is retried", prog.display());
+        for prog in ["shepetal-no-such-indicator", dir.join("missing").to_str().unwrap(), no_python.to_str().unwrap()] {
+            assert_eq!(start(prog, crate::insert::on_path), Run::Missing, "{prog}");
         }
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_missing_indicator_is_reported_once_and_looked_for_with_backoff() {
+        let s = Duration::from_secs;
+        let mut sup = Supervisor::new(s(2));
+        let mut logs = vec![];
+        let mut waits = vec![];
+        for _ in 0..8 {
+            let (wait, log) = sup.next("shepetal-indicator", Run::Missing, Duration::ZERO);
+            waits.push(wait.as_secs());
+            logs.extend(log);
+        }
+        assert_eq!(waits, [2, 4, 8, 16, 32, 64, 64, 64], "backs off to 64 s, never stops looking");
+        assert_eq!(logs.len(), 1, "said once, not every round: {logs:?}");
+        assert!(logs[0].contains("shepetal-indicator: not installed"), "{}", logs[0]);
+
+        // Installed later: it runs, and it is reported if it goes missing again.
+        let (wait, log) = sup.next("shepetal-indicator", Run::Exited("exit status: 1".into()), s(31));
+        assert_eq!((wait, log.unwrap()), (s(2), "indicator exited (exit status: 1); starting it again in 2s".into()), "a run over 30 s resets the wait");
+        let (_, log) = sup.next("shepetal-indicator", Run::Missing, Duration::ZERO);
+        assert!(log.is_some(), "missing again after it ran is said again");
+        assert_eq!(sup.next("shepetal-indicator", Run::Missing, Duration::ZERO).1, None);
+    }
+
+    #[test]
+    fn an_indicator_that_keeps_crashing_backs_off_and_one_that_ran_long_restarts_soon() {
+        let ms = Duration::from_millis;
+        let mut sup = Supervisor::new(ms(100));
+        let crash = |sup: &mut Supervisor, ran: u64| sup.next("i", Run::Exited("signal: 11".into()), ms(ran)).0.as_millis();
+        let waits: Vec<_> = (0..7).map(|_| crash(&mut sup, 50)).collect();
+        assert_eq!(waits, [100, 200, 400, 800, 1600, 3200, 3200]);
+        assert_eq!(crash(&mut sup, 29_999), 3200, "under 30 s keeps the backoff");
+        assert_eq!(crash(&mut sup, 30_000), 100, "30 s or more starts over");
+        assert_eq!(crash(&mut sup, 10), 200);
     }
 
     #[test]
