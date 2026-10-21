@@ -14,7 +14,7 @@ final class ModelNameTests: XCTestCase {
     private static let micName = try! NSRegularExpression(pattern: #"\\\((device|d)\.name\)"#)
     private static let literal = try! NSRegularExpression(pattern: #""(?:[^"\\]|\\.)*""#)
     /// Paths and variable names, never shown.
-    private static let allowed: Set<String> = ["\"whisper.cpp/whisper-cli\"", "\"SHEPETAL_WHISPER_CLI\"", "\"SHEPETAL_WHISPER_MODEL\""]
+    private static let allowed: Set<String> = ["\"SHEPETAL_WHISPER_MODEL\""]
 
     static func offending(_ source: String) -> [String] {
         var hits: [String] = []

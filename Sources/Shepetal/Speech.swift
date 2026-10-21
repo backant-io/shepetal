@@ -2,6 +2,7 @@ import AppKit
 import FluidAudio
 import NaturalLanguage
 import ShepetalCore
+import ShepetalWhisper
 
 protocol SpeechEngine: AnyObject {
     var name: String { get }
@@ -31,7 +32,7 @@ struct SpeechError: LocalizedError {
 
 enum Speech {
     /// The model for the selected languages (`speechRoute`), then the tier's fallback when that model is the
-    /// tier's default. Never downloads anything.
+    /// tier's default. Whisper gets the languages, to pick from. Never downloads anything.
     static func load(prefer: SpeechModel? = nil, languages: [String] = []) async throws -> SpeechEngine {
         let tier = currentModelTier()
         let route = speechRoute(languages: languages, tier: tier)
@@ -40,7 +41,7 @@ enum Speech {
         // A language only whisper knows gets no fallback: Parakeet would write it in the wrong language.
         if route.model == tier.primary, let f = tier.fallback, f != models[0] { models.append(f) }
         for model in models {
-            do { return try await engine(for: model, language: route.language ?? "auto") } catch {
+            do { return try await engine(for: model, languages: languages) } catch {
                 tried.append("\(model.rawValue): \(error.localizedDescription)")  // not shown: logged below
             }
         }
@@ -52,15 +53,29 @@ enum Speech {
         throw SpeechError("On-device speech recognition is not available")
     }
 
-    static func engine(for model: SpeechModel, language: String = "auto") async throws -> SpeechEngine {
+    /// `languages` are the chosen BCP-47 tags, which only whisper takes; none lets it detect the language.
+    static func engine(for model: SpeechModel, languages: [String] = []) async throws -> SpeechEngine {
         do {
             switch model {
             case .parakeetV3: return try await ParakeetEngine.load()
-            case .whisperBaseEn, .whisperLargeV3Turbo: return try WhisperCppEngine(model, language: language)
+            case .whisperBaseEn, .whisperLargeV3Turbo: return try await WhisperEngine.load(model, languages: languages)
             }
         } catch {
             throw SpeechError(plain: error, "On-device speech recognition could not start")
         }
+    }
+
+    /// F12: the hint next to 🤫 when a dictation came out in a language that is not one of the chosen ones. Only
+    /// when they route to Parakeet, which takes no language; whisper is told one of them. nil when the text fits.
+    static func wrongLanguageHint(_ text: String, languages: [String], tier: ModelTier = currentModelTier()) -> String? {
+        guard speechRoute(languages: languages, tier: tier).model == .parakeetV3 else { return nil }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 3)
+        guard let code = wrongLanguage(hypotheses: Dictionary(uniqueKeysWithValues: hypotheses.map { ($0.key.rawValue, $0.value) }),
+                                       words: text.split(whereSeparator: \.isWhitespace).count, chosen: languages) else { return nil }
+        let language = Locale.current.localizedString(forLanguageCode: code) ?? code
+        return "This sounded like \(language), which is not in your Languages"
     }
 }
 
@@ -310,57 +325,50 @@ actor KeywordBooster: VocabularyBooster {
     }
 }
 
-/// The docs/models.md fallback: whisper.cpp's whisper-cli on the saved WAV.
-/// ponytail: one process per dictation reloads the model (0.35 to 1.1 s here); keep a whisper.cpp
-/// server or link libwhisper if the fallback has to meet the 700 ms bar.
-/// Looks in <data>/models (whisper.cpp/whisper-cli and ggml-*.bin); SHEPETAL_WHISPER_CLI and
-/// SHEPETAL_WHISPER_MODEL override the paths.
-final class WhisperCppEngine: SpeechEngine {
+/// The docs/models.md alternative engine: whisper.cpp in this process (ShepetalWhisper), the model loaded once and
+/// kept, so a dictation no longer waits for whisper-cli to reload it (#11). It works on the samples, not the WAV.
+/// Looks in <data>/models for ggml-*.bin; SHEPETAL_WHISPER_MODEL overrides the path.
+final class WhisperEngine: SpeechEngine {
     let name: String
-    let readsWav = true  // whisper-cli reads the WAV file
-    private let cli: URL
-    private let model: URL
-    private let language: String
+    private let model: WhisperModel
+    private let languages: [String]
+    private let lock = NSLock()
+    private var told: String?
+    /// The language whisper was told for the last recording, for the e2e check.
+    var lastLanguage: String? { lock.withLock { told } }
 
-    /// `language` is whisper's `-l` value: a code, or "auto".
-    init(_ m: SpeechModel, language: String = "auto") throws {
-        let env = ProcessInfo.processInfo.environment
-        cli = env["SHEPETAL_WHISPER_CLI"].map { URL(fileURLWithPath: $0) }
-            ?? Paths.models.appendingPathComponent("whisper.cpp/whisper-cli")
-        model = env["SHEPETAL_WHISPER_MODEL"].map { URL(fileURLWithPath: $0) }
-            ?? Paths.models.appendingPathComponent("\(m.rawValue).bin")  // not shown: a path
-        self.language = language
-        name = model.deletingPathExtension().lastPathComponent
-        for url in [cli, model] where !FileManager.default.fileExists(atPath: url.path) {
-            NSLog("shepetal: %@ not found", url.path)
+    /// `languages` are the chosen BCP-47 tags: whisper is told the one language, or the likeliest of several (#31).
+    init(model: WhisperModel, languages: [String]) {
+        self.model = model
+        self.languages = languageCodes(languages)
+        name = model.name
+    }
+
+    static func load(_ m: SpeechModel, languages: [String] = []) async throws -> WhisperEngine {
+        let path = ProcessInfo.processInfo.environment["SHEPETAL_WHISPER_MODEL"]
+            ?? Paths.models.appendingPathComponent("\(m.rawValue).bin").path  // not shown: a path
+        guard FileManager.default.fileExists(atPath: path) else {
+            NSLog("shepetal: %@ not found", path)
             throw SpeechError("The alternative engine is not installed")
         }
+        let model = try await Task.detached { try WhisperModel(path: path) }.value
+        // The first run sets up the Metal kernels; do it before the user speaks. Language detection runs the encoder
+        // and one decoder step: a whole transcription of silence took about 15 s here, retrying at every temperature.
+        _ = await Task.detached { try? model.languageProbabilities([Float](repeating: 0, count: 16_000)) }.value
+        return WhisperEngine(model: model, languages: languages)
     }
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         // The dictionary hint (F39), read fresh for every dictation like the replacements.
-        let args = whisperArguments(model: model.path, wav: wav.path, language: language,
-                                    vocabulary: Vocabulary.load(Paths.dictionary))
-        do { return try await run(cli, args) } catch {
+        let prompt = whisperPrompt(Vocabulary.load(Paths.dictionary))
+        do {
+            let out = try await Task.detached { [model, languages] in
+                try model.transcribe(samples, languages: languages, prompt: prompt)
+            }.value
+            lock.withLock { told = out.language }
+            return out.text
+        } catch {
             throw SpeechError(plain: error, "The alternative engine could not read this recording")
         }
-    }
-
-    private func run(_ cli: URL, _ args: [String]) async throws -> String {
-        try await Task.detached {
-            let p = Process()
-            p.executableURL = cli
-            p.arguments = args
-            let out = Pipe()
-            p.standardOutput = out
-            p.standardError = FileHandle.nullDevice
-            try p.run()
-            let data = out.fileHandleForReading.readDataToEndOfFile()
-            p.waitUntilExit()
-            guard p.terminationStatus == 0 else { throw SpeechError("The alternative engine stopped with code \(p.terminationStatus)") }
-            return String(decoding: data, as: UTF8.self)
-                .split(whereSeparator: \.isNewline).map { $0.trimmingCharacters(in: .whitespaces) }
-                .joined(separator: " ")
-        }.value
     }
 }

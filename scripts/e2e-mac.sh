@@ -21,19 +21,27 @@
 # The c* clips need the local cleanup model: SHEPETAL_CLEANUP_MODEL (default: Qwen3.5 2B in bench/.cache/cleanup,
 # downloaded there on the first run, about 1.3 GB, so run once with the network on). CLEANUP=rules skips them
 # and says so.
+# Languages (F12), last: with English and Japanese chosen, whisper large-v3-turbo runs in process on e01 and on j01,
+# Japanese made with `say -v Kyoko`, and each must come out in its own language. With English and Korean chosen,
+# whisper hears j01 as Japanese first and must still be told one of the two (#31). Then Parakeet, with German and
+# French chosen, on e02: the English text is kept and the wrong-language hint names English. The whisper model is
+# SHEPETAL_WHISPER_MODEL (default: bench/.cache/whisper, downloaded there on the first run, about 574 MB).
+# LANGUAGES=skip skips this part and says so.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=${SHEPETAL_BIN:-.build/release/shepetal}
 [ -x "$BIN" ] || swift build -c release
-# The cleanup model's library links no socket or DNS call, so it cannot reach the network even when a failed
-# call would be swallowed (the sandboxed run below only shows that nothing breaks without the network).
-LLAMA=$(dirname "$BIN")/llama.framework/llama
-[ -f "$LLAMA" ] || LLAMA=$(dirname "$BIN")/../Frameworks/llama.framework/llama
-[ -f "$LLAMA" ] || { echo "no llama.framework next to $BIN" >&2; exit 1; }
-if nm -u "$LLAMA" | grep -Eq '^_(socket|connect|getaddrinfo|gethostbyname|curl_[a-z_]+)$'; then
-  echo "$LLAMA links network calls" >&2; exit 1
-fi
-echo "llama.framework: no network calls linked"
+# The cleanup model's and whisper's libraries link no socket or DNS call, so they cannot reach the network even
+# when a failed call would be swallowed (the sandboxed run below only shows that nothing breaks without the network).
+for LIB in llama whisper; do
+  F=$(dirname "$BIN")/$LIB.framework/$LIB
+  [ -f "$F" ] || F=$(dirname "$BIN")/../Frameworks/$LIB.framework/$LIB
+  [ -f "$F" ] || { echo "no $LIB.framework next to $BIN" >&2; exit 1; }
+  if nm -u "$F" | grep -Eq '^_(socket|connect|getaddrinfo|gethostbyname|curl_[a-z_]+)$'; then
+    echo "$F links network calls" >&2; exit 1
+  fi
+  echo "$LIB.framework: no network calls linked"
+done
 WORK=$PWD/.cache/e2e
 FIX=$WORK/fixtures
 # Never the user's data dir, even when SHEPETAL_HOME is exported: E2E_HOME moves the test's own.
@@ -221,5 +229,73 @@ assert r["pasteboard_text"] == r["text"] != "", ("text not on the clipboard", r[
 assert "clipboard" in r["error"] and r["history_outcome"] == "paste_failed", r
 assert r["inserted_text"] == "" and not r["window_visible"], r
 print("paste not landed: text left on the clipboard")
+PY
+
+if [ "${LANGUAGES:-}" = skip ]; then
+  echo "SKIPPED: languages (LANGUAGES=skip)"
+  echo "e2e-mac: OK"
+  exit 0
+fi
+WHISPER=${SHEPETAL_WHISPER_MODEL:-$PWD/bench/.cache/whisper/ggml-large-v3-turbo-q5_0.bin}
+if [ ! -f "$WHISPER" ] && [ -z "${SHEPETAL_WHISPER_MODEL:-}" ]; then
+  mkdir -p "$(dirname "$WHISPER")"
+  curl -fL --progress-bar -o "$WHISPER.part" https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin &&
+    echo "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2  $WHISPER.part" | shasum -a 256 -c - &&
+    mv "$WHISPER.part" "$WHISPER" ||
+    { rm -f "$WHISPER.part"; echo "no whisper model at $WHISPER and the download failed (run once with the network on, or LANGUAGES=skip)" >&2; exit 1; }
+fi
+J=$FIX/j01
+J_TEXT="明日の会議の資料を、金曜日までに送ってください。"
+[ -f "$J.wav" ] || say -v Kyoko --data-format=LEI16@44100 -o "$J.wav" "$J_TEXT"
+printf '%s\n' "$J_TEXT" > "$J.txt"
+SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ja "$BIN" --e2e "$J.wav" "$FIX/e01.wav" 2>>"$WORK/stderr.log" | tee "$WORK/languages.jsonl" || true
+SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ko "$BIN" --e2e "$J.wav" 2>>"$WORK/stderr.log" | tee "$WORK/outside.jsonl" || true
+# The hint names the language in the system language (Locale.current): pinned, so "English" is checked on any Mac.
+E2E_LANGUAGES=de,fr "$BIN" -AppleLocale en_US --e2e "$FIX/e02.wav" 2>>"$WORK/stderr.log" | tee "$WORK/wrong-language.jsonl" || true
+python3 - "$WORK/languages.jsonl" "$WORK/wrong-language.jsonl" "$FIX" "$(basename "$WHISPER" .bin)" "$WORK/outside.jsonl" <<'PY'
+import json, os, re, sys, unicodedata
+
+def edits(a, b):
+    row = list(range(len(b) + 1))
+    for i, x in enumerate(a, 1):
+        prev, row[0] = row[0], i
+        for j, y in enumerate(b, 1):
+            prev, row[j] = row[j], min(row[j] + 1, row[j - 1] + 1, prev + (x != y))
+    return row[-1]
+
+def chars(s):  # letters and digits only: punctuation and spaces differ between models
+    return [c for c in s if unicodedata.category(c)[0] in "LN"]
+
+def japanese(s):
+    return [c for c in s if 0x3040 <= ord(c) <= 0x30FF or 0x4E00 <= ord(c) <= 0x9FFF]
+
+def words(s):
+    return re.sub(r"[^a-z0-9' ]+", " ", s.lower().replace("-", " ")).split()
+
+langs, wrong, fix, whisper, outside = sys.argv[1:6]
+rows = {os.path.basename(r["wav"]): r for r in map(json.loads, filter(str.strip, open(langs)))}
+assert set(rows) == {"j01.wav", "e01.wav"}, ("clips missing from the languages run", sorted(rows))
+for name, r in rows.items():
+    assert r["error"] == "" and r["paste_landed"] and r["inserted_text"] == r["text"], (name, r)
+    assert r["model"] == whisper, (name, "not the whisper model", r["model"])
+    assert r["wrong_language_hint"] == "", (name, "whisper is told the language, so no hint", r["wrong_language_hint"])
+    assert r["retranscribed_text"] == r["text"], (name, "re-transcribe", r["retranscribed_text"])
+j, ref = rows["j01.wav"]["text"], open(os.path.join(fix, "j01.txt")).read()
+cer = edits(chars(ref), chars(j)) / len(chars(ref))
+assert len(japanese(j)) >= 0.8 * len(chars(j)) and cer <= 0.15, ("j01 not written in Japanese", cer, j)
+e = rows["e01.wav"]["text"]
+ref_e = words(open(os.path.join(fix, "e01.txt")).read())
+wer = edits(ref_e, words(e)) / len(ref_e)
+assert not japanese(e) and wer <= 0.08, ("e01 not written in English", wer, e)
+assert (rows["j01.wav"]["language"], rows["e01.wav"]["language"]) == ("ja", "en"), "whisper was told another language"
+(o,) = [json.loads(l) for l in open(outside) if l.strip()]
+assert o["error"] == "" and o["model"] == whisper and o["language"] in ("en", "ko"), ("told a language not chosen", o["language"], o)
+print(f"languages en,ja: j01 CER {cer:.1%} {j!r}, e01 WER {wer:.1%}, ready {rows['j01.wav']['ready_ms']}/{rows['e01.wav']['ready_ms']} ms")
+print(f"languages en,ko: whisper told {o['language']!r} for j01, wrote {o['text']!r}")
+
+(w,) = [json.loads(l) for l in open(wrong) if l.strip()]
+assert w["error"] == "" and w["paste_landed"], ("the text is still inserted", w)
+assert "English" in w["wrong_language_hint"], ("no wrong-language hint", w["wrong_language_hint"], w["text"])
+print(f"languages de,fr: {w['model']} wrote {w['text']!r}, hint {w['wrong_language_hint']!r}")
 print("e2e-mac: OK")
 PY
