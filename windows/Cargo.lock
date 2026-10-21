@@ -41,6 +41,8 @@ dependencies = [
  "input",
  "insert",
  "meetings",
+ "serde_json",
+ "sha2",
  "shepetal-core",
  "windows-sys",
 ]
