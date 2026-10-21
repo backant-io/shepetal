@@ -1,7 +1,6 @@
 #if canImport(CoreAudio)
-import AppKit
 import CoreAudio
-import EventKit
+import CoreMediaIO
 import MeetingCore
 import os
 
@@ -26,9 +25,9 @@ func readString(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) ->
 }
 
 public enum Probes {
-    /// Processes currently capturing audio input, via Core Audio process objects (macOS 14.2+).
-    /// Reads metadata only: no TCC prompt.
-    public static func micClients() -> [MicClient] {
+    /// Processes capturing audio input, via Core Audio process objects (macOS 14.2+), with their executables and
+    /// the executable of the process responsible for each (a helper's app). Reads metadata only: no TCC prompt.
+    public static func micUsers() -> [MicUser] {
         var addr = address(kAudioHardwarePropertyProcessObjectList)
         let system = AudioObjectID(kAudioObjectSystemObject)
         var size: UInt32 = 0
@@ -38,31 +37,44 @@ public enum Probes {
         return ids.compactMap { id in
             guard read(id, kAudioProcessPropertyIsRunningInput, UInt32(0)) == 1 else { return nil }
             let pid = read(id, kAudioProcessPropertyPID, pid_t(0)) ?? 0
-            return MicClient(bundleID: readString(id, kAudioProcessPropertyBundleID) ?? "", name: processName(pid))
+            return MicUser(pid: pid, bundleID: readString(id, kAudioProcessPropertyBundleID) ?? "",
+                           path: path(pid), responsiblePath: path(responsible?(pid) ?? pid))
         }
     }
 
-    static func processName(_ pid: pid_t) -> String {
+    static func path(_ pid: pid_t) -> String {
         var buf = [CChar](repeating: 0, count: Int(MAXPATHLEN))
-        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return "pid \(pid)" }
-        let path = String(decoding: buf.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
-        return path.split(separator: "/").last.map(String.init) ?? "pid \(pid)"
+        guard proc_pidpath(pid, &buf, UInt32(buf.count)) > 0 else { return "" }
+        return String(cString: buf)
     }
 
-    /// On-screen window titles keyed by owner bundle ID. macOS only returns titles of other
-    /// apps with Screen Recording permission; we check first so this never prompts.
-    public static func windowTitles() -> [String: [String]] {
-        guard CGPreflightScreenCaptureAccess(),
-              let list = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]]
-        else { return [:] }
-        var out: [String: [String]] = [:]
-        for w in list {
-            guard let title = w[kCGWindowName as String] as? String, !title.isEmpty,
-                  let pid = w[kCGWindowOwnerPID as String] as? pid_t,
-                  let bundle = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier else { continue }
-            out[bundle, default: []].append(title)
+    /// The process macOS holds responsible for a pid (Safari for its WebKit GPU process, Chrome for a helper), as
+    /// Activity Monitor and TCC attribute them. Private libsystem SPI, so it is looked up and may be missing.
+    static let responsible: (@convention(c) (pid_t) -> pid_t)? = dlsym(UnsafeMutableRawPointer(bitPattern: -2),
+        "responsibility_get_pid_responsible_for_pid").map { unsafeBitCast($0, to: (@convention(c) (pid_t) -> pid_t).self) }
+
+    /// Whether any camera runs in some process, from CoreMediaIO device state. This reads no frames, so it needs
+    /// no camera access and never prompts. macOS does not say which process it is.
+    public static func cameraInUse() -> Bool {
+        var addr = cmio(kCMIOHardwarePropertyDevices)
+        let system = CMIOObjectID(kCMIOObjectSystemObject)
+        var size: UInt32 = 0
+        guard CMIOObjectGetPropertyDataSize(system, &addr, 0, nil, &size) == noErr else { return false }
+        var ids = [CMIOObjectID](repeating: 0, count: Int(size) / MemoryLayout<CMIOObjectID>.size)
+        var used: UInt32 = 0
+        guard CMIOObjectGetPropertyData(system, &addr, 0, nil, size, &used, &ids) == noErr else { return false }
+        return ids.contains { id in
+            var running: UInt32 = 0
+            var a = cmio(kCMIODevicePropertyDeviceIsRunningSomewhere)
+            return CMIOObjectGetPropertyData(id, &a, 0, nil, UInt32(MemoryLayout<UInt32>.size), &used, &running) == noErr
+                && running != 0
         }
-        return out
+    }
+
+    static func cmio(_ selector: Int) -> CMIOObjectPropertyAddress {
+        CMIOObjectPropertyAddress(mSelector: CMIOObjectPropertySelector(selector),
+                                  mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
+                                  mElement: CMIOObjectPropertyElement(kCMIOObjectPropertyElementMain))
     }
 
     /// Default input and output device IDs (no permission needed).
@@ -89,24 +101,8 @@ public enum Probes {
         return "\(ok ? wake.tv_sec : -1).\(wake.tv_usec)/\(audioRestarts.withLock { $0 })"
     }
 
-    nonisolated(unsafe) static let eventStore = EKEventStore()
-
-    /// The calendar event around now. Reads EventKit only when Calendar full access is already
-    /// granted, so this never prompts.
-    public static func calendarEvent(now: Date = Date()) -> String? {
-        guard EKEventStore.authorizationStatus(for: .event) == .fullAccess else { return nil }
-        let window = eventStore.predicateForEvents(withStart: now.addingTimeInterval(-300),
-                                                   end: now.addingTimeInterval(300), calendars: nil)
-        let events = eventStore.events(matching: window).map {
-            CalendarEvent(title: $0.title ?? "", start: $0.startDate.timeIntervalSince1970,
-                          end: $0.endDate.timeIntervalSince1970, isAllDay: $0.isAllDay)
-        }
-        return CalendarEvent.current(in: events, now: now.timeIntervalSince1970)
-    }
-
     public static func snapshot() -> Snapshot {
-        Snapshot(micClients: micClients(), windowTitles: windowTitles(), calendarEvent: calendarEvent(),
-                 devices: devices(), wakeMarker: wakeMarker())
+        Snapshot(micUsers: micUsers(), cameraInUse: cameraInUse(), devices: devices(), wakeMarker: wakeMarker())
     }
 }
 #endif

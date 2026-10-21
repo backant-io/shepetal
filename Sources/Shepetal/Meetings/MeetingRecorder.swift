@@ -90,14 +90,13 @@ final class MeetingRecorder: NSObject {
 
     nonisolated static func autoRecords(_ defaults: UserDefaults = .standard) -> Bool { defaults.bool(forKey: autoRecordKey) }
 
-    /// The detector thresholds from docs/re/meetings.md, each overridable with
-    /// `defaults write io.backant.shepetal meeting.<name> <seconds>`.
+    /// The detector for this process (its own mic use never counts), with the thresholds from docs/re/meetings.md,
+    /// each overridable with `defaults write io.backant.shepetal meeting.<name> <seconds>`.
     nonisolated static func configuredDetector(_ defaults: UserDefaults = .standard) -> MeetingDetector {
-        var d = MeetingDetector()
+        var d = MeetingDetector(ownPID: ProcessInfo.processInfo.processIdentifier, ownBundleID: Bundle.main.bundleIdentifier)
         let keys: [(String, WritableKeyPath<MeetingDetector, Double>)] = [
             ("startAfter", \.startAfter), ("holdoff", \.holdoff), ("minSession", \.minSession),
-            ("endWithEvidence", \.endWithEvidence), ("endWithoutEvidence", \.endWithoutEvidence),
-            ("reacquire", \.reacquire), ("deviceChangeGrace", \.deviceChangeGrace),
+            ("endAfter", \.endAfter), ("deviceChangeGrace", \.deviceChangeGrace),
         ]
         for (name, path) in keys {
             if let v = defaults.object(forKey: "meeting.\(name)") as? Double { d[keyPath: path] = v }
@@ -105,8 +104,8 @@ final class MeetingRecorder: NSObject {
         return d
     }
 
-    /// Polls `probe` off the main thread every second (window titles and EventKit can be slow) and
-    /// feeds the detector on the main thread.
+    /// Polls `probe` (which apps use the mic, whether a camera runs) off the main thread every second and feeds the
+    /// detector on the main thread.
     func watch(probe: @escaping @Sendable () -> Snapshot = { Probes.snapshot() }) {
         let t = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "io.backant.shepetal.meeting-probe"))
         t.schedule(deadline: .now(), repeating: 1)
