@@ -106,6 +106,13 @@ class Recorder {
         return lock.withLock { samples }
     }
 
+    /// F13: a copy of the last `count` samples recorded so far, without stopping; nil once the recording stopped.
+    /// What the resampler still holds comes only with `stop`.
+    func snapshot(last count: Int) -> [Float]? {
+        guard isRecording else { return nil }
+        return lock.withLock { Array(samples.suffix(count)) }
+    }
+
     /// Health events since the last call, plus the check for buffers that never came.
     func healthEvents() -> [MicHealth.Event] {
         lock.withLock {
@@ -182,7 +189,8 @@ class Recorder {
         }
     }
 
-    private func take(_ buf: AVAudioPCMBuffer) {
+    /// On the tap's thread; internal so tests feed buffers without a mic.
+    func take(_ buf: AVAudioPCMBuffer) {
         let t = ProcessInfo.processInfo.systemUptime
         lock.withLock {
             // Built from the buffer itself, so a device whose format was reported stale is still resampled right.

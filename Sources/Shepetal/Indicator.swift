@@ -100,8 +100,14 @@ final class Indicator {
     }
 
     /// Text that stays next to the indicator while set and while recording, e.g. creator mode's label.
-    /// A hint covers it for its seconds. Any mode other than recording or hands-free clears it.
-    var status: String? { didSet { if labelUntil == nil, status != oldValue { setLabel(status) } } }
+    /// A hint covers it for its seconds. Any mode other than recording or hands-free clears it, and it cannot be
+    /// set outside them, so live words (F13) that come back after the release never show.
+    var status: String? {
+        didSet {
+            if mode != .recording && mode != .handsFree { status = nil }
+            if labelUntil == nil, status != oldValue { setLabel(status) }
+        }
+    }
 
     /// "Creator mode" in Settings: the label shows while recording, for screen recordings. Unset means off.
     static let creatorModeKey = "creatorMode"
@@ -109,6 +115,11 @@ final class Indicator {
     /// The `status` to set when recording starts: the creator label, or nil when the setting is off.
     static func creatorStatus(_ defaults: UserDefaults = .standard) -> String? {
         defaults.bool(forKey: creatorModeKey) ? creatorLabel : nil
+    }
+    /// The `status` for live words (F13): after the creator label when creator mode is on, so viewers still see it
+    /// for the whole recording.
+    static func liveStatus(_ words: String, _ defaults: UserDefaults = .standard) -> String {
+        creatorStatus(defaults).map { "\($0) · \(words)" } ?? words
     }
 
     private func setLabel(_ text: String?) {
