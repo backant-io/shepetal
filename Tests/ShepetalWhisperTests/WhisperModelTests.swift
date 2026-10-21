@@ -66,7 +66,8 @@ final class WhisperModelTests: XCTestCase {
         XCTAssertEqual(try m.transcribe(samples, languages: [], prompt: nil).language, "ja", "none chosen: whisper's own guess")
     }
 
-    // A quick hold gives under 1 s, which whisper.cpp alone skips.
+    // A quick hold gives under 1 s. whisper.cpp used to skip that ("input is too short"); since #2065 only under
+    // 100 ms, so the samples go in as they are.
     func testShortAudioIsStillTranscribed() throws {
         let m = try model()
         let samples = try speech("Samantha", "Yes.")

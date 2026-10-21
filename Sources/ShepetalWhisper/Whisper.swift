@@ -56,13 +56,11 @@ public final class WhisperModel: @unchecked Sendable {
     public func transcribe(_ samples: [Float], languages: [String], prompt: String?) throws -> (text: String, language: String) {
         lock.lock()
         defer { lock.unlock() }
-        // whisper.cpp skips audio under 1 s ("input is too short"); a quick hold still gets heard.
-        let audio = MicAudio.padded(samples, to: AudioStore.sampleRate * 21 / 20)
         let language: String
         if !multilingual {
             language = "en"
         } else if languages.count > 1 {
-            language = pickLanguage(probs: try probabilities(audio), allowed: languages) ?? "auto"
+            language = pickLanguage(probs: try probabilities(samples), allowed: languages) ?? "auto"
         } else {
             language = languages.first ?? "auto"
         }
@@ -76,10 +74,10 @@ public final class WhisperModel: @unchecked Sendable {
         p.translate = false
         let status: Int32 = language.withCString { lang in
             p.language = lang
-            guard let prompt else { return whisper_full(ctx, p, audio, Int32(audio.count)) }
+            guard let prompt else { return whisper_full(ctx, p, samples, Int32(samples.count)) }
             return prompt.withCString { text in
                 p.initial_prompt = text
-                return whisper_full(ctx, p, audio, Int32(audio.count))
+                return whisper_full(ctx, p, samples, Int32(samples.count))
             }
         }
         guard status == 0 else { throw WhisperError(errorDescription: "whisper.cpp stopped with code \(status)") }
@@ -94,11 +92,11 @@ public final class WhisperModel: @unchecked Sendable {
     public func languageProbabilities(_ samples: [Float]) throws -> [String: Float] {
         lock.lock()
         defer { lock.unlock() }
-        return try probabilities(MicAudio.padded(samples, to: AudioStore.sampleRate * 21 / 20))
+        return try probabilities(samples)
     }
 
-    private func probabilities(_ audio: [Float]) throws -> [String: Float] {
-        guard whisper_pcm_to_mel(ctx, audio, Int32(audio.count), threads) == 0 else {
+    private func probabilities(_ samples: [Float]) throws -> [String: Float] {
+        guard whisper_pcm_to_mel(ctx, samples, Int32(samples.count), threads) == 0 else {
             throw WhisperError(errorDescription: "whisper.cpp could not read the audio")
         }
         var probs = [Float](repeating: 0, count: Int(whisper_lang_max_id()) + 1)
