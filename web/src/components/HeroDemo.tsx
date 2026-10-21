@@ -17,7 +17,7 @@ const HINT_MS = 2000;
 
 type Phase = 'rest' | 'hold' | 'talk' | 'process';
 
-const WORDS = ['hold fn,', 'talk,', 'done.'];
+const WORDS = ['Write at', 'the speed', 'of thought.'];
 // How many headline words are lit in each phase. At rest the whole line is lit.
 const LIT: Record<Phase, number> = { rest: 3, hold: 1, talk: 2, process: 2 };
 
@@ -85,7 +85,7 @@ export function HeroDemo() {
 
   return (
     <>
-      <h1 className="display text-[clamp(4rem,13vw,10.5rem)] leading-[0.88]">
+      <h1 className="display text-[clamp(3.5rem,9vw,7.5rem)] leading-[0.88]">
         {WORDS.map((w, i) => (
           <span key={w} className="hero-word block" data-dim={i >= LIT[phase]}>
             {w}
