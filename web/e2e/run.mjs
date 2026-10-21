@@ -221,11 +221,10 @@ async function main() {
     assert.equal(res.status, 200);
     assert.ok(html.includes('Try 30 days free') && /<form[^>]*action=/.test(html), 'the trial button is a sign-in form');
     // Assets (src, srcset, stylesheets, preloads) and visible links; the canonical <link> names the site's own domain.
-    // The only outside links are the cited speaking and typing rate sources.
     const outside = [
       ...html.matchAll(/\b(?:src|srcset)="(https?:\/\/[^"]+)"/g),
       ...html.matchAll(/<(?:a|link(?![^>]*rel="(?:canonical|alternate)"))\b[^>]*\bhref="(https?:\/\/[^"]+)"/g),
-    ].map((m) => m[1]).filter((u) => !u.startsWith('https://ncvs.org/') && !u.startsWith('https://doi.org/10.1145/'));
+    ].map((m) => m[1]);
     assert.deepEqual(outside, [], 'no asset or link to another server');
     assert.match(res.headers.get('content-security-policy') ?? '', /font-src 'self' data:/);
     // The X card: a large image at an absolute URL, served as a static file.
@@ -234,6 +233,11 @@ async function main() {
     const og = await fetch(`${BASE}/og.jpg`);
     assert.equal(og.status, 200);
     assert.match(og.headers.get('content-type') ?? '', /^image\/jpeg/);
+    // The footer's Legal link carries the attribution and trademark notices the page no longer prints.
+    assert.ok(html.includes('href="/legal"'), 'the footer links to /legal');
+    const legal = await fetch(`${BASE}/legal`);
+    assert.equal(legal.status, 200);
+    assert.ok((await legal.text()).includes('/brand/emoji/NOTICE.txt'), '/legal links the Noto NOTICE');
   });
 
   // ---- 1. Signed out, /app/login runs the Google sign-in and comes back to the same URL.

@@ -7,10 +7,13 @@ import { describe, expect, it } from 'vitest';
 const SRC = join(__dirname, '..', '..');
 const read = (f: string) => readFileSync(f, 'utf8');
 const page = read(join(__dirname, 'page.tsx'));
+const layout = read(join(__dirname, 'layout.tsx'));
+const legal = read(join(__dirname, 'legal', 'page.tsx'));
 const hero = read(join(SRC, 'components', 'landing', 'Hero.tsx'));
 const files = [
   join(__dirname, 'page.tsx'),
   join(__dirname, 'layout.tsx'),
+  join(__dirname, 'legal', 'page.tsx'),
   ...readdirSync(join(SRC, 'components', 'landing')).map((f) => join(SRC, 'components', 'landing', f)),
 ];
 const text = files.map(read).join('\n');
@@ -22,10 +25,13 @@ const strip = (src: string) =>
     .replace(/\b(?:aria-label|alt)=(?:"[^"]*"|\{`[^`]*`\})/g, '');
 const visible = strip(text);
 // The hero's own words: its JSX text, without the code around it.
-const heroText = strip(hero)
-  .split('export function Hero')[1]
-  .replace(/<[^>]*>|\{[^{}\n]*\}/g, ' ')
-  .replace(/\s+/g, ' ');
+const words = (src: string) =>
+  strip(src)
+    .replace(/<[^>]*>|\{[^{}\n]*\}/g, ' ')
+    .replace(/\s+/g, ' ');
+const heroText = words(hero.split('export function Hero')[1]);
+// The rest of the page as a reader sees it, below the hero.
+const pageText = words(page.split('export default function Home')[1]);
 
 describe('landing page', () => {
   it('names no speech recognition or AI model, so the privacy story is about the Mac and not a vendor', () => {
@@ -33,9 +39,8 @@ describe('landing page', () => {
     expect(visible).not.toMatch(/\bAI\b|\bmodel\b|\bLLM\b/);
   });
 
-  it('loads nothing from another server, and the only outside links are the cited speaking and typing sources', () => {
-    const urls = text.match(/https?:\/\/[^\s'"`)]+/g) ?? [];
-    expect(urls.filter((u) => !u.startsWith('https://ncvs.org/') && !u.startsWith('https://doi.org/10.1145/'))).toEqual([]);
+  it('loads nothing from another server and links to none, since the page makes its claims without citing sources', () => {
+    expect(text.match(/https?:\/\/[^\s'"`)]+/g) ?? []).toEqual([]);
     expect(text).not.toMatch(/fonts\.googleapis|fonts\.gstatic|fontshare|backant\.io/);
   });
 
@@ -47,27 +52,40 @@ describe('landing page', () => {
     // Google refuses sign-in inside in-app browsers such as X's, so on a phone each trial button has a
     // Send to my Mac next to it (CSS swaps them under 760 px).
     expect(both.match(/<SendToMac \/>/g)?.length).toBe(signIns);
-    expect(page).toContain('$4.99 once');
-    expect(page).toContain('no card');
   });
 
-  it('carries every approved line with its proof footnote, as the brand requires', () => {
-    for (const [line, n] of [
-      ['100% private. Your data is yours.', 2],
-      ['Instant, real-time, 4x faster.', 4],
-    ] as const) {
-      const at = page.indexOf(line);
-      expect(at, line).toBeGreaterThan(-1);
-      expect(page.slice(at, at + 200), line).toContain(`<Ref n={${n}} first />`);
-      expect(page, `note ${n}`).toContain(`id="note-${n}"`);
-    }
-    // 4x keeps the speaking source a reader can open, and never cites Karat et al.: in that study dictation with
-    // corrections was slower than typing, so the link would argue against the line (brand/strategy.md, Evidence notes).
-    const note4 = page.slice(page.indexOf('id="note-4"'), page.indexOf('</li>', page.indexOf('id="note-4"')));
-    expect(note4).toContain('{NCVS}');
-    expect(text).not.toMatch(/Karat|302979/);
-    // The measured latency keeps its conditions next to it.
-    expect(page).toMatch(/measured on an M4 Pro\.\s*<Ref n=\{3\} first \/>/);
+  it('gives each bold claim its own section, said once and as written (voice.md, The claims)', () => {
+    for (const claim of [
+      'Works in every app.',
+      'Instant.',
+      '4x faster than typing.',
+      '100% private. Your data is yours.',
+      'Works offline.',
+      'Meetings, transcribed on your Mac.',
+      '$4.99. Yours forever.',
+    ])
+      expect(pageText.split(claim).length - 1, claim).toBe(1);
+  });
+
+  it('makes claims without proof apparatus, disclosures or hedges below the hero (Pavel, Oct 21)', () => {
+    // Footnotes, the notes section, the privacy-detail links, the sign-in and roadmap lines, the fine print.
+    for (const banned of ['<Ref', '<sup', 'id="note-', 'What goes online', 'Read the privacy details', 'Google sign-in', 'Sign in with Google'])
+      expect(page, banned).not.toContain(banned);
+    expect(pageText).not.toMatch(/in development|no dates|no card|Illustration|0\.1 s|measured on|M4 Pro/i);
+    // A hedge undoes a bold claim.
+    expect(pageText).not.toMatch(/\b(about|around|roughly|up to|depending on|typically|may|might)\b/i);
+    // Quiet wordplay is not a brand line.
+    expect(pageText).not.toMatch(/silent|makes no sound|keeps quiet/i);
+  });
+
+  it('keeps the footer to Privacy, Terms and Legal, and the notices on /legal', () => {
+    const foot = layout.slice(layout.indexOf('<footer'));
+    expect([...foot.matchAll(/<Link href="([^"]+)"/g)].map((m) => m[1])).toEqual(['/privacy', '/terms', '/legal']);
+    expect(foot).not.toMatch(/trademark|Apache|License|©/);
+    // Apache-2.0 asks for the NOTICE file to travel with the artwork; Apple asks for its trademark line.
+    expect(legal).toContain('/brand/emoji/NOTICE.txt');
+    expect(legal).toContain('/brand/emoji/LICENSE-Apache-2.0.txt');
+    expect(legal).toContain('Mac and macOS are trademarks of Apple Inc.');
   });
 
   it('keeps the price and the steps off the link preview, as the brand asks, so a shared link sells the outcome', () => {
@@ -115,14 +133,15 @@ describe('landing page', () => {
     expect(hero).toContain('<span className="hd-pill-rec">Recording</span>');
     expect(hero).toContain('<span className="hd-pill-write">Writing</span>');
     // Orange appears only in the hands-free scene, whose caption names it.
-    expect(page).toContain('to speak hands-free: the ring stays orange');
+    expect(page).toContain('hands-free. The ring stays orange');
   });
 
-  it('states the real system requirement and keeps the other platforms undated', () => {
-    expect(visible).toContain('macOS 14.4 or later');
-    // No build a visitor can download is out yet (/download says coming soon), so the page says Mac first, never available now.
-    expect(visible).not.toMatch(/macOS 14 or later|coming soon|available now/i);
-    expect(visible).toMatch(/Linux, Windows and iPhone are in development\. No dates yet\./);
+  it('states the real system requirement once, in the FAQ, and names no other platform', () => {
+    // The app's LSMinimumSystemVersion is 14.4 (meeting capture needs Core Audio process taps) and the build is arm64.
+    expect(visible.match(/macOS 14\.4/g)?.length).toBe(1);
+    expect(page).toContain("['Which Macs does it run on?', 'Macs with Apple silicon, on macOS 14.4 or later.']");
+    // No build a visitor can download is out yet (/download says coming soon), so the page never says available now.
+    expect(visible).not.toMatch(/macOS 14 or later|coming soon|available now|Linux|Windows|iPhone/i);
   });
 
   it('says a meeting records only after Record is clicked, with auto-record off by default', () => {

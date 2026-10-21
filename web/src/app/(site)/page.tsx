@@ -8,22 +8,6 @@ import { SignInButton } from '@/components/SignInButton';
 
 export const metadata: Metadata = { alternates: { canonical: '/' } };
 
-const NCVS = 'https://ncvs.org/archive/ncvs/tutorials/voiceprod/tutorial/quality.html';
-// Dhakal et al., CHI 2018 (a large online typing test): the faster typists, next to whom speaking is about 3x.
-// Which typing studies 4x may cite is in brand/strategy.md, Evidence notes.
-const DHAKAL = 'https://doi.org/10.1145/3173574.3174220';
-
-/** A footnote marker. The first marker of a note carries the id the note links back to. */
-function Ref({ n, first }: { n: number; first?: boolean }) {
-  return (
-    <sup className="ref">
-      <a href={`#note-${n}`} id={first ? `ref-${n}` : undefined} aria-label={`Note ${n}`}>
-        {n}
-      </a>
-    </sup>
-  );
-}
-
 /** A generated brand image: AVIF with a WebP fallback, in the widths that exist, and the night version in dark mode.
  * `webp` for the images whose WebP came out smaller than the AVIF (last-light, valley). */
 function Photo({
@@ -77,7 +61,6 @@ function Stage({ label, mode, children }: { label: string; mode?: 'free'; childr
     <div className="stage" role="img" aria-label={`Illustration: ${label}`} data-mode={mode}>
       {children}
       <Ind />
-      <span className="illus">Illustration</span>
     </div>
   );
 }
@@ -110,7 +93,7 @@ const APP_SCENES = [
         </div>
       </Win>
     </Stage>
-    <p className="scene-cap">A reply in your mail app, written while you look at the invoice.</p>
+    <p className="scene-cap">A reply in your mail app.</p>
   </Fragment>,
   <Fragment key="chat">
     <Stage label="A team chat. The message lands in the box at the bottom.">
@@ -145,7 +128,7 @@ const APP_SCENES = [
         </div>
       </Win>
     </Stage>
-    <p className="scene-cap">A message in your team chat, in the box you were already typing in.</p>
+    <p className="scene-cap">A message in your team chat.</p>
   </Fragment>,
   <Fragment key="code">
     <Stage label="A code editor. A comment lands on the line where the cursor was.">
@@ -213,7 +196,7 @@ const APP_SCENES = [
         </div>
       </Win>
     </Stage>
-    <p className="scene-cap">A comment in your code editor, on the line where the cursor was.</p>
+    <p className="scene-cap">A comment in your code editor.</p>
   </Fragment>,
   <Fragment key="term">
     <Stage label="A terminal. A long prompt for a coding agent lands at the prompt in full sentences.">
@@ -233,7 +216,7 @@ const APP_SCENES = [
         </div>
       </Win>
     </Stage>
-    <p className="scene-cap">A whole prompt for your coding agent, in the terminal, with every detail you would skip when typing.</p>
+    <p className="scene-cap">A whole prompt for your coding agent.</p>
   </Fragment>,
   <Fragment key="docs">
     <Stage mode="free" label="A doc in the browser. Hands-free: the ring is orange while you speak, then the paragraph lands.">
@@ -250,10 +233,7 @@ const APP_SCENES = [
         </div>
       </Win>
     </Stage>
-    <p className="scene-cap">
-      A longer paragraph in a doc. Double-tap <span className="kbd">fn</span> to speak hands-free: the ring stays orange until you tap{' '}
-      <span className="kbd">fn</span> again.
-    </p>
+    <p className="scene-cap">A long paragraph in a doc, hands-free. The ring stays orange while you speak.</p>
   </Fragment>,
 ];
 
@@ -263,17 +243,17 @@ const MEET_TABS = [
   <Fragment key="card">
     <span className="n">1</span>
     <span className="step-t">A call starts</span>
-    <span className="s">A small card next to the indicator asks first, and recording waits for your click.</span>
+    <span className="s">A card asks first. Nothing records until you click.</span>
   </Fragment>,
   <Fragment key="live">
     <span className="n">2</span>
     <span className="step-t">You click Record</span>
-    <span className="s">The ring stays red for the whole call, and the transcript fills in as Me and Others.</span>
+    <span className="s">The ring stays red. The transcript fills in as Me and Others.</span>
   </Fragment>,
   <Fragment key="sum">
     <span className="n">3</span>
     <span className="step-t">After the call</span>
-    <span className="s">A summary with key points, decisions and action items, written on your Mac.</span>
+    <span className="s">Key points, decisions and action items.</span>
   </Fragment>,
 ];
 
@@ -309,7 +289,6 @@ const MEET_SCENES = [
       <span className="b">Not now</span>
     </div>
     <Ind hint={<span className="ind-hint hint-meet">Recording meeting</span>} />
-    <span className="illus">Illustration</span>
   </div>,
   <div
     key="live"
@@ -336,7 +315,6 @@ const MEET_SCENES = [
       </div>
     </Win>
     <Ind />
-    <span className="illus">Illustration</span>
   </div>,
   <div
     key="sum"
@@ -391,57 +369,24 @@ const MEET_SCENES = [
       </div>
     </Win>
     <Ind />
-    <span className="illus">Illustration</span>
   </div>,
 ];
 
 /* ---------- FAQ ---------- */
 
 const FAQ: [string, React.ReactNode][] = [
-  [
-    'Does it work offline?',
-    'Yes. Speech recognition runs on your Mac, so dictation works with the Wi-Fi off, on a plane or on a train with no signal. The license needs a connection once every 7 days.',
-  ],
-  [
-    'Where does my voice go?',
-    'It stays on your Mac. Speech recognition runs on the Mac, and your recordings and history are saved in a folder on it that only your user account can read. The text you dictate goes wherever the app you paste it into sends it.',
-  ],
-  [
-    'Why do I sign in with Google?',
-    'For the license. Signing in starts your 30 days and connects your purchase to you, so the account knows your email address. Your audio and your text are never part of it.',
-  ],
-  [
-    'What happens after 30 days?',
-    'You can keep shepetal with a single payment of $4.99. It is yours, with updates. The trial needs no card, so you pay only when you decide to buy.',
-  ],
-  [
-    'Which Macs does it run on?',
-    'Macs with Apple silicon on macOS 14.4 or later. Speech recognition downloads once, about 470 MB.',
-  ],
-  [
-    'Does it work in the terminal and in code editors?',
-    'Yes. In the terminal or your editor, press the key and your words land at the prompt, as in any other app. Long instructions for a coding agent are where speaking saves the most.',
-  ],
+  ['Which Macs does it run on?', 'Macs with Apple silicon, on macOS 14.4 or later.'],
   [
     'How do I know it is listening?',
     <>
-      The <Shush /> in the bottom-left corner of your screen shows it: a red ring while it records, orange in hands-free and a pulsing
-      blue ring while it writes. It stays in its corner on every desktop and over full-screen apps, and the app itself is silent.
+      The <Shush /> in the corner of your screen. A red ring while it records, orange in hands-free, blue while it writes.
     </>,
   ],
-  ['How are dates written?', 'As numbers. Say “the twenty-sixth of July” and it lands as 26.07.26.'],
   [
     'Who knows a meeting is being recorded?',
-    <>
-      You decide. A meeting records only after you click Record on the card next to <Shush />, and recording automatically is off until
-      you turn it on in Settings. Let people know before you record them.
-    </>,
+    'You decide. Nothing records until you click Record, and automatic recording is off until you turn it on. Let people know before you record them.',
   ],
-  ['Is there a version for Linux, Windows or iPhone?', 'All three are in development. No dates yet.'],
-  [
-    'What does the name mean?',
-    'It comes from a Slovenian word for “he whispered” or “she whispered”. Pavel, who makes shepetal, is from Slovenia.',
-  ],
+  ['How are dates written?', 'As numbers. Say “the twenty-sixth of July” and it lands as 26.07.26.'],
 ];
 
 export default function Home() {
@@ -449,43 +394,14 @@ export default function Home() {
     <main className="lp">
       <Hero />
 
-      {/* Facts that anyone can check, in the place other pages put logos */}
-      <div className="wrap">
-        <ul className="facts" aria-label="shepetal in short">
-          <li>
-            <b>About 0.1 s</b>
-            <span>after you finish speaking, M4 Pro</span>
-          </li>
-          <li>
-            <b>On your Mac</b>
-            <span>your voice and text never leave it</span>
-          </li>
-          <li className="f-wifi">
-            <b>Wi-Fi off</b>
-            <span>dictation keeps working</span>
-          </li>
-          <li>
-            <b>$4.99 once</b>
-            <span>after 30 days free, no card</span>
-          </li>
-          <li>
-            <b>Any app</b>
-            <span>the terminal and your code editor too</span>
-          </li>
-        </ul>
-      </div>
-
       {/* Every app */}
       <section id="apps" className="sec" aria-labelledby="apps-title">
         <div className="wrap">
           <div className="head">
             <h2 id="apps-title" className="t-h1">
-              Your words land in any app.
+              Works in every app.
             </h2>
-            <p className="t-lead muted">
-              Mail, chat, your code editor, the terminal and docs in the browser. The text lands where your cursor is, in the app you were
-              already using.
-            </p>
+            <p className="t-lead muted">Your editor, terminal, mail and chat.</p>
           </div>
 
           <div className="apps">
@@ -495,18 +411,11 @@ export default function Home() {
           <div className="two">
             <div>
               <h3 className="t-h3">For builders</h3>
-              <p className="t-body">
-                Say the whole prompt. Describe the change to your coding agent in full sentences, in the terminal or in your editor, with the
-                detail you would leave out when typing. Speech recognition runs on your Mac, so the code, client names and plans you mention
-                stay on it until you send the prompt.
-              </p>
+              <p className="t-body">Say the whole prompt. Your coding agent gets every detail you would skip when typing.</p>
             </div>
             <div>
               <h3 className="t-h3">For every day</h3>
-              <p className="t-body">
-                Replies, messages and notes with one key, in the apps you already use. On a train with no signal it works the same, and when
-                a thought gets longer, double-tap <span className="kbd">fn</span> and speak hands-free.
-              </p>
+              <p className="t-body">Replies, messages and notes in the apps you already use. Hands-free when a thought runs long.</p>
             </div>
           </div>
         </div>
@@ -514,49 +423,13 @@ export default function Home() {
 
       {/* Speed */}
       <section className="sec speed-sec" aria-labelledby="speed-title">
-        <div className="wrap">
-          <InView className="speed">
-            <h2 id="speed-title" className="t-h2">
-              Silent while you speak, ready when you stop.
-            </h2>
-            <p className="big-num">
-              <span className="pre">About</span>0.1<span className="unit"> s</span>
-            </p>
-            <p className="t-lead">
-              From the moment you finish speaking to the text in your app, measured on an M4 Pro.
-              <Ref n={3} first /> Speech recognition runs right on your Mac, so the text is there about 0.1 s after you stop.
-            </p>
-            <figure className="ruler" aria-label="A timeline from 0 to 1 second. You stop speaking at 0. The text is there between 57 and 89 milliseconds, 69 on average.">
-              <div className="ruler-track" aria-hidden="true">
-                <span className="ruler-band" />
-                <span className="ruler-dot" />
-                {[0, 0.25, 0.5, 0.75, 1].map((t) => (
-                  <span key={t} className="ruler-tick" style={{ '--x': t } as React.CSSProperties}>
-                    <span>{t === 0 ? '0 s' : t === 1 ? '1 s' : `${t * 1000} ms`}</span>
-                  </span>
-                ))}
-              </div>
-              <figcaption>
-                <span>
-                  <b>You stop speaking</b> at 0
-                </span>
-                <span>
-                  <b>The text is there</b> after 57 to 89 ms, 69 ms on average
-                </span>
-              </figcaption>
-            </figure>
-          </InView>
-
-          <div className="wpm">
-            <h3 className="t-h3">
-              Instant, real-time, 4x faster.
-              <Ref n={4} first />
-            </h3>
-            <p className="t-lead muted">
-              You speak about 150 words a minute and type about 40, so saying it is about 4x faster than typing it. Your own gain
-              depends on how fast you type.
-            </p>
-          </div>
+        <div className="wrap speed">
+          <h2 id="speed-title" className="t-h1">
+            Instant.
+          </h2>
+          <p className="big-num">
+            4x<span className="unit"> faster than typing.</span>
+          </p>
         </div>
       </section>
 
@@ -566,27 +439,13 @@ export default function Home() {
           <div className="privacy-copy">
             <h2 id="privacy-title" className="t-h1">
               100% private. Your data is yours.
-              <Ref n={2} first />
             </h2>
-            <p className="t-lead">
-              Your voice and your text stay on your Mac. Speech recognition runs on the Mac, so dictation keeps working with the{' '}
-              <span className="nw">Wi-Fi</span> off.
-            </p>
-            <p className="t-body muted">
-              Cloud dictation sends your voice to a server to turn it into text. shepetal does that work on your Mac, and that is how it is
-              built.
-            </p>
-            <a href="#note-2" className="link">
-              What goes online, and why
-            </a>
+            <p className="t-lead">Works offline.</p>
             <div className="cta-row">
               <SignInButton redirectTo="/account" className="btn btn-lg">
                 {TRY}
               </SignInButton>
               <SendToMac />
-              <a href="/privacy" className="link">
-                Read the privacy details
-              </a>
             </div>
           </div>
           <InView className="offline-wrap">
@@ -621,9 +480,7 @@ export default function Home() {
                 </div>
               </Win>
               <Ind />
-              <span className="illus">Illustration</span>
             </div>
-            <p className="scene-cap">Wi-Fi off on the train, and the note still lands.</p>
           </InView>
         </div>
       </section>
@@ -633,15 +490,9 @@ export default function Home() {
         <div className="wrap">
           <div className="head">
             <h2 id="meet-title" className="t-h1">
-              It asks before it records.
+              Meetings, transcribed on your Mac.
             </h2>
-            <p className="t-lead muted">
-              When a call app such as Zoom, Google Meet or Teams uses your mic or camera, a small card next to the indicator asks first. One
-              click on Record, and you can focus on the conversation. The transcript and the summary are in Meetings.
-            </p>
-            <p className="t-body muted">
-              Recording automatically is a setting, and it is off until you turn it on. Let people know before you record them.
-            </p>
+            <p className="t-lead muted">Focus on the conversation.</p>
           </div>
           <div className="meet">
             <Cycle label="How a meeting is recorded" tabs={MEET_TABS} panels={MEET_SCENES} ms={6500} tabClass="step-tab" />
@@ -654,12 +505,9 @@ export default function Home() {
         <div className="wrap rec">
           <div className="head">
             <h2 id="rec-title" className="t-h1">
-              Your recordings stay on your Mac.
+              Your recordings are in a folder on your Mac.
             </h2>
-            <p className="t-lead muted">
-              Every recording, transcript and summary is saved in a folder on your Mac that only your user account can read. Choose Delete
-              recordings after 24 hours in Settings, and the audio goes a day later. Transcripts and summaries stay until you delete them.
-            </p>
+            <p className="t-lead muted">Keep them, or delete the audio after 24 hours.</p>
           </div>
           <InView className="settings-wrap">
             <div
@@ -722,16 +570,10 @@ export default function Home() {
             </p>
             <div className="reading">
               <p>
-                You probably write the same kind of reply over and over during the day, and you already know what you want to say long before
-                your hands catch up. I have built shepetal so you can press one key and just say it, and the text lands wherever your cursor is.
+                You already know what you want to say before your hands catch up. I have built shepetal so one key puts what you say wherever
+                your cursor is.
               </p>
-              <p>
-                It all runs on your Mac, because I wanted my own voice to stay on mine, and it makes no sound. The little indicator in the
-                corner shows you what it is doing. Meetings work the same way: it asks first, and the transcript stays with you.
-              </p>
-              <p>
-                shepetal is new, and every update after you buy it is yours too.
-              </p>
+              <p>It all runs on your Mac, because I wanted my own voice to stay on mine.</p>
             </div>
             <p className="sign">
               <b>Pavel Hegler</b>
@@ -745,52 +587,16 @@ export default function Home() {
       <section id="price" className="sec price-sec" aria-labelledby="price-title">
         <div className="wrap">
           <div className="price">
-            <div className="price-card">
-              <h2 id="price-title" className="t-h1">
-                $4.99, once.
-              </h2>
-              <p className="t-lead">30 days free, no card. Then $4.99 once, with updates.</p>
-              <p className="t-body muted">
-                Speech recognition runs on your Mac, so no server has to do the work for every word you say, and the price reflects that.
-              </p>
-              <div className="cta-row">
-                <SignInButton redirectTo="/account" className="btn btn-lg">
-                  {TRY}
-                </SignInButton>
-                <span className="t-small muted on-mac">Sign in with Google to start the trial</span>
-                <SendToMac />
-              </div>
-              <p className="t-small muted">
-                Mac first: macOS 14.4 or later, Apple silicon. Linux, Windows and iPhone are in development. No dates yet.
-              </p>
+            <h2 id="price-title" className="t-h1">
+              $4.99. Yours forever.
+            </h2>
+            <p className="t-lead">No subscription. Every update included.</p>
+            <div className="cta-row">
+              <SignInButton redirectTo="/account" className="btn btn-lg">
+                {TRY}
+              </SignInButton>
+              <SendToMac />
             </div>
-            <table className="compare">
-              <caption>shepetal next to cloud dictation subscriptions</caption>
-              <thead>
-                <tr>
-                  <td />
-                  <th scope="col">shepetal</th>
-                  <th scope="col">Cloud dictation subscriptions</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <th scope="row">You pay</th>
-                  <td>$4.99 once, updates included</td>
-                  <td>Every month or every year</td>
-                </tr>
-                <tr>
-                  <th scope="row">Speech recognition</th>
-                  <td>On your Mac</td>
-                  <td>On the provider’s servers</td>
-                </tr>
-                <tr>
-                  <th scope="row">With the Wi-Fi off</th>
-                  <td>Dictation keeps working</td>
-                  <td>Needs a connection</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
       </section>
@@ -817,66 +623,14 @@ export default function Home() {
         <div className="wrap">
           <img className="final-mark" src="/brand/shepetal-wordmark-on-dark.svg" alt="shepetal" width={320} height={86} loading="lazy" />
           <h2 id="final-title" className="t-h1">
-            Instant dictation that stays on your Mac.
+            Write at the speed of thought.
           </h2>
-          <p className="t-lead">
-            Dictation and meetings in one app on your Mac. 30 days free, no card. Then $4.99 once, with updates.
-          </p>
           <div className="cta-row">
             <SignInButton redirectTo="/account" className="btn btn-lg">
               {TRY}
             </SignInButton>
             <SendToMac />
           </div>
-          <p className="final-meta">Google sign-in, only for the license · For Mac with Apple silicon, macOS 14.4 or later</p>
-        </div>
-      </section>
-
-      {/* Notes: the proof for the approved lines (brand voice, Approved lines) */}
-      <section className="notes" aria-labelledby="notes-title">
-        <div className="wrap">
-          <h2 id="notes-title" className="t-small">
-            Notes
-          </h2>
-          <ol>
-            <li id="note-1">
-              The one key is fn, and a double-tap of fn starts hands-free until you tap it again. The text lands in any app that accepts a
-              paste (in password fields and secure input, the text waits on the clipboard for Command-V), after a one-time setup: the permissions, a
-              Google sign-in and one download.
-            </li>
-            <li id="note-2">
-              “100% private” means your voice and your text: speech recognition runs on your Mac, and shepetal never sends your audio or your
-              text anywhere. Your recordings, transcripts and history are stored on the Mac in a folder only your user account can read. The
-              text you dictate goes wherever the app you paste it into sends it. shepetal goes online only for these, and none of them
-              carries your audio or your text: signing in with Google; the license check (at launch and once a day, never while you
-              dictate); checkout; update checks; and the downloads you start: speech recognition (about 470 MB, once) and the optional
-              cleanup. Your account (your Google email address and your license status) is kept by shepetal’s account service, and payment
-              is handled by the payment provider. Dictation works with the Wi-Fi off; the license needs a connection once every 7 days.
-              Meeting summaries are written on the Mac. With Handoff on, macOS can offer text that waits on the clipboard to your other
-              Apple devices. If you turn on the setting that lets other apps read your meetings and dictations, the apps you connect can read
-              them, and they may send them to their own servers. <a href="#ref-2">Back</a>
-            </li>
-            <li id="note-3">
-              About 0.1 s from letting go of fn to the text: 57 to 89 ms (69 ms on average) on six synthesized clips of 4.5 to 10.7 s, with
-              the default speech recognition and without the optional cleanup, pasted into a text view the app owns, on an M4 Pro, network
-              blocked, October 20, 2026. Longer dictations, other Macs and the alternative speech recognition take longer, and with the
-              optional cleanup on, the text takes up to about 0.8 s. Real-time means the text is ready about 0.1 s after you finish
-              speaking, with nothing uploaded. <a href="#ref-3">Back</a>
-            </li>
-            <li id="note-4">
-              Speaking runs at about 150 words per minute (
-              <a href={NCVS} rel="noopener">
-                US National Center for Voice and Speech
-              </a>
-              ). Typing runs at about 40 words per minute, a common average for keyboard typing. 150 ÷ 40 = 3.75, rounded to 4x. In a large
-              online typing test, people copying sentences averaged about 52 words per minute (
-              <a href={DHAKAL} rel="noopener">
-                Dhakal et al., CHI 2018
-              </a>
-              ), and next to that speaking is about 3x faster. Your own gain depends on how fast you type and how much you correct.{' '}
-              <a href="#ref-4">Back</a>
-            </li>
-          </ol>
         </div>
       </section>
 

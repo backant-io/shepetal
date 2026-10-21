@@ -30,7 +30,6 @@ export function SendToMac() {
       <button type="button" className="btn btn-lg" onClick={share}>
         {copied ? 'Link copied' : 'Send to my Mac'}
       </button>
-      <p className="t-small muted">shepetal is for Mac. Send this page to your Mac and start your 30 free days there.</p>
     </div>
   );
 }

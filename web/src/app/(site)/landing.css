@@ -133,9 +133,6 @@ html {
 .muted {
   color: var(--sh-text-muted);
 }
-.nw {
-  white-space: nowrap;
-}
 .head {
   display: grid;
   gap: 20px;
@@ -149,70 +146,11 @@ html {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
-.kbd {
-  display: inline-block;
-  min-width: 1.7em;
-  padding: 0.04em 0.42em;
-  border: 1px solid color-mix(in srgb, var(--sh-text) 26%, transparent);
-  border-radius: 6px;
-  font-family: var(--sh-font-text);
-  font-weight: 520;
-  font-size: 0.875em;
-  line-height: 1.35;
-  text-align: center;
-  vertical-align: 0.06em;
-}
 .shush-i {
   display: inline-block;
   width: 1.05em;
   height: 1.05em;
   vertical-align: -0.16em;
-}
-.ref {
-  font-family: var(--sh-font-text);
-  font-size: 0.32em;
-  font-weight: 600;
-  vertical-align: super;
-  line-height: 0;
-  margin-left: 0.15em;
-  letter-spacing: 0;
-}
-.t-h3 .ref,
-.t-lead .ref {
-  font-size: 0.55em;
-}
-.ref a {
-  display: inline-block;
-  min-width: 24px;
-  min-height: 24px;
-  line-height: 24px;
-  text-align: center;
-  padding: 0 0.2em;
-  color: var(--sh-accent);
-}
-.link {
-  color: var(--sh-accent);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 4px;
-  font-weight: 500;
-}
-.illus {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  z-index: 4;
-  font-family: var(--sh-font-text);
-  font-size: 11px;
-  font-weight: 520;
-  letter-spacing: 0.01em;
-  padding: 2px 8px;
-  border-radius: 6px;
-  color: rgb(255 249 246 / 0.92);
-  background: rgb(28 10 19 / 0.38);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  pointer-events: none;
 }
 
 /* ---------- Header ---------- */
@@ -531,9 +469,6 @@ html {
   width: 100%;
   margin-top: 20px;
   justify-content: center;
-}
-.hero-cta .cta-mac p {
-  display: none;
 }
 .lp .hero-cta .btn {
   height: 52px;
@@ -1081,57 +1016,6 @@ html {
   }
 }
 
-/* ---------- Facts strip: checkable facts in the place of logos ---------- */
-.facts {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  border-block: 1px solid var(--sh-border);
-}
-.facts li {
-  display: grid;
-  gap: 4px;
-  align-content: start;
-  padding: 20px 14px 20px 0;
-}
-/* Phones show four in two columns (Wi-Fi off is in the privacy band), so no cell stands alone. */
-@media (max-width: 899px) {
-  .facts .f-wifi {
-    display: none;
-  }
-  .facts li:nth-child(2),
-  .facts li:nth-child(5) {
-    padding-left: 16px;
-    border-left: 1px solid var(--sh-border);
-  }
-  .facts li:nth-child(n + 4) {
-    border-top: 1px solid var(--sh-border);
-  }
-}
-.facts b {
-  font-family: var(--sh-font-display);
-  font-weight: 400;
-  font-size: clamp(21px, 2vw, 26px);
-  line-height: 1.2;
-}
-.facts span {
-  font-size: 14px;
-  line-height: 1.45;
-  color: var(--sh-text-muted);
-}
-@media (min-width: 900px) {
-  .facts {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-  }
-  .facts li {
-    padding: 28px 20px;
-    border-left: 1px solid var(--sh-border);
-  }
-  .facts li:first-child {
-    padding-left: 0;
-    border-left: 0;
-  }
-}
-
 /* ---------- Every app ---------- */
 .apps {
   margin-top: clamp(40px, 5vw, 72px);
@@ -1536,106 +1420,15 @@ html {
   line-height: 0.92;
   letter-spacing: -0.03em;
 }
-.big-num .pre {
-  display: inline;
-  font-size: 0.2em;
-  font-weight: 380;
-  letter-spacing: -0.005em;
-  vertical-align: 0.9em;
-  margin-right: 0.35em;
-}
 .big-num .unit {
   font-size: 0.42em;
   letter-spacing: 0;
 }
-.ruler {
-  margin-top: clamp(24px, 4vw, 48px);
-  max-width: 900px;
-}
-.ruler-track {
-  position: relative;
-  height: 52px;
-  border-bottom: 1px solid var(--sh-text-muted);
-}
-.ruler-tick {
-  position: absolute;
-  top: 100%;
-  left: calc(var(--x) * 100%);
-  width: 0;
-  height: 8px;
-  border-left: 1px solid var(--sh-text-muted);
-}
-.ruler-tick > span {
-  position: absolute;
-  top: 12px;
-  left: 0;
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  color: var(--sh-text-muted);
-}
-.ruler-tick:last-child > span {
-  left: auto;
-  right: 0;
-}
-.ruler-band {
-  position: absolute;
-  bottom: 0;
-  left: 5.7%;
-  width: 3.2%;
-  height: 36px;
-  border-radius: 4px 4px 0 0;
-  background: color-mix(in srgb, var(--sh-accent) 30%, transparent);
-  animation: band-in 400ms var(--sh-ease-settle) 900ms both;
-}
-.ruler-dot {
-  position: absolute;
-  bottom: -5px;
-  left: 6.9%;
-  width: 9px;
-  height: 9px;
-  margin-left: -4.5px;
-  border-radius: 50%;
-  background: var(--sh-accent);
-  animation: dot-run 520ms var(--sh-ease-settle) 300ms both;
-}
-@keyframes band-in {
-  from {
-    opacity: 0;
-    transform: scaleY(0.3);
-    transform-origin: bottom;
-  }
-}
-@keyframes dot-run {
-  from {
-    left: 0;
-  }
-}
-.ruler figcaption {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-start;
-  gap: 8px 48px;
-  margin-top: 44px;
-  font-size: 15px;
-  color: var(--sh-text-muted);
-}
-.ruler figcaption b {
-  color: var(--sh-text);
-  font-weight: 600;
-}
-
-.wpm {
-  display: grid;
-  gap: 32px;
-  margin-top: clamp(64px, 8vw, 112px);
-  padding-top: clamp(40px, 5vw, 56px);
-  border-top: 1px solid var(--sh-border);
-}
-@media (min-width: 900px) {
-  .wpm {
-    grid-template-columns: 1fr 1.1fr;
-    gap: 64px;
+/* Phones: the words go under 4x on a line of their own height. */
+@media (max-width: 599px) {
+  .big-num .unit {
+    display: block;
+    line-height: 1.1;
   }
 }
 
@@ -2374,98 +2167,16 @@ html {
 }
 .price {
   display: grid;
-  gap: 40px;
+  gap: 18px;
+  justify-items: center;
+  text-align: center;
   padding: clamp(28px, 5vw, 64px);
   border-radius: 20px;
   background: var(--sh-bg-raised);
   border: 1px solid var(--sh-border);
 }
-@media (min-width: 980px) {
-  .price {
-    grid-template-columns: 1fr 1.05fr;
-    gap: 64px;
-    align-items: center;
-  }
-}
-.price-card {
-  display: grid;
-  gap: 18px;
-  justify-items: start;
-}
-.price-card .cta-row {
+.price .cta-row {
   margin-top: 8px;
-}
-.compare {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 15px;
-  line-height: 1.45;
-}
-.compare caption {
-  text-align: left;
-  padding-bottom: 14px;
-  font-size: 13px;
-  font-weight: 520;
-  color: var(--sh-text-muted);
-}
-.compare th,
-.compare td {
-  text-align: left;
-  vertical-align: top;
-  padding: 14px 12px 14px 0;
-  border-top: 1px solid var(--sh-border);
-}
-.compare thead th {
-  font-weight: 600;
-  border-top: 0;
-}
-.compare thead td {
-  border-top: 0;
-}
-.compare tbody th {
-  font-weight: 500;
-  color: var(--sh-text-muted);
-  width: 30%;
-}
-.compare tbody td:nth-child(2) {
-  font-weight: 600;
-}
-.compare tbody td:last-child {
-  color: var(--sh-text-muted);
-}
-/* Phones: one block per row, each value labelled, so no cell wraps to four lines. */
-@media (max-width: 560px) {
-  .compare thead {
-    display: none;
-  }
-  .compare tbody tr {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 6px 16px;
-    padding: 14px 0;
-    border-top: 1px solid var(--sh-border);
-  }
-  .compare tbody th,
-  .compare tbody td {
-    width: auto;
-    padding: 0;
-    border-top: 0;
-  }
-  .compare tbody th {
-    grid-column: 1 / -1;
-  }
-  .compare tbody td::before {
-    display: block;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--sh-text-muted);
-  }
-  .compare tbody td:nth-child(2)::before {
-    content: 'shepetal';
-  }
-  .compare tbody td:last-child::before {
-    content: 'Cloud subscriptions';
-  }
 }
 
 /* ---------- FAQ ---------- */
@@ -2549,39 +2260,6 @@ html {
 .final .t-h1 {
   max-width: 16em;
 }
-.final .t-lead {
-  max-width: 34em;
-}
-.final-meta {
-  font-size: 14px;
-  color: var(--sh-text-muted);
-}
-
-/* ---------- Notes (the proof for the approved lines) ---------- */
-.notes {
-  padding-block: 48px 24px;
-}
-.notes h2 {
-  font-weight: 600;
-  margin-bottom: 12px;
-}
-.notes ol {
-  display: grid;
-  gap: 10px;
-  max-width: 900px;
-  padding-left: 1.2em;
-  list-style: decimal;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--sh-text-muted);
-}
-.notes a {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-.notes li:target {
-  color: var(--sh-text);
-}
 
 /* ---------- Phones: the trial starts on the Mac ---------- */
 /* Google refuses sign-in inside in-app browsers (X, Instagram), so under 760 px every trial button
@@ -2591,17 +2269,11 @@ html {
 }
 @media (max-width: 759px) {
   .lp .cta-row > form,
-  .lp .cta-row > .on-mac,
   .site-head .head-end form {
     display: none;
   }
   .cta-mac {
     display: contents;
-  }
-  .cta-mac p {
-    flex-basis: 100%;
-    order: 9;
-    max-width: 34em;
   }
 }
 
@@ -2679,17 +2351,6 @@ html {
 }
 .foot-links a:hover {
   color: var(--sh-text);
-}
-.foot-small {
-  display: grid;
-  gap: 6px;
-  margin-top: 36px;
-  font-size: 12.5px;
-  line-height: 1.55;
-}
-.foot-small a {
-  text-decoration: underline;
-  text-underline-offset: 3px;
 }
 
 /* ---------- Reduced motion: the still pictures, nothing moves ---------- */
