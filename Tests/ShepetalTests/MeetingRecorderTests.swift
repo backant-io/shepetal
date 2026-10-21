@@ -48,8 +48,14 @@ final class MeetingRecorderTests: XCTestCase {
         ended = []
         cards = []
         autoRecord = false
+        make(silenceEnd: 120)
+    }
+
+    /// `silenceEnd` is passed in, so this runner's defaults never change a test.
+    private func make(silenceEnd: Double) {
         recorder = MeetingRecorder(dir: root, capture: capture, detector: MeetingDetector(ownPID: getpid()),
-                                   autoRecord: { [unowned self] in autoRecord }, card: { [unowned self] in cards.append($0) }) { [unowned self] in hints.append($0) }
+                                   autoRecord: { [unowned self] in autoRecord }, silenceEnd: silenceEnd,
+                                   card: { [unowned self] in cards.append($0) }) { [unowned self] in hints.append($0) }
         recorder.onEnded = { [unowned self] in ended.append($0) }
     }
 
@@ -217,16 +223,140 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertEqual(ended.map(\.app), [MeetingRecorder.manualApp])
     }
 
-    func testManualRecordingRunsUntilStoppedByHand() {
+    /// The detector never ends a recording made by hand; the hand or the silence end does (F67).
+    func testManualRecordingRunsUntilStoppedByHandOrNoOneSpeaks() {
         recorder.start()
         XCTAssertEqual(recorder.current?.app, MeetingRecorder.manualApp)
         XCTAssertEqual(hints, ["Recording meeting"])
         feed(zoom, 0, 20)
         feed(quiet, 21, 60)  // a detected meeting ending must not stop a manual recording
+        hear(90)
         XCTAssertNotNil(recorder.current)
         XCTAssertEqual(capture.started.count, 1, "a detected start does not open a second recording")
         recorder.stop()
         XCTAssertEqual(ended.map(\.app), [MeetingRecorder.manualApp])
+        XCTAssertEqual(hints.last, "Meeting recording saved")
+
+        recorder.start()  // forgotten: nobody stops it and nobody speaks
+        hear(90)
+        XCTAssertNotNil(recorder.current, "each recording starts the clock again; the 90 s before do not count")
+        hear(30)
+        XCTAssertNil(recorder.current, "a manual recording no longer runs forever")
+        XCTAssertEqual(ended.map(\.app), [MeetingRecorder.manualApp, MeetingRecorder.manualApp])
+        XCTAssertEqual(hints.last, "Meeting ended · no one spoke for 2 min")
+    }
+
+    // MARK: F67, the end on silence
+
+    /// Live blocks of `block` seconds on both channels, `seconds` in all, as the transcriber reports them.
+    private func hear(_ seconds: Double, block: Double = 30, me: Bool = false, others: Bool = false) {
+        let id = recorder.current?.id ?? ""
+        for _ in 0..<Int(seconds / block) {
+            recorder.heard(id, .me, seconds: block, speech: me)
+            recorder.heard(id, .others, seconds: block, speech: others)
+        }
+    }
+
+    func testTwoMinutesWithNoOneSpeakingEndsADetectedRecordingAndKeepsItsAudio() throws {
+        feed(zoom, 0, 5)
+        recorder.record()
+        let meeting = try XCTUnwrap(recorder.current)
+        hear(90)
+        XCTAssertNotNil(recorder.current, "90 s of quiet is a pause, not the end")
+        hear(30)
+        XCTAssertNil(recorder.current, "2 min with no one speaking ends it")
+        XCTAssertEqual(capture.stops, 1)
+        XCTAssertEqual(ended.map(\.id), [meeting.id], "handed to the transcriber like any ended meeting")
+        XCTAssertNotNil(ended.first?.endedAt)
+        XCTAssertEqual(hints, ["Meeting detected · recording", "Meeting ended · no one spoke for 2 min"])
+        for path in [meeting.meAudioPath, meeting.othersAudioPath] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: path), "the audio is kept as recorded (rule 4): \(path)")
+        }
+        feed(zoom, 6, 200)
+        XCTAssertEqual(capture.started.count, 1, "like a stop by hand, the same call is not recorded again")
+        XCTAssertEqual(cards, ["zoom.us", nil], "nor offered again")
+    }
+
+    func testSpeechOnEitherChannelStartsTheClockAgain() {
+        recorder.start()
+        hear(90)
+        hear(30, others: true)  // the other side speaks: Me alone has been quiet for 2 min
+        hear(90)
+        XCTAssertNotNil(recorder.current)
+        hear(30, me: true)
+        hear(90)
+        XCTAssertNotNil(recorder.current)
+        hear(30)
+        XCTAssertNil(recorder.current, "2 min after the last speech on either channel")
+    }
+
+    /// A live pass reads Me before Others: Me's quiet alone must not end the meeting before Others is read.
+    func testAChannelNotReadYetHoldsTheEnd() throws {
+        recorder.start()
+        let id = try XCTUnwrap(recorder.current?.id)
+        recorder.heard(id, .me, seconds: 300, speech: false)
+        XCTAssertNotNil(recorder.current)
+        recorder.heard(id, .others, seconds: 300, speech: false)
+        XCTAssertNil(recorder.current)
+    }
+
+    func testMicOnlyRecordingEndsOnTheMicsSilence() throws {
+        capture.systemAudio = false
+        recorder.start()
+        let id = try XCTUnwrap(recorder.current?.id)
+        recorder.heard(id, .me, seconds: 120, speech: false)
+        XCTAssertNil(recorder.current, "no Others channel to wait for")
+    }
+
+    func testNoSilenceEndInTheFirst15Seconds() throws {
+        make(silenceEnd: 5)
+        recorder.start()
+        let id = try XCTUnwrap(recorder.current?.id)
+        for _ in 0..<14 {
+            recorder.heard(id, .me, seconds: 1, speech: false)
+            recorder.heard(id, .others, seconds: 1, speech: false)
+        }
+        XCTAssertNotNil(recorder.current, "a meeting is never ended in its first 15 s")
+        recorder.heard(id, .me, seconds: 1, speech: false)
+        recorder.heard(id, .others, seconds: 1, speech: false)
+        XCTAssertNil(recorder.current)
+        XCTAssertEqual(hints.last, "Meeting ended · no one spoke for 15 s", "the hint says how long it really waited")
+    }
+
+    func testZeroTurnsTheSilenceEndOff() {
+        make(silenceEnd: 0)
+        recorder.start()
+        hear(3600)
+        XCTAssertNotNil(recorder.current, "an hour of quiet does not end it")
+    }
+
+    /// The last live pass of a meeting that ended can still be running when the next one starts.
+    func testAnEndedMeetingsLastPassDoesNotCountForTheNextOne() throws {
+        recorder.start()
+        let old = try XCTUnwrap(recorder.current?.id)
+        recorder.stop()
+        recorder.start()
+        recorder.heard(old, .me, seconds: 300, speech: false)
+        recorder.heard(old, .others, seconds: 300, speech: false)
+        XCTAssertNotNil(recorder.current)
+    }
+
+    func testHintSaysHowLongNoOneSpoke() {
+        XCTAssertEqual(SilenceEnd(seconds: 120, minSession: 15).said, "2 min")
+        XCTAssertEqual(SilenceEnd(seconds: 40, minSession: 15).said, "40 s")
+        XCTAssertEqual(SilenceEnd(seconds: 90, minSession: 15).said, "90 s")
+        XCTAssertEqual(SilenceEnd(seconds: 300, minSession: 15).said, "5 min")
+    }
+
+    func testSilenceEndIsConfigurableAndDefaultsTo2Minutes() throws {
+        let name = "shepetal-silence-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        XCTAssertEqual(MeetingRecorder.configuredSilenceEnd(defaults), 120)
+        defaults.set("40", forKey: SilenceEnd.key)  // what `defaults write io.backant.shepetal meeting.silenceEnd 40` stores
+        XCTAssertEqual(MeetingRecorder.configuredSilenceEnd(defaults), 40)
+        defaults.set(0, forKey: SilenceEnd.key)
+        XCTAssertEqual(MeetingRecorder.configuredSilenceEnd(defaults), 0)
     }
 
     func testCaptureThatCannotStartRecordsNothing() {

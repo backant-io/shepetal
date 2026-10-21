@@ -57,7 +57,8 @@ final class MeetingFlowTests: XCTestCase {
         store = try MeetingStore(path: root.appendingPathComponent("meetings.sqlite"))
         capture = WavCapture()
         recorder = MeetingRecorder(dir: root.appendingPathComponent("meetings"), capture: capture,
-                                   detector: MeetingDetector(ownPID: getpid()), autoRecord: { false }, card: { _ in }) { [unowned self] in hints.append($0) }
+                                   detector: MeetingDetector(ownPID: getpid()), autoRecord: { false }, silenceEnd: 20,
+                                   card: { _ in }) { [unowned self] in hints.append($0) }
         connect(self.engine)
     }
 
@@ -177,6 +178,47 @@ final class MeetingFlowTests: XCTestCase {
         await flow.finishing?.value
         XCTAssertEqual(opened.count, 1)
         XCTAssertEqual(opened.first??.segments, [])
+    }
+
+    // F67: nobody speaks for the silence end (20 s here). The live pass hears it in the growing WAVs and the
+    // recording ends by itself, then it is stored, transcribed and kept like a meeting that ended by hand.
+    func testRecordingNobodySpeaksInEndsByItselfAndIsKept() async throws {
+        recorder.start()
+        let id = try XCTUnwrap(recorder.current?.id)
+        try capture.append(me: audio(21), others: audio(21))
+        try await until("a live pass ends the recording after 20 s of quiet") { recorder.current == nil }
+        await flow.finishing?.value
+        XCTAssertEqual(hints, ["Recording meeting", "Meeting ended · no one spoke for 20 s", "Meeting notes ready · open Shepetal → Meetings"])
+        XCTAssertEqual(recording, [true, false])
+        let r = try XCTUnwrap(try store.get(id))
+        XCTAssertNotNil(r.meeting.endedAt, "stored as ended")
+        XCTAssertEqual(opened.count, 1, "the transcript window opens as after any meeting")
+        for path in [r.meeting.meAudioPath, r.meeting.othersAudioPath] {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: path), "the audio is kept as recorded (rule 4): \(path)")
+        }
+    }
+
+    // Others speaks at the end of 25 s in which Me is quiet: the model hears a word, so it goes on.
+    func testSpeechInTheRecordedAudioKeepsTheRecordingGoing() async throws {
+        recorder.start()
+        try capture.append(me: audio(25), others: audio(25, on: 20...21))
+        try await until("the live pass reads both channels and transcribes Others' line") { engine.calls.count == 1 }
+        XCTAssertNotNil(recorder.current, "Others spoke 4 s ago")
+        try capture.append(me: audio(21), others: audio(21))
+        try await until("then 20 s of quiet on both ends it") { recorder.current == nil }
+        XCTAssertEqual(hints.dropFirst().first, "Meeting ended · no one spoke for 20 s")
+    }
+
+    // A key or a cough is loud, but no one spoke: the model hears no words (or only prints a tag for it), so the
+    // sound does not keep a silent meeting going. A level floor would hear it as speech, and on a real mic the
+    // room is always above that floor, so the meeting would never end.
+    func testSoundTheModelHearsNoWordsInIsNotSpeech() async throws {
+        engine.texts = ["[BLANK_AUDIO]", "(noise)"]
+        recorder.start()
+        try capture.append(me: audio(21, on: 3...4), others: audio(21, on: 10...11))
+        try await until("the live pass hears only sound and ends the recording") { recorder.current == nil }
+        XCTAssertEqual(engine.calls.count, 2, "both sounds went to the model")
+        XCTAssertEqual(hints.dropFirst().first, "Meeting ended · no one spoke for 20 s")
     }
 
     // The recorder keeps nothing when no audio was written, so the tab must not keep an empty meeting either.

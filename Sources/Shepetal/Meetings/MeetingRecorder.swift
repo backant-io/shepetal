@@ -49,6 +49,45 @@ struct MeetingOffer {
     }
 }
 
+/// F67: a recording nobody speaks in ends by itself, detected or started by hand, so a forgotten one does not run
+/// forever. It is clocked in recorded audio, per channel, and ends once every channel has been quiet for `seconds`
+/// (`defaults write io.backant.shepetal meeting.silenceEnd <seconds>`, 0 turns it off), never in the first
+/// `minSession`. Pure, so tests feed it blocks of audio.
+/// ponytail: speech is a block the model heard words in, and a block with speech resets its channel's clock, so the
+/// end can come one block (30 s live) late; a line still running at a block's end counts only once it ends, so a
+/// line started just before the end and never paused for 0.5 s can be cut off; and no model loaded means no
+/// clock. Count the quiet tail of the block, or ask Utterances whether one is open, if either matters.
+struct SilenceEnd {
+    static let key = "meeting.silenceEnd"
+    static let defaultSeconds = 120.0
+
+    /// The quiet that ends a recording: `seconds`, but never less than `minSession`.
+    let after: Double
+    let on: Bool
+    /// Recorded seconds since each channel of the recording last had speech. A channel not read yet holds the end.
+    private var quiet: [Speaker: Double] = [:]
+
+    init(seconds: Double, minSession: Double) {
+        on = seconds > 0
+        after = max(seconds, minSession)
+    }
+
+    /// A block of newly recorded audio on one channel. True once the recording should end.
+    mutating func heard(_ speaker: Speaker, seconds: Double, speech: Bool) -> Bool {
+        guard let q = quiet[speaker] else { return false }
+        quiet[speaker] = speech ? 0 : q + seconds
+        return on && quiet.values.allSatisfy { $0 >= after }
+    }
+
+    /// A new recording of these channels.
+    mutating func start(_ channels: [Speaker]) { quiet = Dictionary(uniqueKeysWithValues: channels.map { ($0, 0.0) }) }
+
+    /// "2 min", "40 s".
+    var said: String {
+        after >= 60 && after.truncatingRemainder(dividingBy: 60) == 0 ? "\(Int(after / 60)) min" : "\(Int(after)) s"
+    }
+}
+
 /// Detector to recorder: the probe runs every second, a detected meeting is offered (`MeetingOffer`) and, once
 /// accepted, recorded until the detector says it ended, then the meeting goes to `onEnded` (the transcriber).
 /// The menu item starts and stops by hand.
@@ -66,6 +105,7 @@ final class MeetingRecorder: NSObject {
     /// Shows the "Meeting detected · <app>" card, or hides it for nil.
     private let card: (String?) -> Void
     private var offer = MeetingOffer()
+    private var silence: SilenceEnd
     private var timer: DispatchSourceTimer?
     /// The meeting being recorded; nil when idle.
     private(set) var current: Meeting?
@@ -79,10 +119,12 @@ final class MeetingRecorder: NSObject {
     init(dir: URL = Paths.root.appendingPathComponent("meetings"), capture: MeetingCapturing,
          detector: MeetingDetector = MeetingRecorder.configuredDetector(),
          autoRecord: @escaping () -> Bool = { MeetingRecorder.autoRecords() },
+         silenceEnd: Double = MeetingRecorder.configuredSilenceEnd(),
          card: @escaping (String?) -> Void, hint: @escaping (String) -> Void) {
         self.dir = dir
         self.capture = capture
         self.detector = detector
+        silence = SilenceEnd(seconds: silenceEnd, minSession: detector.minSession)
         self.autoRecord = autoRecord
         self.card = card
         self.hint = hint
@@ -102,6 +144,12 @@ final class MeetingRecorder: NSObject {
             if let v = defaults.object(forKey: "meeting.\(name)") as? Double { d[keyPath: path] = v }
         }
         return d
+    }
+
+    /// `meeting.silenceEnd` in seconds; unset means 120. `defaults write` without a type stores "40" as text, which
+    /// counts too.
+    nonisolated static func configuredSilenceEnd(_ defaults: UserDefaults = .standard) -> Double {
+        defaults.object(forKey: SilenceEnd.key) == nil ? SilenceEnd.defaultSeconds : defaults.double(forKey: SilenceEnd.key)
     }
 
     /// Polls `probe` (which apps use the mic, whether a camera runs) off the main thread every second and feeds the
@@ -155,6 +203,7 @@ final class MeetingRecorder: NSObject {
         do {
             try AudioStore.makeOwnerOnlyDirectory(folder)  // rule 4: 0700, the capture writes 0600 files
             let both = try capture.start(dir: folder)
+            silence.start(both ? [.me, .others] : [.me])
             current = Meeting(id: id, app: app, startedAt: Date(),
                               meAudioPath: folder.appendingPathComponent("Me.wav").path,
                               othersAudioPath: both ? folder.appendingPathComponent("Others.wav").path : "")
@@ -166,7 +215,15 @@ final class MeetingRecorder: NSObject {
         }
     }
 
-    func stop() {
+    /// A block of newly recorded audio from the live transcriber. Only the meeting recording now counts, not the
+    /// last pass of one that already ended.
+    func heard(_ id: String, _ speaker: Speaker, seconds: Double, speech: Bool) {
+        guard current?.id == id, silence.heard(speaker, seconds: seconds, speech: speech) else { return }
+        stop(saved: "Meeting ended · no one spoke for \(silence.said)")
+    }
+
+    /// `saved` is the hint when the audio was kept.
+    func stop(saved: String = "Meeting recording saved") {
         guard var meeting = current else { return }
         current = nil
         var problem: String?
@@ -179,7 +236,7 @@ final class MeetingRecorder: NSObject {
             onDiscarded(meeting)
             return hint("Meeting not saved: \(problem ?? "no audio was captured")")
         }
-        hint(problem.map { "Meeting saved, but: \($0)" } ?? "Meeting recording saved")
+        hint(problem.map { "Meeting saved, but: \($0)" } ?? saved)
         onEnded(meeting)
     }
 

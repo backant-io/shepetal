@@ -18,6 +18,9 @@ final class MeetingTranscriber {
     private let summarizer: MeetingSummarizing
     private let channels: [Channel]
     private var live: Task<Void, Never>?
+    /// Each block of audio a live pass reads: its channel, its seconds, and whether the model heard words in it
+    /// (the recorder's silence end, F67). A block whose pass failed is not reported, so it never adds quiet.
+    var onHeard: (_ speaker: Speaker, _ seconds: Double, _ speech: Bool) -> Void = { _, _, _ in }
 
     /// The meeting must already be saved in `store`.
     init(meeting: Meeting, engine: SpeechEngine, store: MeetingStoring, summarizer: MeetingSummarizing) {
@@ -67,8 +70,11 @@ final class MeetingTranscriber {
     private func pass(final: Bool) async throws -> [Segment] {
         var out: [Segment] = []
         for ch in channels {
-            while try ch.readMore() {  // in blocks, so a long meeting never sits in memory whole
-                out += try await transcribe(ch, final: false)
+            while let block = try ch.readMore() {  // in blocks, so a long meeting never sits in memory whole
+                let said = try await transcribe(ch, final: false)
+                out += said
+                // Words, not level: room noise and keys on a real mic pass any level floor. A model tag is no word.
+                if !final { onHeard(ch.speaker, Double(block) / Double(AudioStore.sampleRate), said.contains { !SpeechGuard.stripTags($0.text).isEmpty }) }
             }
             if final {
                 try ch.flush()
@@ -142,15 +148,16 @@ final class Channel {
         tail = WavTail(url)
     }
 
-    /// Adds up to a minute of new audio. False when nothing new was written.
-    func readMore() throws -> Bool {
-        guard let buffer = try tail.read(maxSeconds: 60) else { return false }
+    /// Adds up to a minute of new audio. The 16 kHz samples added; nil when nothing new was written.
+    func readMore() throws -> Int? {
+        guard let buffer = try tail.read(maxSeconds: 60) else { return nil }
         if resampler == nil {
             guard let r = Resampler(from: buffer.format) else { throw SpeechError("Cannot convert \(tail.url.lastPathComponent)") }
             resampler = r
         }
-        pending += resampler!.convert(buffer)
-        return true
+        let block = resampler!.convert(buffer)
+        pending += block
+        return block.count
     }
 
     /// The end of the recording: what the resampler still holds. The file must exist by now.
