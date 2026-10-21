@@ -5,8 +5,8 @@
 // starts `wrangler dev` on 127.0.0.1 and a fake Stripe API, then signs in the way the apps do
 // (OAuth for native apps with PKCE): GET /app/login signed out goes to Google and comes back,
 // signed in it redirects to shepetal://auth with a one-time code, POST /api/app/token trades it
-// for a token, license = trial, checkout = a Stripe Checkout URL, a signed
-// checkout.session.completed webhook, license = active. Then the redirect_uri and PKCE rules.
+// for a token, license = trial, checkout per plan = a Stripe Checkout URL, signed webhooks for the
+// subscription (paid, failed, cancelled), the Billing Portal, then the lifetime license. Then the redirect_uri and PKCE rules.
 //
 // Google is faked with a next-auth session cookie signed with the run's AUTH_SECRET, so the run
 // needs no Google account and no network except Google's OIDC discovery (for the sign-in redirect).
@@ -58,33 +58,62 @@ const freePort = () =>
     });
   });
 
-// ---- Fake Stripe API: just the one call /api/checkout makes. Anything else is a test failure.
+// ---- Fake Stripe API: the calls checkout, the webhook and the Billing Portal make. Anything else is a test failure.
 const stripeCalls = [];
+const DAY_S = 86_400;
+const fakeSub = {
+  id: 'sub_e2e',
+  object: 'subscription',
+  customer: 'cus_e2e',
+  status: 'active',
+  current_period_start: Math.floor(Date.now() / 1000),
+  current_period_end: Math.floor(Date.now() / 1000) + 30 * DAY_S,
+  cancel_at_period_end: false,
+  ended_at: null,
+  metadata: {},
+  items: { object: 'list', data: [] },
+};
 const fakeStripe = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
-    const params = Object.fromEntries(new URLSearchParams(body));
-    stripeCalls.push({ method: req.method, path: req.url, params, auth: req.headers.authorization });
+    const url = new URL(req.url, 'http://x');
+    const params = Object.fromEntries(new URLSearchParams(req.method === 'GET' ? url.search : body));
+    stripeCalls.push({ method: req.method, path: url.pathname, params, auth: req.headers.authorization });
     res.setHeader('content-type', 'application/json');
-    if (req.method !== 'POST' || req.url !== '/v1/checkout/sessions') {
-      res.statusCode = 404;
-      return res.end(JSON.stringify({ error: { type: 'invalid_request_error', message: `fake Stripe: no ${req.method} ${req.url}` } }));
+    const route = `${req.method} ${url.pathname}`;
+    const reply = (o) => res.end(JSON.stringify(o));
+    if (route === 'GET /v1/prices') {
+      const key = params['lookup_keys[0]'];
+      return reply({ object: 'list', has_more: false, data: [{ id: `price_e2e_${key}`, object: 'price', lookup_key: key, active: true }] });
     }
-    const id = `cs_test_e2e_${stripeCalls.length}`;
-    res.end(
-      JSON.stringify({
+    if (route === 'POST /v1/customers') return reply({ id: 'cus_e2e', object: 'customer', email: params.email, metadata: metadataOf(params) });
+    if (route === 'POST /v1/checkout/sessions') {
+      const id = `cs_test_e2e_${stripeCalls.length}`;
+      return reply({
         id,
         object: 'checkout.session',
         mode: params.mode,
         status: 'open',
         payment_status: 'unpaid',
         client_reference_id: params.client_reference_id ?? null,
-        customer_email: params.customer_email ?? null,
+        customer: params.customer ?? null,
         metadata: metadataOf(params),
         url: `https://checkout.stripe.com/c/pay/${id}`,
-      }),
-    );
+      });
+    }
+    if (route === 'GET /v1/subscriptions/sub_e2e') return reply(fakeSub);
+    if (route === 'GET /v1/invoices/in_e2e') return reply({ id: 'in_e2e', object: 'invoice', status: fakeSub.status === 'past_due' ? 'open' : 'paid' });
+    if (route === 'POST /v1/subscriptions/sub_e2e') {
+      if (params.cancel_at_period_end === 'true') fakeSub.cancel_at_period_end = true;
+      return reply(fakeSub);
+    }
+    if (route === 'GET /v1/billing_portal/configurations') {
+      return reply({ object: 'list', has_more: false, data: [{ id: 'bpc_other', object: 'billing_portal.configuration', metadata: {} }, { id: 'bpc_e2e', object: 'billing_portal.configuration', metadata: { app: 'shepetal' } }] });
+    }
+    if (route === 'POST /v1/billing_portal/sessions') return reply({ id: 'bps_e2e', object: 'billing_portal.session', url: 'https://billing.stripe.com/p/session/test_e2e' });
+    res.statusCode = 404;
+    reply({ error: { type: 'invalid_request_error', message: `fake Stripe: no ${req.method} ${req.url}` } });
   });
 });
 
@@ -101,7 +130,6 @@ const env = {
   GOOGLE_CLIENT_SECRET: 'e2e-client-secret',
   STRIPE_SECRET_KEY: 'sk_test_e2e',
   STRIPE_WEBHOOK_SECRET: `whsec_${randomBytes(24).toString('hex')}`,
-  STRIPE_PRICE_ID: 'price_e2e_lifetime',
   STRIPE_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
 };
 // An env file instead of --var keeps values out of `ps`, and replaces any developer .dev.vars.
@@ -290,25 +318,32 @@ async function main() {
   assert.equal((await app('GET', '/api/license')).status, 401);
   ok(`license: trial until ${lic.body.trial_ends_at} (first sign-in ${started} + 30 days); 401 for a bad or missing token`);
 
-  // ---- 6. Checkout: a Stripe Checkout URL for the one-time price, tagged with the user id.
+  // ---- 6. Checkout: a Stripe Checkout URL for the chosen plan, on the user's own Stripe customer, codes allowed.
   assert.equal((await app('POST', '/api/checkout', { json: {} })).status, 401, 'checkout signed out');
-  const co = await app('POST', '/api/checkout', { token: accessToken, json: {} });
+  assert.equal((await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'yearly' } })).status, 400, 'an unknown plan');
+  const calls = (path, method = 'POST') => stripeCalls.filter((c) => c.path === path && c.method === method);
+  const co = await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'monthly' } });
   assert.equal(co.status, 200, JSON.stringify(co.body));
   assert.match(co.body.url, /^https:\/\/checkout\.stripe\.com\//);
-  assert.equal(stripeCalls.length, 1, 'one Stripe call');
-  const sent = stripeCalls[0].params;
   assert.equal(stripeCalls[0].auth, `Bearer ${env.STRIPE_SECRET_KEY}`);
-  assert.equal(sent.mode, 'payment');
-  assert.equal(sent['line_items[0][price]'], env.STRIPE_PRICE_ID);
-  assert.equal(sent['line_items[0][quantity]'], '1');
-  assert.match(sent.client_reference_id ?? '', /^\d+$/, 'client_reference_id is the user id');
-  ok(`checkout: ${co.body.url} (mode payment, ${env.STRIPE_PRICE_ID}, client_reference_id ${sent.client_reference_id})`);
+  assert.equal(calls('/v1/prices', 'GET')[0].params['lookup_keys[0]'], 'shepetal_monthly', 'the price is found by lookup_key');
+  assert.equal(calls('/v1/customers').length, 1, 'one Stripe customer for the user');
+  const subSent = calls('/v1/checkout/sessions')[0].params;
+  assert.equal(subSent.mode, 'subscription');
+  assert.equal(subSent['line_items[0][price]'], 'price_e2e_shepetal_monthly');
+  assert.equal(subSent.allow_promotion_codes, 'true');
+  assert.equal(subSent.customer, 'cus_e2e');
+  assert.equal(subSent.client_reference_id, undefined, "no client_reference_id on a subscription: backant's handler would take it");
+  assert.equal(subSent['subscription_data[metadata][app]'], 'shepetal');
+  const userId = subSent['subscription_data[metadata][user_id]'];
+  assert.match(userId ?? '', /^\d+$/, 'the subscription carries the user id');
+  ok(`checkout monthly: ${co.body.url} (mode subscription, shepetal_monthly by lookup_key, promotion codes, customer cus_e2e, user ${userId} in the subscription metadata)`);
 
   // ---- 7. Stripe's webhook. backant.io uses the same Stripe account, so this endpoint also gets
-  // backant's checkouts: only a paid shepetal session may activate, everything else is a 200 no-op.
-  const event = (type, session = {}) =>
+  // backant's checkouts: only shepetal's sessions and subscriptions count, everything else is a 200 no-op.
+  const event = (type, object = {}, id = `evt_e2e_${randomBytes(6).toString('hex')}`) =>
     JSON.stringify({
-      id: `evt_e2e_${randomBytes(6).toString('hex')}`,
+      id,
       object: 'event',
       type,
       api_version: '2025-02-24.acacia',
@@ -321,10 +356,10 @@ async function main() {
           mode: 'payment',
           status: 'complete',
           payment_status: 'paid',
-          client_reference_id: sent.client_reference_id,
-          customer_email: sent.customer_email ?? email,
-          metadata: metadataOf(sent),
-          ...session,
+          client_reference_id: userId,
+          customer: 'cus_e2e',
+          metadata: { app: 'shepetal', user_id: userId, plan: 'lifetime' },
+          ...object,
         },
       },
     });
@@ -339,18 +374,76 @@ async function main() {
     assert.equal((await app('GET', '/api/license', { token: accessToken })).body.status, 'trial', `${why} must not grant a license`);
   };
   await noLicense('a bad signature', event('checkout.session.completed'), 400, 'whsec_wrong');
-  // backant's own subscription checkout (backant-mcp web/src/app/api/checkout), paid, whose
-  // client_reference_id happens to equal this shepetal user's id.
+  // backant's own subscription checkout (backant-mcp), paid, whose client_reference_id happens to equal this user's id.
   await noLicense(
     "backant's subscription checkout",
-    event('checkout.session.completed', { mode: 'subscription', metadata: {}, subscription: 'sub_e2e', success_url: 'https://backant.io/dashboard/billing?success=1' }),
+    event('checkout.session.completed', { mode: 'subscription', metadata: {}, subscription: 'sub_backant', success_url: 'https://backant.io/dashboard/billing?success=1' }),
   );
+  await noLicense("backant's subscription update", event('customer.subscription.updated', { ...fakeSub, id: 'sub_backant', metadata: {} }));
   await noLicense('an unpaid shepetal checkout (delayed payment method)', event('checkout.session.completed', { payment_status: 'unpaid' }));
-  const paid = await hook(event('checkout.session.completed'));
+  ok("webhook: bad signature 400; backant's subscription checkout and update, and an unpaid one, 200 with no license");
+
+  // The monthly checkout completes: the webhook reads the subscription from Stripe.
+  Object.assign(fakeSub, { metadata: { app: 'shepetal', user_id: userId } });
+  const subDone = event('checkout.session.completed', { mode: 'subscription', client_reference_id: null, subscription: 'sub_e2e', metadata: { app: 'shepetal', user_id: userId, plan: 'monthly' } }, 'evt_e2e_sub');
+  assert.equal((await hook(subDone)).status, 200);
+  lic = await app('GET', '/api/license', { token: accessToken });
+  const through = new Date(fakeSub.current_period_end * 1000).toISOString();
+  assert.deepEqual(lic.body, { status: 'active', plan: 'subscription', trial_ends_at: null, paid_through: through, renews: true, payment_failed: false, email });
+  // Stripe sends an event again when it is not sure it arrived: it changes nothing a second time.
+  const retrieves = calls('/v1/subscriptions/sub_e2e', 'GET').length;
+  assert.deepEqual(await (await hook(subDone)).json(), { received: true, duplicate: true });
+  assert.equal(calls('/v1/subscriptions/sub_e2e', 'GET').length, retrieves, 'a redelivered event is not handled again');
+  ok(`webhook: the monthly checkout makes a subscription paid through ${through}, renewing; the same event id again is a no-op`);
+
+  // A second monthly checkout is refused; the Billing Portal opens with shepetal's configuration.
+  assert.deepEqual(await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'monthly' } }), { status: 409, body: { error: 'already_subscribed' } });
+  const portal = await app('POST', '/api/billing/portal', { token: accessToken });
+  assert.deepEqual(portal, { status: 200, body: { url: 'https://billing.stripe.com/p/session/test_e2e' } });
+  const ps = calls('/v1/billing_portal/sessions')[0].params;
+  assert.deepEqual([ps.customer, ps.configuration, ps.return_url], ['cus_e2e', 'bpc_e2e', `${BASE}/account`]);
+  ok('checkout: a second subscription is 409 already_subscribed; billing/portal opens the Billing Portal (cus_e2e, configuration bpc_e2e, back to /account)');
+
+  // A failed renewal: Stripe moves the subscription to past_due and the paid time ends where the new period began.
+  Object.assign(fakeSub, { status: 'past_due', current_period_start: Math.floor(Date.now() / 1000) - 60 });
+  const inv = { id: 'in_e2e', object: 'invoice', status: 'open', subscription: 'sub_e2e', subscription_details: { metadata: { app: 'shepetal', user_id: userId } } };
+  assert.equal((await hook(event('invoice.payment_failed', inv))).status, 200);
+  lic = await app('GET', '/api/license', { token: accessToken });
+  assert.equal(lic.body.status, 'trial', 'a failed renewal ends the paid time; the trial is still running for this user');
+  assert.equal(lic.body.payment_failed, true);
+  Object.assign(fakeSub, { status: 'active' });
+  assert.equal((await hook(event('invoice.paid', { ...inv, status: 'paid' }))).status, 200);
+  lic = await app('GET', '/api/license', { token: accessToken });
+  assert.deepEqual([lic.body.status, lic.body.payment_failed], ['active', false]);
+  ok('webhook: invoice.payment_failed stops the subscription (payment_failed true), invoice.paid starts it again');
+
+  // A cancel in the Billing Portal: it keeps working to the period end and stops renewing.
+  Object.assign(fakeSub, { cancel_at_period_end: true });
+  assert.equal((await hook(event('customer.subscription.updated', fakeSub))).status, 200);
+  lic = await app('GET', '/api/license', { token: accessToken });
+  assert.deepEqual([lic.body.status, lic.body.plan, lic.body.renews], ['active', 'subscription', false]);
+  Object.assign(fakeSub, { cancel_at_period_end: false });
+  assert.equal((await hook(event('customer.subscription.updated', fakeSub))).status, 200);
+  ok('webhook: a cancelled subscription stays active until its period end with renews false; resumed, it renews again');
+
+  // The lifetime license, bought while subscribed: the subscription stops renewing.
+  const lt = await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'lifetime' } });
+  assert.equal(lt.status, 200, JSON.stringify(lt.body));
+  const sent = calls('/v1/checkout/sessions').at(-1).params;
+  assert.equal(sent.mode, 'payment');
+  assert.equal(sent['line_items[0][price]'], 'price_e2e_shepetal_lifetime');
+  assert.equal(sent['line_items[0][quantity]'], '1');
+  assert.equal(sent.allow_promotion_codes, 'true');
+  assert.equal(sent.customer, 'cus_e2e');
+  assert.equal(sent.client_reference_id, userId, 'client_reference_id is the user id');
+  assert.equal(calls('/v1/customers').length, 1, 'the same Stripe customer again');
+  const paid = await hook(event('checkout.session.completed', { client_reference_id: sent.client_reference_id, metadata: metadataOf(sent) }));
   assert.equal(paid.status, 200, await paid.clone().text());
   lic = await app('GET', '/api/license', { token: accessToken });
-  assert.deepEqual(lic.body, { status: 'active', trial_ends_at: null, email });
-  ok("webhook: bad signature 400, backant's subscription checkout and an unpaid one 200 with no license; a paid shepetal checkout makes it active, trial_ends_at null");
+  assert.deepEqual(lic.body, { status: 'active', plan: 'lifetime', trial_ends_at: null, paid_through: null, renews: false, payment_failed: false, email });
+  assert.equal(calls('/v1/subscriptions/sub_e2e').at(-1)?.params.cancel_at_period_end, 'true', 'the subscription stops renewing');
+  assert.deepEqual(await app('POST', '/api/checkout', { token: accessToken, json: {} }), { status: 409, body: { error: 'already_active' } });
+  ok(`checkout lifetime: mode payment, shepetal_lifetime, client_reference_id ${userId}; the paid webhook makes it lifetime, stops the subscription renewing, and checkout is 409 after`);
 
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.
   await check('/app/login POST: no code without the CSRF token, with a wrong one, cross-site, or signed out', async () => {
