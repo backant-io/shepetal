@@ -33,7 +33,8 @@ final class AccountWiringTests: XCTestCase {
         let src = try app()
         XCTAssertTrue(src.contains("Account.shared.start(isDictating: { [weak self] in self?.busy == true || (self?.dictation?.gesture.state ?? .idle) != .idle },"),
                       "isDictating must cover recording (gesture) and transcribing (busy)")
-        XCTAssertTrue(src.contains("Account.shared.menuItems().forEach(menu.addItem)"))
+        XCTAssertTrue(src.contains("access: Account.shared.access, signingIn: Account.shared.signingIn,"),
+                      "the 🤫 menu's account items follow the account")
     }
 
     /// Signed out at launch or on a blocked fn press, Account opens the Shepetal window on Home, where Sign in is

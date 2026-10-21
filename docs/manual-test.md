@@ -12,20 +12,20 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. In System Settings > Keyboard, set "Press 🌐 key to" to Change Input Source (to see the installer fix it).
 2. Download `Shepetal-<version>.pkg` from the release and open it (right-click › Open, or Privacy & Security › Open Anyway if macOS blocks it). Click Continue, Install, enter your password.
 3. Expected: when the installer finishes, Shepetal opens by itself: no Dock icon, 🤫 in the menu bar and, tiny, in the bottom-left corner. The permissions window opens.
-4. Expected: System Settings > Keyboard shows "Press 🌐 key to: Do Nothing" (reopen the pane), and pressing fn no longer switches the input source. System Settings > General > Login Items & Extensions lists Shepetal under Open at Login, and the 🤫 menu shows Start at login checked. At this first launch "🌐 key set to Do Nothing so fn can dictate" shows next to 🤫 for a few seconds, once.
-5. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅ and the 🤫 menu's first line reads "Hold fn to talk, double-tap for hands-free".
+4. Expected: System Settings > Keyboard shows "Press 🌐 key to: Do Nothing" (reopen the pane), and pressing fn no longer switches the input source. System Settings > General > Login Items & Extensions lists Shepetal under Open at Login, and Open shepetal > Settings shows Start at login turned on. At this first launch "🌐 key set to Do Nothing so fn can dictate" shows next to 🤫 for a few seconds, once.
+5. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅, the 🤫 menu no longer has "Permissions needed…" at the top, and Home's fn key line reads "Watched: hold fn to talk, double-tap for hands-free".
 6. Click into any text field, hold fn, say a sentence, release. Expected: the sentence is typed there.
 
 ### M-SETUP-4: the 🌐 key at launch, restore and uninstall
 1. Quit Shepetal. Set "Press 🌐 key to" to Show Emoji & Symbols. Open Shepetal.
 2. Expected: "🌐 key set to Do Nothing so fn can dictate" next to 🤫 for a few seconds, and the setting reads Do Nothing. Quit and open Shepetal again: no message this time.
-3. In the 🤫 menu choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the setting is back to that value.
+3. In Open shepetal > Settings choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the button goes away. Expected: the setting is back to that value.
 4. Run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
 
 ### M-SETUP-5: no false "fn not received"
 "fn not received" only shows when the 🌐 key's keycode 179 reaches Shepetal and fn's keycode 63 does not (another app took fn). Ordinary keys never show it. The positive case cannot be produced by hand; `FnHealthTests` and `FnTapTests` cover it.
 1. With all three permissions granted, type a few sentences in TextEdit. Hold Down arrow for 2 s, then Left arrow for 2 s. Press ⌘C, ⌘V, ⇧ with letters, ⌥←, ⌘Space (then Esc), ⌃⌘V. Hold ⌃⌥ together for 2 s. Press fn+Delete and fn+↓. Hold ⌃, then hold fn for 2 s, release both. Tap fn, double-tap fn, and hold fn for 2 s (a dictation, fine).
-2. Expected: no "fn not received" next to 🤫 at any point, no yellow ring, and Open Shepetal… > Home shows no fn problem.
+2. Expected: no "fn not received" next to 🤫 at any point, no yellow ring, and Open shepetal > Home shows no fn problem.
 3. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s. Expected: "Input Monitoring access was turned off" with a yellow ring and the Permissions window, not "fn not received". Turn Shepetal back on: within 2 s fn dictates again.
 
 ### M-SETUP-2: permissions survive a rebuild
@@ -34,7 +34,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 
 ### M-SETUP-3: stays running in the background
 1. Open Shepetal and use other apps for an hour, including full-screen apps and Space switches.
-2. Expected: 🤫 is still in the bottom-left corner and in the menu bar, there was never a Dock icon, and fn still dictates. Quit Shepetal from the 🤫 menu: both 🤫 disappear.
+2. Expected: 🤫 is still in the bottom-left corner and in the menu bar, there was never a Dock icon, and fn still dictates. Quit shepetal from the 🤫 menu (or press ⌘Q while the menu is open): both 🤫 disappear.
 
 ### M-PERM-1: Microphone
 1. Quit Shepetal. Run `tccutil reset Microphone io.backant.shepetal`.
@@ -45,7 +45,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-PERM-2: Input Monitoring
 1. Run `tccutil reset ListenEvent io.backant.shepetal` and open Shepetal.
 2. Click Grant… next to Input Monitoring. System Settings opens at Privacy & Security > Input Monitoring. Turn on Shepetal.
-3. Expected: the row turns ✅, and within 2 s the 🤫 menu's first line reads "Hold fn to talk, double-tap for hands-free". You don't need to restart.
+3. Expected: the row turns ✅, and within 2 s Home's fn key line reads "Watched: hold fn to talk, double-tap for hands-free". You don't need to restart.
 
 ### M-PERM-3: Accessibility
 1. Run `tccutil reset Accessibility io.backant.shepetal` and open Shepetal.
@@ -78,13 +78,13 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-FN-3: short press
 1. Tap fn once, briefly (under half a second), and don't tap again.
 2. Expected: nothing is inserted and the ring never turns orange (a short press is never hands-free). "Hold fn to talk · double-tap for hands-free" shows next to 🤫 about half a second after the release, for about 3 s, without another fn press.
-3. Expected: Recent in the 🤫 menu has a "(too short)" entry, and a new WAV is in Open recordings folder.
+3. Expected: Recent in the 🤫 menu has a "(too short)" entry, and a new WAV is in Settings > Open recordings folder.
 
 ### M-FN-4: fn as a modifier
 1. In a long TextEdit document, hold fn and press Down arrow within the first second, keep both held for about 2 s, then release.
 2. Expected: the view pages down. No ring stays red, nothing is transcribed or pasted, and no hint shows.
 3. Type a word, then press fn+Delete quickly a few times.
-4. Expected: characters after the cursor are deleted, nothing is inserted, and no hint shows. Recent in the 🤫 menu has a "(cancelled)" entry for each press, and each has a WAV in Open recordings folder.
+4. Expected: characters after the cursor are deleted, nothing is inserted, and no hint shows. Recent in the 🤫 menu has a "(cancelled)" entry for each press, and each has a WAV in Settings > Open recordings folder.
 5. Hold fn for about 2 s, then press Down arrow while still holding and speaking. Expected: the dictation goes on and is inserted on release.
 
 ### M-INS-1: TextEdit
@@ -107,12 +107,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-NS-1: no speech
 1. Copy a word in TextEdit (Cmd+C), then click into the document. In a quiet room, hold fn for about 2 s without speaking, then release.
 2. Expected: nothing is inserted. A yellow ring and "No speech heard" show for about 4 s. Cmd+V still pastes the word you copied.
-3. Expected: Recent in the 🤫 menu has a "(no speech)" entry, and a new WAV is in Open recordings folder.
+3. Expected: Recent in the 🤫 menu has a "(no speech)" entry, and a new WAV is in Settings > Open recordings folder.
 4. Hold fn, say only "um, uh", then release. Expected: the same as steps 2 and 3.
 5. Hold fn and say a quiet "yes" from about an arm's length away. Expected: "yes" is inserted. If it shows "No speech heard" instead, or room noise in step 1 got transcribed, the -60 dBFS floor does not fit this mic: note the mic and the room in #15. You can try another floor with `defaults write io.backant.shepetal speechFloorDb -float -65` and relaunch.
 
 ### M-RET-1: delete after 24 hours
-1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
+1. In Open shepetal > Settings set Recordings to Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
 3. Meetings follow the same choice. Record a short meeting (M-MTG-1, or start and stop one by hand) and leave Shepetal running. Expected about 25 h later: its folder (Me.wav, Others.wav) is gone from `~/Library/Application Support/Shepetal/meetings/`, but the meeting is still in Meetings with its transcript and summary, and search still finds it. Only the audio is deleted, as with dictation. A meeting recorded in the last 24 h keeps its folder, and so does one that is still recording. (The timing is covered by `MeetingStoreTests.testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording`.)
 
@@ -121,7 +121,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Expected: nothing is inserted, the ring goes away, and "Cancelled" shows next to 🤫 for about 2 s. The Open dialog is still open, because Shepetal kept that Esc from the app (with Accessibility on).
 3. Double-tap fn for hands-free, say a sentence, press Esc. Expected: the same.
 4. With nothing recording, press Esc. Expected: the Open dialog closes, because an idle Esc reaches the app.
-5. Expected: Recent in the 🤫 menu has a "(cancelled)" entry for steps 1 and 3, and each has a WAV in Open recordings folder.
+5. Expected: Recent in the 🤫 menu has a "(cancelled)" entry for steps 1 and 3, and each has a WAV in Settings > Open recordings folder.
 
 ### M-ESC-2: Esc while transcribing
 1. Double-tap fn in TextEdit and talk for about a minute (a longer recording takes longer to transcribe). Tap fn and press Esc right after it, while the ring pulses blue.
@@ -157,12 +157,13 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Click into a TextEdit document and press ⌃⌘V. Expected: the sentence is inserted, and no "v" is typed.
 3. Copy some other text with ⌘C, then press ⌃⌘C and paste with ⌘V. Expected: the sentence again.
 4. Tap fn once briefly (too short) and wait for the hint to go away, then press ⌃⌘V. Expected: still the same sentence, because entries without text are skipped.
-5. The 🤫 menu's "Paste last text" and "Copy last text" do the same.
+5. Open the 🤫 menu. Expected: "Paste last transcript" with ⌃⌘V right-aligned, the way macOS shows shortcuts, and no Copy last text item. Choose it: the sentence is inserted. ⌃⌘C still copies (step 3).
+6. Rebind Paste last text to ⌃⌥P (M-KEY-3 step 4). Expected: the menu shows ⌃⌥P next to Paste last transcript. Rebind it to a mouse button: the shortcut moves into the title, "Paste last transcript (Mouse 4)". Reset to defaults.
 
 ### M-MIC-1: choosing the mic
 1. Plug in a USB or Bluetooth mic you have never used with Shepetal. Expected: "New mic: <its name>" shows next to 🤫. Unplug and plug it in again: nothing shows.
 2. Open 🤫 > Microphone. Expected: "Automatic (<mic in use>)" is checked, every input device is listed, and a "Prefer <name>" item is listed for each.
-3. Choose the USB mic's name (this forces it). Dictate a sentence while tapping the USB mic, then play the newest WAV from Open recordings folder. Expected: the tap is loud, so the USB mic recorded.
+3. Choose the USB mic's name (this forces it). Dictate a sentence while tapping the USB mic, then play the newest WAV from Settings > Open recordings folder. Expected: the tap is loud, so the USB mic recorded.
 4. Choose Automatic, then "Prefer <USB mic>". Dictate again. Expected: the USB mic records. Unplug it. Expected: "Using <next mic>" shows next to 🤫, and the next dictation works.
 
 ### M-MIC-2: closed lid
@@ -171,7 +172,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 
 ### M-MIC-3: mic disconnected mid-dictation
 1. Force a USB or Bluetooth mic. Double-tap fn for hands-free, say a sentence, then unplug the mic (or switch off the headset) while still recording.
-2. Expected: recording stops, "Mic disconnected" shows next to 🤫, what you said before the unplug is inserted, and its WAV is in Open recordings folder.
+2. Expected: recording stops, "Mic disconnected" shows next to 🤫, what you said before the unplug is inserted, and its WAV is in Settings > Open recordings folder.
 
 ### M-MIC-4: dead mic
 1. Force an input that sends only silence: a loopback driver with nothing playing (for example Microsoft Teams Audio when Teams is closed, or BlackHole). Double-tap fn for hands-free and wait.
@@ -189,12 +190,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 
 ### M-LANG-1: languages
 1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
-2. Check Deutsch and Français. Expected: the menu's model line stays "Model: parakeet-tdt-0.6b-v3" (no reload). Say a German sentence. Expected: German text.
-3. Check 日本語 (Japanese). Expected: the model line reads "Model: ggml-large-v3-turbo-q5_0" when that model and `whisper-cli` are in `~/Library/Application Support/Shepetal/models/`. Otherwise it says which file is missing and where it goes, and dictation shows "Speech model is not loaded" until you install it or choose Automatic.
-4. Choose Automatic. Expected: the model line goes back to Parakeet.
+2. Check Deutsch and Français. Expected: Home's speech recognition line stays "On-device speech recognition (standard engine)" (no reload). Say a German sentence. Expected: German text.
+3. Check 日本語 (Japanese). Expected: Home's line reads "On-device speech recognition (alternative engine)" when that model and `whisper-cli` are in `~/Library/Application Support/Shepetal/models/`. Otherwise it says which file is missing and where it goes (the 🤫 menu shows the same line at the top while speech recognition is not ready), and dictation shows "Speech model is not loaded" until you install it or choose Automatic.
+4. Choose Automatic. Expected: the line goes back to the standard engine.
 
 ### M-DICT-1: personal dictionary
-1. Choose 🤫 > Dictionary…. Expected: `dictionary.txt` opens in your default text editor, holding only comment lines that explain the format. `ls -l ~/Library/Application\ Support/Shepetal/dictionary.txt` shows `-rw-------`.
+1. Choose Open shepetal > Settings > Dictionary…. Expected: `dictionary.txt` opens in your default text editor, holding only comment lines that explain the format. `ls -l ~/Library/Application\ Support/Shepetal/dictionary.txt` shows `-rw-------`.
 2. Add the lines `GitHub` and `asap => as soon as possible`, save, and without restarting Shepetal dictate "push it to github asap".
 3. Expected: "Push it to GitHub as soon as possible." A word that only contains "asap" (for example "asaps") is left alone.
 
@@ -250,15 +251,24 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 5. Quit Shepetal, run `open dist/Shepetal.app --args --no-permission-prompts`, and turn Accessibility off. Expected: the message and the yellow ring show, but no window opens.
 
 ### M-LOGIN-1: Start at login (F92)
-1. Open the 🤫 menu and choose Start at login.
-2. Expected: the item is checked. If macOS wants approval instead, "Allow Shepetal in System Settings > General > Login Items" shows next to 🤫 and System Settings opens at Login Items. Allow Shepetal there. The item is then checked the next time you open the menu.
+1. In Open shepetal > Settings, turn on Start at login.
+2. Expected: the toggle stays on. If macOS wants approval instead, "Allow Shepetal in System Settings > General > Login Items" shows next to 🤫, System Settings opens at Login Items and the toggle stays off. Allow Shepetal there. The toggle is then on the next time you open Settings.
 3. Log out and log back in. Expected: 🤫 is in the bottom-left corner and in the menu bar without you opening Shepetal, and there is no Dock icon.
-4. Choose Start at login again. Expected: unchecked, and Shepetal is gone from Login Items. The installer turns it on; builds signed with the same certificate keep it.
+4. Turn Start at login off. Expected: the toggle is off, and Shepetal is gone from Login Items. The installer turns it on; builds signed with the same certificate keep it.
+
+### M-MENU-1: the 🤫 menu
+Setup: all three permissions granted, speech recognition loaded, signed in with a trial of more than 7 days (or a build from source that does not require sign-in, signed in), and at least one meeting recorded.
+1. Click 🤫 in the menu bar. Expected, top to bottom with a separator between each group: Record meeting, Past meetings › | Open shepetal | Check for Updates… (greyed out) | Paste last transcript with ⌃⌘V right-aligned, Recent › | Shortcuts…, Microphone ›, Languages › | Help center, Send feedback… | Quit shepetal with ⌘Q right-aligned. Nothing above Record meeting, no grey status lines, no emoji besides 🤫 in the menu bar, and "shepetal" in lowercase.
+2. Hover Recent. Expected: "Click to copy" above the last dictations. Click one, then ⌘V in TextEdit: its text.
+3. Choose Help center. Expected: https://shepetal.backant.io/help opens in the browser. Choose Send feedback…. Expected: a new mail to founder@backant.io with the subject "shepetal feedback".
+4. In System Settings > Privacy & Security > Accessibility, turn Shepetal off. Open the menu. Expected: "Permissions needed…" at the very top with a yellow mark; choosing it opens the Permissions window. Turn Shepetal back on: the line is gone the next time the menu opens.
+5. Signed out (Home > Sign out): the top of the menu has "Sign in to start your free trial…". With a test account 7 days or less from the end of its trial, or after it: "Get shepetal for $4.99…" instead. With more than 7 days left, or Yours forever, neither.
+6. Open shepetal and check that nothing left the app: Home has the account line with Sign out, the speech recognition line and the Donate links (each opens its page); Settings has Recordings, Open recordings folder, Start at login, Dictionary… and Permissions….
 
 ### M-HUB-1: open the Shepetal window
 1. Before you install this build, run `sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite 'select count(*) from history'` and note the number. Install and open the new build. Run the command again. Expected: the same number. (`HistoryTests.testOldDatabaseUpgradesWithoutLosingRows` checks this on a copy of the old schema.)
 2. With all three permissions granted, quit Shepetal and open it again from Finder or Spotlight. Expected: only 🤫 appears. No Shepetal window opens.
-3. Open the 🤫 menu and choose Open Shepetal…. Expected: a window titled "Shepetal" with Home, History, Meetings and Settings tabs comes to the front.
+3. Open the 🤫 menu and choose Open shepetal. Expected: a window titled "Shepetal" with Home, History, Meetings and Settings tabs comes to the front.
 4. Close it. Open `dist/Shepetal.app` again (Finder, Spotlight or `open dist/Shepetal.app`). Expected: the same window opens. No second 🤫 appears.
 5. Home: expected rows for speech recognition ("On-device speech recognition (standard engine)", no model name), the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
 
@@ -281,8 +291,8 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Tick Show archived. Expected: it is back, marked "archived", with Unarchive. Click Unarchive and untick Show archived. Expected: it stays in the list.
 
 ### M-HUB-6: settings
-1. In Settings, set Recordings to Delete recordings after 24 hours. Expected: the 🤫 menu's Recordings submenu shows the same choice.
-2. Open recordings folder opens Finder at the audio folder. Permissions… opens the Permissions window.
+1. In Settings, set Recordings to Delete recordings after 24 hours. Close and reopen the window. Expected: the same choice.
+2. Open recordings folder opens Finder at the audio folder. Dictionary… opens `dictionary.txt` (M-DICT-1). Permissions… opens the Permissions window. Start at login is M-LOGIN-1, and Restore 🌐 key setting (shown only after Shepetal changed the setting) is M-SETUP-4.
 
 ### M-CTX-1: app and page URL
 1. Dictate into TextEdit, into a text field in Safari, and into a text field in Chrome (for example a GitHub comment box).
@@ -291,19 +301,19 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
 
 ### M-MTG-1: Zoom call, detected, recorded after one click, and transcribed (rule 7)
-Setup: quit Shepetal, run `scripts/make-app.sh --install` from main, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic). Open Shepetal… > Settings: "Always record meetings automatically" is off (the default).
+Setup: quit Shepetal, run `scripts/make-app.sh --install` from main, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic). Open shepetal > Settings: "Always record meetings automatically" is off (the default).
 1. Start or join a Zoom meeting in the zoom.us app, with your mic unmuted. Click into Zoom's chat box.
-2. Expected about 5 s after Zoom opens the mic: a small card just above the 🤫 in the bottom-left corner says "Meeting detected · zoom.us", with Record and Not now. Nothing records yet: 🤫 has no red ring, the menu bar shows "🤫", and the 🤫 menu shows "Start meeting recording".
+2. Expected about 5 s after Zoom opens the mic: a small card just above the 🤫 in the bottom-left corner says "Meeting detected · zoom.us", with Record and Not now. Nothing records yet: 🤫 has no red ring, the menu bar shows "🤫", and the 🤫 menu shows "Record meeting".
 3. Click Record. Expected: the card goes away, and typing still goes into Zoom's chat box (the click did not take focus or bring Shepetal forward). "Meeting detected · recording" shows next to 🤫, 🤫 gets a red ring that stays for the whole meeting, the menu bar shows "🤫●", and the 🤫 menu shows "Stop meeting recording". The first time, macOS asks whether Shepetal may record system audio: allow it. If the hint says "… mic only (turn on System Audio Recording)", add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, then leave and rejoin the call.
-4. Open 🤫 > Open Shepetal… > Meetings. Expected: a "zoom.us" meeting at the top, still running. Within about a minute its transcript fills in, with your lines labelled Me and the other side's labelled Others.
+4. Open 🤫 > Open shepetal > Meetings. Expected: a "zoom.us" meeting at the top, still running. Within about a minute its transcript fills in, with your lines labelled Me and the other side's labelled Others.
 5. Say "I will send the slides by Friday." Have the other side say "I will review the budget tomorrow."
 6. Leave the meeting. Expected within about 5 s: "Meeting recording saved", then "Meeting notes ready · open Shepetal → Meetings", the red ring goes away, and the menu bar goes back to "🤫". The meeting's Summary lists the action items "Me: send the slides (Friday)" and "Others: review the budget (tomorrow)" (the wording may differ slightly).
 7. Type `budget` in the Meetings search. Expected: the meeting is found. Click Copy summary and paste in TextEdit: the summary is pasted, without the transcript. Export Markdown writes a `.md` file where you choose.
 8. Run `ls -la ~/Library/Application\ Support/Shepetal/meetings/*/`. Expected: the meeting's folder is `drwx------` and holds `Me.wav` and `Others.wav`, both `-rw-------`. Open them in QuickTime: Me is your mic, Others is the call audio.
 9. Do steps 1 to 6 again without headphones, with the call on the MacBook's own speakers at normal volume. The mic hears the other side here too, and Me.wav keeps that echo (the audio is kept as recorded). Expected: the transcript has no Others line a second time under Me, and the summary has "Others: review the budget (tomorrow)" once, with no second copy under Me. Short replies of yours said over the other side ("yes, that works") stay under Me.
-10. Not now: join a Zoom meeting and click Not now on the card. Expected: the card goes, nothing records (no red ring, "🤫" in the menu bar, "Start meeting recording" in the menu), no new meeting appears under Meetings, and the card does not come back while you stay in that meeting. Leave it.
-11. Timeout: join again and leave the card alone. Expected: it goes away by itself after about 20 s and nothing records. 🤫 > Start meeting recording still records the rest of this meeting by hand (listed as "Manual"); stop it from the menu.
-12. Always record: in Open Shepetal… > Settings, turn on "Always record meetings automatically". Join a Zoom meeting. Expected: no card; about 5 s after Zoom opens the mic, "Meeting detected · recording" next to 🤫, the red ring, "🤫●", and "Stop meeting recording" in the menu. Stop meeting recording ends it. Turn the setting off again.
+10. Not now: join a Zoom meeting and click Not now on the card. Expected: the card goes, nothing records (no red ring, "🤫" in the menu bar, "Record meeting" in the menu), no new meeting appears under Meetings, and the card does not come back while you stay in that meeting. Leave it.
+11. Timeout: join again and leave the card alone. Expected: it goes away by itself after about 20 s and nothing records. 🤫 > Record meeting still records the rest of this meeting by hand (listed as "Manual"); stop it from the menu.
+12. Always record: in Open shepetal > Settings, turn on "Always record meetings automatically". Join a Zoom meeting. Expected: no card; about 5 s after Zoom opens the mic, "Meeting detected · recording" next to 🤫, the red ring, "🤫●", and "Stop meeting recording" in the menu. Stop meeting recording ends it. Turn the setting off again.
 
 ### M-MTG-2: Google Meet in a browser
 Setup: as in M-MTG-1. Shepetal needs no Screen Recording access; if you added it for an older build, you can leave it or remove it.
@@ -348,24 +358,25 @@ Setup: as in M-MTG-1. Before the meeting, select the word `canary` in TextEdit a
 5. Click into the window, select a few words in one line, and press Cmd+C. Paste. Expected: only those words.
 6. Click Open in Meetings. Expected: the Shepetal window opens on the Meetings tab, with this meeting open. Its Copy transcript button, next to Copy summary, copies the same text as in step 4.
 7. Record a second meeting and end it while the window is still open. Expected: the same window now shows the second meeting, and no second window opens. Close the window: it stays closed until the next meeting ends.
-8. No speech: choose 🤫 > Start meeting recording, stay silent for 20 s, then choose Stop meeting recording. Expected: the window says "No speech was recorded". The first line has no app name ("DD.MM.YY HH:MM · < 1 min"). Copy transcript and Copy summary are greyed out, and Open in Meetings opens the meeting.
-9. Choose 🤫 > Start meeting recording and say a sentence. Put Safari in full screen and click into its address bar. Then choose 🤫 > Stop meeting recording. Expected: the window shows over full-screen Safari, and typing still goes into the address bar.
-10. After Settings > Recordings > Delete recordings after 24 hours has removed a meeting's audio (as in M-HUB-3 step 2, with `touch -t` on its folder), open that meeting in the Meetings tab. Expected: its transcript and summary are still there, and Copy transcript still works.
+8. No speech: choose 🤫 > Record meeting, stay silent for 20 s, then choose Stop meeting recording. Expected: the window says "No speech was recorded". The first line has no app name ("DD.MM.YY HH:MM · < 1 min"). Copy transcript and Copy summary are greyed out, and Open in Meetings opens the meeting.
+9. Choose 🤫 > Record meeting and say a sentence. Put Safari in full screen and click into its address bar. Then choose 🤫 > Stop meeting recording. Expected: the window shows over full-screen Safari, and typing still goes into the address bar.
+10. Close the window. Open 🤫 > Past meetings. Expected: the meetings you just recorded, newest first, each as "Zoom · DD.MM.YY HH:MM · N min" (up to 8, none still recording). Choose the first: the same "Meeting transcript" window shows it, again without taking the keyboard.
+11. After Settings > Recordings > Delete recordings after 24 hours has removed a meeting's audio (as in M-HUB-3 step 2, with `touch -t` on its folder), open that meeting in the Meetings tab. Expected: its transcript and summary are still there, and Copy transcript still works.
 
 ### M-ACC-1: first launch, sign-in and the free trial
 Needs shepetal.backant.io live, and a build that requires sign-in: the release package, `REQUIRE_SIGNIN=1 scripts/make-app.sh --install` (the "Built" line ends with "sign-in required"), or any build started with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
-0. Without `ShepetalRequiresSignIn` or the variable (a plain `scripts/make-app.sh` build), signed out: expected the menu still offers Sign in, but no sign-in hint shows at launch, no window opens by itself, and fn dictates normally.
-1. Sign out first if this Mac was signed in (🤫 menu > Sign out). Quit and open Shepetal. Expected: next to 🤫 "Sign in with Google to start your free 30-day trial" for a few seconds, and the Shepetal window opens by itself on Home. Its first section, Account, says "Not signed in" with a large "Sign in with Google to start your free 30-day trial" button. The 🤫 menu shows "Not signed in" and "Sign in with Google to start your free 30-day trial…". Close the window and wait two minutes: it does not open again by itself.
+0. Without `ShepetalRequiresSignIn` or the variable (a plain `scripts/make-app.sh` build), signed out: expected the menu still offers Sign in to start your free trial…, but no sign-in hint shows at launch, no window opens by itself, and fn dictates normally.
+1. Sign out first if this Mac was signed in (Open shepetal > Home > Sign out). Quit and open Shepetal. Expected: next to 🤫 "Sign in with Google to start your free 30-day trial" for a few seconds, and the Shepetal window opens by itself on Home. Its first section, Account, says "Not signed in" with a large "Sign in with Google to start your free 30-day trial" button. The top of the 🤫 menu shows "Sign in to start your free trial…". Close the window and wait two minutes: it does not open again by itself.
 2. Hold fn in TextEdit. Expected: nothing is recorded or inserted, no new file appears in `~/Library/Application Support/Shepetal/audio`, the menu-bar mic indicator (orange dot) never shows, the hint "Sign in with Google to start your free 30-day trial" shows next to 🤫 with no error ring and no mic message, and the Shepetal window comes to the front on Home.
-3. Choose Sign in with Google… Expected: a sign-in sheet opens shepetal.backant.io and goes to Google; if the browser is already signed in to Google, one click picks the account. Nothing to type. The menu says "Signing in with Google…". Expected: after the sheet closes, within a few seconds the menu and the top of Home show "Signed in as <your email> · Trial, 30 days left", Get Shepetal for $4.99 (lifetime, updates included)… and Sign out. Quit and reopen Shepetal: the window does not open by itself. Run `security find-generic-password -s io.backant.shepetal.account` in Terminal. Expected: an item exists (do not print its secret).
+3. Choose Sign in to start your free trial… in the 🤫 menu. Expected: a sign-in sheet opens shepetal.backant.io and goes to Google; if the browser is already signed in to Google, one click picks the account. Nothing to type. Home says "Signing in with Google…" and the menu has Cancel sign-in. Expected: after the sheet closes, within a few seconds the top of Home shows "Signed in as <your email> · Trial, 30 days left", Get Shepetal for $4.99 (lifetime, updates included) and Sign out, and the 🤫 menu has no account item at all (Get shepetal for $4.99… shows there from 7 days left). Quit and reopen Shepetal: the window does not open by itself. Run `security find-generic-password -s io.backant.shepetal.account` in Terminal. Expected: an item exists (do not print its secret).
 4. Hold fn and dictate into TextEdit. Expected: it works as in M-FN-1.
-4a. Sign out, choose Sign in with Google… again and close the sheet with Cancel. Expected: no error, the menu is back to "Not signed in" with the Sign in item. Sign in again.
+4a. Sign out on Home, choose Sign in to start your free trial… again and close the sheet with Cancel. Expected: no error, Home is back to "Not signed in" and the menu to Sign in to start your free trial…. Sign in again.
 5. Quit and reopen Shepetal with Wi-Fi off. Expected: the trial line is unchanged and dictation still works (7-day offline grace). Turn Wi-Fi back on.
 
 ### M-ACC-2: buy, lifetime, sign out
-1. Choose Get Shepetal for $4.99… Expected: Stripe Checkout opens in the browser. Pay with a Stripe test card on a test deployment. Expected: within about a minute of paying, the menu and Home say "Signed in as <email> · Yours forever" and have no Buy item.
-2. On the site, end the trial of a test account (or wait for it). Reopen Shepetal. Expected: once the license check answers, the window opens on Home with "Signed in as <email> · Trial ended" and Get Shepetal for $4.99 (once per launch); holding fn shows "Trial ended: get Shepetal for $4.99", opens Home and records nothing.
-3. Choose Sign out. Expected: "Not signed in", fn shows the sign-in hint, and `security find-generic-password -s io.backant.shepetal.account` finds nothing.
+1. On a test account with 7 days or less left, open the 🤫 menu. Expected: Get shepetal for $4.99… at the top. Choose it. Expected: Stripe Checkout opens in the browser. Pay with a Stripe test card on a test deployment. Expected: within about a minute of paying, Home says "Signed in as <email> · Yours forever", and neither Home nor the menu has a Buy item.
+2. On the site, end the trial of a test account (or wait for it). Reopen Shepetal. Expected: once the license check answers, the window opens on Home with "Signed in as <email> · Trial ended" and Get Shepetal for $4.99 (once per launch), and the 🤫 menu has Get shepetal for $4.99… at the top; holding fn shows "Trial ended: get Shepetal for $4.99", opens Home and records nothing.
+3. Choose Sign out on Home. Expected: "Not signed in", fn shows the sign-in hint, and `security find-generic-password -s io.backant.shepetal.account` finds nothing.
 4. While dictating a long hands-free note, watch Little Snitch or `nettop -p shepetal`: expected no connection during the dictation.
 
 ## iPhone
