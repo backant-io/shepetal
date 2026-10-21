@@ -16,6 +16,10 @@
 #                                  running Shepetal is quit first and opened again afterwards
 #   scripts/make-app.sh --zip      also write dist/Shepetal-<version>-mac.zip (+ .sha256) for a release
 #   VERSION=0.1.1 scripts/make-app.sh ...   the version shown in Finder and in the zip name (default 0.1.0)
+#   REQUIRE_SIGNIN=1|0 ...         1: dictation needs Google sign-in and a trial or license
+#                                  (ShepetalRequiresSignIn in Info.plist). Default 1 with --zip and from
+#                                  scripts/make-pkg.sh (the release), else 0, so a build from source dictates
+#                                  without signing in. SHEPETAL_REQUIRE_SIGNIN=1|0 overrides it when the app starts.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 INSTALL=0; ZIP=0
@@ -26,6 +30,12 @@ for a in "$@"; do
     *) echo "unknown option $a" >&2; exit 2 ;;
   esac
 done
+REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-$ZIP}
+case $REQUIRE_SIGNIN in
+  1) SIGNIN_KEY='<key>ShepetalRequiresSignIn</key><true/>'; SIGNIN="sign-in required" ;;
+  0) SIGNIN_KEY=''; SIGNIN="sign-in not required" ;;
+  *) echo "REQUIRE_SIGNIN must be 1 or 0" >&2; exit 2 ;;
+esac
 
 swift build -c release -j "${JOBS:-4}"
 BIN=$(swift build -c release --show-bin-path)
@@ -91,6 +101,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSMicrophoneUsageDescription</key><string>Shepetal listens while you hold fn and turns your speech into text on this Mac. Audio never leaves it.</string>
   <key>NSAudioCaptureUsageDescription</key><string>Shepetal records the other people in a meeting so it can transcribe it on this Mac. Audio never leaves it.</string>
   <key>NSHumanReadableCopyright</key><string>MIT License</string>
+  $SIGNIN_KEY
 </dict>
 </plist>
 PLIST
@@ -108,7 +119,7 @@ else
   echo "Signed with: $(codesign -dvv "$APP" 2>&1 | awk -F= '/^Authority=/ { print $2; exit }')"
   codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /Designated requirement: /p'
 fi
-echo "Built $PWD/$APP ($SHORT_VERSION, build $BUILD, $COMMIT)"
+echo "Built $PWD/$APP ($SHORT_VERSION, build $BUILD, $COMMIT, $SIGNIN)"
 
 if [ "$ZIP" = 1 ]; then
   Z=dist/Shepetal-$SHORT_VERSION-mac.zip

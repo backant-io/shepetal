@@ -9,10 +9,9 @@ final class Account: NSObject, ObservableObject {
     static let shared = Account(client: AccountClient(), tokens: .keychain(),
                                 stateURL: Paths.root.appendingPathComponent("account.json"), required: signInRequired())
 
-    /// Whether dictation needs a trial or a license. It stays off until shepetal.backant.io is live, because
-    /// before that nobody could sign in and dictation would be off for everyone. The release turns it on with
-    /// `ShepetalRequiresSignIn` = true in Info.plist (scripts/make-app.sh). SHEPETAL_REQUIRE_SIGNIN=1 or 0
-    /// overrides it for a hand test.
+    /// Whether dictation needs a trial or a license. Release builds (`scripts/make-app.sh --zip`,
+    /// `scripts/make-pkg.sh`) set `ShepetalRequiresSignIn` = true in Info.plist; a build from source does not, so
+    /// it dictates without signing in. SHEPETAL_REQUIRE_SIGNIN=1 or 0 overrides it for a hand test.
     static func signInRequired(env: [String: String] = ProcessInfo.processInfo.environment,
                                info: [String: Any]? = Bundle.main.infoDictionary) -> Bool {
         if let v = env["SHEPETAL_REQUIRE_SIGNIN"] { return v == "1" }
@@ -36,6 +35,10 @@ final class Account: NSObject, ObservableObject {
     var authenticate: (URL, String) async throws -> URL = { try await WebLogin.authenticate($0, scheme: $1) }
     private(set) var hint: (String) -> Void = { _ in }
     private var isDictating: () -> Bool = { false }
+    /// Opens the Shepetal window on Home, where Sign in is.
+    private var showHome: () -> Void = {}
+    private var shownHomeAtLaunch = false
+    private var launchCheck = false
 
     private let client: AccountClient
     private let tokens: TokenStore
@@ -59,13 +62,19 @@ final class Account: NSObject, ObservableObject {
         refresh()
     }
 
-    /// At launch: check the license if signed in, say why dictation is off if it is, then tick every minute.
-    func start(isDictating: @escaping () -> Bool, hint: @escaping (String) -> Void) {
+    /// At launch: check the license if signed in, say why dictation is off if it is and open Home (once),
+    /// then tick every minute.
+    func start(isDictating: @escaping () -> Bool, hint: @escaping (String) -> Void, showHome: @escaping () -> Void = {}) {
         self.isDictating = isDictating
         self.hint = hint
+        self.showHome = showHome
+        launchCheck = signedIn
         if signedIn { check() }
         // A signed-in user whose cache is stale gets the answer of the check that just started instead.
-        if required, let h = access.blockedHint, access != .unchecked || !signedIn { hint(h) }
+        if required, let h = access.blockedHint, access != .unchecked || !signedIn {
+            hint(h)
+            showHomeAtLaunch()
+        }
         timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -84,6 +93,7 @@ final class Account: NSObject, ObservableObject {
         refresh()
         guard access.allowsDictation || !required else {
             hint(signingIn ? "Finish signing in with Google first" : access.blockedHint ?? "")
+            if !signingIn { showHome() }  // Sign in (or Buy) is on Home; the sign-in sheet stays in front
             // Nothing is being dictated, so ask again: a purchase on the website or a network that came back
             // unlocks on the next press instead of the next day. At most once a minute.
             if signedIn, now().timeIntervalSince(state.lastAttempt ?? .distantPast) >= 60 { check() }
@@ -120,6 +130,17 @@ final class Account: NSObject, ObservableObject {
             message = ""
         }
         refresh()
+        if launchCheck {  // the launch check said signed out, expired or not checkable
+            launchCheck = false
+            showHomeAtLaunch()
+        }
+    }
+
+    /// Once per launch, so the window does not keep taking the focus.
+    private func showHomeAtLaunch() {
+        guard required, !access.allowsDictation, !shownHomeAtLaunch else { return }
+        shownHomeAtLaunch = true
+        showHome()
     }
 
     /// Google sign-in with PKCE: the login page in an ASWebAuthenticationSession, the code from the
@@ -207,11 +228,11 @@ final class Account: NSObject, ObservableObject {
 
     @objc func checkNow() { check() }
 
-    /// One line for the menu and Home.
+    /// One line for the menu and Home: "Signed in as <email> · Trial, 12 days left", or "Not signed in".
     var summaryLine: String {
         if signingIn { return "Signing in with Google…" }
-        if !email.isEmpty, access != .signedOut { return "\(access.summary) · \(email)" }
-        return access.summary
+        guard signedIn else { return access.summary }
+        return (email.isEmpty ? "Signed in" : "Signed in as \(email)") + " · " + access.summary
     }
 
     /// The account part of the 🤫 menu.
