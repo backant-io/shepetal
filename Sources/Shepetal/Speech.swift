@@ -109,12 +109,45 @@ final class SpeechMenu: NSObject {
             i.representedObject = code
             i.state = languages.contains(code) ? .on : .off
         }
+        // F41: macOS 15 and later. Before that the item is not there at all: never a grey item (#207).
+        if let translator {
+            menu.addItem(.separator())
+            let on = UserDefaults.standard.bool(forKey: Translate.key)
+            let t = menu.addItem(withTitle: "Translate to English", action: #selector(toggleTranslate), keyEquivalent: "")
+            t.target = self
+            t.state = on ? .on : .off
+            for code in on ? translator.toDownload : [] {
+                let d = menu.addItem(withTitle: "Download \(Translate.name(code)) for translation…",
+                                     action: #selector(clickedDownload(_:)), keyEquivalent: "")
+                d.target = self
+                d.representedObject = code
+            }
+        }
         let languagesItem = NSMenuItem(title: "Languages", action: nil, keyEquivalent: "")
         languagesItem.submenu = menu
         return languagesItem
     }
 
     @objc private func automatic() { languages = [] }
+
+    /// F41's translator; nil before macOS 15. A seam, so tests reach neither the framework nor a window.
+    var translator: Translator? = Translate.onDevice
+
+    @objc private func toggleTranslate() {
+        UserDefaults.standard.set(!UserDefaults.standard.bool(forKey: Translate.key), forKey: Translate.key)
+    }
+
+    @objc private func clickedDownload(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String else { return }
+        downloadTranslation(code)
+    }
+
+    /// The Download item: the system asks the user, then 🤫 says how it went. Never during a dictation.
+    @discardableResult
+    func downloadTranslation(_ language: String) -> Task<Void, Never>? {
+        guard let translator else { return nil }
+        return Task { notice(await translator.download(language)) }
+    }
 
     @objc private func toggle(_ sender: NSMenuItem) {
         guard let code = sender.representedObject as? String else { return }
