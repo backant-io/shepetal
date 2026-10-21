@@ -31,7 +31,9 @@ use windows::Win32::System::Registry::{
     RegCloseKey, RegEnumKeyExW, RegGetValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, KEY_READ,
     RRF_RT_REG_QWORD,
 };
-use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::System::SystemInformation::{
+    GetLocalTime, GetSystemTimeAsFileTime, GetTickCount64,
+};
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
 
 /// What [`watch`] reports.
@@ -131,7 +133,7 @@ const CONSENT_STORE: &str =
 /// One observation: the other apps using the mic or the camera, and the default device IDs. COM
 /// must be initialised on this thread.
 pub fn snapshot(own_exe: &Path) -> io::Result<Snapshot> {
-    let apps = in_use(&Hkcu(CONSENT_STORE.into()), own_exe)?;
+    let apps = in_use(&Hkcu(CONSENT_STORE.into()), own_exe, booted())?;
     let devices = unsafe {
         let en: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
         [eCapture, eRender].map(|flow| default_device_id(&en, flow))
@@ -140,6 +142,17 @@ pub fn snapshot(own_exe: &Path) -> io::Result<Snapshot> {
         apps,
         devices: devices.to_vec(),
     })
+}
+
+/// Now as a FILETIME, the ConsentStore's time format.
+fn now_filetime() -> u64 {
+    let t = unsafe { GetSystemTimeAsFileTime() };
+    (t.dwHighDateTime as u64) << 32 | t.dwLowDateTime as u64
+}
+
+/// When Windows booted, as a FILETIME: now less the uptime (ms, in 100 ns units).
+fn booted() -> u64 {
+    now_filetime().saturating_sub(unsafe { GetTickCount64() } * 10_000)
 }
 
 /// HKCU's keys under this path: the ConsentStore, or a scratch key in the test.
@@ -439,7 +452,7 @@ mod tests {
                 assert_eq!(r, ERROR_SUCCESS, "{key}");
             }
         };
-        let t = 134_000_000_000_000_000;
+        let t = now_filetime(); // after this boot, or in_use would take it for stale
         set(
             r"microphone\NonPackaged\C:#Program Files#Zoom#bin#Zoom.exe",
             t,
@@ -452,7 +465,8 @@ mod tests {
             t,
         );
         set(r"webcam\Microsoft.WindowsCamera_8wekyb3d8bbwe", t, 0);
-        let apps = in_use(&Hkcu(base.clone()), Path::new(r"C:\Shepetal\shepetal.exe"));
+        let own = Path::new(r"C:\Shepetal\shepetal.exe");
+        let apps = in_use(&Hkcu(base.clone()), own, booted());
         let gone = Hkcu(base.clone())
             .subkeys("no such key")
             .map_err(|e| e.to_string());

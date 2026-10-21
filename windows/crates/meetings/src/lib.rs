@@ -78,13 +78,22 @@ pub trait Registry {
 /// The apps using the mic or the camera now, by name, shepetal itself (`own_exe`) left out.
 /// Windows keeps a key per app under `microphone` and `webcam`: a packaged app's is its package
 /// family name, and a desktop app's, under `NonPackaged`, is its exe path with `#` for `\`.
-/// LastUsedTimeStop is 0 while the app uses the device, after a LastUsedTimeStart.
-pub fn in_use(reg: &impl Registry, own_exe: &Path) -> io::Result<Vec<String>> {
+/// LastUsedTimeStop is 0 while the app uses the device, after a LastUsedTimeStart. An entry
+/// that started before `booted` (a FILETIME) is stale, e.g. left by a power loss mid-call: its
+/// app is gone and it would hold one endless meeting.
+// ponytail: a clock corrected forward after boot (a late time sync) hides a mic taken before
+// the correction; allow a margin below `booted` if that shows up.
+pub fn in_use(reg: &impl Registry, own_exe: &Path, booted: u64) -> io::Result<Vec<String>> {
     let using = |key: &str| {
         reg.qword(key, "LastUsedTimeStop") == Some(0)
-            && reg.qword(key, "LastUsedTimeStart").is_some_and(|t| t > 0)
+            && reg
+                .qword(key, "LastUsedTimeStart")
+                .is_some_and(|t| t > booted)
     };
+    // Compared in the key's own form: `#` back to `\` loses any `#` in the real path.
     let own = own_exe.to_string_lossy();
+    let own = own.strip_prefix(r"\\?\").unwrap_or(&own);
+    let own = own.replace('\\', "#").to_lowercase();
     let mut apps = vec![];
     for device in ["microphone", "webcam"] {
         for key in reg.subkeys(device)? {
@@ -97,15 +106,12 @@ pub fn in_use(reg: &impl Registry, own_exe: &Path) -> io::Result<Vec<String>> {
                 continue;
             }
             for exe in reg.subkeys(&format!(r"{device}\NonPackaged"))? {
-                let path = exe.replace('#', r"\");
                 // The exact path, never the name: shepetal keeps its mic open the whole time it
                 // runs (the dictation pre-roll), and records meetings itself.
-                if path.eq_ignore_ascii_case(&own)
-                    || !using(&format!(r"{device}\NonPackaged\{exe}"))
-                {
+                if exe.to_lowercase() == own || !using(&format!(r"{device}\NonPackaged\{exe}")) {
                     continue;
                 }
-                let file = path.rsplit('\\').next().unwrap_or_default();
+                let file = exe.rsplit('#').next().unwrap_or_default();
                 let exe = file.to_ascii_lowercase().ends_with(".exe");
                 apps.push(file[..file.len() - if exe { 4 } else { 0 }].to_string());
             }
@@ -434,8 +440,9 @@ mod tests {
     }
 
     const SHEPETAL: &str = r"C:\Users\pavel\AppData\Local\Programs\Shepetal\shepetal.exe";
-    /// A FILETIME, in 100 ns units since 1601.
-    const T: Option<u64> = Some(134_000_000_000_000_000);
+    /// FILETIMEs, in 100 ns units since 1601: the last boot, and a use since.
+    const BOOT: u64 = 134_000_000_000_000_000;
+    const T: Option<u64> = Some(BOOT + 600_000_000);
 
     #[test]
     fn finds_desktop_and_packaged_apps_using_the_mic_or_camera_now() {
@@ -472,7 +479,7 @@ mod tests {
             ),
             (r"webcam\NonPackaged\C:#Tools#cam.exe", T, None),
         ]);
-        let apps = in_use(&reg, Path::new(SHEPETAL)).unwrap();
+        let apps = in_use(&reg, Path::new(SHEPETAL), BOOT).unwrap();
         assert_eq!(
             apps,
             ["MSTeams", "Zoom", "WindowsCamera"],
@@ -495,7 +502,10 @@ mod tests {
                 Some(0),
             ),
         ]);
-        assert_eq!(in_use(&reg, Path::new(SHEPETAL)).unwrap(), [] as [&str; 0]);
+        assert_eq!(
+            in_use(&reg, Path::new(SHEPETAL), BOOT).unwrap(),
+            [] as [&str; 0]
+        );
         // Not by name: another app called shepetal.exe, or one whose name holds it, counts.
         let reg = Fixture::new(&[
             (r"microphone\NonPackaged\D:#Other#shepetal.exe", T, Some(0)),
@@ -506,8 +516,58 @@ mod tests {
             ),
         ]);
         assert_eq!(
-            in_use(&reg, Path::new(SHEPETAL)).unwrap(),
+            in_use(&reg, Path::new(SHEPETAL), BOOT).unwrap(),
             ["shepetal-notes", "shepetal"]
+        );
+    }
+
+    #[test]
+    fn shepetal_never_counts_when_its_path_holds_a_hash_or_a_verbatim_prefix() {
+        // Windows allows `#` in a user name; its key then holds `#` both ways, so the key, not a
+        // path turned back from it, is what must match. Else shepetal's own mic would be a
+        // meeting from every launch on, and hold off every real one.
+        let own = r"C:\Users\Jo#1\AppData\Local\Programs\Shepetal\shepetal.exe";
+        let reg = Fixture::new(&[
+            (
+                r"microphone\NonPackaged\C:#Users#Jo#1#AppData#Local#Programs#Shepetal#shepetal.exe",
+                T,
+                Some(0),
+            ),
+            (
+                r"microphone\NonPackaged\D:#code#C##app#Zoom.exe",
+                T,
+                Some(0),
+            ),
+        ]);
+        assert_eq!(in_use(&reg, Path::new(own), BOOT).unwrap(), ["Zoom"]);
+        let verbatim = format!(r"\\?\{own}");
+        assert_eq!(in_use(&reg, Path::new(&verbatim), BOOT).unwrap(), ["Zoom"]);
+        // Non-ASCII letters in another case are the same path too.
+        let reg = Fixture::new(&[(
+            r"microphone\NonPackaged\C:#Users#ÖLAF#Shepetal#shepetal.exe",
+            T,
+            Some(0),
+        )]);
+        let own = Path::new(r"C:\Users\ölaf\Shepetal\shepetal.exe");
+        assert_eq!(in_use(&reg, own, BOOT).unwrap(), [] as [&str; 0]);
+    }
+
+    #[test]
+    fn a_use_left_over_from_before_this_boot_is_not_a_meeting() {
+        // A power loss mid-call leaves LastUsedTimeStop at 0 for an app that no longer runs.
+        // Counted, it would be one endless meeting, and no real call would get a card.
+        let reg = Fixture::new(&[
+            (
+                r"microphone\NonPackaged\C:#Zoom#Zoom.exe",
+                Some(BOOT - 1),
+                Some(0),
+            ),
+            (r"webcam\MSTeams_8wekyb3d8bbwe", Some(BOOT - 1), Some(0)),
+            (r"microphone\NonPackaged\C:#Discord#Discord.exe", T, Some(0)),
+        ]);
+        assert_eq!(
+            in_use(&reg, Path::new(SHEPETAL), BOOT).unwrap(),
+            ["Discord"]
         );
     }
 
@@ -515,7 +575,10 @@ mod tests {
     fn no_consent_store_keys_means_no_app() {
         // A PC where no app ever used the camera has no webcam key.
         let reg = Fixture::new(&[]);
-        assert_eq!(in_use(&reg, Path::new(SHEPETAL)).unwrap(), [] as [&str; 0]);
+        assert_eq!(
+            in_use(&reg, Path::new(SHEPETAL), BOOT).unwrap(),
+            [] as [&str; 0]
+        );
     }
 
     #[test]
