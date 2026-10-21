@@ -151,8 +151,14 @@ final class ParakeetEngine: SpeechEngine {
         return engine
     }
 
+    /// FluidAudio deletes a model folder it cannot load and downloads it again on its own, unless its offline
+    /// mode is on (#78). main.swift turns it on before anything loads; only `download()` lifts it.
+    static func stayOffline() { ModelHub.offlineMode = true }
+
     /// User action only: about 470 MB from Hugging Face into FluidAudio's cache.
     static func download() async throws {
+        ModelHub.offlineMode = false
+        defer { stayOffline() }
         _ = try await AsrModels.download(version: .v3)
     }
 

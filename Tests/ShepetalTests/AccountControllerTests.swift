@@ -236,6 +236,24 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertEqual(titles(a), ["Yours forever · a@example.com", "Sign out"])
     }
 
+    /// Bought, then Buy pressed again before the re-check ran: the service answers 409 already_active.
+    /// The user must see "Yours forever", not "Checkout failed", and no second checkout page opens.
+    func testBuyWhenAlreadyBoughtChecksAndShowsYoursForever() async throws {
+        try tokens.write("tok-1")
+        var status = "trial"
+        server.handler = { [unowned self] r in
+            r.path == "/api/checkout" ? (409, ["error": "already_active"]) : license(status, endsIn: 5 * day)
+        }
+        let a = account()
+        try await until("checked at launch") { a.access == .trial(daysLeft: 5) }
+        status = "active"  // paid in the browser a moment ago
+        a.buy()
+        try await until("re-checked after the 409") { a.access == .lifetime }
+        XCTAssertEqual(a.message, "")
+        XCTAssertTrue(opened.isEmpty)
+        XCTAssertEqual(titles(a), ["Yours forever · a@example.com", "Sign out"])
+    }
+
     func testCheckoutWithARevokedTokenSignsOut() async throws {
         try tokens.write("tok-1")
         server.handler = { [unowned self] r in r.path == "/api/checkout" ? (401, ["error": "unauthorized"]) : license("expired", endsIn: -day) }

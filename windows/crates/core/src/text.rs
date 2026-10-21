@@ -233,6 +233,290 @@ fn tidy_spaces(s: &str) -> String {
     out
 }
 
+/// Spoken dates become numbers (docs/text-rules.md): "the twenty sixth of July twenty twenty-six" is
+/// "26.07.26" and "26. Juni" is "26.06.", in English and German at once. Runs on the cleaned text. No
+/// platform had a number-word parser, so the small one below is the first.
+pub fn dates(text: &str) -> String {
+    let w = Words::new(text);
+    let mut out = String::new();
+    let (mut copied, mut i) = (0, 0);
+    while i < w.at.len() {
+        match w.date(i) {
+            Some((date, next, end)) => {
+                out.push_str(&text[copied..w.at[i].0]);
+                out.push_str(&date);
+                copied = end;
+                i = next;
+            }
+            None => i += 1,
+        }
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+const MONTHS: [&str; 12] =
+    ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+const MONATE: [&str; 12] =
+    ["januar", "februar", "märz", "april", "mai", "juni", "juli", "august", "september", "oktober", "november", "dezember"];
+const UNITS: [&str; 9] = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"];
+const TEENS: [&str; 10] = ["ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
+const TENS: [&str; 8] = ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
+const ORDINALS: [&str; 19] = [
+    "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth", "eleventh", "twelfth",
+    "thirteenth", "fourteenth", "fifteenth", "sixteenth", "seventeenth", "eighteenth", "nineteenth",
+];
+const EINER: [&str; 9] = ["ein", "zwei", "drei", "vier", "fünf", "sechs", "sieben", "acht", "neun"];
+const ZEHNER: [&str; 10] =
+    ["zehn", "elf", "zwölf", "dreizehn", "vierzehn", "fünfzehn", "sechzehn", "siebzehn", "achtzehn", "neunzehn"];
+const ZIGER: [&str; 8] = ["zwanzig", "dreißig", "vierzig", "fünfzig", "sechzig", "siebzig", "achtzig", "neunzig"];
+const ORDNUNG: [&str; 9] = ["erst", "zweit", "dritt", "viert", "fünft", "sechst", "siebt", "acht", "neunt"];
+
+/// 1 for the first entry of `list`.
+fn pos(list: &[&str], w: &str) -> Option<u32> {
+    list.iter().position(|x| *x == w).map(|i| i as u32 + 1)
+}
+
+fn month(w: &str) -> Option<u32> {
+    pos(&MONTHS, w).or_else(|| pos(&MONATE, w))
+}
+
+/// English 1 to 99: "six", "twelve", "twenty six".
+fn en_number(p: &str) -> Option<u32> {
+    let tens = |t| pos(&TENS, t).map(|i| i * 10 + 10);
+    match p.split_once(' ') {
+        Some((t, u)) => Some(tens(t)? + pos(&UNITS, u)?),
+        None => pos(&UNITS, p).or_else(|| pos(&TEENS, p).map(|i| i + 9)).or_else(|| tens(p)),
+    }
+}
+
+/// English day 1 to 31: "first", "twentieth", "twenty sixth".
+fn en_ordinal(p: &str) -> Option<u32> {
+    match p.split_once(' ') {
+        Some(("twenty", u)) => pos(&ORDINALS[..9], u).map(|i| i + 20),
+        Some(("thirty", "first")) => Some(31),
+        Some(_) => None,
+        None => pos(&ORDINALS, p).or(match p {
+            "twentieth" => Some(20),
+            "thirtieth" => Some(30),
+            _ => None,
+        }),
+    }
+}
+
+/// German 1 to 99 as one word: "eins", "zwölf", "sechsundzwanzig".
+fn de_number(w: &str) -> Option<u32> {
+    let tens = |t| pos(&ZIGER, t).map(|i| i * 10 + 10);
+    match w.split_once("und") {
+        Some((e, z)) => Some(tens(z)? + pos(&EINER, e)?),
+        None if w == "eins" => Some(1),
+        None => pos(&EINER, w).or_else(|| pos(&ZEHNER, w).map(|i| i + 9)).or_else(|| tens(w)),
+    }
+}
+
+/// German day as one word with its ending: "erste", "siebten", "zwölfter", "sechsundzwanzigsten".
+fn de_ordinal(w: &str) -> Option<u32> {
+    let stem = ["er", "en", "es", "em", "e"].iter().find_map(|e| w.strip_suffix(e))?;
+    if stem == "siebent" {
+        return Some(7);
+    }
+    pos(&ORDNUNG, stem)
+        .or_else(|| stem.strip_suffix('t').and_then(|s| pos(&ZEHNER, s)).map(|i| i + 9))
+        .or_else(|| stem.strip_suffix("st").and_then(de_number).filter(|v| *v >= 20))
+}
+
+/// zweitausend, zweitausendsechsundzwanzig, zweitausend sechsundzwanzig, zweitausendundfünf, neunzehnhundert...
+fn de_year(p: &str) -> Option<u32> {
+    let all: String = p.split(' ').collect();
+    let rest = all.strip_prefix("zweitausend").or_else(|| all.strip_prefix("neunzehnhundert"))?;
+    if rest.is_empty() {
+        return Some(0);
+    }
+    de_number(rest.strip_prefix("und").unwrap_or(rest))
+}
+
+/// "26", "26th" or "1st": the day, and whether it is bare digits (only those take the German "26.").
+fn digit_day(w: &str) -> Option<(u32, bool)> {
+    let n = w.find(|c: char| !c.is_ascii_digit()).unwrap_or(w.len());
+    if !(1..=2).contains(&n) || !["", "st", "nd", "rd", "th"].contains(&&w[n..]) {
+        return None;
+    }
+    Some((w[..n].parse().ok()?, n == w.len()))
+}
+
+fn digits(w: &str, n: usize) -> Option<u32> {
+    (w.len() == n && w.bytes().all(|b| b.is_ascii_digit())).then(|| w.parse().ok())?
+}
+
+/// A date found at a word: its numbers, the word after it, and the byte where it ends.
+type Found = (String, usize, usize);
+
+/// The text as words (runs of `is_word`) and what is between them.
+struct Words<'a> {
+    text: &'a str,
+    at: Vec<(usize, usize)>,
+}
+
+impl<'a> Words<'a> {
+    fn new(text: &'a str) -> Self {
+        let mut at = vec![];
+        let mut i = 0;
+        while let Some(c) = text[i..].chars().next() {
+            match run(&text[i..], is_word) {
+                0 => i += c.len_utf8(),
+                n => {
+                    at.push((i, i + n));
+                    i += n;
+                }
+            }
+        }
+        Words { text, at }
+    }
+
+    /// Word `i` in lowercase, with ae, oe, ue and ss read as ä, ö, ü and ß; "" past the end.
+    fn word(&self, i: usize) -> String {
+        self.at.get(i).map_or(String::new(), |&(a, b)| {
+            self.text[a..b].to_lowercase().replace("ae", "ä").replace("oe", "ö").replace("ue", "ü").replace("ss", "ß")
+        })
+    }
+
+    /// The text after word `i` up to the next word, or to the end after the last one.
+    fn gap(&self, i: usize) -> &str {
+        match self.at.get(i) {
+            Some(&(_, end)) => &self.text[end..self.at.get(i + 1).map_or(self.text.len(), |w| w.0)],
+            None => "",
+        }
+    }
+
+    /// A hyphen equals a space inside a spoken number.
+    fn spaced(&self, i: usize) -> bool {
+        matches!(self.gap(i), " " | "-")
+    }
+
+    /// The longest run of up to `max` spaced words from `i` that `f` reads: its value and length.
+    fn longest(&self, i: usize, max: usize, f: fn(&str) -> Option<u32>) -> Option<(u32, usize)> {
+        (1..=max).rev().find_map(|n| {
+            let spaced = i + n <= self.at.len() && (i..i + n - 1).all(|k| self.spaced(k));
+            let p = (i..i + n).map(|k| self.word(k)).collect::<Vec<_>>().join(" ");
+            spaced.then(|| f(&p).map(|v| (v, n)))?
+        })
+    }
+
+    fn date(&self, i: usize) -> Option<Found> {
+        if self.text[..self.at[i].0].ends_with('.') {
+            return None; // inside "26.07.26": already numbers
+        }
+        self.day_first(i).or_else(|| self.month_first(i))
+    }
+
+    /// `[the] DAY [of] MONTH [,] [YEAR]`
+    fn day_first(&self, i: usize) -> Option<Found> {
+        let the = self.word(i) == "the" && self.gap(i) == " ";
+        let d = i + usize::from(the);
+        // In "twenty ninth" the day is 29, never "ninth".
+        let tens_before = d > 0 && self.spaced(d - 1) && matches!(self.word(d - 1).as_str(), "twenty" | "thirty");
+        let spelled = self.longest(d, 2, en_ordinal).filter(|_| !tens_before);
+        let (day, n, bare) = match spelled.or_else(|| de_ordinal(&self.word(d)).map(|v| (v, 1))) {
+            Some((v, n)) => (v, n, false),
+            None => digit_day(&self.word(d)).map(|(v, bare)| (v, 1, bare))?,
+        };
+        let gap = self.gap(d + n - 1);
+        if gap != " " && !(bare && gap == ". ") {
+            return None;
+        }
+        let of = self.word(d + n) == "of" && self.gap(d + n) == " ";
+        let m = d + n + usize::from(of);
+        let mo = month(&self.word(m))?;
+        let year = self.year(m);
+        if of && year.is_none() && (day, mo) == (4, 7) {
+            return None; // "Happy Fourth of July!" is the holiday's name
+        }
+        self.found(day, mo, m, year)
+    }
+
+    /// `MONTH [the] DAY [,] [YEAR]`, with an English or digit day.
+    fn month_first(&self, i: usize) -> Option<Found> {
+        let mo = month(&self.word(i))?;
+        if mo == 5 && self.word(i) == "may" && &self.text[self.at[i].0..self.at[i].1] != "May" {
+            return None; // "you may first want to"
+        }
+        if self.gap(i) != " " {
+            return None;
+        }
+        let d = i + 1 + usize::from(self.word(i + 1) == "the" && self.gap(i + 1) == " ");
+        let (day, n) = self.longest(d, 2, en_ordinal).or_else(|| Some((digit_day(&self.word(d))?.0, 1)))?;
+        self.found(day, mo, d + n - 1, self.year(d + n - 1))
+    }
+
+    /// The year after word `last` (a comma between is fine): its last two digits, the full year and the
+    /// word after it.
+    fn year(&self, last: usize) -> Option<(u32, u32, usize)> {
+        if !matches!(self.gap(last), " " | ", ") {
+            return None;
+        }
+        let y = last + 1;
+        let w = self.word(y);
+        if let Some(v) = digits(&w, 4) {
+            return Some((v % 100, v, y + 1));
+        }
+        let century = if w.starts_with("nineteen") || w.starts_with("neunzehn") { 1900 } else { 2000 };
+        let (yy, n) = self.spoken_year(y, &w)?;
+        Some((yy, century + yy, y + n))
+    }
+
+    /// A spelled or two-digit year at word `y` (`w`): its last two digits and its length in words.
+    fn spoken_year(&self, y: usize, w: &str) -> Option<(u32, usize)> {
+        // twenty twenty-six, nineteen ninety nine, twenty oh nine
+        if (w == "twenty" || w == "nineteen") && self.spaced(y) {
+            if self.word(y + 1) == "oh" && self.spaced(y + 1) {
+                if let Some(u) = pos(&UNITS, &self.word(y + 2)) {
+                    return Some((u, 3));
+                }
+            }
+            if let Some((v, n)) = self.longest(y + 1, 2, en_number).filter(|(v, _)| *v >= 10) {
+                return Some((v, 1 + n));
+            }
+        }
+        // two thousand, two thousand five, two thousand and twenty six
+        if w == "two" && self.spaced(y) && self.word(y + 1) == "thousand" {
+            let and = usize::from(self.spaced(y + 1) && self.word(y + 2) == "and" && self.spaced(y + 2));
+            let more = if self.spaced(y + 1) { self.longest(y + 2 + and, 2, en_number) } else { None };
+            return Some(more.map_or((0, 2), |(v, n)| (v, 2 + and + n)));
+        }
+        if let Some(found) = self.longest(y, 3, de_year) {
+            return Some(found);
+        }
+        // A short year (26, twenty six, sechsundzwanzig) only before punctuation or the end: in "July fourth
+        // twenty six people came" it is a count.
+        let (v, n) = match digits(w, 2) {
+            Some(v) => (v, 1),
+            None => self.longest(y, 2, en_number).or_else(|| de_number(w).map(|v| (v, 1))).filter(|(v, _)| *v >= 10)?,
+        };
+        let ends = self.gap(y + n - 1).chars().next().is_none_or(|c| ".,;:!?)".contains(c));
+        ends.then_some((v, n))
+    }
+
+    /// The date as numbers if it exists, from its fields and its last word before the year.
+    fn found(&self, day: u32, mo: u32, last: usize, year: Option<(u32, u32, usize)>) -> Option<Found> {
+        let leap = |y: u32| y.is_multiple_of(4) && (!y.is_multiple_of(100) || y.is_multiple_of(400));
+        let feb = match year {
+            Some((_, full, _)) if !leap(full) => 28,
+            _ => 29,
+        };
+        if day < 1 || day > [31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo as usize - 1] {
+            return None;
+        }
+        Some(match year {
+            Some((yy, _, next)) => (format!("{day:02}.{mo:02}.{yy:02}"), next, self.at[next - 1].1),
+            // A "." right after "DD.MM." is the date's own dot.
+            None => {
+                let end = self.at[last].1;
+                (format!("{day:02}.{mo:02}."), last + 1, end + usize::from(self.text[end..].starts_with('.')))
+            }
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -415,5 +699,26 @@ mod tests {
         assert_eq!(cleanup("the theme and android"), "the theme and android", "a stutter is a whole word");
         assert_eq!(cleanup("Hm, ok"), "Hm, ok", "hmm+ needs two m's");
         assert_eq!(cleanup("one\ntwo  \n three"), "one\ntwo three", "a single newline stays, a run becomes one space");
+    }
+
+    // Pavel: spoken dates are written DD.MM.YY. The vectors are shared with the Mac and Linux, so a case
+    // added to the file is enforced here without touching this test.
+    #[test]
+    fn dates_match_the_shared_vectors() {
+        let json = include_str!("../../../../Tests/fixtures/text-rules/dates.json");
+        let cases: Vec<serde_json::Value> = serde_json::from_str(json).expect("dates.json is a JSON array");
+        assert!(cases.len() >= 80, "dates.json holds {} cases, want at least 80", cases.len());
+        let mut failed = vec![];
+        for c in &cases {
+            let (input, expected, note) = (c["input"].as_str().unwrap(), c["expected"].as_str().unwrap(), &c["note"]);
+            let (got, again) = (dates(input), dates(expected));
+            if got != expected {
+                failed.push(format!("{input:?} gave {got:?}, want {expected:?} ({note})"));
+            }
+            if again != expected {
+                failed.push(format!("{expected:?} changed on a second run to {again:?} ({note})"));
+            }
+        }
+        assert!(failed.is_empty(), "{} of {} date cases failed:\n{}", failed.len(), cases.len(), failed.join("\n"));
     }
 }

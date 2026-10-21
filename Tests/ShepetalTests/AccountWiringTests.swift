@@ -21,11 +21,11 @@ final class AccountWiringTests: XCTestCase {
 
     func testFnIsGatedBeforeTheGestureRuns() throws {
         let src = try app()
-        let fn = try XCTUnwrap(src.range(of: "private func fn(_ down: Bool, at t: TimeInterval) {"))
-        let body = String(src[fn.upperBound...].prefix(600))
-        let gate = try XCTUnwrap(body.range(of: "if down, dictation?.gesture.state == .idle, !Account.shared.allowFnDown() { return }"),
-                                 "the fn gate is gone from fn(_:at:)")
-        let run = try XCTUnwrap(body.range(of: "run { down ? $0.fnDown(at: t) : $0.fnUp(at: t) }"))
+        let fn = try XCTUnwrap(src.range(of: "private func key(_ input: KeyInput, at t: TimeInterval) {"))
+        let body = String(src[fn.upperBound...].prefix(1500))
+        let gate = try XCTUnwrap(body.range(of: "case .pttDown where idle && !Account.shared.allowFnDown(), .toggle where idle && !Account.shared.allowFnDown():"),
+                                 "the fn gate is gone from key(_:at:)")
+        let run = try XCTUnwrap(body.range(of: "run { $0.handle(input, at: t) }"))
         XCTAssertLessThan(gate.lowerBound, run.lowerBound, "the gate must come before the gesture")
     }
 

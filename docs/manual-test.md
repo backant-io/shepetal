@@ -12,7 +12,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. In System Settings > Keyboard, set "Press 🌐 key to" to Change Input Source (to see the installer fix it).
 2. Download `Shepetal-<version>.pkg` from the release and open it (right-click › Open, or Privacy & Security › Open Anyway if macOS blocks it). Click Continue, Install, enter your password.
 3. Expected: when the installer finishes, Shepetal opens by itself: no Dock icon, 🤫 in the menu bar and, tiny, in the bottom-left corner. The permissions window opens.
-4. Expected: System Settings > Keyboard shows "Press 🌐 key to: Do Nothing" (reopen the pane), and pressing fn no longer switches the input source. System Settings > General > Login Items & Extensions lists Shepetal under Open at Login, and the 🤫 menu shows Start at login checked.
+4. Expected: System Settings > Keyboard shows "Press 🌐 key to: Do Nothing" (reopen the pane), and pressing fn no longer switches the input source. System Settings > General > Login Items & Extensions lists Shepetal under Open at Login, and the 🤫 menu shows Start at login checked. At this first launch "🌐 key set to Do Nothing so fn can dictate" shows next to 🤫 for a few seconds, once.
 5. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅ and the 🤫 menu's first line reads "Hold fn to talk, double-tap for hands-free".
 6. Click into any text field, hold fn, say a sentence, release. Expected: the sentence is typed there.
 
@@ -88,6 +88,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-INS-1: TextEdit
 1. Type "Please" in a TextEdit document, leave the cursor right after it, then hold fn and say "Send the report today."
 2. Expected: "Please send the report today." The text starts with a space and a lowercase "send".
+3. If it goes in as dictated instead ("Please" then "Send the report today." with its capital), Shepetal could not read the field. Run `log stream --predicate 'eventMessage CONTAINS "shepetal: context"'` in Terminal, dictate again, and write down the line it prints (`shepetal: context: <attribute> unreadable (AX <code>), text goes in as dictated`). It never shows your text.
 
 ### M-INS-2: Slack
 1. Click into a Slack message box (desktop app). Hold fn, say a sentence, then release.
@@ -112,6 +113,49 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. In the 🤫 menu choose Recordings > Delete recordings after 24 hours.
 2. Expected: recordings older than 24 h are gone from the recordings folder right away. Newer ones stay. (The timing itself is covered by `StorageTests.testRetention24hDeletesOnTime`.)
 3. Meetings follow the same choice. Record a short meeting (M-MTG-1, or start and stop one by hand) and leave Shepetal running. Expected about 25 h later: its folder (Me.wav, Others.wav) is gone from `~/Library/Application Support/Shepetal/meetings/`, but the meeting is still in Meetings with its transcript and summary, and search still finds it. Only the audio is deleted, as with dictation. A meeting recorded in the last 24 h keeps its folder, and so does one that is still recording. (The timing is covered by `MeetingStoreTests.testRetentionDeletesOnlyTheAudioOfMeetingsEndedOver24hAgoButNeverOfTheOneRecording`.)
+
+### M-ESC-1: Esc cancels and keeps the audio
+1. In TextEdit choose File > Open… so a dialog is open. Hold fn, say a sentence, and press Esc while still holding fn. Release fn.
+2. Expected: nothing is inserted, the ring goes away, and "Cancelled" shows next to 🤫 for about 2 s. The Open dialog is still open, because Shepetal kept that Esc from the app (with Accessibility on).
+3. Double-tap fn for hands-free, say a sentence, press Esc. Expected: the same.
+4. With nothing recording, press Esc. Expected: the Open dialog closes, because an idle Esc reaches the app.
+5. Expected: Recent in the 🤫 menu has a "(cancelled)" entry for steps 1 and 3, and each has a WAV in Open recordings folder.
+
+### M-ESC-2: Esc while transcribing
+1. Double-tap fn in TextEdit and talk for about a minute (a longer recording takes longer to transcribe). Tap fn and press Esc right after it, while the ring pulses blue.
+2. Expected: nothing is inserted and "Cancelled" shows. Recent has the entry with its text, marked cancelled in `history.sqlite` (`sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite "select outcome, text from history order by created_at desc limit 1"`). If the text was already inserted, Esc came too late. Try again with a longer recording.
+
+### M-KEY-1: fn+Space hands-free toggle
+1. In TextEdit, with nothing recording, press fn+Space (fn first) and release both. Expected: the ring turns orange and stays. No space character is typed.
+2. Speak a sentence, then press fn+Space again. Expected: the text is inserted, again without an extra space.
+3. Press fn+Space, then press it again within half a second. Expected: the recording is thrown away. Nothing is inserted, and Recent has a "(cancelled)" entry.
+
+### M-KEY-2: hold fn, then add Space
+1. In TextEdit hold fn and start speaking. Still holding fn, press Space, then release both.
+2. Expected: the ring turns from red to orange and recording goes on. No space is typed.
+3. Tap fn once. Expected: the whole dictation is inserted.
+
+### M-KEY-3: Shortcuts window
+1. In the 🤫 menu choose Shortcuts…. Expected: hold to talk fn, hands-free fn Space, cancel Esc, paste last ⌃ ⌘ V, copy last ⌃ ⌘ C.
+2. Click Change… next to Paste last text and press ⌘Tab. Expected: "⌘ Tab: macOS or most apps already use these keys." and the chord stays ⌃ ⌘ V.
+3. Click Change… again and press A alone, then ⌘ with both Command keys plus A, then fn. Expected, in turn: "Add fn, ⌃, ⌥, ⇧, ⌘ or a mouse button.", "Use one side of a modifier, not both.", "Another action already uses these keys."
+4. Click Change… and press ⌃⌥P. Expected: the row shows ⌃ ⌥ P. Quit and reopen Shepetal. Expected: still ⌃ ⌥ P, and ⌃⌥P now pastes the last text.
+5. With a mouse that has side buttons: Change… for Hold to talk, press mouse button 4. Expected: "Mouse 4". Holding it records, releasing inserts, and the browser does not go back a page.
+6. Click Reset to defaults. Expected: the defaults from step 1.
+7. Turn Accessibility off for Shepetal and reopen the window. Expected: the note says that Esc and the keys of a shortcut also reach the app. Turn it back on.
+
+### M-LEN-1: maximum length
+1. Run `defaults write io.backant.shepetal maxDictationMinutes -int 2` and restart Shepetal.
+2. In TextEdit double-tap fn and keep talking (or let it run).
+3. Expected: after 1 minute "1 minute left" shows next to 🤫. After 2 minutes the recording stops by itself and the text is inserted as if you had tapped fn.
+4. Run `defaults delete io.backant.shepetal maxDictationMinutes` and restart. The cap is back to 20 minutes, with the warning at 19.
+
+### M-LAST-1: paste last and copy last
+1. Open Activity Monitor and click its process list. Hold fn, say a sentence, release (the paste does not land, as in M-INS-4).
+2. Click into a TextEdit document and press ⌃⌘V. Expected: the sentence is inserted, and no "v" is typed.
+3. Copy some other text with ⌘C, then press ⌃⌘C and paste with ⌘V. Expected: the sentence again.
+4. Tap fn once briefly (too short) and wait for the hint to go away, then press ⌃⌘V. Expected: still the same sentence, because entries without text are skipped.
+5. The 🤫 menu's "Paste last text" and "Copy last text" do the same.
 
 ### M-MIC-1: choosing the mic
 1. Plug in a USB or Bluetooth mic you have never used with Shepetal. Expected: "New mic: <its name>" shows next to 🤫. Unplug and plug it in again: nothing shows.
@@ -157,6 +201,13 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Select "today." including its period. Hold fn and say "Tomorrow". Expected: "Send the final version tomorrow." with the period kept.
 4. Select " version " with the spaces on both sides. Say "copy". Expected: "Send the final copy tomorrow." with no double or missing spaces.
 
+### M-INS-7: a dictation in the middle of a sentence (F109)
+1. In TextEdit type "I met John today." and put the cursor right before "John". Hold fn, say "Yesterday.", then release.
+2. Expected: "I met yesterday John today." The dictation is lowercase, has no period, and has one space on each side.
+3. On a new line type "I went home." and put the cursor right before its period. Hold fn and say "Today." Expected: "I went home today." with one period.
+4. On a new line type "Hello. World." and put the cursor right before "World". Hold fn and say "Big news." Expected: "Hello. Big news. World." Between two sentences the dictation keeps its capital and its period.
+5. On a new line type "Please" and leave the cursor after it. Hold fn and say "Send it to John at NASA." Expected: "Please send it to John at NASA." Only the first letter is lowercased.
+
 ### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
 1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
 2. Click into a Notes note, then tap fn once to stop.
@@ -188,7 +239,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-HUB-1: open the Shepetal window
 1. Before you install this build, run `sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite 'select count(*) from history'` and note the number. Install and open the new build. Run the command again. Expected: the same number. (`HistoryTests.testOldDatabaseUpgradesWithoutLosingRows` checks this on a copy of the old schema.)
 2. With all three permissions granted, quit Shepetal and open it again from Finder or Spotlight. Expected: only 🤫 appears. No Shepetal window opens.
-3. Open the 🤫 menu and choose Open Shepetal…. Expected: a window titled "Shepetal" with Home, History and Settings tabs comes to the front.
+3. Open the 🤫 menu and choose Open Shepetal…. Expected: a window titled "Shepetal" with Home, History, Meetings and Settings tabs comes to the front.
 4. Close it. Open `dist/Shepetal.app` again (Finder, Spotlight or `open dist/Shepetal.app`). Expected: the same window opens. No second 🤫 appears.
 5. Home: expected rows for speech recognition ("On-device speech recognition (standard engine)", no model name), the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
 
@@ -221,7 +272,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 4. With Chrome in front on a heavy page (a long GitHub pull request), tap fn quickly five times, waiting 2 s after each tap. Expected: each tap shows the short-press hint and nothing is inserted. The page-URL lookup runs off the main thread, so a slow page must not turn a tap into a hold.
 
 ### M-MTG-1: Zoom call, detected, recorded after one click, and transcribed (rule 7)
-Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic). Open Shepetal… > Settings: "Always record meetings automatically" is off (the default).
+Setup: quit Shepetal, run `scripts/make-app.sh --install` from main, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic). Open Shepetal… > Settings: "Always record meetings automatically" is off (the default).
 1. Start or join a Zoom meeting in the zoom.us app, with your mic unmuted. Click into Zoom's chat box.
 2. Expected about 5 s after Zoom opens the mic: a small card just above the 🤫 in the bottom-left corner says "Meeting detected · Zoom", with Record and Not now. Nothing records yet: 🤫 has no red ring, the menu bar shows "🤫", and the 🤫 menu shows "Start meeting recording".
 3. Click Record. Expected: the card goes away, and typing still goes into Zoom's chat box (the click did not take focus or bring Shepetal forward). "Meeting detected · recording" shows next to 🤫, 🤫 gets a red ring that stays for the whole meeting, the menu bar shows "🤫●", and the 🤫 menu shows "Stop meeting recording". The first time, macOS asks whether Shepetal may record system audio: allow it. If the hint says "… mic only (turn on System Audio Recording)", add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, then leave and rejoin the call.
@@ -251,6 +302,21 @@ Setup: quit Shepetal, run `scripts/make-app.sh --install` from this branch, and 
 ### M-MTG-5: killed during a meeting (#100)
 1. Start a meeting recording and talk for about 20 s. Then, in Terminal, run `pkill -9 -x Shepetal`, as a crash would end it.
 2. Run `afinfo ~/Library/Application\ Support/Shepetal/meetings/<newest>/Me.wav` (and `Others.wav` if it is there). Expected: `estimated duration` is about 20 s, not 0. Both files play in QuickTime up to the kill.
+
+### M-MTG-6: mic only, without System Audio Recording (F65)
+Setup: as in M-MTG-1, but wear headphones so the Mac's mic does not hear the other side.
+1. In System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, turn Shepetal off (switch it off, do not remove it). Quit Shepetal and open it again.
+2. Join a Zoom meeting and click Record on the card. Expected: macOS does not ask about system audio. "Meeting detected · recording mic only (turn on System Audio Recording)" shows next to 🤫, and the red ring, "🤫●" and "Stop meeting recording" show as in M-MTG-1 step 3.
+3. Say a sentence, have the other side say one, then leave the meeting. Expected within about 5 s: "Meeting recording saved", then "Meeting notes ready · open Shepetal → Meetings". The meeting's transcript has only Me lines, and none of what the other side said.
+4. Run `ls -la ~/Library/Application\ Support/Shepetal/meetings/<newest>/`. Expected: only `Me.wav` (`-rw-------`), no `Others.wav`.
+5. Turn Shepetal back on under System Audio Recording Only, quit and reopen Shepetal, and record another meeting. Expected: the hint has no "mic only", and the new folder holds both `Me.wav` and `Others.wav`.
+
+### M-MTG-7: Microsoft Teams and a Slack huddle (F66)
+Setup: as in M-MTG-1. For steps 2 and 3, Shepetal needs screen recording access as in M-MTG-2 step 1, because a huddle is found by its Slack window title (#145).
+1. Join a call in the Microsoft Teams app with the mic on. Expected about 5 s after Teams opens the mic: the card says "Meeting detected · Microsoft Teams". Click Record, talk for at least 15 s (no meeting ends sooner), then leave the call. Expected about 4 s later: "Meeting recording saved", the red ring goes away, and Meetings lists the meeting as "Microsoft Teams".
+2. In the Slack app, start a huddle with someone. Expected about 5 s after the huddle opens the mic: "Meeting detected · Slack". Click Record, talk for at least 15 s, then leave the huddle. Expected: "Meeting recording saved" about 4 s after no Slack window title says "huddle" any more (up to about 30 s while one still does), and Meetings lists the meeting as "Slack".
+3. In a Slack message box, record an audio clip without a huddle. Expected: no card, and nothing records.
+4. Turn screen recording access off for Shepetal, quit and reopen it, and start a huddle again. Expected: no card. 🤫 > Start meeting recording still records it by hand, listed as "Manual"; stop it from the menu.
 
 ### M-ACC-1: first launch, sign-in and the free trial
 Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
@@ -394,7 +460,7 @@ The only field signal a keyboard gets is `documentIdentifier`. This step checks 
 
 ## Meetings
 
-The Mac `meeting/` CLI on its own. The Mac app does not use it yet (#16). Build it with `cd meeting && swift build`, and run the commands from `meeting/`. Expected output lines are quoted as the CLI prints them.
+The Mac `meeting/` CLI on its own. The Mac app uses the same detector and capture (M-MTG-1 to M-MTG-7). Build it with `cd meeting && swift build`, and run the commands from `meeting/`. Expected output lines are quoted as the CLI prints them.
 
 ### MEET-1: probe
 1. Quit every app that uses the mic. Run `.build/debug/shepetal-meeting probe`.
@@ -432,9 +498,9 @@ The Mac `meeting/` CLI on its own. The Mac app does not use it yet (#16). Build 
 
 ## Linux
 
-Setup: a real Ubuntu 24.04 desktop, not a VM without a keyboard of its own. Log in to each session from the gear at the bottom right of the login screen: "Ubuntu" is GNOME on Wayland (the default), "Ubuntu on Xorg" is X11, and "Plasma (Wayland)" is KDE once `sudo apt install kde-plasma-desktop` is installed (keep gdm3 when asked). `echo $XDG_SESSION_TYPE $XDG_CURRENT_DESKTOP` tells you which one you are in. The gesture and audio steps (L-FN, L-AUD) behave the same in every session because evdev sits below the display server, so run them once. The L-INS steps run once per session.
+Setup: a real Ubuntu 24.04 desktop, not a VM without a keyboard of its own. Log in to each session from the gear at the bottom right of the login screen: "Ubuntu" is GNOME on Wayland (the default), "Ubuntu on Xorg" is X11, and "Plasma (Wayland)" is KDE once `sudo apt install kde-plasma-desktop` is installed (keep gdm3 when asked). `echo $XDG_SESSION_TYPE $XDG_CURRENT_DESKTOP` tells you which one you are in. The key, audio and dictionary steps (L-FN, L-SC, L-AUD, L-MIC, L-VOC) behave the same in every session because evdev sits below the display server, so run them once. The L-INS, L-FOC and L-IND steps run once per session.
 
-What is not on main yet, so not tested here: the 🤫 indicator (#56; the short-press hint goes to the daemon's stderr), rule 8 focus checks (#58; text goes to whatever window has focus when it is ready), history (#67), Esc cancel in hands-free, retention, and meeting recording (detection only runs in `probe`). Keep the terminal that runs `shepetal daemon` visible: its stderr is the only feedback.
+What is not on main yet, so not tested here: history (#67), the 24 h retention setting (for meeting audio too, #141), and a live meeting transcript, meeting summaries and a meeting state in 🤫. Keep the terminal that runs `shepetal daemon` visible: 🤫 shows only a few words, and the full hints and errors go to its stderr.
 
 The automated part of every step runs with the Docker command in `linux/README.md` (`cargo test`). Test names below are the `#[test]` functions under `linux/src/`.
 
@@ -474,6 +540,13 @@ The automated part of every step runs with the Docker command in `linux/README.m
 4. With the laptop keyboard only (fn not visible, L-KEY-2), run `shepetal daemon` while ydotoold runs. Expected: it still exits with the "fn is not visible to Linux" message and does not start.
 (Automated: `daemon_waits_for_fn_only_on_keyboards_that_can_send_it`, which includes a fake ydotoold device that declares every key.)
 
+### L-SETUP-5: the 🤫 indicator
+1. `sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-3.0 gir1.2-gtklayershell-0.1 fonts-noto-color-emoji`
+2. In the clone's `linux` folder: `mkdir -p ~/.local/bin && ln -s "$PWD/indicator/shepetal-indicator" ~/.local/bin/`. If `~/.local/bin` is new, log out and back in so it is on PATH. Check that `command -v shepetal-indicator` prints it.
+3. For GNOME Wayland only, in the same folder: `cp -r gnome-extension ~/.local/share/gnome-shell/extensions/shepetal-indicator@backant.io`, log out and back in, then `gnome-extensions enable shepetal-indicator@backant.io`.
+4. `shepetal daemon`. Expected: a small 🤫 in the bottom-left corner of the screen. On GNOME Wayland the daemon also prints `shepetal: on GNOME Wayland 🤫 comes from the shepetal GNOME Shell extension (linux/gnome-extension/)`.
+(Automated: `socket_is_owner_only_in_a_private_runtime_dir`, `the_indicator_is_started_again_when_it_exits`.)
+
 ### L-KEY-1: fn visible on an Apple keyboard
 1. Connect an Apple keyboard (Magic Keyboard, USB or Bluetooth) and run `shepetal probe`.
 2. Expected: `fn key:    visible on /dev/input/eventN (<the keyboard's name, e.g. Apple Inc. Magic Keyboard>)`. Write down `cat /sys/module/hid_apple/parameters/fnmode` next to the result.
@@ -501,7 +574,7 @@ In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from
 2. Expected: the sentence is typed at the cursor, starting with "Testing" (recording starts on the press, so the first word is not cut off). The daemon prints no hint.
 3. Hold fn for about 5 s without pressing anything else, then release. Expected: one dictation, not several (key repeat is ignored).
 4. Tap fn briefly, wait about 1 s, then hold fn and speak. Expected: the first tap prints the hint (L-FN-3), and the hold is typed as in step 2.
-(Automated: `hold_of_500ms_is_push_to_talk`, `release_at_499ms_is_a_tap_not_a_stop`, `second_press_after_window_starts_fresh`, `evdev_key_values_become_gesture_events`, `a_key_event_is_stamped_when_it_arrives`, `dictation_keeps_the_audio_the_model_heard`.)
+(Automated: `hold_of_500ms_is_push_to_talk`, `release_at_499ms_is_a_tap_not_a_stop`, `second_press_after_window_starts_fresh`, `evdev_key_events_reach_the_shortcut_layer_as_is`, `hotkey_gestures_still_work_through_the_shortcut_layer`, `a_key_event_is_stamped_when_it_arrives`, `dictation_keeps_the_audio_the_model_heard`.)
 
 ### L-FN-2: double-tap for hands-free
 1. Tap fn twice quickly (the second press within half a second of releasing the first) and release.
@@ -522,9 +595,52 @@ In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from
 2. In a long document hold fn and press Left or Down arrow. Expected: the arrow does its fn action (Home or Page Down) or moves the cursor, nothing is typed, no hint, one more `.cancelled.wav`.
 3. Hold fn, say a few words, and press Esc while still holding. Expected: the same as step 1: Esc while the hotkey is down is a chord and cancels.
 4. Hold fn for about 2 s while speaking, then press Down arrow. Expected: also cancelled, nothing is typed. (Linux cancels at any point of the hold; the Mac only in the first second. Known gap in docs/linux.md.)
-5. Double-tap fn for hands-free, speak, and press Esc. Expected: nothing happens; the recording goes on, and fn types it. Esc cancel for hands-free is not built on Linux (F03).
+5. Double-tap fn for hands-free, speak, and press Esc. Expected: nothing is typed, and a new `<unix-ms>.cancelled.wav` is in the audio folder (L-SC-1).
 6. With both an Apple keyboard and the laptop keyboard: hold fn on the Apple keyboard and press a key on the laptop keyboard. Expected: no cancel, the hold is typed on release (only keyboards that can send the hotkey are read; known gap).
-(Automated: `chord_with_another_key_cancels`, `cancel_keeps_the_recording`.)
+(Automated: `chord_with_another_key_cancels`, `cancel_keeps_the_recording`, `esc_cancels_a_hold_a_double_tap_and_a_toggle`.)
+
+In the L-SC steps the shortcuts have their defaults: Esc cancels, Shift+Alt+Z is paste-last, Shift+Alt+X is copy-last and Ctrl+Meta+Space (Ctrl+Super+Space) is the hands-free key. No `~/.config/shepetal/config.json` exists until L-SC-5. shepetal reads the keys without grabbing them, so the focused app gets them too.
+
+### L-SC-1: Esc cancels a dictation
+1. Double-tap fn, say a sentence, wait 2 s, and press Esc. Expected: nothing is typed, 🤫 goes back to idle, and `ls ~/.local/share/shepetal/audio` shows a new `<unix-ms>.cancelled.wav`. `pw-play` it: you hear the sentence. The editor also gets the Esc.
+2. Press Ctrl+Meta+Space, speak, and press Esc. Expected: the same, with one more `.cancelled.wav`.
+3. Hold fn, speak, press Esc while still holding, then release fn. Expected: cancelled as in step 1, and the release starts nothing.
+(Automated: `esc_cancels_a_hold_a_double_tap_and_a_toggle`, `esc_in_the_daemon_cancels_and_keeps_the_audio`.)
+
+### L-SC-2: Esc with nothing recording
+1. With the daemon idle, open a dialog that closes on Esc (for example Open, Ctrl+O, in the Text Editor) and press Esc. Expected: the dialog closes, and the daemon's terminal shows nothing.
+2. Hold fn and dictate a sentence. Expected: it is typed as in L-FN-1.
+(Automated: `esc_with_nothing_recording_does_nothing`.)
+
+### L-SC-3: paste-last and copy-last
+1. Start the daemon and press Shift+Alt+Z before you dictate anything. Expected: nothing is typed, and next to 🤫 shows `Nothing dictated yet` (stderr: `shepetal: hint: Nothing dictated yet`). Shift+Alt+X gives the same.
+2. Dictate a sentence. Click into another text field and press Shift+Alt+Z. Expected: the same sentence is typed once you let go of all three keys.
+3. Press Shift+Alt+X, then Ctrl+V in a third field. Expected: the same sentence is pasted.
+4. Restart the daemon and press Shift+Alt+Z. Expected: `Nothing dictated yet` again. The last text lives only in the running daemon until history lands (#67).
+5. Write down whether the focused app also reacted to Shift+Alt+Z or Shift+Alt+X.
+(Automated: `paste_and_copy_last_fire_once_every_key_is_up`, `a_combo_needs_exactly_its_keys`, `defaults_are_wisprs_windows_keys`, `paste_last_and_copy_last_keys_repeat_the_last_dictation`.)
+
+### L-SC-4: the hands-free key
+1. Press Ctrl+Meta+Space, let go, and speak for about 10 s while typing a few words in the document. Expected: the orange ring from the press on, and the typing does not stop the recording. Press Ctrl+Meta+Space again. Expected: the spoken text is typed.
+2. Press Ctrl+Meta+Space twice quickly (the second press within half a second of the first). Expected: nothing is typed, and a new `.cancelled.wav` is in the audio folder.
+3. Press Ctrl+Meta+Space, speak, then press fn once. Expected: the text is typed, and no second recording starts (🤫 alone afterwards).
+4. Double-tap fn, speak, then press Ctrl+Meta+Space. Expected: the text is typed. Hold fn and speak: a new dictation, typed on release.
+5. Write down whether GNOME or KDE also reacted to Ctrl+Super+Space.
+(Automated: `hands_free_toggle_starts_stops_and_cancels`, `hands_free_is_reported_for_the_toggle_and_the_double_tap`, `the_hotkey_stops_a_toggled_dictation_without_starting_another`, `the_toggle_ends_a_double_tap_dictation`.)
+
+### L-SC-5: shortcut settings
+1. Put `{"shortcuts": {"paste_last": "z"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon; echo $?`. Expected: `shepetal: /home/<you>/.config/shepetal/config.json: paste_last: "z" needs a modifier: ctrl, alt, shift or meta` and `1`.
+2. With `{"shortcuts": {"paste_last": "ctrl+alt+shift+z"}}`. Expected: `... paste_last: "ctrl+alt+shift+z" has 4 keys, at most 3 are allowed` and `1`.
+3. With `{"shortcuts": {"hands_free": "shift+alt+z"}}`. Expected: `... hands_free: "shift+alt+z" is already paste_last` and `1`.
+4. With `{"shortcuts": {"paste_last": "ctrl+alt+v"}}` the daemon starts. Dictate a sentence and press Ctrl+Alt+V. Expected: the sentence is typed again, Shift+Alt+Z does nothing, and Shift+Alt+X still copies (a shortcut left out keeps its default).
+5. With `{"shortcuts": {"copy_last": "rightalt+x"}}`, run `SHEPETAL_KEY=rightalt shepetal daemon`. Expected: `... copy_last: "rightalt+x" uses rightalt, the dictation hotkey` and exit code 1. Remove the file and run `SHEPETAL_KEY=rightalt shepetal daemon` again. Dictate with Right Alt, then press Shift+Left Alt+Z. Expected: the sentence is typed again (a generic `alt` means Left Alt when Right Alt is the hotkey).
+6. Remove `~/.config/shepetal/config.json`.
+(Automated: `validation_rejects_what_wispr_rejects`, `combos_that_clash_with_the_hotkey_are_rejected`, `config_errors_name_the_shortcut_and_place`, `config_overrides_and_other_settings_are_skipped`, `config_file_location_and_missing_file`, `key_names_map_to_evdev_codes`.)
+
+### L-SC-6: 20-minute cap
+1. Start a hands-free dictation (double-tap fn or Ctrl+Meta+Space) and leave it running for 20 min, speaking now and then.
+2. Expected: at 19 min next to 🤫 shows `Recording stops in 1 minute` (stderr: `shepetal: hint: Recording stops in 1 minute`). At 20 min the recording stops by itself and the text is typed. Write down how long the text took after the stop: the whole clip goes to the model at once.
+(Automated: `warning_at_19_minutes_and_stop_at_20`, `a_20_minute_hold_stops_and_the_late_release_does_nothing`.)
 
 ### L-AUD-1: every recording is kept, owner-only
 1. After L-FN-1 to L-FN-4, run `stat -c '%a %U %n' ~/.local/share/shepetal/audio ~/.local/share/shepetal/audio/*`.
@@ -551,18 +667,83 @@ In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from
 2. Expected: the daemon exits with `shepetal: all input devices closed`, a new `.cancelled.wav` is in the audio folder, and `pgrep -a pw-record` prints nothing (the mic is released).
 (Automated: `losing_every_keyboard_mid_recording_stops_the_recorder`.)
 
+In the L-MIC steps a USB mic is plugged in (any external mic works). `command -v notify-send` must print a path (package `libnotify-bin`): the mic alerts are desktop notifications, and 🤫 shows a few words of each.
+
+### L-MIC-1: the ranked mic list
+1. With no `[mic]` section in `~/.config/shepetal/config.toml`, run `shepetal mics`. Expected: one line per mic, without monitors or echo-cancel sources. The first is marked `*` and `(desktop default)` and is the one `pactl get-default-source` names. The built-in mic is marked `(built-in)` and comes after the external mics unless it is the default. The last line names the config file.
+2. Put these two lines in `~/.config/shepetal/config.toml`: `[mic]` and `prefer = ["<part of the USB mic's name>"]`. Run `shepetal mics`. Expected: the USB mic is first, with `*` and `(preference #1 "<that text>")`.
+3. Start the daemon, double-tap fn and speak. In another terminal run `pgrep -a pw-record`. Expected: `--target <the USB mic's node name>`, the name `shepetal mics` prints after `[usb]` (`--device=` with parecord). Press fn: the text is typed. `pw-play` the newest clip: it is the USB mic's sound.
+(Automated: `pw_dump_lists_hardware_sources_only`, `pactl_json_skips_monitors`, `ranking_follows_the_users_list_then_default_external_builtin`, `config_reads_only_mic_prefer`, `records_from_the_picked_mic`, `mics_command_lists_in_rank_order`, `dictation_keeps_the_audio_the_model_heard`.)
+
+### L-MIC-2: a mic plugged in or out between dictations
+1. Keep the L-MIC-1 preference. Unplug the USB mic and run `shepetal mics`. Expected: the next mic is first with `*`.
+2. Dictate. Expected: on the press, next to 🤫 shows `Mic: <that mic's name> (the last one is gone)` (also on stderr), and the text is typed.
+3. Plug the USB mic back in and dictate. Expected: `Mic: <the USB mic's name> (ranked higher)`, and the clip is from the USB mic.
+4. Dictate once more. Expected: no `Mic:` hint.
+(Automated: `hot_plug_switches_at_the_next_record_start`.)
+
+### L-MIC-3: the mic unplugged mid-dictation
+1. Double-tap fn, say a sentence into the USB mic, and unplug it while still in hands-free.
+2. Expected: within about 2 s a notification `Mic disconnected: <mic>. Dictation stopped; what you said before is kept.`, `Mic disconnected` next to 🤫, and the sentence is typed without another press. `pgrep -a pw-record` prints nothing.
+3. Hold fn and speak. Expected: a new dictation on the next mic, typed on release (the press does not just end the old one).
+4. Press Shift+Alt+Z. Expected: the sentence from step 1 is typed again.
+(Automated: `unplugging_the_mic_mid_dictation_stops_with_an_alert`, `a_mic_unplugged_mid_dictation_ends_it_and_types_what_was_said`, `after_a_reset_the_next_press_starts_a_new_dictation`, `the_indicator_gets_a_few_words_and_no_device_name`.)
+
+### L-MIC-4: a silent mic
+1. Mute the mic marked `*` in `shepetal mics`: `pactl set-source-mute <its node name> 1`, or its hardware mute switch.
+2. Double-tap fn, wait about 7 s, then press fn. Expected: after about 5 s one notification `No sound from <mic>: it sends only silence. Check that it is not muted, or rank another one (shepetal mics).`, and `No sound from the mic` next to 🤫.
+3. Within a minute, do step 2 again. Expected: no second notification.
+4. `pactl set-source-mute <its node name> 0` and dictate in a whisper. Expected: no notification.
+(Automated: `no_audio_only_after_more_than_5_s_of_exact_zeros`, `health_reads_a_growing_wav_and_catches_a_dead_mic`, `wav_samples_start_after_the_data_chunk`, `alerts_are_rate_limited_per_kind`.)
+
+### L-MIC-5: lid closed
+1. On a laptop with an external display, keyboard and mic, put part of the built-in mic's name first in `prefer`, then close the lid. `cat /proc/acpi/button/lid/*/state`. Expected: `state: closed`. If there is no such file, write down the laptop model: the lid is then not seen (known gap in docs/linux-mic.md).
+2. `shepetal mics`. Expected: the built-in mic is last, marked `built-in, lid closed: last resort`, though it is preferred.
+3. Dictate. Expected: the clip is from the first mic in the list, not the built-in one.
+(Automated: `lid_closed_puts_the_builtin_mic_last_even_when_preferred`, `lid_state_from_acpi`.)
+
+### L-MIC-6: no sound server
+1. With the daemon running, `systemctl --user stop pipewire.socket pipewire-pulse.socket pipewire pipewire-pulse wireplumber` (stop the sockets too, or the next `pw-dump` starts PipeWire again).
+2. `shepetal mics; echo $?`. Expected: `shepetal: No PipeWire or PulseAudio found, so shepetal cannot record. Install pipewire-bin (or pulseaudio-utils) and start the sound server.` and `1`.
+3. Press fn. Expected: a notification with the same text, and `No PipeWire or PulseAudio` next to 🤫. Write down what else the daemon prints.
+4. `systemctl --user start pipewire.socket pipewire-pulse.socket wireplumber` and dictate. Expected: it works again.
+(Automated: `alerts_are_rate_limited_per_kind`, `the_indicator_gets_a_few_words_and_no_device_name`.)
+
+The dictionary and snippets live in `~/.config/shepetal/` and are read again at every dictation, so the daemon keeps running through the L-VOC steps.
+
+### L-VOC-1: dictionary words and replacements
+1. `shepetal dict add GitHub`, `shepetal dict add 'thanks => thank you very much'` and `shepetal dict add 'cat => dog'`, then `shepetal dict list`. Expected: the three entries. `stat -c '%a %n' ~/.config/shepetal ~/.config/shepetal/dictionary.txt`: `700` and `600`.
+2. Hold fn and say "Thanks, I pushed it to github." Expected: `Thank you very much, I pushed it to GitHub.` The capital at "Thanks" is kept.
+3. Say "Okay, thanks." Expected: `Okay, thank you very much.`
+4. Say "The category has two cats." Expected: typed unchanged: `cat` only matches the whole word.
+5. `shepetal dict remove thanks` and do step 3 again. Expected: `Okay, thanks.`
+(Automated: `dictionary_fixes_casing_whole_words_only`, `replacement_keeps_a_sentence_capital`, `longest_first_and_never_replaced_again`, `unicode_words_and_boundaries`, `dictionary_lines`, `config_dir_follows_xdg`, `cli_edits_owner_only_files`, `the_dictionary_biases_whisper_and_fixes_the_text`.)
+
+### L-VOC-2: the model hint
+1. On a machine where `shepetal probe` names the Whisper model (Vulkan, docs/linux.md step 2), say "Shepetal types what I say." Write down how the name is spelled.
+2. `shepetal dict add '*Shepetal'` and say the sentence again. Expected: `Shepetal types what I say.`
+3. On a Parakeet machine, do steps 1 and 2 and write down the spelling. Parakeet gets no hint, so only the casing of an exact match is fixed (F39).
+(Automated: `prompt_puts_starred_last_and_is_capped`, `the_dictionary_biases_whisper_and_fixes_the_text`.)
+
+### L-VOC-3: snippets
+1. `shepetal snippet add 'my address' '221B Baker Street, London'`, then `shepetal snippet list`. Expected: `my address => 221B Baker Street, London`. `stat -c '%a' ~/.config/shepetal/snippets.toml`: `600`.
+2. Hold fn and say only "My address." Expected: `221B Baker Street, London` is typed alone, exactly as written.
+3. Say "Please send it to my address today." Expected: `Please send it to 221B Baker Street, London today.`
+4. `shepetal snippet remove 'my address'` and do step 2 again. Expected: `My address.`
+(Automated: `whole_dictation_snippet_ignores_case_and_punctuation`, `inline_snippet_expands_inside_a_sentence`, `longest_first_and_never_replaced_again`, `snippets_toml_round_trips`, `cli_edits_owner_only_files`, `the_dictionary_biases_whisper_and_fixes_the_text`.)
+
 ### L-INS-1: ydotool on GNOME Wayland
 1. In the "Ubuntu" session, with `ydotoold` running (L-SETUP-4), start `shepetal daemon`. Expected: its first line ends with `insert Ydotool`.
 2. In the GNOME Text Editor hold fn and say "Send the report today, then call Anna."
 3. Expected: the sentence is typed at the cursor, with the comma and the period. Repeat in GNOME Terminal and in a Firefox text field: the same.
 4. ydotool sends keycodes, so the result depends on the layout. With a non-US layout (for example German), write down any swapped letters (y/z) or wrong punctuation.
-5. Stop ydotoold and dictate again. Write down what happens: ydotool 0.1.8 may still type without the daemon (it prints `ydotoold backend unavailable`), or the daemon prints `shepetal: insert: ydotool failed: …` and nothing is typed. v0 does not fall back to the clipboard after a failure; the clip is still kept.
+5. Stop ydotoold and dictate again. Write down what happens: ydotool 0.1.8 may still type without the daemon (it prints `ydotoold backend unavailable`), or the daemon prints `shepetal: insert: ydotool failed: …` and nothing is typed. After a failure nothing is typed, and the text is on the clipboard with `Typing failed. The text is on the clipboard: press Ctrl+V (Ctrl+Shift+V in a terminal).` next to 🤫. The clip is still kept.
 (Automated: `gnome_wayland_skips_wtype`, `text_goes_over_stdin_not_argv`.)
 
 ### L-INS-2: wtype on KDE Wayland
 1. In "Plasma (Wayland)", start `shepetal daemon`. Expected: `insert Wtype`.
 2. In Kate hold fn and say "Send the report today, then call Anna."
-3. Expected: the sentence is typed at the cursor. If nothing is typed and the daemon prints `shepetal: insert: wtype failed: …` (for example "Compositor does not support the virtual keyboard protocol"), write it down with `plasmashell --version`: KWin may refuse wtype, and v0 does not fall back to ydotool after a failure.
+3. Expected: the sentence is typed at the cursor. If nothing is typed and the daemon prints `shepetal: insert: wtype failed: …` (the text is then on the clipboard with the `Typing failed.` hint; for example "Compositor does not support the virtual keyboard protocol"), write it down with `plasmashell --version`: KWin may refuse wtype, and v0 does not fall back to ydotool after a failure.
 (Automated: `session_type_picks_native_typer`, `text_goes_over_stdin_not_argv`.)
 
 ### L-INS-3: xdotool on X11
@@ -580,11 +761,60 @@ In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from
 ### L-INS-5: clipboard fallback
 1. On GNOME Wayland: `sudo apt remove wtype ydotool`. `shepetal probe`. Expected: `insert:    Some(WlCopy)`.
 2. Copy a word, say "earlier", with Ctrl+C. Start the daemon, hold fn in the Text Editor, say a sentence, release.
-3. Expected: nothing is typed. Ctrl+V pastes the sentence, not "earlier" (the old clipboard is not restored, docs/linux.md). The daemon prints no paste hint yet (#58).
+3. Expected: nothing is typed, and next to 🤫 shows `No typing tool. The text is on the clipboard: press Ctrl+V (Ctrl+Shift+V in a terminal).` Ctrl+V pastes the sentence, not "earlier" (the old clipboard is not restored, docs/linux.md).
 4. On X11: `sudo apt remove xdotool ydotool`. Expected: `Some(Xclip)`, and steps 2 and 3 give the same result.
 5. Remove `wl-clipboard` and `xclip` too and start the daemon. Expected: it exits with `shepetal: no text insertion tool: install wtype, xdotool, ydotool, wl-clipboard or xclip`.
 6. `sudo apt install wtype xdotool ydotool wl-clipboard xclip` again.
-(Automated: `ydotool_then_clipboard_are_fallbacks`, `text_goes_over_stdin_not_argv`.)
+(Automated: `ydotool_then_clipboard_are_fallbacks`, `text_goes_over_stdin_not_argv`, `unreadable_focus_types_and_failed_typing_falls_back_to_the_clipboard`.)
+
+### L-FOC-1: text only goes into the window that kept focus (X11, Sway, Hyprland)
+1. In "Ubuntu on Xorg", start `shepetal daemon`. Open the GNOME Text Editor and GNOME Terminal. Copy a word, say "earlier", with Ctrl+C.
+2. In the Text Editor, double-tap fn, say "Send the report today.", click into the terminal, and press fn once. Expected: nothing is typed in either window, focus stays on the terminal, and next to 🤫 shows `Focus moved. The text is on the clipboard: press Ctrl+V (Ctrl+Shift+V in a terminal).` Ctrl+Shift+V pastes the sentence into the terminal.
+3. Copy "earlier" again and repeat step 2 without leaving the Text Editor. Expected: the sentence is typed there, and Ctrl+V in another field still pastes "earlier".
+4. If you have Sway (`sudo apt install sway`, then "Sway" at login) or Hyprland, repeat steps 2 and 3 there with its terminal. Expected: the same.
+(Automated: `only_the_same_window_gets_the_text`, `session_picks_how_focus_is_read`, `text_is_typed_only_into_the_window_that_kept_focus`, `text_goes_to_the_clipboard_when_focus_moved`, `focus_is_read_again_when_the_text_is_ready`, `focus_is_read_from_sway_and_hyprland`, `sway_tree_gives_the_focused_node`, `hyprland_gives_the_active_window_address`, `a_hung_focus_tool_is_cut_off`.)
+
+### L-FOC-2: GNOME and KDE on Wayland
+1. In "Ubuntu", start `shepetal daemon`. Expected: it also prints `shepetal: this desktop does not tell apps which window has focus, so text is typed into whatever window has focus when it is ready (goal rule 8 needs X11, Sway or Hyprland)`.
+2. Do L-FOC-1 step 2. Expected: the sentence is typed into the terminal, the window with focus at the end, and no hint shows.
+3. In "Plasma (Wayland)", do steps 1 and 2. Expected: the same.
+(Automated: `session_picks_how_focus_is_read`, `unreadable_focus_types_and_failed_typing_falls_back_to_the_clipboard`.)
+
+### L-IND-1: 🤫 on X11
+1. In "Ubuntu on Xorg" (or Xfce or i3), run `shepetal daemon`. Expected: a small 🤫 about 8 px in from the bottom-left corner of the primary monitor (the one `xrandr` marks `primary`), over the panel if one is there.
+2. Switch workspaces. Expected: 🤫 stays. Play a video full screen in Firefox. Expected: 🤫 stays on top (a window mapped above it can cover it for up to a second; known gap in docs/linux.md).
+3. Click on 🤫. Expected: the click reaches what is below, and the focused window does not change.
+4. Hold fn and talk. Expected: red ring. Release: blue pulsing ring, then 🤫 alone once the text is typed. Double-tap fn. Expected: orange ring until the next press.
+5. Tap fn once. Expected: `Hold fn to talk · double-tap for hands-free` to the right of 🤫 for about 2 s (goal rule 2 now says about 3 s, #140).
+6. Stop the daemon with Ctrl+C. Expected: 🤫 disappears. Start it again and run `pkill -9 -f 'shepetal daemon'` in another terminal. Expected: 🤫 disappears too.
+(Automated: `every_indicator_gets_the_state_and_late_ones_the_current_one`, `the_indicator_shows_each_step_of_a_hands_free_dictation`, `a_too_short_press_shows_the_hint_next_to_the_indicator`, `a_silent_recording_puts_the_indicator_back_to_idle`, `a_failed_dictation_turns_the_indicator_yellow`, `a_reader_that_never_reads_cannot_stall_the_daemon`, `a_running_daemon_keeps_its_socket_and_a_dead_ones_is_replaced`; the X11 screenshots of `linux/indicator/check.sh`.)
+
+### L-IND-2: 🤫 on KDE Plasma Wayland
+1. In "Plasma (Wayland)", do L-IND-1. Expected: the same. 🤫 sits over the bottom panel, and a click on it reaches the panel button below it.
+2. With two monitors, write down which one 🤫 is on: wlr-layer-shell has no primary output, so it goes to the one GTK reports as primary, else the first (known gap in docs/linux.md).
+(Automated: as L-IND-1; the wlr-layer-shell screenshots of `linux/indicator/check.sh` run in headless Sway.)
+
+### L-IND-3: 🤫 on Sway or Hyprland
+1. In Sway or Hyprland, do L-IND-1 with a full-screen window open (`fullscreen` in Sway, the `fullscreen` dispatcher in Hyprland). Expected: the same.
+(Automated: as L-IND-2.)
+
+### L-IND-4: 🤫 from the GNOME Shell extension
+1. In "Ubuntu" with the extension from L-SETUP-5 enabled, start `shepetal daemon`. Expected: it prints that 🤫 comes from the extension, and 🤫 appears within 2 s.
+2. Do the checks of L-IND-1 steps 2 to 5, also over a full-screen video and in the Activities overview.
+3. Stop the daemon with Ctrl+C. Expected: 🤫 disappears. Start it again. Expected: 🤫 is back within about 2 s.
+4. `gnome-extensions disable shepetal-indicator@backant.io`. Expected: 🤫 disappears, and `journalctl --user -b | grep -i shepetal` shows no errors from the extension. Write down `gnome-shell --version`: the extension lists shell versions 45 to 51 without a run on any of them.
+(Automated: eslint and the gjs lifecycle run with stand-ins for the Shell modules in `linux/indicator/check.sh`.)
+
+### L-IND-5: two monitors and HiDPI
+1. With a second monitor left of the primary, start the daemon. Expected: 🤫 is on the primary.
+2. Make the other monitor primary (Settings > Displays). Expected: 🤫 moves there.
+3. At 200% scale. Expected: 🤫 is about 36 physical pixels, 16 from the corner.
+(Automated: `test_bottom_left_of_a_1080p_monitor`, `test_primary_monitor_right_of_or_below_another` in `linux/indicator/test_indicator.py`, run by `linux/indicator/check.sh`.)
+
+### L-IND-6: 🤫 without the hotkey
+1. With no daemon running, on any of the desktops: `printf 'recording\nhint Hello from shepetal\n' | (cat; sleep 5) | shepetal indicator`.
+2. Expected: a red ring and `Hello from shepetal` next to 🤫 for about 2 s, then 🤫 disappears when the command ends.
+(Automated: `every_indicator_gets_the_state_and_late_ones_the_current_one`.)
 
 ### L-MEET-1: a Zoom call in probe
 1. Install the Zoom `.deb` from zoom.us and join a call (zoom.us/test, or a call with a second device). Unmute.
@@ -606,3 +836,52 @@ In the L-FN steps "fn" is the hotkey: fn on an Apple keyboard, else the key from
 2. Expected: no `mic user:` line for shepetal or `pw-record`. If one shows (for example `pw-record (pw-record)`), `pw-record -P '{ application.name = shepetal }'` did not rename the stream: write down the line (docs/linux.md, known gaps).
 3. Tap fn to end the dictation.
 (Automated: `ignores_idle_streams_monitors_playback_and_itself`.)
+
+In the L-MEET-4 to L-MEET-10 steps `shepetal daemon` records meetings (docs/linux-meetings.md). Before them: `sudo apt install cmake g++ libnotify-bin`, then `git clone https://github.com/ggml-org/whisper.cpp && cd whisper.cpp && cmake -B build && cmake --build build -j` (on a Vulkan machine build it as in docs/linux.md, "Manual test steps", step 2), `ln -s "$PWD/build/bin/whisper-cli" ~/.local/bin/`, and `./models/download-ggml-model.sh large-v3-turbo-q5_0 && cp models/ggml-large-v3-turbo-q5_0.bin ~/.local/share/shepetal/` (on a Vulkan machine it is already there: it is the dictation model). Check that `command -v whisper-cli` and `command -v notify-send` print a path. Turn Do Not Disturb off, wear headphones (without them the other side is recorded in Me.wav too), and have a second device in the call to play the other side. Remove `~/.config/shepetal/config.json` unless a step says otherwise.
+
+### L-MEET-4: a Zoom call, offered, recorded after Record and transcribed
+1. `shepetal daemon`. Expected, after the `hold fn to talk` line: `shepetal: meeting detection on, asking before each recording, Thresholds { poll: 2000, start_after: 5000, min_session: 15000, end_with_evidence: 3000, reacquire: 4000, device_change: 10000, prompt: 20000 } ms (SHEPETAL_MEETING_THRESHOLDS)`, and no `meetings are recorded but not transcribed` line.
+2. Join a Zoom call (zoom.us/test, or a call with the second device) and unmute. Expected within about 8 s: a notification "Record this meeting?" with "Zoom is using the microphone. Nothing is recorded unless you click Record." and a Record button, and `shepetal: meeting (Zoom) detected, asking: Record this meeting?` on stderr. `ls ~/.local/share/shepetal/meetings/` shows no new folder, and `pgrep -a pw-record` prints nothing.
+3. Click Record. Expected within about 2 s: `shepetal: meeting (Zoom) recording to /home/<you>/.local/share/shepetal/meetings/<unix-ms>, system audio Some("<sink>.monitor")`, where `<sink>` is what `pactl get-default-sink` prints. `pgrep -a pw-record` shows two recorders: one ending in `Me.wav`, and one with `stream.capture.sink = true` ending in `Others.wav`.
+4. While it records, run `shepetal probe`. Expected: a `mic user:` line for Zoom, and none for shepetal or `pw-record`. If one shows, write it down (docs/linux.md, known gaps).
+5. Talk for about a minute while the other side talks too. Mute yourself in Zoom for 20 s, then unmute. Expected: no `meeting ended` line. If the recording ends, write down that Zoom closes its mic stream while muted (docs/linux-meetings.md, known gaps).
+6. Leave the call. Expected about 4 to 6 s later: `shepetal: meeting ended, transcribing /home/<you>/.local/share/shepetal/meetings/<unix-ms>`, then `shepetal: meeting transcript /home/<you>/.local/share/shepetal/meetings/<unix-ms>/transcript.md`, and `pgrep -a pw-record` prints nothing. Write down how long the transcript took.
+7. Open `transcript.md`. Expected: `# Meeting`, `- Apps: Zoom` and `- Audio: Me.wav (microphone), Others.wav (system audio)`, then turns in time order: `[hh:mm:ss] Me: ...` with what you said and `[hh:mm:ss] Others: ...` with what the other side said, the times counted from the start of the recording.
+(Automated: `starts_once_a_meeting_app_held_the_mic_for_the_grace`, `the_committed_pw_dump_fixture_is_a_meeting`, `the_prompt_has_one_record_button_and_expires_with_the_threshold`, `a_meeting_records_only_after_record_is_clicked`, `shepetal_own_streams_never_start_or_hold_a_meeting`, `flapping_restarts_the_grace_and_does_not_end_a_call`, `ends_after_reacquire_and_never_in_the_first_15_s`, `recorders_take_the_mic_and_the_default_sink_monitor`, `whisper_keeps_timestamps_and_drops_markers`, `transcript_interleaves_me_and_others_by_time`.)
+
+### L-MEET-5: meeting audio is kept, owner-only
+1. After L-MEET-4, `stat -c '%a %n' ~/.local/share/shepetal/meetings ~/.local/share/shepetal/meetings/<unix-ms> ~/.local/share/shepetal/meetings/<unix-ms>/*`. Expected: both folders are `700`, and `Me.wav`, `Others.wav` and `transcript.md` are `600`.
+2. `file ~/.local/share/shepetal/meetings/<unix-ms>/*.wav`. Expected: both are `RIFF (little-endian) data, WAVE audio, Microsoft PCM, 16 bit, mono 16000 Hz`.
+3. `pw-play` `Me.wav`. Expected: your voice for the whole call. `pw-play` `Others.wav`: the other side, without your voice.
+4. `chmod 755 ~/.local/share/shepetal/meetings`, join a call and click Record. Expected: `shepetal: meeting not recorded: meeting folder: /home/<you>/.local/share/shepetal/meetings must be a 0700 directory`, no new folder, and `pgrep -a pw-record` prints nothing. Leave the call, then `chmod 700 ~/.local/share/shepetal/meetings`.
+(Automated: `meeting_audio_is_owner_only_and_never_reused`, `recorders_take_the_mic_and_the_default_sink_monitor`.)
+
+### L-MEET-6: no click, no recording
+1. Join a call and close the notification without clicking Record. Expected: `shepetal: meeting not recorded: the Record? prompt was dismissed`. For the rest of the call: no new folder in `~/.local/share/shepetal/meetings/`, `pgrep -a pw-record` prints nothing, and no second notification. Leave the call.
+2. Join a call and leave the notification alone. Expected about 20 s later: it goes from the screen and from the notification list, and `shepetal: meeting not recorded: Record was not clicked within 20 s`. Nothing is recorded. If the notification stays, write down `notify-send --version` (SIGINT did not close it). Leave the call.
+3. Join a call, wait for the notification, and leave the call at once, without clicking. Expected about 15 s after the notification showed (before its 20 s are up): `shepetal: meeting ended before Record was clicked, nothing recorded`, and the notification goes away. Nothing is recorded.
+(Automated: `a_dismissed_prompt_records_nothing_for_that_meeting`, `an_unanswered_prompt_is_withdrawn_and_records_nothing`, `the_prompt_is_withdrawn_when_the_call_ends_first`.)
+
+### L-MEET-7: a headset switch and two meeting apps
+1. Join a call, click Record, and switch to a Bluetooth headset (or plug one in) during it. Expected: no `meeting ended` line. After the call, `pw-play` `Others.wav`: the other side is there after the switch too.
+2. Join a Zoom call and, in Firefox, a Google Meet call, and click Record once. Leave Zoom. Expected: no `meeting ended` line until you leave Meet too. One new meeting folder, and its `transcript.md` has an `- Apps:` line that names both `Zoom` and `Browser (Firefox)`.
+(Automated: `a_device_change_holds_off_the_end_for_10_s`, `two_apps_are_one_meeting_until_both_let_go`.)
+
+### L-MEET-8: the daemon killed mid-meeting
+1. Join a call, click Record and talk for about 20 s. In another terminal run `pkill -9 -f 'shepetal daemon'`.
+2. Expected about a second later: `pgrep -a pw-record` prints nothing. In the newest meeting folder, `pw-play` `Me.wav` and `Others.wav`: each plays up to the kill. There is no `transcript.md` (docs/linux-meetings.md, known gaps).
+(Automated: `a_recorder_gets_sigint_when_the_daemon_goes`.)
+
+### L-MEET-9: always record, and bad meeting settings
+1. Put `{"meetings": {"auto_record": true}}` in `~/.config/shepetal/config.json` and start the daemon. Expected: `shepetal: meeting detection on, recording every meeting (meetings.auto_record), Thresholds { ... } ms (SHEPETAL_MEETING_THRESHOLDS)`.
+2. Join a call. Expected within about 8 s: no notification, and the `meeting (Zoom) recording to` line. Leave the call. Expected: the `meeting ended` and `meeting transcript` lines as in L-MEET-4 step 6.
+3. With `{"meetings": {"auto_record": "yes"}}`, run `shepetal daemon; echo $?`. Expected: `shepetal: /home/<you>/.config/shepetal/config.json: meetings.auto_record: expected true or false` and `1`.
+4. Remove `~/.config/shepetal/config.json` and run `SHEPETAL_MEETING_THRESHOLDS=reacquire=soon shepetal daemon; echo $?`. Expected: `shepetal: SHEPETAL_MEETING_THRESHOLDS: "reacquire=soon": not a number of seconds` and `1`.
+(Automated: `auto_record_is_opt_in`, `auto_record_records_without_asking`, `thresholds_are_tunable_in_seconds`.)
+
+### L-MEET-10: a meeting without the Whisper model
+On a machine where `shepetal probe` names a Parakeet model (CPU or CUDA):
+1. `mv ~/.local/share/shepetal/ggml-large-v3-turbo-q5_0.bin ~/` and start the daemon. Expected: `shepetal: meetings are recorded but not transcribed until whisper-cli and /home/<you>/.local/share/shepetal/ggml-large-v3-turbo-q5_0.bin are installed`, then the `meeting detection on` line.
+2. Join a call, click Record, talk, and leave. Expected: both WAVs are kept, the daemon prints `shepetal: meeting /home/<you>/.local/share/shepetal/meetings/<unix-ms>: Me was not transcribed: whisper-cli: ...` and the same for Others, and `transcript.md` lists `- Me was not transcribed: ...` and `- Others was not transcribed: ...` under its header, with no turns.
+3. `mv ~/ggml-large-v3-turbo-q5_0.bin ~/.local/share/shepetal/`.
+(Automated: `transcript_interleaves_me_and_others_by_time`.)

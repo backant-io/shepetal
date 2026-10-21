@@ -81,10 +81,12 @@ final class Pipeline {
             let wav = engine.readsWav ? try await saving.value : store.url(run.entry.id)
             run.entry.rawText = try await engine.transcribe(samples, wav: wav)
         } catch {
+            if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"
         }
         run.entry.text = Self.finishText(run.entry.rawText, dictionary: dictionary)
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
+        if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
         // Rule 8 before the field is read: when the text is not pasted, the field that has focus now is not
         // where it goes. And again right before the paste: focus or secure input can change during the read.
