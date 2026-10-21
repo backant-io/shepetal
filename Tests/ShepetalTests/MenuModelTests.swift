@@ -5,8 +5,9 @@ import XCTest
 
 /// The 🤫 menu after Pavel compared it with Wispr Flow's (2026-10-21): ours had 22 items with grey status lines,
 /// account and setup items mixed in. It is now short and grouped by intent, shows what needs doing only when it
-/// does, and everything it lost lives in the shepetal window. Built from MenuState alone: no app, no screen,
-/// and never the user's clipboard (the copy test uses a private pasteboard).
+/// does, has no grey item anywhere (Pavel, 21.10.26: every item is actionable or hidden), and everything it lost
+/// lives in the shepetal window. Built from MenuState alone: no app, no screen, and never the user's clipboard
+/// (the copy test uses a private pasteboard).
 @MainActor
 final class MenuModelTests: XCTestCase {
     private let day: TimeInterval = 86400
@@ -30,13 +31,16 @@ final class MenuModelTests: XCTestCase {
 
     /// Everything that can show at once: what Pavel sees on a bad day.
     private var busy: MenuState {
-        MenuState(permissionsMissing: true, engineProblem: "Loading on-device speech recognition…", canDownloadEngine: true,
-                  cleanupDownloadMB: 1281, cleanupDownloadFailed: true, access: .trial(daysLeft: 3), recordingMeeting: true, meetings: (0..<12).map { meeting($0) },
+        MenuState(permissionsMissing: true, canDownloadEngine: true, cleanupDownloadMB: 1281, access: .trial(daysLeft: 3),
+                  recordingMeeting: true, meetings: (0..<12).map { meeting($0) },
                   recent: [entry("Send the report today."), entry("", .tooShort)], canCheckForUpdates: true)
     }
 
+    /// A normal day once the updater ships: something dictated, nothing to do.
+    private var normalDay: MenuState { MenuState(recent: [entry("Send the report today.")], canCheckForUpdates: true) }
+
     func testTheMenuIsShortAndGroupedByIntent() {
-        XCTAssertEqual(titles(MenuModel.groups(MenuState(canCheckForUpdates: true))), [
+        XCTAssertEqual(titles(MenuModel.groups(normalDay)), [
             ["Record meeting", "Open Meetings"],
             ["Open shepetal"],
             ["Check for Updates…"],
@@ -45,7 +49,15 @@ final class MenuModelTests: XCTestCase {
             ["Help center", "Send feedback…"],
             ["Quit shepetal"],
         ], "on a normal day nothing comes before the meetings, and there are no grey status lines")
-        XCTAssertEqual(MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count, 12, "it had 22 items")
+        XCTAssertEqual(MenuModel.groups(normalDay).joined().count, 12, "it had 22 items")
+        XCTAssertEqual(titles(MenuModel.groups(MenuState())), [
+            ["Record meeting", "Open Meetings"],
+            ["Open shepetal"],
+            ["Paste last transcript"],
+            ["Shortcuts…", "Microphone", "Languages"],
+            ["Help center", "Send feedback…"],
+            ["Quit shepetal"],
+        ], "no updater yet and nothing dictated: Check for Updates… and Recent are hidden, not greyed out")
     }
 
     func testWhatNeedsDoingShowsOnlyThenAndAtTheTop() throws {
@@ -72,16 +84,13 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(top(MenuState(access: .lifetime)), [])
         XCTAssertEqual(top(MenuState(access: .unchecked)), [], "Check license now is on Home")
 
-        let engine = top(MenuState(engineProblem: "Download failed: check the internet connection and try again"))
-        XCTAssertEqual(engine.map(\.title), ["Download failed: check the internet connection and try again"])
-        XCTAssertFalse(engine[0].enabled, "a grey line, only while speech recognition is not ready")
         XCTAssertEqual(top(MenuState(canDownloadEngine: true)).map(\.action), [.download])
+        XCTAssertEqual(top(MenuState(canDownloadEngine: false)), [],
+                       "loading, downloading or could not start: no grey status line, Home's Speech recognition line says it")
 
         let groups = MenuModel.groups(busy)
-        XCTAssertEqual(groups[0].map(\.title), ["Permissions needed…", "Loading on-device speech recognition…",
-                                                 "Download on-device speech recognition (about 470 MB)",
-                                                 "Cleanup model download failed. Try again later.", "Download cleanup model (about 1.3 GB)",
-                                                 "Get shepetal for $4.99…"],
+        XCTAssertEqual(groups[0].map(\.title), ["Permissions needed…", "Download on-device speech recognition (about 470 MB)",
+                                                 "Download cleanup model (about 1.3 GB)", "Get shepetal for $4.99…"],
                        "every contextual item is in the first group")
         XCTAssertEqual(groups[1].first?.title, "Stop meeting recording", "then the menu as usual")
     }
@@ -97,36 +106,29 @@ final class MenuModelTests: XCTestCase {
         XCTAssertFalse(offer.attention, "dictation works without it")
         XCTAssertEqual(top(MenuState(cleanupDownloadMB: 533)).map(\.title), ["Download cleanup model (about 0.5 GB)"], "8 GB Macs")
 
-        let downloading = top(MenuState(cleanupDownloadMB: 1281, downloadingCleanup: true))
-        XCTAssertEqual(downloading.map(\.title), ["Downloading the cleanup model…"],
-                       "no download item while it runs, so a second click cannot start a second download")
-        XCTAssertFalse(downloading[0].enabled)
-        XCTAssertEqual(top(MenuState(cleanupDownloadMB: 1281, cleanupDownloadFailed: true)).map(\.action), [nil, .downloadCleanup],
-                       "after a failed download: a grey line, and the item again")
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: 1281, downloadingCleanup: true)), [],
+                       "no download item while it runs, so a second click cannot start a second download, and no grey line")
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: 1281)).map(\.action), [.downloadCleanup],
+                       "after a failed download the item is back; the failure is on Home's Cleanup line")
+        XCTAssertTrue(try AppSource.code("Pipeline.swift").contains(
+            "cleanupStatus = \"Rules only (the download failed; try again from the 🤫 menu)\""))
     }
 
     /// F39 (#30): the keyword model's download is with what needs doing, only while SpeechMenu offers it (speech
-    /// recognition there, words in the dictionary, keyword model missing), and greyed out while it runs.
-    func testDictionarySupportShowsOnlyWhenOfferedAndGreysOutWhileItDownloads() throws {
-        XCTAssertEqual(MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count, 12, "a normal day keeps the 12 items")
+    /// recognition there, words in the dictionary, keyword model missing), and hidden while it runs.
+    func testDictionarySupportShowsOnlyWhenOfferedAndHidesWhileItDownloads() throws {
+        XCTAssertEqual(MenuModel.groups(normalDay).joined().count, 12, "a normal day keeps the 12 items")
 
         let offered = MenuModel.contextual(MenuState(dictionarySupport: .offered))
         XCTAssertEqual(offered, [MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport)])
         XCTAssertEqual(MenuModel.groups(MenuState(dictionarySupport: .offered))[0], offered, "at the top")
-        let running = MenuModel.contextual(MenuState(dictionarySupport: .downloading))
-        XCTAssertEqual(running.map(\.title), ["Downloading dictionary support…"])
-        for t in offered.map(\.title) + running.map(\.title) {
-            XCTAssertTrue(ModelNameTests.offending("\"\(t)\"").isEmpty, "model name in \(t)")
-        }
+        XCTAssertEqual(MenuModel.contextual(MenuState(dictionarySupport: .downloading)), [],
+                       "hidden while it runs: a second click starts nothing, and the notice next to 🤫 says it is downloading")
+        XCTAssertTrue(ModelNameTests.offending("\"\(offered[0].title)\"").isEmpty, "model name in \(offered[0].title)")
 
-        let built = { (s: DictionarySupport) -> NSMenuItem? in
-            let m = NSMenu()
-            MenuModel.build(MenuModel.groups(MenuState(dictionarySupport: s)), into: m, target: self, action: #selector(self.noop(_:)))
-            return m.items.first
-        }
-        XCTAssertEqual(built(.offered)?.isEnabled, true)
-        XCTAssertEqual(built(.offered)?.representedObject as? MenuAction, .downloadDictionarySupport)
-        XCTAssertEqual(built(.downloading)?.isEnabled, false, "greyed out: a second click starts nothing")
+        let m = NSMenu()
+        MenuModel.build(MenuModel.groups(MenuState(dictionarySupport: .offered)), into: m, target: self, action: #selector(noop(_:)))
+        XCTAssertEqual(m.items.first?.representedObject as? MenuAction, .downloadDictionarySupport)
 
         let app = try AppSource.code("App.swift")
         for line in ["dictionarySupport: speech.dictionarySupport(),", "case .downloadDictionarySupport: speech.downloadBoost()",
@@ -156,11 +158,12 @@ final class MenuModelTests: XCTestCase {
 
     func testRecentCopiesAndCopyLastLeftTheMenu() throws {
         let recent = try XCTUnwrap(MenuModel.groups(busy).joined().first { $0.title == "Recent" }?.submenu)
-        XCTAssertEqual(recent.map(\.title), ["Click to copy", "Send the report today.", "(too short)"])
-        XCTAssertTrue(recent[0].header)
-        XCTAssertEqual(recent[1].action, .copy("Send the report today."))
-        XCTAssertNil(recent[2].action, "nothing to copy")
-        XCTAssertEqual(MenuModel.recent([]).map(\.title), ["Nothing yet"])
+        XCTAssertEqual(recent, [MenuEntry(title: "Send the report today.", action: .copy("Send the report today."))],
+                       "no grey heading, and the too-short dictation has nothing to copy, so it is left out")
+        for rows in [[], [entry("", .tooShort), entry("", .noSpeech)]] {
+            XCTAssertFalse(allTitles(Array(MenuModel.groups(MenuState(recent: rows)).joined())).contains("Recent"),
+                           "nothing to copy: no Recent submenu instead of a grey \"Nothing yet\"")
+        }
 
         let everything = allTitles(Array(MenuModel.groups(busy).joined()))
         XCTAssertFalse(everything.contains { $0.contains("Copy last") }, "Copy last text left the menu")
@@ -248,20 +251,19 @@ final class MenuModelTests: XCTestCase {
         }
         XCTAssertNotNil(real[0].image, "Permissions needed… has the yellow mark")
         XCTAssertNil(real.first { $0.title == "Open shepetal" }?.image)
-        XCTAssertFalse(try XCTUnwrap(real.first { $0.title == "Loading on-device speech recognition…" }).isEnabled)
         let past = try XCTUnwrap(real.first { $0.title == "Past meetings" }?.submenu)
         XCTAssertEqual(past.items.first?.representedObject as? MenuAction, .showMeeting("m0"))
         let recent = try XCTUnwrap(real.first { $0.title == "Recent" }?.submenu)
-        XCTAssertTrue(recent.items[0].isSectionHeader)
-        XCTAssertFalse(recent.items[2].isEnabled, "(too short) is greyed out")
+        XCTAssertEqual(recent.items.map { $0.representedObject as? MenuAction }, [.copy("Send the report today.")])
 
         let updates = { (can: Bool) -> NSMenuItem? in
             let m = NSMenu()
             MenuModel.build(MenuModel.groups(MenuState(canCheckForUpdates: can)), into: m, target: self, action: #selector(self.noop(_:)))
             return m.items.first { $0.title == "Check for Updates…" }
         }
+        XCTAssertEqual(updates(true)?.representedObject as? MenuAction, .checkForUpdates)
         XCTAssertEqual(updates(true)?.isEnabled, true)
-        XCTAssertNil(updates(false), "hidden until the updater exists, never greyed out (Pavel, 21.10.26)")
+        XCTAssertNil(updates(false), "hidden until an updater can check, never greyed out")
         XCTAssertFalse(NoUpdateChecker().canCheckForUpdates)
         // With Sparkle the item is always there and enabled: a click while Sparkle downloads says so instead.
         XCTAssertTrue(try AppSource.code("Install.swift").contains("var canCheckForUpdates: Bool { true }"))
@@ -271,6 +273,97 @@ final class MenuModelTests: XCTestCase {
         let found = MenuModel.groups(MenuState(canCheckForUpdates: true, checkForUpdatesTitle: "Update to 0.2.1…"))
         XCTAssertTrue(found.joined().contains { $0.title == "Update to 0.2.1…" && $0.action == .checkForUpdates })
         XCTAssertEqual(found.joined().count, MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count)
+    }
+
+    /// Pavel, 21.10.26: "Menu bar menu must drop all the grayed-out text fields." The real menu, built the way
+    /// menuNeedsUpdate builds it (MenuModel plus the app's Microphone, Languages and dictation-off items), for
+    /// every kind of day, walked into each submenu: every item can be clicked and does something. With the app
+    /// object there, `update()` validates like the real menu does, so AppKit's autoenable cannot grey one out or
+    /// undo it either (#207). Fake mics, a throwaway defaults suite and an injected front app: nothing real is
+    /// read or changed.
+    func testNoItemAnywhereInTheMenuIsGreyedOut() throws {
+        _ = NSApplication.shared
+        let suite = "shepetal-menu-test-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let blocked = AppBlockList(defaults)
+        blocked.set("com.example.Notes", name: "Notes", off: true)
+        let off = DictationOff(list: blocked) { ("com.apple.TextEdit", "TextEdit") }
+        let builtIn = MicDevice(uid: "BuiltInMicrophoneDevice", name: "MacBook Pro Microphone", transport: .builtIn)
+        let usb = MicDevice(uid: "usb-1", name: "Yeti", transport: .usb)
+        let languages = SpeechMenu()
+
+        let full = (0..<10).map { entry($0.isMultiple(of: 3) ? "" : "Dictation \($0).", $0.isMultiple(of: 3) ? .tooShort : .inserted) }
+        let days: [(String, MenuState)] = [
+            ("normal day", MenuState()),
+            ("signed out", MenuState(access: .signedOut)),
+            ("signing in", MenuState(access: .signedOut, signingIn: true)),
+            ("trial ending", MenuState(access: .trial(daysLeft: 3))),
+            ("trial over", MenuState(access: .expired)),
+            ("license unchecked", MenuState(access: .unchecked)),
+            ("permissions missing", MenuState(permissionsMissing: true)),
+            ("speech not ready", MenuState(canDownloadEngine: false)),
+            ("speech not downloaded", MenuState(canDownloadEngine: true)),
+            ("cleanup model not downloaded", MenuState(cleanupDownloadMB: 1281)),
+            ("cleanup model downloading", MenuState(cleanupDownloadMB: 1281, downloadingCleanup: true)),
+            ("dictionary support offered", MenuState(dictionarySupport: .offered)),
+            ("dictionary support downloading", MenuState(dictionarySupport: .downloading)),
+            ("meeting recording, none ended", MenuState(recordingMeeting: true, meetings: [meeting(-1, ended: false)])),
+            ("past meetings", MenuState(meetings: (0..<12).map { meeting($0) })),
+            ("only too-short dictations", MenuState(recent: [entry("", .tooShort), entry("", .noSpeech)])),
+            ("full recents", MenuState(recent: full)),
+            ("bad day", busy),
+        ]
+        var walked = 0
+        for (day, base) in days {
+            for updater in [false, true] {
+                for lidClosed in [false, true] {
+                    var state = base
+                    state.canCheckForUpdates = updater
+                    let mic = Mic(recorder: Recorder(), inputs: { [builtIn, usb] }, isLidClosed: { lidClosed })
+                    let menu = NSMenu()
+                    MenuModel.build(MenuModel.groups(state), into: menu, target: self, action: #selector(noop(_:))) {
+                        switch $0 {
+                        case .microphone: mic.menuItem()
+                        case .languages: languages.languagesItem()
+                        default: nil
+                        }
+                    }
+                    off.menuItems().forEach(menu.addItem)
+                    let name = "\(day), updater \(updater ? "on" : "off"), lid \(lidClosed ? "closed" : "open")"
+                    walked += assertEveryItemIsActionable(menu, name)
+
+                    let mics = try XCTUnwrap(menu.items.first { $0.title == "Microphone" }?.submenu).items.map(\.title)
+                    XCTAssertEqual(mics.contains { $0.contains(builtIn.name) }, !lidClosed,
+                                   "\(name): a closed lid's built-in mic is hidden, not greyed out (#207)")
+                    XCTAssertTrue(mics.contains("Yeti") && mics.contains("Prefer Yeti"), name)
+                }
+            }
+        }
+        XCTAssertGreaterThan(walked, days.count * 4 * 50, "the walk reached the submenus")
+    }
+
+    /// Every item in `menu` and its submenus is enabled and has an action its target performs, or a submenu that
+    /// is not empty. Separators are not text and stay. Returns how many items it checked.
+    private func assertEveryItemIsActionable(_ menu: NSMenu, _ path: String) -> Int {
+        XCTAssertFalse(menu.autoenablesItems, "\(path): with autoenable on, AppKit decides what is greyed out (#207)")
+        menu.update()
+        var checked = 0
+        for item in menu.items where !item.isSeparatorItem {
+            let at = "\(path) > \(item.title)"
+            checked += 1
+            XCTAssertTrue(item.isEnabled, "\(at) is greyed out")
+            XCTAssertFalse(item.isSectionHeader, "\(at) is a grey heading")
+            if let sub = item.submenu {
+                XCTAssertTrue(sub.items.contains { !$0.isSeparatorItem }, "\(at) is an empty submenu")
+                checked += assertEveryItemIsActionable(sub, at)
+            } else if let action = item.action {
+                XCTAssertTrue((item.target as? NSObject)?.responds(to: action) == true, "\(at): nothing performs it")
+            } else {
+                XCTFail("\(at) has no action and no submenu: a plain status line")
+            }
+        }
+        return checked
     }
 
     func testLabelsUseTheBrandAndNoEmojiOrModelName() {
@@ -306,10 +399,7 @@ final class MenuModelTests: XCTestCase {
             ("Restore 🌐 key setting", "Button(\"Restore 🌐 key setting", settings),
             ("Permissions…", "Button(\"Permissions…\", action: model.openPermissions)", settings),
         ]
-        var state = busy
-        state.engineProblem = nil
-        state.access = .trial(daysLeft: 3)
-        let menu = allTitles(Array(MenuModel.groups(state).joined()))
+        let menu = allTitles(Array(MenuModel.groups(busy).joined()))
         for m in moved {
             XCTAssertTrue(m.place.contains(m.window), "\(m.menu) is missing from the window")
             XCTAssertFalse(menu.contains { $0.hasPrefix(m.menu) }, "\(m.menu) is still in the menu")
@@ -337,7 +427,6 @@ final class MenuModelTests: XCTestCase {
         }
         let state = try lines(of: "func menuNeedsUpdate(_ menu: NSMenu) {")
         for line in ["let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,",
-                     "engineProblem: engine == nil ? engineStatus : nil,",
                      "canDownloadEngine: engine == nil && !downloading && !ParakeetEngine.isInstalled,",
                      "access: Account.shared.access, signingIn: Account.shared.signingIn,",
                      "recordingMeeting: meetings.current != nil,",
@@ -345,8 +434,7 @@ final class MenuModelTests: XCTestCase {
                      "recent: (try? pipeline?.history.recent(limit: 10)) ?? [],",
                      "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
                      "canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)",
-                     "cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,", "downloadingCleanup: pipeline?.downloadingCleanup == true,",
-                     "cleanupDownloadFailed: pipeline?.cleanupDownloadFailed == true,"] {
+                     "cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,", "downloadingCleanup: pipeline?.downloadingCleanup == true,"] {
             XCTAssertTrue(state.contains(line), "menuNeedsUpdate: \(line)")
         }
         XCTAssertTrue(app.contains("Task { await pipeline?.loadCleanup() }"), "the cleanup model loads at launch")

@@ -12,31 +12,26 @@ enum MenuAction: Equatable {
     case shortcuts, helpCenter, feedback, quit
 }
 
-/// One menu item: a grey line (no action), an action, or a submenu.
+/// One menu item: an action or a submenu. Never a grey line (Pavel, 21.10.26): what cannot be clicked is not in
+/// the menu, and its status is on Home.
 struct MenuEntry: Equatable {
     var title: String
     var action: MenuAction?
     var submenu: [MenuEntry]?
-    var enabled = true
     var key = ""
     var modifiers: NSEvent.ModifierFlags = []
     /// The yellow mark: something has to be done before dictation works.
     var attention = false
-    /// A small grey heading inside a submenu.
-    var header = false
 }
 
 /// What the menu shows, read by the app each time the menu opens.
 struct MenuState {
     var permissionsMissing = false
-    /// Only while speech recognition is not ready: "Loading…", "Download failed: …".
-    var engineProblem: String?
     var canDownloadEngine = false
     /// The local cleanup model's size while this Mac can run it and has not downloaded it. Optional: the rules
     /// clean up without it, so the offer has no yellow mark.
     var cleanupDownloadMB: Int?
     var downloadingCleanup = false
-    var cleanupDownloadFailed = false
     /// F39: the keyword model's download (`SpeechMenu.dictionarySupport`), nil when there is nothing to offer.
     var dictionarySupport: DictionarySupport?
     var access: Access = .lifetime
@@ -51,8 +46,9 @@ struct MenuState {
     var checkForUpdatesTitle = "Check for Updates…"
 }
 
-/// The 🤫 menu, short and grouped by intent: what needs doing (only when it does), meetings, the window, updates,
-/// the last text, input, help, quit. Everything else is in the shepetal window (Home and Settings).
+/// The 🤫 menu, short and grouped by intent: what needs doing (only when it does), meetings, the window, updates
+/// (only with an updater), the last text, input, help, quit. Everything else is in the shepetal window (Home and
+/// Settings).
 enum MenuModel {
     static let helpCenter = URL(string: "https://shepetal.backant.io/help")!
     /// The contact address on shepetal.backant.io (web/ terms page); the site has no feedback page.
@@ -67,7 +63,7 @@ enum MenuModel {
          meetings(s),
          [MenuEntry(title: "Open shepetal", action: .openApp)],
          s.canCheckForUpdates ? [MenuEntry(title: s.checkForUpdatesTitle, action: .checkForUpdates)] : [],
-         [paste(s.pasteLast), MenuEntry(title: "Recent", submenu: recent(s.recent))],
+         [paste(s.pasteLast)] + (recent(s.recent).isEmpty ? [] : [MenuEntry(title: "Recent", submenu: recent(s.recent))]),
          [MenuEntry(title: "Shortcuts…", action: .shortcuts), MenuEntry(title: "Microphone", action: .microphone),
           MenuEntry(title: "Languages", action: .languages)],
          [MenuEntry(title: "Help center", action: .helpCenter), MenuEntry(title: "Send feedback…", action: .feedback)],
@@ -79,20 +75,15 @@ enum MenuModel {
     static func contextual(_ s: MenuState) -> [MenuEntry] {
         var e: [MenuEntry] = []
         if s.permissionsMissing { e.append(MenuEntry(title: "Permissions needed…", action: .permissions, attention: true)) }
-        if let problem = s.engineProblem { e.append(MenuEntry(title: problem, enabled: false)) }
         if s.canDownloadEngine {
             e.append(MenuEntry(title: "Download on-device speech recognition (about 470 MB)", action: .download, attention: true))
         }
-        if s.downloadingCleanup {  // no download item meanwhile, so a second click cannot start a second download
-            e.append(MenuEntry(title: "Downloading the cleanup model…", enabled: false))
-        } else if let mb = s.cleanupDownloadMB {
-            if s.cleanupDownloadFailed { e.append(MenuEntry(title: "Cleanup model download failed. Try again later.", enabled: false)) }
+        // A download's item is hidden while it runs, so a second click cannot start a second download.
+        if let mb = s.cleanupDownloadMB, !s.downloadingCleanup {
             e.append(MenuEntry(title: "Download cleanup model (about \(String(format: "%.1f", Double(mb) / 1000)) GB)", action: .downloadCleanup))
         }
-        switch s.dictionarySupport {
-        case .offered: e.append(MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport))
-        case .downloading: e.append(MenuEntry(title: "Downloading dictionary support…", enabled: false))
-        case nil: break
+        if s.dictionarySupport == .offered {
+            e.append(MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport))
         }
         return e + account(s.access, signingIn: s.signingIn)
     }
@@ -135,12 +126,9 @@ enum MenuModel {
         return (Key.label([k]).lowercased(), NSEvent.ModifierFlags(keys.compactMap { flags[$0] }))
     }
 
+    /// Each click copies; a dictation without text has nothing to copy and is left out.
     static func recent(_ rows: [HistoryEntry]) -> [MenuEntry] {
-        guard !rows.isEmpty else { return [MenuEntry(title: "Nothing yet", enabled: false)] }
-        return [MenuEntry(title: "Click to copy", header: true)] + rows.map { e in
-            e.text.isEmpty ? MenuEntry(title: "(\(e.outcome.rawValue.replacingOccurrences(of: "_", with: " ")))", enabled: false)
-                           : MenuEntry(title: String(e.text.prefix(60)), action: .copy(e.text))
-        }
+        rows.filter { !$0.text.isEmpty }.map { MenuEntry(title: String($0.text.prefix(60)), action: .copy($0.text)) }
     }
 
     /// Fills `menu` with `groups`. Every item calls `action` on `target` with its MenuAction as representedObject;
@@ -148,7 +136,7 @@ enum MenuModel {
     static func build(_ groups: [[MenuEntry]], into menu: NSMenu, target: AnyObject, action: Selector,
                       provide: (MenuAction) -> NSMenuItem? = { _ in nil }) {
         menu.removeAllItems()
-        menu.autoenablesItems = false  // `enabled` decides
+        menu.autoenablesItems = false  // every item is enabled; AppKit does not get to grey one out
         for (n, group) in groups.enumerated() {
             if n > 0 { menu.addItem(.separator()) }
             for e in group { menu.addItem(item(e, target: target, action: action, provide: provide)) }
@@ -157,12 +145,10 @@ enum MenuModel {
 
     private static func item(_ e: MenuEntry, target: AnyObject, action: Selector, provide: (MenuAction) -> NSMenuItem?) -> NSMenuItem {
         if let a = e.action, let provided = provide(a) { return provided }
-        if e.header { return .sectionHeader(title: e.title) }
         let i = NSMenuItem(title: e.title, action: e.action == nil ? nil : action, keyEquivalent: e.key)
         i.keyEquivalentModifierMask = e.modifiers
         i.target = target
         i.representedObject = e.action
-        i.isEnabled = e.enabled && (e.action != nil || e.submenu != nil)
         if let sub = e.submenu {
             i.submenu = NSMenu()
             build([sub], into: i.submenu!, target: target, action: action, provide: provide)
