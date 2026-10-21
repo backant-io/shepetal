@@ -132,7 +132,8 @@ impl flow::Mic for AppMic {
     }
 }
 
-struct AppStore(audio::Store);
+/// The store, and the stamp of the last dictation clip, which its transcript is saved under.
+struct AppStore(audio::Store, Option<u64>);
 
 impl flow::Store for AppStore {
     fn keep(&mut self, samples: &[f32], why: Kept) -> Result<(), String> {
@@ -141,8 +142,20 @@ impl flow::Store for AppStore {
             Kept::Cancelled => audio::Kind::Cancelled,
             Kept::TooShort => audio::Kind::TooShort,
         };
-        self.0.save(now_ms(), kind, samples).map(drop).map_err(|e| format!("Could not keep the recording: {e}"))
+        let stamp = now_ms();
+        self.1 = (why == Kept::Dictation).then_some(stamp);
+        self.0.save(stamp, kind, samples).map(drop).map_err(|e| format!("Could not keep the recording: {e}"))
     }
+    fn transcript(&mut self, text: &str) -> Result<(), String> {
+        // Under the clip's stamp; one that failed to save still gets its text in the history.
+        let stamp = self.1.take().unwrap_or_else(now_ms);
+        self.0.save_transcript(stamp, text).map(drop).map_err(|e| format!("Could not save the text in the history: {e}"))
+    }
+}
+
+/// The newest transcripts for the tray's Recent submenu. An unreadable folder lists nothing.
+fn recent(store: &audio::Store) -> Vec<String> {
+    store.recent(input::RECENT).unwrap_or_default().into_iter().map(|(_, text)| text).collect()
 }
 
 struct AppInsert(Option<insert::Focus>);
@@ -236,6 +249,8 @@ pub fn run() {
     ui.set_start_at_login(starts_at_login());
     let mut retention = retention();
     ui.set_delete_after_24h(retention == Retention::Delete24h);
+    let mut history = recent(&store);
+    ui.set_recent(history.clone());
 
     let (tx, rx) = mpsc::channel();
     let forward = tx.clone();
@@ -249,7 +264,7 @@ pub fn run() {
 
     let mut flow = Flow::new(
         AppMic(audio::Mic::open(PRE_ROLL).ok()),
-        AppStore(store.clone()),
+        AppStore(store.clone(), None),
         AppInsert(None),
         ui,
         flow::rules,
@@ -305,6 +320,17 @@ pub fn run() {
             }
             Ok(Msg::Text(text)) => {
                 flow.transcribed(text, now);
+                history = recent(&store);
+                flow.show.set_recent(history.clone());
+                vec![]
+            }
+            Ok(Msg::Input(input::Event::CopyRecent(n))) => {
+                if let Some(text) = history.get(n) {
+                    match insert::copy(text) {
+                        Ok(()) => flow.show.show_hint("Copied. Press Ctrl+V to paste it.", HINT),
+                        Err(e) => flow.error(&format!("Could not use the clipboard: {e}"), now),
+                    }
+                }
                 vec![]
             }
             Ok(Msg::Meeting(notice)) => {

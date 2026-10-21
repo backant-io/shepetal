@@ -39,6 +39,9 @@ pub enum Event {
     /// Tray menu: Recordings > Keep recordings (false) or Delete recordings after 24 hours
     /// (true) was picked. The app saves the choice, then calls `Ui::set_delete_after_24h`.
     DeleteAfter24h(bool),
+    /// Tray menu: Recent > item `n` (0 is the newest) of the list last given to `Ui::set_recent`.
+    /// The app copies that text.
+    CopyRecent(usize),
     /// Tray menu: Quit. The tray icon, overlay and hook are already gone.
     Quit,
 }
@@ -68,6 +71,20 @@ pub fn recordings_menu(delete_after_24h: bool) -> [(&'static str, bool, bool); 2
         ("Keep recordings", !delete_after_24h, false),
         ("Delete recordings after 24 hours", delete_after_24h, true),
     ]
+}
+
+/// How many transcripts the tray's Recent submenu lists, as on the Mac.
+pub const RECENT: usize = 10;
+
+/// A transcript as a Recent menu item: on one line, at most 60 characters (as on the Mac) plus
+/// "…", and with `&` doubled, since a menu would take a single one as a shortcut underline.
+pub fn recent_label(text: &str) -> String {
+    let line = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut label: String = line.chars().take(60).collect();
+    if line.chars().count() > 60 {
+        label.push('…');
+    }
+    label.replace('&', "&&")
 }
 
 /// A hotkey: one to three keys that must all be held, as Windows VK codes. Left and right
@@ -716,6 +733,28 @@ mod tests {
             ring_alpha(Mode::Processing, 2 * PULSE_MS),
             1.0,
             "and repeats"
+        );
+    }
+
+    #[test]
+    fn recent_labels_are_one_short_line_and_keep_ampersands() {
+        assert_eq!(recent_label("Hello world."), "Hello world.");
+        assert_eq!(recent_label("  two\r\nlines\there "), "two lines here");
+        assert_eq!(
+            recent_label("Q&A at 3"),
+            "Q&&A at 3",
+            "a single & would underline the A"
+        );
+        let long = "ä".repeat(61);
+        assert_eq!(
+            recent_label(&long),
+            format!("{}…", "ä".repeat(60)),
+            "60 characters, not bytes"
+        );
+        assert_eq!(
+            recent_label(&"x".repeat(60)),
+            "x".repeat(60),
+            "exactly 60 is not cut"
         );
     }
 

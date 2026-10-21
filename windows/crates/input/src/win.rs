@@ -36,6 +36,8 @@ const ID_QUIT: usize = 5;
 const ID_LOGIN: usize = 6;
 /// Recordings submenu: item `i` of `recordings_menu` is `ID_RECORDINGS + i`.
 const ID_RECORDINGS: usize = 7;
+/// Recent submenu: transcript `n` is `ID_RECENT + n`.
+const ID_RECENT: usize = 100;
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// The last mode set was Recording or HandsFree. Set on the caller's thread so the hook sees it
@@ -48,6 +50,7 @@ enum Cmd {
     Hint(String, u64),
     StartAtLogin(bool),
     DeleteAfter24h(bool),
+    Recent(Vec<String>),
     Quit,
 }
 
@@ -82,6 +85,12 @@ impl Ui {
     /// after spawn and after each `Event::DeleteAfter24h`.
     pub fn set_delete_after_24h(&self, on: bool) {
         self.send(Cmd::DeleteAfter24h(on));
+    }
+
+    /// The transcripts in the Recent submenu, newest first (at most `RECENT`). The app calls this
+    /// after spawn and after each dictation; `Event::CopyRecent(n)` names an item of this list.
+    pub fn set_recent(&self, texts: Vec<String>) {
+        self.send(Cmd::Recent(texts));
     }
 
     pub fn quit(&self) {
@@ -229,6 +238,7 @@ struct State {
     paused: bool,
     start_at_login: bool,
     delete_after_24h: bool,
+    recent: Vec<String>,
     /// What the overlay shows now, to skip redraws that change nothing.
     shown: Option<(Frame, Rect, u32)>,
 }
@@ -306,6 +316,7 @@ unsafe fn init(hotkey: Hotkey, events: Sender<Event>, cmds: Receiver<Cmd>) -> Re
         paused: false,
         start_at_login: false,
         delete_after_24h: false,
+        recent: Vec::new(),
         shown: None,
     };
     s.tray(NIM_ADD); // fails before Explorer runs; TaskbarCreated adds it then
@@ -344,6 +355,7 @@ impl State {
                 Cmd::Hint(text, ms) => self.view.show_hint(&text, ms, now),
                 Cmd::StartAtLogin(on) => self.start_at_login = on,
                 Cmd::DeleteAfter24h(on) => self.delete_after_24h = on,
+                Cmd::Recent(texts) => self.recent = texts,
                 Cmd::Quit => return self.shutdown(),
             }
         }
@@ -413,12 +425,24 @@ impl State {
 
 /// The tray menu. Runs a modal loop, so the state is only borrowed before and after it.
 unsafe fn menu() {
-    let Some((ctrl, paused, login, delete)) =
-        with(|s| (s.ctrl, s.paused, s.start_at_login, s.delete_after_24h))
-    else {
+    let Some((ctrl, paused, login, delete, recent)) = with(|s| {
+        let recent: Vec<String> = s
+            .recent
+            .iter()
+            .take(RECENT)
+            .map(|t| recent_label(t))
+            .collect();
+        (
+            s.ctrl,
+            s.paused,
+            s.start_at_login,
+            s.delete_after_24h,
+            recent,
+        )
+    }) else {
         return;
     };
-    let Ok(menu) = build_menu(paused, login, delete) else {
+    let Ok(menu) = build_menu(paused, login, delete, &recent) else {
         return;
     };
     let mut pt = POINT::default();
@@ -438,6 +462,9 @@ unsafe fn menu() {
         }
         ID_LOGIN => {
             let _ = s.events.send(Event::StartAtLogin);
+        }
+        id if (ID_RECENT..ID_RECENT + RECENT).contains(&id) => {
+            let _ = s.events.send(Event::CopyRecent(id - ID_RECENT));
         }
         id if (ID_RECORDINGS..ID_RECORDINGS + 2).contains(&id) => {
             let (_, _, delete) = recordings_menu(s.delete_after_24h)[id - ID_RECORDINGS];
@@ -464,13 +491,36 @@ fn open_url(url: &'static str) {
     });
 }
 
-unsafe fn build_menu(paused: bool, login: bool, delete_after_24h: bool) -> Result<HMENU> {
+unsafe fn build_menu(
+    paused: bool,
+    login: bool,
+    delete_after_24h: bool,
+    recent: &[String],
+) -> Result<HMENU> {
     let check = |on| MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED };
     let menu = CreatePopupMenu()?;
     let donate = CreatePopupMenu()?;
     AppendMenuW(donate, MF_STRING, ID_COFFEE, w!("Buy Me a Coffee"))?;
     AppendMenuW(donate, MF_STRING, ID_SPONSORS, w!("GitHub Sponsors"))?;
     AppendMenuW(menu, MF_STRING, ID_OPEN, w!("Open"))?;
+    let history = CreatePopupMenu()?;
+    for (i, label) in recent.iter().enumerate() {
+        AppendMenuW(
+            history,
+            MF_STRING,
+            ID_RECENT + i,
+            &HSTRING::from(label.as_str()),
+        )?;
+    }
+    if recent.is_empty() {
+        AppendMenuW(history, MF_STRING | MF_GRAYED, 0, w!("Nothing yet"))?;
+    }
+    AppendMenuW(
+        menu,
+        MF_POPUP,
+        history.0 as usize,
+        w!("Recent (click to copy)"),
+    )?;
     AppendMenuW(menu, check(paused), ID_PAUSE, w!("Pause"))?;
     let recordings = CreatePopupMenu()?;
     for (i, (label, on, _)) in recordings_menu(delete_after_24h).into_iter().enumerate() {

@@ -29,6 +29,8 @@ pub trait Mic {
 
 pub trait Store {
     fn keep(&mut self, samples: &[f32], why: Kept) -> Result<(), String>;
+    /// The history: the text of the last dictation clip `keep` kept, as it was inserted.
+    fn transcript(&mut self, text: &str) -> Result<(), String>;
 }
 
 /// Goal rule 8: remember the focused window at the start, paste only into that same window,
@@ -147,7 +149,13 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
         self.state = State::Idle;
         let inserted = match text.map(|t| (self.rules)(&t)) {
             Ok(t) if t.is_empty() => Ok(None),
-            Ok(t) => self.insert.insert(&t),
+            Ok(t) => {
+                // Into the history first, so it is there even if the clipboard fails.
+                if let Err(e) = self.store.transcript(&t) {
+                    self.pending.get_or_insert(e);
+                }
+                self.insert.insert(&t)
+            }
             Err(e) => Err(e),
         };
         match (inserted, self.pending.take()) {
@@ -207,6 +215,10 @@ mod tests {
     impl Store for FakeStore {
         fn keep(&mut self, samples: &[f32], why: Kept) -> Result<(), String> {
             self.0.borrow_mut().push(format!("keep {} {why:?}", samples.len()));
+            self.1.clone()
+        }
+        fn transcript(&mut self, text: &str) -> Result<(), String> {
+            self.0.borrow_mut().push(format!("history {text}"));
             self.1.clone()
         }
     }
@@ -294,7 +306,7 @@ mod tests {
         // Rule 4: the clip is kept before it is transcribed, so a crash in STT still keeps it.
         assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "mode Processing"]);
         f.transcribed(Ok("  um hello world ".into()), 1100);
-        assert_eq!(take(&log), ["insert hello world", "mode Idle"], "the core cleanup runs before insert");
+        assert_eq!(take(&log), ["history hello world", "insert hello world", "mode Idle"], "the core cleanup runs before insert");
     }
 
     // The date rule runs after the cleanup: before it, "the the" would leave a "the" in front of the date.
@@ -305,7 +317,7 @@ mod tests {
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("Um, see you on the the twenty sixth of July twenty twenty-six.".into()), 1100);
-        assert_eq!(take(&log), ["insert See you on 26.07.26.", "mode Idle"]);
+        assert_eq!(take(&log), ["history See you on 26.07.26.", "insert See you on 26.07.26.", "mode Idle"]);
     }
 
     #[test]
@@ -316,7 +328,7 @@ mod tests {
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("hi".into()), 1000);
-        assert_eq!(take(&log), ["insert hi".to_string(), "mode Idle".into(), format!("hint {moved}")]);
+        assert_eq!(take(&log), ["history hi".to_string(), "insert hi".into(), "mode Idle".into(), format!("hint {moved}")]);
     }
 
     #[test]
@@ -357,7 +369,7 @@ mod tests {
         assert_eq!(run(&mut f, g.tick(20 * 60_000), 20 * 60_000), 1, "the 20 minutes go to speech-to-text");
         assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "mode Processing"]);
         f.transcribed(Ok("a long one".into()), 20 * 60_000 + 500);
-        assert_eq!(take(&log), ["insert a long one", "mode Idle"]);
+        assert_eq!(take(&log), ["history a long one", "insert a long one", "mode Idle"]);
         // A warning that arrives when nothing records shows nothing.
         f.action(Action::WarnDuration, 30 * 60_000);
         assert!(take(&log).is_empty());
@@ -374,7 +386,7 @@ mod tests {
         assert!(take(&log).is_empty(), "the mic must not restart mid-transcription");
         f.transcribed(Ok("one".into()), 2000);
         f.transcribed(Ok("two".into()), 2100);
-        assert_eq!(take(&log), ["insert one", "mode Idle"], "one transcript per stop");
+        assert_eq!(take(&log), ["history one", "insert one", "mode Idle"], "one transcript per stop");
         assert!(!f.busy());
     }
 
@@ -423,7 +435,7 @@ mod tests {
         f.action(Action::Stop, 900);
         take(&log);
         f.transcribed(Ok("keep me".into()), 1000);
-        assert_eq!(take(&log), ["insert keep me", "mode Error", "hint Disk full"]);
+        assert_eq!(take(&log), ["history keep me", "insert keep me", "mode Error", "hint Disk full"]);
     }
 
     #[test]

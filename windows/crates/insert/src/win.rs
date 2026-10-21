@@ -79,6 +79,11 @@ pub fn insert(text: &str, start: Option<Focus>) -> io::Result<Outcome> {
     }
 }
 
+/// Puts `text` on the clipboard as plain text, kept in clipboard history (the tray's Recent).
+pub fn copy(text: &str) -> io::Result<()> {
+    Owner::new()?.leave(text)
+}
+
 /// A message-only window that owns the clipboard while we use it and answers WM_RENDERFORMAT.
 struct Owner(HWND);
 
