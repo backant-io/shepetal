@@ -154,7 +154,7 @@ fn history_cmd(args: &[String]) -> Res {
 /// Put `text` on the clipboard of this session.
 fn copy(text: &str) -> Res {
     let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
-    let clip = insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("no wl-copy or xclip")?;
+    let clip = insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path).ok_or("no wl-copy, xclip or xsel")?;
     clip.insert(text).map_err(|e| e.to_string())
 }
 
@@ -593,7 +593,7 @@ fn deliver(text: &str, typer: insert::Backend, focused_at_start: Option<&str>, i
     };
     let (session, desktop) = (env("XDG_SESSION_TYPE"), env("XDG_CURRENT_DESKTOP"));
     let clip = if typer.is_clipboard() { Some(typer) } else { insert::clipboard(&insert::Env { session: &session, desktop: &desktop }, insert::on_path) };
-    match clip.ok_or_else(|| std::io::Error::other("no wl-copy or xclip")).and_then(|c| c.insert(text)) {
+    match clip.ok_or_else(|| std::io::Error::other("no wl-copy, xclip or xsel")).and_then(|c| c.insert(text)) {
         Ok(()) => {
             ind.send("idle");
             ("paste_failed", Some(focus::clipboard_hint(why)))
