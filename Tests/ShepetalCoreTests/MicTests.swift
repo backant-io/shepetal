@@ -60,6 +60,29 @@ final class MicTests: XCTestCase {
                                           lidClosed: false), teams, "so is a preferred one")
     }
 
+    /// Pavel's Mac lists the iPhone's Continuity mic before the built-in one. With Teams Audio as the system
+    /// default, Automatic must still record from the MacBook's own mic, not wake the phone. Only a closed lid
+    /// leaves the phone as the real mic.
+    func testVirtualSystemDefaultFallsBackToTheBuiltInMicBeforeCoreAudiosFirst() throws {
+        let iPhone = MicDevice(uid: "iphone", name: "Pavel's iPhone Microphone", transport: .other)
+        let teams = MicDevice(uid: "MSLoopbackDriverDevice_UID", name: "Microsoft Teams Audio", transport: .virtual)
+        let devices = [iPhone, builtIn, teams]
+        XCTAssertEqual(try MicChoice.pick(devices, forced: nil, ranking: [], systemDefault: teams.uid, lidClosed: false), builtIn)
+        XCTAssertEqual(try MicChoice.pick(devices, forced: nil, ranking: [], systemDefault: nil, lidClosed: false), builtIn,
+                       "no system default either")
+        XCTAssertEqual(try MicChoice.pick(devices, forced: nil, ranking: [], systemDefault: teams.uid, lidClosed: true), iPhone)
+        XCTAssertEqual(try MicChoice.pick(devices, forced: nil, ranking: [], systemDefault: iPhone.uid, lidClosed: false), iPhone,
+                       "a real system default is the user's choice")
+    }
+
+    /// The fix for the 21.10.26 empty recordings: moving the engine onto the default input it already records from
+    /// made it reconfigure until the rebuilds ran out. Only a pick that is not the default moves it.
+    func testEngineMovesOnlyOffTheSystemDefault() {
+        XCTAssertFalse(MicChoice.needsMove(builtIn, systemDefault: builtIn.uid))
+        XCTAssertTrue(MicChoice.needsMove(builtIn, systemDefault: "MSLoopbackDriverDevice_UID"), "Teams Audio is the default")
+        XCTAssertTrue(MicChoice.needsMove(usb, systemDefault: nil))
+    }
+
     func testClamshellWithOnlyBuiltInIsAnError() {
         XCTAssertThrowsError(try pick([builtIn], lidClosed: true)) { XCTAssertEqual($0 as? MicError, .lidClosed) }
         XCTAssertThrowsError(try pick([], lidClosed: false)) { XCTAssertEqual($0 as? MicError, .noMic) }
@@ -135,7 +158,17 @@ final class MicTests: XCTestCase {
 
         var flowing = MicHealth(start: 100)
         _ = flowing.buffer([0.1], at: 100.1)
-        XCTAssertEqual(flowing.tick(at: 110), [], "buffers came, so it is not a stop")
+        XCTAssertEqual(flowing.tick(at: 105), [], "buffers came, so it is not a stop")
+    }
+
+    /// An engine that is still running after a configuration change is left alone. When it then stops delivering,
+    /// the dictation would record nothing more without a word: it ends, and what came is transcribed.
+    func testBuffersThatStopPartwayStop() {
+        var h = MicHealth(start: 0)
+        _ = feed(&h, zeros: false, from: 0.1, to: 2)
+        XCTAssertEqual(h.tick(at: 6.9), [])
+        XCTAssertEqual(h.tick(at: 7), [.stalled])
+        XCTAssertEqual(h.tick(at: 8), [])  // once
     }
 
     func testSilentStartReopensOnce() {

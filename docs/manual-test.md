@@ -190,9 +190,9 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 
 ### M-MIC-7: every dictation records (21.10.26 retest: empty WAVs)
 1. With the system input on MacBook Pro Microphone and Microsoft Teams (or Zoom, BlackHole) installed, hold fn, say a sentence, release. Expected: the text is inserted, no "No audio from the microphone", and the newest WAV in Open recordings folder is longer than 44 bytes.
-2. Set System Settings > Sound > Input to Microsoft Teams Audio. Open 🤫 > Microphone. Expected: "Automatic (MacBook Pro Microphone)", and a dictation records your voice. Set the input back.
+2. Keep your iPhone nearby and unlocked (macOS lists its Continuity mic before the built-in one). Set System Settings > Sound > Input to Microsoft Teams Audio. Open 🤫 > Microphone. Expected: "Automatic (MacBook Pro Microphone)", not the iPhone, and a dictation records your voice. This dictation moves the engine off the system default, so in step 4 its "opened" line can have one "configuration change" line after it. Set the input back.
 3. Choose the iPhone or a USB mic in 🤫 > Microphone (not the system input) and dictate. Expected: it records, and the menu lists no CADefaultDeviceAggregate device.
-4. The mic's log, without any audio or text: `/usr/bin/log show --last 10m --predicate 'process == "Shepetal" AND eventMessage BEGINSWITH "shepetal: mic"'` (zsh's own `log` command shadows /usr/bin/log). Expected: one "opened <mic>" line per dictation, at most one "configuration change" line after it, and no "dictation ended" line.
+4. The mic's log, without any audio or text: `/usr/bin/log show --last 10m --predicate 'process == "Shepetal" AND eventMessage BEGINSWITH "shepetal: mic"'` (zsh's own `log` command shadows /usr/bin/log). Expected: one "opened <mic>" line per dictation, at most one "configuration change" line after it, and no "dictation ended" line (a mic that stops partway ends with "<mic> stopped sending audio").
 
 ### M-LANG-1: languages
 1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
