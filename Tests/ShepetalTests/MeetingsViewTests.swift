@@ -56,9 +56,7 @@ final class MeetingsViewTests: XCTestCase {
 
     func testMarkdownExport() {
         XCTAssertEqual(MeetingFormat.markdown(record, timeZone: utc), """
-        # Google Meet (Chrome)
-
-        2026-10-20 15:00 · 1 h 5 min
+        # Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min
 
         ## Overview
 
@@ -89,9 +87,7 @@ final class MeetingsViewTests: XCTestCase {
         var r = record
         r.summary = Summary(overview: "Short call.")
         XCTAssertEqual(MeetingFormat.markdown(r, transcript: false, timeZone: utc), """
-        # Google Meet (Chrome)
-
-        2026-10-20 15:00 · 1 h 5 min
+        # Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min
 
         ## Overview
 
@@ -109,6 +105,9 @@ final class MeetingsViewTests: XCTestCase {
         XCTAssertEqual(MeetingFormat.headline(record.meeting, timeZone: utc), "Google Meet (Chrome) · 20.10.26 15:00 · 1 h 5 min")
         XCTAssertEqual(MeetingFormat.headline(meeting("m", MeetingRecorder.manualApp, at: t0), timeZone: utc),
                        "20.10.26 15:00 · 42 min")
+        // Copy summary and the export head the same way as the window: no "Manual", DD.MM.YY.
+        XCTAssertEqual(MeetingFormat.markdown(MeetingRecord(meeting: meeting("m", MeetingRecorder.manualApp, at: t0)), timeZone: utc),
+                       "# 20.10.26 15:00 · 42 min\n")
     }
 
     // Pasted into a chat or a doc, it must read without Markdown and keep who said what when; no summary.

@@ -8,44 +8,69 @@ import SwiftUI
 /// reused: the latest meeting replaces the one shown. The clipboard is written only from its Copy buttons or ⌘C.
 @MainActor
 final class MeetingTranscriptWindow {
-    let panel: NSPanel = TranscriptPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
-                                         styleMask: [.titled, .closable, .resizable, .nonactivatingPanel],
-                                         backing: .buffered, defer: false)
+    let panel: TranscriptPanel
     let model: MeetingsModel
-    private let present: @MainActor (NSPanel) -> Void
+    let hosting: NSHostingView<MeetingTranscriptView>
+    private let open: (String) -> Void
 
-    /// Like `MeetingCard`: tests pass a `present` that only counts, so nothing shows, and a model with its own copy.
-    init(model: MeetingsModel, open: @escaping (String) -> Void,
-         present: @escaping @MainActor (NSPanel) -> Void = { $0.orderFrontRegardless() }) {
+    /// Tests pass a panel that only records what it is asked to do, so nothing shows, and a model with its own copy.
+    init(model: MeetingsModel, open: @escaping (String) -> Void, panel: TranscriptPanel = TranscriptPanel()) {
         self.model = model
-        self.present = present
+        self.open = open
+        self.panel = panel
+        hosting = NSHostingView(rootView: MeetingTranscriptView(model: model, open: open, summarizing: true))
         panel.title = "Meeting transcript"
         panel.isReleasedWhenClosed = false
         panel.hidesOnDeactivate = false  // an accessory app is never active
         panel.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]  // over a full-screen call too
-        panel.contentView = NSHostingView(rootView: MeetingTranscriptView(model: model, open: open))
+        panel.contentView = hosting
         panel.center()
     }
 
-    func show(_ meeting: Meeting) {
+    /// One window for every meeting `flow` finishes, made at the first one: the latest replaces the one shown.
+    static func follow(_ flow: MeetingFlow, open: @escaping (String) -> Void,
+                       panel: @escaping () -> TranscriptPanel = { TranscriptPanel() }) {
+        var window: MeetingTranscriptWindow?
+        flow.onTranscript = { [store = flow.store] m, summarizing in
+            window = window ?? MeetingTranscriptWindow(model: MeetingsModel(store: store), open: open, panel: panel())
+            window?.show(m, summarizing: summarizing)
+        }
+    }
+
+    /// `summarizing` false: no summary is coming (the final pass or the summary failed), so none is promised.
+    /// The same meeting again only updates the window; a window the user closed stays closed.
+    func show(_ meeting: Meeting, summarizing: Bool = true) {
+        let shown = model.selectedID == meeting.id
         model.select(meeting.id)
-        present(panel)
+        hosting.rootView = MeetingTranscriptView(model: model, open: open, summarizing: summarizing)
+        if !shown { panel.orderFrontRegardless() }
     }
 }
 
 /// An accessory app has no Edit menu for ⌘C to reach, so the panel sends copy: to the selected text itself.
-private final class TranscriptPanel: NSPanel {
+class TranscriptPanel: NSPanel {
+    convenience init() {
+        self.init(contentRect: NSRect(x: 0, y: 0, width: 560, height: 620),
+                  styleMask: [.titled, .closable, .resizable, .nonactivatingPanel], backing: .buffered, defer: false)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, event.charactersIgnoringModifiers == "c" {
-            return NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self)
-        }
-        return super.performKeyEquivalent(with: event)
+        Self.isCopy(event) ? NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) : super.performKeyEquivalent(with: event)
+    }
+
+    /// ⌘C with Caps Lock on or off, and on a layout whose C key types another letter (Cyrillic "с").
+    static func isCopy(_ event: NSEvent) -> Bool {
+        guard event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command else { return false }
+        let c = event.charactersIgnoringModifiers?.lowercased() ?? ""
+        return c == "c" || (!c.allSatisfy(\.isASCII) && event.keyCode == 8)  // 8: the C key (kVK_ANSI_C)
     }
 }
 
 struct MeetingTranscriptView: View {
     @ObservedObject var model: MeetingsModel
     let open: (String) -> Void
+    /// The summary is still being written; false once it failed, so nothing spins for ever.
+    let summarizing: Bool
 
     var body: some View {
         Group {
@@ -73,7 +98,7 @@ struct MeetingTranscriptView: View {
                     Button { model.copyTranscript() } label: { Label("Copy transcript", systemImage: "text.quote") }
                         .disabled(r.segments.isEmpty)
                     Button { model.copySummary() } label: { Label("Copy summary", systemImage: "doc.on.doc") }
-                        .disabled(r.summary == nil || r.segments.isEmpty)
+                        .disabled(!model.canCopySummary)
                     Spacer(minLength: 8)
                     Button("Open in Meetings") { open(r.meeting.id) }
                 }
@@ -99,20 +124,17 @@ struct MeetingTranscriptView: View {
         }
     }
 
+    /// The same sections as the Meetings tab, so what shows here is what Copy summary copies.
     @ViewBuilder private func summary(_ s: Summary?) -> some View {
-        if let s {
-            VStack(alignment: .leading, spacing: 10) {
-                if !s.overview.isEmpty { Text(s.overview).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
-                if !s.actionItems.isEmpty {
-                    Text("Action items").font(.headline)
-                    ForEach(Array(s.actionItems.enumerated()), id: \.offset) { _, a in ActionRow(item: a) }
-                }
-            }
-        } else {
+        if let s, !s.isEmpty {
+            SummarySections(summary: s).textSelection(.enabled)
+        } else if s == nil && summarizing {
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small)
                 Text("Summarizing…").foregroundStyle(.secondary)
             }
+        } else {
+            Text("No summary for this meeting").foregroundStyle(.secondary)
         }
     }
 }
