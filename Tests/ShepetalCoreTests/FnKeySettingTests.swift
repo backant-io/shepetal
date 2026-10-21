@@ -123,41 +123,56 @@ final class FnKeySettingTests: XCTestCase {
     }
 }
 
+/// "fn not received" must mean it: the 🌐 key's 179 reached the tap and fn's 63 did not. Pavel saw it while typing
+/// other keys (2026-10-21) because the old check polled the HID fn flag, which macOS also sets for arrows and F-keys.
 final class FnHealthTests: XCTestCase {
-    func testPressTheTapNeverReportsAlertsOnceAfterGrace() {
-        var h = FnHealth()
-        XCTAssertFalse(h.poll(hidFnDown: true, at: 10))
-        XCTAssertFalse(h.poll(hidFnDown: true, at: 10.5))
-        XCTAssertTrue(h.poll(hidFnDown: true, at: 11.0))
-        XCTAssertFalse(h.poll(hidFnDown: true, at: 11.5), "once per press")
-        XCTAssertFalse(h.poll(hidFnDown: false, at: 12))
-        XCTAssertFalse(h.poll(hidFnDown: true, at: 13))
-        XCTAssertTrue(h.poll(hidFnDown: true, at: 14.1), "the next unreported press alerts again")
+    /// Polls every 0.1 s from `from` through `to`; returns the times it alerted.
+    func alerts(_ h: inout FnHealth, from: TimeInterval, to: TimeInterval) -> [TimeInterval] {
+        stride(from: from, through: to, by: 0.1).filter { h.poll(at: $0) }
     }
 
-    func testReportedPressNeverAlerts() {
+    func testGlobeWithoutFnAlertsOnceAfterTheWindow() {
         var h = FnHealth()
-        h.tapEvent(at: 10.02)
-        for t in stride(from: 10.0, through: 13.0, by: 0.1) { XCTAssertFalse(h.poll(hidFnDown: true, at: t)) }
+        h.globe(at: 10)
+        XCTAssertEqual(alerts(&h, from: 10, to: 10.9), [], "fn may still come")
+        XCTAssertEqual(alerts(&h, from: 11, to: 20), [11], "once per press")
+        h.globe(at: 30)
+        XCTAssertEqual(alerts(&h, from: 30, to: 32).count, 1, "the next unanswered press alerts again")
     }
 
-    func testTapEventJustBeforeThePollCounts() {
+    func testGlobeAfterAFnTapNeverAlerts() {
         var h = FnHealth()
-        h.tapEvent(at: 9.8)  // the tap saw fn down before the 0.1 s poll did
-        for t in stride(from: 10.0, through: 12.0, by: 0.1) { XCTAssertFalse(h.poll(hidFnDown: true, at: t)) }
+        h.fn(down: true, at: 10)
+        h.fn(down: false, at: 10.15)
+        h.globe(at: 10.16)  // macOS sends the 179 pair right after the release
+        XCTAssertEqual(alerts(&h, from: 10, to: 15), [])
     }
 
-    func testOldTapEventDoesNotCoverANewPress() {
+    func testFnShortlyAfterTheGlobeCoversIt() {
         var h = FnHealth()
-        h.tapEvent(at: 1)
-        XCTAssertFalse(h.poll(hidFnDown: true, at: 10))
-        XCTAssertTrue(h.poll(hidFnDown: true, at: 11))
+        h.globe(at: 10)  // in case macOS sends 179 before 63
+        h.fn(down: true, at: 10.3)
+        XCTAssertEqual(alerts(&h, from: 10, to: 15), [])
     }
 
-    func testShortPressDoesNotAlert() {
+    func testGlobeWhileFnIsHeldNeverAlerts() {
         var h = FnHealth()
-        XCTAssertFalse(h.poll(hidFnDown: true, at: 10))
-        XCTAssertFalse(h.poll(hidFnDown: true, at: 10.3))
-        XCTAssertFalse(h.poll(hidFnDown: false, at: 10.4))
+        h.fn(down: true, at: 10)
+        h.globe(at: 14)  // 🌐+E during a long hold: the last fn event is 4 s old, but fn is down
+        XCTAssertEqual(alerts(&h, from: 14, to: 20), [])
+    }
+
+    func testOldFnDoesNotCoverANewGlobe() {
+        var h = FnHealth()
+        h.fn(down: true, at: 1)
+        h.fn(down: false, at: 1.1)
+        h.globe(at: 10)
+        h.fn(down: true, at: 11.5)  // too late for that press
+        XCTAssertEqual(alerts(&h, from: 10, to: 11.4), [11])
+    }
+
+    func testNothingButPollsNeverAlerts() {
+        var h = FnHealth()
+        XCTAssertEqual(alerts(&h, from: 0, to: 60), [])
     }
 }
