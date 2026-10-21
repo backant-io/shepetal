@@ -25,10 +25,10 @@ export function Cards({ list, large }: { list: Article[]; large?: boolean }) {
 /**
  * The blog's one Mulberry field (the afterglow), with blush text only. The brand line, the canonical line and the price
  * claims, as written; the other claims appear once each in the article itself (CTA_CLAIMS, checked in blog.test.ts).
- * "Download for Mac" goes to /download, which signs in (the 30 days start there) and hands over the installer;
+ * "Try 30 days free" goes to /download, which signs in (the 30 days start there) and hands over the installer;
  * "Buy shepetal" goes to the landing page's price section, where the purchase starts.
  */
-export const CTA_CLAIMS = ['Write at the speed of thought.', 'Press one key. Your words appear wherever you speak.', '30 days free.', '$4.99. Yours forever.'];
+export const CTA_CLAIMS = ['Write at the speed of thought.', 'Press one key. Your words appear wherever you speak.', '30 days free', '$4.99. Yours forever.', 'For Mac.'];
 
 export function BlogCta() {
   return (
@@ -37,18 +37,16 @@ export function BlogCta() {
         <img src="/brand/shepetal-wordmark-on-dark.svg" alt="shepetal" width={200} height={54} loading="lazy" decoding="async" className="bl-cta-mark" />
         <h2 id="cta-h">Write at the speed of thought.</h2>
         <p className="bl-cta-lead">Press one key. Your words appear wherever you speak.</p>
-        <ul className="bl-cta-claims">
-          <li>30 days free.</li>
-          <li>$4.99. Yours forever.</li>
-        </ul>
+        <p className="bl-cta-price">$4.99. Yours forever.</p>
         <div className="bl-cta-row">
           <a href="/download" className="bl-btn">
-            Download for Mac
+            Try 30 days free
           </a>
           <Link href="/#price" className="bl-btn bl-btn-quiet">
             Buy shepetal
           </Link>
         </div>
+        <p className="bl-cta-meta">For Mac.</p>
       </div>
     </section>
   );

@@ -5,7 +5,9 @@ import { ARTICLES, bySlug, KIND_LABEL } from '@/lib/blog/articles';
 import { articleJsonLd, AUTHOR, ldJson, ogImageFor } from '@/lib/blog/seo';
 import { BlogCta, Cards, formatDate } from '@/components/blog/parts';
 
-export const dynamicParams = false;
+// Every article is prerendered at build time. dynamicParams stays on: on the Worker, OpenNext without an incremental
+// cache answers a prerendered page with NoFallbackError (a 404) when dynamicParams is false. An unknown slug is a 404
+// through notFound() below.
 
 export function generateStaticParams() {
   return ARTICLES.map((a) => ({ slug: a.slug }));

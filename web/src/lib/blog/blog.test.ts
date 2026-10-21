@@ -204,8 +204,10 @@ describe('sitemap and robots', () => {
 describe('blog pages', () => {
   it('render statically: no request-time APIs, and unknown slugs are a 404', () => {
     const page = readFileSync(join(WEB, 'src', 'app', '(site)', 'blog', '[slug]', 'page.tsx'), 'utf8');
-    expect(page).toContain('export const dynamicParams = false');
     expect(page).toContain('generateStaticParams');
+    expect(page).toContain('notFound()');
+    // dynamicParams = false 404s every article on the Worker (OpenNext with no incremental cache): keep it out.
+    expect(page).not.toMatch(/export const dynamicParams = false/);
     expect(page).not.toMatch(/cookies\(|headers\(|auth\(/);
   });
 });
