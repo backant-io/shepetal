@@ -179,6 +179,8 @@ final class VocabularyTests: XCTestCase {
             XCTAssertEqual(try mode(), 0o600)
             XCTAssertEqual(batch.entries, learned)
 
+            // An editor that saves with the default umask in between: the undo leaves the file owner-only again.
+            try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: url.path)
             XCTAssertTrue(try Vocabulary.undoLearned(batch, at: url))
             XCTAssertEqual(try Data(contentsOf: url), Data(before.utf8), "byte for byte as before: \(before.debugDescription)")
             XCTAssertEqual(try mode(), 0o600)

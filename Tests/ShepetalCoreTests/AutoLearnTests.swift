@@ -38,6 +38,8 @@ final class AutoLearnTests: XCTestCase {
         XCTAssertEqual(AutoLearn.learn(pasted: "my cat is here", edited: "my dog is here"), [])
         XCTAssertEqual(AutoLearn.learn(pasted: "ping jon and mike today", edited: "tell John or Mikey today"), [],
                        "more than half of the words changed, even if two of them look like fixes")
+        XCTAssertEqual(AutoLearn.learn(pasted: "jon is at home", edited: "John was at work"), [],
+                       "a new sentence, though \"jon is\" => \"John was\" alone would pass every word filter")
     }
 
     func testStopwordsNumbersAndSingleCJKCharactersLearnNothing() {

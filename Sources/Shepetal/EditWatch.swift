@@ -190,7 +190,7 @@ final class AutoLearner: NSObject {
         guard let batch = lastBatch else { return }
         lastBatch = nil
         let undone = (try? Vocabulary.undoLearned(batch, at: dictionary)) == true
-        hint(undone ? "Forgot \(Self.list(batch.entries))" : "dictionary.txt changed since; remove the words in Settings > Dictionary…")
+        hint(undone ? "Forgot \(Self.list(batch.entries))" : "dictionary.txt was changed since, so the words stay. Remove them in the Dictionary tab.")
     }
 
     static func learnedHint(_ entries: [Vocabulary.Entry]) -> String { "Learned: " + entries.map(\.written).joined(separator: ", ") }
