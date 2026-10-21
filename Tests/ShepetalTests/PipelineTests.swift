@@ -9,6 +9,7 @@ final class FakeEngine: SpeechEngine {
     var text: String
     var error: Error?
     private(set) var calls = 0
+    private(set) var heard: [Float] = []  // the samples of the last call
 
     init(_ text: String = "", error: Error? = nil) {
         self.text = text
@@ -17,6 +18,7 @@ final class FakeEngine: SpeechEngine {
 
     func transcribe(_ samples: [Float], wav: URL) async throws -> String {
         calls += 1
+        heard = samples
         if let error { throw error }
         return text
     }
@@ -50,7 +52,7 @@ final class PipelineTests: XCTestCase {
     func process(_ samples: [Float], _ engine: SpeechEngine?, before: String = "",
                  sendPaste: @escaping (CGEvent) -> Void = { _ in }) async throws -> (Pipeline.Run, HistoryEntry) {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        let run = await pipeline.process(samples, engine: engine, context: { (before, "") }, sendPaste: { [unowned self] in
+        let run = await pipeline.process(samples, engine: engine, context: { (before, "", "") }, sendPaste: { [unowned self] in
             self.pastes += 1
             sendPaste($0)
         })
@@ -195,7 +197,7 @@ final class PipelineTests: XCTestCase {
     func testDictationAndRetranscribeBothUseTheCleanupModel() async throws {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         pipeline.cleanup = RewriteModel(["Send it to John, I mean Jane.": "Send it to Jane."])
-        let run = await pipeline.process(speech, engine: FakeEngine("Send it to John, I mean Jane."), context: { ("", "") },
+        let run = await pipeline.process(speech, engine: FakeEngine("Send it to John, I mean Jane."), context: { ("", "", "") },
                                          sendPaste: { [unowned self] e in if e.type == .keyDown { _ = pasteboard.string(forType: .string) } })
         XCTAssertEqual(run.entry.text, "Send it to Jane.")
         XCTAssertEqual(run.cleanupModel, "rewrite")
@@ -238,6 +240,30 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(failedRow.outcome, .failed)
         XCTAssertEqual(failedRow.model, "fake")
         XCTAssertEqual(pastes, 0)
+    }
+
+    // The WAV is written off the main thread while Parakeet works on the samples. whisper-cli reads the file,
+    // so it must get it written in full, even from a slow disk.
+    @MainActor
+    func testAnEngineThatReadsTheWavGetsItWritten() async throws {
+        let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
+        let write = pipeline.writeAudio
+        pipeline.writeAudio = { Thread.sleep(forTimeInterval: 0.2); return try write($0, $1) }  // a slow disk
+        let engine = WavReadingEngine()
+        let run = await pipeline.process(speech, engine: engine, context: { ("", "", "") }, sendPaste: { _ in })
+        XCTAssertEqual(engine.read, AudioStore.wav(speech))
+        XCTAssertEqual(run.entry.rawText, "from the file")
+    }
+}
+
+private final class WavReadingEngine: SpeechEngine {
+    let name = "reads wav"
+    let readsWav = true
+    private(set) var read: Data?
+
+    func transcribe(_ samples: [Float], wav: URL) async throws -> String {
+        read = try Data(contentsOf: wav)
+        return "from the file"
     }
 }
 

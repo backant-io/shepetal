@@ -80,7 +80,7 @@ final class E2E: NSObject, NSApplicationDelegate {
                 continue
             }
             let run = await pipeline.process(samples, engine: engine, app: app, context: { [textView] in
-                FocusedText.split(textView!.string, textView!.selectedRange())
+                FocusedText.context(FocusedText.Field(textView!))
             }, sendPaste: { event in
                 // The same Cmd+V the app posts system-wide, delivered through this process's menu instead.
                 guard !dropPaste, event.type == .keyDown, let e = NSEvent(cgEvent: event) else { return }
@@ -147,5 +147,26 @@ final class PrivatePasteView: NSTextView {
 
     override func paste(_ sender: Any?) {
         if let source { _ = readSelection(from: source) }
+    }
+}
+
+extension FocusedText.Field {
+    /// A text view's own accessibility answers: what TextEdit's text view gives over AX, without an AX call.
+    init(_ view: NSTextView) {
+        func answer(_ name: String) -> Any? {
+            switch name {
+            case kAXRoleAttribute: return view.accessibilityRole()?.rawValue
+            case kAXValueAttribute: return view.accessibilityValue()
+            case kAXNumberOfCharactersAttribute: return view.accessibilityNumberOfCharacters()
+            case kAXSelectedTextAttribute: return view.accessibilitySelectedText()
+            case kAXSelectedTextRangeAttribute:
+                let r = view.accessibilitySelectedTextRange()
+                var cf = CFRange(location: r.location, length: r.length)
+                return AXValueCreate(.cfRange, &cf)
+            default: return nil
+            }
+        }
+        self.init(get: { name in answer(name).map { (.success, $0 as AnyObject) } ?? (.attributeUnsupported, nil) },
+                  string: { view.accessibilityString(for: NSRange(location: $0.location, length: $0.length)) })
     }
 }
