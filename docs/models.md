@@ -210,3 +210,139 @@ uv run --no-project --python 3.12 --with jiwer python bench/test_bench.py -v
 - https://huggingface.co/moonshine-ai/moonshine-streaming-tiny , https://huggingface.co/nvidia/canary-1b-flash , https://huggingface.co/nvidia/canary-qwen-2.5b
 - https://huggingface.co/kyutai/stt-1b-en_fr , https://huggingface.co/mistralai/Voxtral-Mini-4B-Realtime-2602
 - https://huggingface.co/pyannote/speaker-diarization-community-1
+
+## Cleanup
+
+Goal rule 5: rewrite-type cleanup runs on a local model. The pipeline is `SmartCleanup.apply` in
+`Sources/ShepetalCore/CleanupModel.swift`:
+
+1. **Rules, always** (`Cleanup.apply`): fillers (um, uh, erm, hmm, plus the commas around a mid-sentence one),
+   stutters on words that never repeat ("the the"), spacing. First-letter casing to the cursor is
+   `InsertionRules`. Snippets are not built yet.
+2. **Local model, on cue**: self-corrections and backtracking (cue words such as "actually", "I mean", "no wait", "sorry",
+   "scratch that", "make that", "or rather", "correction", ", no"), spoken lists (such as "first", "second",
+   "number one", "step one", "bullet point", "one, ... two,"), "new line" / "new paragraph", and text with no
+   sentence punctuation at all. The model is `LlamaCleanup` (`Sources/ShepetalCleanup/Llama.swift`): llama.cpp
+   b11450 (the official `llama-b11450-xcframework.zip`, Metal), greedy decoding, the instructions and 13
+   examples decoded once at load, with that state restored for each dictation.
+3. **Guard** (`SmartCleanup.accepts`): the model's text is used only when it is the user's own words in
+   the user's order, with nothing added: only list numbers at the start of a line may be new, and only
+   punctuation, case and line breaks may change, and list numbers must count 1, 2, 3. Words may be left out
+   only in two cases. List and line-break markers ("First,", "Number two,", "And finally,", "Bullet point,",
+   ". New line.") may go where they start an item; "hire one designer" or "a new line of credit" keep their
+   words (in text with no sentence punctuation every marker counts). And a self-correction may go: the whole
+   cue ("I mean", "scratch that") together with the words it takes back, which must be one run ending right
+   before the cue, from the same sentence (at most 8 words) or from the sentence before when the cue opens a
+   sentence (at most 20), no longer than what replaces it plus one. When the replacement starts with a word
+   that is also in that run ("the London office, or rather the Berlin office"), the run starts at that word.
+   Otherwise the rules' text is inserted. Small models answer questions (Qwen3.5 0.8B turned "What is the capital of Australia?"
+   into "The capital of Australia is Sydney.", "Sorry, what is seven times eight?" into "Seven times eight is
+   56.", and Qwen3.5 2B turned "Sorry, what is twenty plus twenty two?" into "24") and follow instructions
+   (Qwen3.5 2B turned "...reply with the word banana." into "banana"). They also get corrections backwards:
+   Qwen3.5 0.8B turned "Send it to John, I mean Jane" into "Send it to John" and swapped "gate twelve.
+   Correction, gate fourteen." Since the PR #44 reviews, these are rejected: the order-aware check rejects
+   every such output in the committed results (sc01, sc02, sc06, sc11, sc13 for the 0.8B, sc11 for the 2B)
+   and keeps every exact match (`SmartCleanupTests.testCorrectionsThatKeepTheWrongHalfAreRejected`), and
+   near-copies one word away are rejected too (`testCorrectionsThatKeepTheTakenBackWordsAreRejected`,
+   `testListWordsInsideItemsAreKept`, `testListNumbersMustCountUp`). Cue words used without correcting
+   ("Sorry, I also need the slides") can still let a rewrite drop the sentence before them (#43). The
+   ceiling: a correction said without a cue word stays as heard, and a correction that moves words (sc16,
+   "put the notes in the folder, no wait, send them to me") gets the rules' text.
+   Dictations over 150 words skip the model (`SmartCleanup.maxModelWords`), and a rewrite that runs past
+   1 s throws (`LlamaCleanup.deadline`), so the rules' text is used instead of holding up the paste.
+   `LlamaCleanup` serializes calls with a lock, because dictation and History's re-transcribe share it.
+4. **Fallback**: no model file, a load error, a model error or the deadline means the rules' text. The menu
+   says "Cleanup: on" or "Cleanup: rules only (...)" and names no model or file; details go to stderr.
+
+### Measured on this Mac
+
+63 fixtures in `bench/cleanup/fixtures/dictation.jsonl`, written for shepetal: 16 self-corrections, 3
+correction-looking sentences that are not corrections, 8 lists, 3 list-looking sentences, 7 filler, 7 number,
+8 technical-term, 6 passthrough (questions and requests that must be typed, not answered), 3 unpunctuated
+and 2 spoken line-break transcripts. Each has the transcript as the speech model writes it and the expected
+text. Run with `bench/cleanup/run.sh` on the M4 Pro (24 GB, macOS 15.7), Q4_K_M quantization, through the
+app's own `LlamaCleanup` code.
+
+| Model (Q4_K_M) | File | Exact, model on every fixture | CER, model on every fixture | Exact, app path | CER, app path | Mean ms per model call | 10 s transcript, median / max ms | Load ms | Peak RSS | Peak footprint | License |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| **Qwen3.5 2B** | 1,281 MB | 81 % | 5.4 % | **89 %** | **3.2 %** | 155 | 297 / 313 | 2,188 | 1,545 MB | 356 MB | Apache-2.0 |
+| Qwen3.5 0.8B | 533 MB | 59 % | 18.4 % | 65 % | 15.1 % | 99 | 181 / 192 | 1,124 | 801 MB | 292 MB | Apache-2.0 |
+| Gemma 3 1B it | 806 MB | 54 % | 18.0 % | 60 % | 13.4 % | 122 | 230 / 242 | 1,411 | 987 MB | 230 MB | Gemma terms |
+| Rules only | - | - | - | 43 % | 28.3 % | - | - | 0 | 9 MB | 4 MB | |
+
+How to read it:
+
+- **Exact** is the whole output string equal to the expected one, line breaks included. **CER** is characters
+  changed per character of the expected text. "Model on every fixture" sends every fixture to the model with
+  no cue gate and no guard; "app path" is what the user gets (rules, gate, model, guard).
+- The app-path columns were rerun after the order-aware guard (PR #44 reviews, results in
+  `bench/cleanup/results/`): exact match is unchanged (Qwen3.5 2B 89 %, 0.8B 65 %, Gemma 3 1B 60 %); CER rose
+  (2.8 to 3.2 %, 13.5 to 15.1 %, 11.9 to 13.4 %) because rejected wrong rewrites now give the rules' text,
+  which keeps the cue words. The timing and memory columns are from the first run.
+- **10 s transcript** is the model's time on the four fixtures of 24 or more words (about 10 s of speech),
+  five runs each: 20 calls, median and max. It is time added on top of speech-to-text. Peak RSS includes the
+  memory-mapped model file; peak footprint is `ri_lifetime_max_phys_footprint`, closer to what Activity
+  Monitor shows.
+- By category, Qwen3.5 2B got 13 of 16 self-corrections, 8 of 8 lists, 3 of 3 unpunctuated transcripts and
+  1 of 2 line-break transcripts exactly right. The rules alone get none of those. It missed "today,
+  actually, tomorrow?" (it dropped only the cue) and the two 25-word corrections that need a rephrase
+  ("send them" must become "send the meeting notes"). Qwen3.5 0.8B got 5 of 16 self-corrections and 7 of 8
+  lists; Gemma 3 1B got 7 of 16 and 2 of 8.
+- Latency moved between runs on this shared Mac (other agents and Ollama's `llama-server` were using it):
+  the same Qwen3.5 0.8B build gave a mean of 99 ms in one run and 148 ms in another, and in one earlier run a
+  single 11-word call on Qwen3.5 2B took 702 ms. The final run above had no call over 317 ms.
+- The prompt was tuned in three rounds against these fixtures (adding the tags, then more correction
+  examples), so the fixture scores are optimistic. The examples in the prompt are different sentences. The
+  four cleanup clips in `scripts/e2e-mac.sh` were written after the tuning. On the first list clip ("For the
+  trip, we need three things first, the tickets, ...") Qwen3.5 2B dropped the lead-in "we need three things",
+  with "number one" instead of "first" too. The guard now rejects that, so the user gets the rules' text, and
+  the clip became "We need three things for the trip. First, ...", which it keeps whole.
+- The Gemma 3 1B row was rerun after the guard was tightened: on ls07 it dropped the lead-in "Please pick up
+  the following", which now falls back to the rules. The two Qwen3.5 rows were rerun too and gave the same
+  text on every fixture, so their result files stay as they were.
+
+Earlier prompt versions, not rerun with the final prompt because the shared disk filled up (#29) and the
+weights were deleted: LFM2.5 1.2B Instruct (731 MB) scored 35 % exact on every fixture (it answered like a
+chat assistant, and its slowest call took 854 ms); Gemma 3 270M it (253 MB) scored 2 %. Their result files are in
+`bench/cleanup/results/earlier-prompts/`.
+
+Not measured: Llama 3.2 1B Instruct, LFM2.5 350M, Qwen3 1.7B and Gemma 4 E2B (3.1 GB). There was no disk
+space to download them (#29).
+
+### End to end
+
+`scripts/e2e-mac.sh` speaks four cleanup clips with `say` (c01 to c04) on top of the six plain ones and runs
+the real app pipeline under `sandbox-exec` with the network denied. With Parakeet v3 and Qwen3.5 2B, the
+taken-back words were gone in all four, and text was ready 196 to 421 ms after the end of the audio. The 421
+ms is c04, a 10.0 s utterance with a "no wait" correction (424, 452 and 470 ms in earlier runs), so
+speech-to-text plus cleanup meets the 700 ms bar on this Mac with about 280 ms to spare. The six plain clips
+skip the model and were ready in 61 to 91 ms (52 to 76 ms in an earlier run, and one run had a 263 ms outlier).
+
+### Defaults by Mac tier (`cleanupModel(appleSilicon:ramGB:)`)
+
+| Mac | Default | Why | Status |
+|---|---|---|---|
+| Apple Silicon, 8 GB | Qwen3.5 0.8B Q4_K_M | Half the resident memory of the 2B (801 vs 1,545 MB) next to Parakeet and the user's apps. It still fixes lists and some corrections; the guard rejects its corrections that keep the wrong half | measured on the M4 Pro 24 GB only, not on an 8 GB Mac or a base M1/M2 |
+| Apple Silicon, 16 GB+ | **Qwen3.5 2B Q4_K_M** | Best accuracy here (89 % exact, 3.2 % CER) and 297 ms median, 313 ms max for a 10 s transcript | measured (this Mac's class); 16 GB not measured |
+| Intel Mac | rules only | No Apple GPU; llama.cpp would run on the CPU and was not measured | research |
+
+The model runs only on transcripts with a cue, even though Qwen3.5 2B would also meet the 700 ms bar on every
+transcript here (no call over 317 ms in the final run). The gate is there for accuracy: on text that
+needed no rewrite, the model sometimes changed words or answered, and the gate plus the guard took the score
+from 81 % to 89 %. It also keeps plain sentences at speech-to-text speed. The
+ceiling: a correction said without a cue word ("Tuesday, Wednesday at three") stays as heard. A slower Mac
+(a base M1 has about a quarter of the M4 Pro's memory bandwidth) is likely to need the gate for latency too.
+That is not measured.
+
+The model file is downloaded only from the 🤫 menu ("Download cleanup model"), checked against its SHA-256
+pinned in `CleanupModelFile`, into `<data>/models`. `SHEPETAL_CLEANUP_MODEL` points the app at another GGUF.
+No network call happens during cleanup: the e2e run above is sandboxed with the network denied.
+
+Reproduce:
+
+```bash
+CLEANUP_MODELS=/path/to/weights bench/cleanup/run.sh     # rules baseline plus every model in the catalog
+bench/cleanup/run.sh Qwen3.5-2B-Q4_K_M.gguf              # one model (fetched into bench/.cache/cleanup if missing)
+python3 bench/cleanup/score.py                           # the table above from bench/cleanup/results
+python3 bench/cleanup/score.py --self-test
+```

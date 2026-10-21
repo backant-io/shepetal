@@ -57,7 +57,7 @@ extension Pipeline {
         var e = entry
         let samples = try AudioStore.read(wav)
         e.rawText = try await engine.transcribe(await Task.detached { VoiceIsolation.apply(samples) }.value, wav: wav)
-        e.text = Self.finishText(e.rawText, dictionary: dictionary)
+        e.text = await finishText(e.rawText).text
         e.model = engine.name
         try history.update(e)
         return e
