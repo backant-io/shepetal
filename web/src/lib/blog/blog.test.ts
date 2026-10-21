@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { createElement, Fragment } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { BLOG_CSS } from '../../app/(site)/blog/blog-css';
 import robots from '../../app/robots';
 import sitemap from '../../app/sitemap';
 import { APPS } from './apps';
@@ -209,6 +210,15 @@ describe('sitemap and robots', () => {
 });
 
 describe('blog pages', () => {
+  it('inline their styles minified and whole: balanced braces, no comments, only the brand tokens', () => {
+    expect(BLOG_CSS.split('{').length).toBe(BLOG_CSS.split('}').length);
+    expect(BLOG_CSS).not.toContain('/*');
+    expect(BLOG_CSS).toContain('.bl-cta{');
+    expect(BLOG_CSS).toContain('@media (max-width: 719px){');
+    for (const v of BLOG_CSS.match(/var\(--[a-z0-9-]+/g) ?? []) expect(v, v).toMatch(/var\(--(sh|bl)-/);
+    expect(BLOG_CSS.length).toBeLessThan(10_000);
+  });
+
   it('render statically: no request-time APIs, and unknown slugs are a 404', () => {
     const page = readFileSync(join(WEB, 'src', 'app', '(site)', 'blog', '[slug]', 'page.tsx'), 'utf8');
     expect(page).toContain('generateStaticParams');

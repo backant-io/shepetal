@@ -1,3 +1,7 @@
+// The blog's styles, inlined into the page head by layout.tsx (React hoists the <style>), so a blog page has one
+// render-blocking stylesheet fewer: Lighthouse on the preview counted blog.css as 500 ms of blocking time on a phone.
+// Brand v2.1 (BRAND.md): only the tokens from tokens.css and fonts.css are used here.
+const SOURCE = `
 /* The blog, brand v2.1 (BRAND.md): blush by day, dusk by night, Newsreader for headlines and reading text,
    Hanken Grotesk for everything else, and one Mulberry field per page (the afterglow call to action).
    Only brand tokens are used here, so the blog follows tokens.css and fonts.css and nothing else. */
@@ -529,3 +533,11 @@
     transition: none !important;
   }
 }
+`;
+
+/** Comments and spaces out: the string ships twice (the <style> and the page's RSC payload), so keep it small. */
+export const BLOG_CSS = SOURCE.replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/\s+/g, ' ')
+  .replace(/\s*([{};,>])\s*/g, '$1')
+  .replace(/;}/g, '}')
+  .trim();
