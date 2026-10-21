@@ -28,15 +28,18 @@ final class WhatsNewNotesTests: XCTestCase {
     }
 
     /// The window reads top down as this version, then the older ones.
-    func testNotesAreNewestFirstWithDDMMYYDates() throws {
+    func testNotesAreNewestFirstWithDDMMYYDates() {
         let notes = WhatsNewWindow.notes
         XCTAssertFalse(notes.isEmpty)
         for (newer, older) in zip(notes, notes.dropFirst()) {
             XCTAssertTrue(WhatsNew.isNewer(newer.version, than: older.version), "\(newer.version) is listed above \(older.version)")
         }
-        let date = try NSRegularExpression(pattern: #"^\d{2}\.\d{2}\.\d{2}$"#)
+        let ddMMyy = DateFormatter()  // strict, and it must print the date back as written: 10.20.26 or 1.10.26 fail
+        ddMMyy.locale = Locale(identifier: "en_US_POSIX")
+        ddMMyy.dateFormat = "dd.MM.yy"
+        ddMMyy.isLenient = false
         for n in notes {
-            XCTAssertNotNil(date.firstMatch(in: n.date, range: NSRange(location: 0, length: n.date.utf16.count)), "\(n.version): \(n.date)")
+            XCTAssertEqual(ddMMyy.date(from: n.date).map(ddMMyy.string(from:)), n.date, "\(n.version): \(n.date) is not DD.MM.YY")
             XCTAssertFalse(n.lines.isEmpty, "\(n.version) has no lines")
         }
     }
