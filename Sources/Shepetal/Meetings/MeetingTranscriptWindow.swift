@@ -14,7 +14,8 @@ final class MeetingTranscriptWindow {
     private let open: (String) -> Void
 
     /// Tests pass a panel that only records what it is asked to do, so nothing shows, and a model with its own copy.
-    init(model: MeetingsModel, open: @escaping (String) -> Void, panel: TranscriptPanel = TranscriptPanel()) {
+    init(model: MeetingsModel, open: @escaping (String) -> Void, panel: TranscriptPanel? = nil) {
+        let panel = panel ?? TranscriptPanel()
         self.model = model
         self.open = open
         self.panel = panel
@@ -29,7 +30,7 @@ final class MeetingTranscriptWindow {
 
     /// One window for every meeting `flow` finishes, made at the first one: the latest replaces the one shown.
     static func follow(_ flow: MeetingFlow, open: @escaping (String) -> Void,
-                       panel: @escaping () -> TranscriptPanel = { TranscriptPanel() }) {
+                       panel: @escaping @MainActor () -> TranscriptPanel = { TranscriptPanel() }) {
         var window: MeetingTranscriptWindow?
         flow.onTranscript = { [store = flow.store] m, summarizing in
             window = window ?? MeetingTranscriptWindow(model: MeetingsModel(store: store), open: open, panel: panel())

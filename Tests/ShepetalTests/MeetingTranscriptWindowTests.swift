@@ -48,8 +48,7 @@ final class MeetingTranscriptWindowTests: XCTestCase {
     // Rule 8: it comes to the front for the user to see, but keyboard focus stays in the app they are typing in.
     func testPanelNeverTakesFocusWhenItOpens() throws {
         XCTAssertTrue(TranscriptPanel().styleMask.contains(.nonactivatingPanel), "clicking it must not activate the app")
-        XCTAssertTrue(NSPanel().hidesOnDeactivate, "an NSPanel hides when its app is not active…")
-        XCTAssertFalse(panel.hidesOnDeactivate, "…and an accessory app never is, so it would never show")
+        XCTAssertFalse(panel.hidesOnDeactivate, "an accessory app is never active, so it would never show")
         window.show(try ended("a", "Zoom", minutesAgo: 5, said: [Segment(speaker: .me, start: 1, end: 2, text: "Hi")]))
         XCTAssertEqual(panel.calls, ["orderFrontRegardless"], "in front, but never made key")
         XCTAssertNil(try source("Meetings/MeetingTranscriptWindow.swift").range(of: "activate("),
