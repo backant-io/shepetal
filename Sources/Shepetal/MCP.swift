@@ -69,7 +69,7 @@ final class MCPServer {
         default:
             return reply(id, error: -32601, "Method not found: \(method)")
         }
-        guard let id else { return nil }  // a notification, e.g. notifications/initialized
+        guard let id else { return nil }  // a notification (no id) is never answered
         return Self.encode(["jsonrpc": "2.0", "id": id, "result": result])
     }
 
