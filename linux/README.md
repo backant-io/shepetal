@@ -11,7 +11,7 @@ Design, X11/Wayland matrix, packaging and manual test steps: [docs/linux.md](../
 From the repo root (works on a Mac, no Rust toolchain needed):
 
 ```sh
-docker run --rm -v "$PWD/linux":/src -w /src -e CARGO_TARGET_DIR=/tmp/target ubuntu:24.04 sh -c \
+docker run --rm -v "$PWD":/src -w /src/linux -e CARGO_TARGET_DIR=/tmp/target ubuntu:24.04 sh -c \
   'apt-get update -qq && apt-get install -y -qq cargo >/dev/null && cargo test && cargo build --release && /tmp/target/release/shepetal probe --pw-dump fixtures/pw-dump-meeting.json'
 ```
 

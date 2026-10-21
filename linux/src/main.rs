@@ -1,6 +1,7 @@
 use shepetal::gesture::Action;
 use shepetal::indicator::{self, Indicator};
 use shepetal::shortcuts::{self, Cmd, Shortcuts};
+use shepetal::text_rules::{cleanup, dates};
 use shepetal::{focus, history, insert, meeting, model, vocab};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -329,8 +330,9 @@ fn transcribe(m: &model::Choice, wav: &Path) -> Result<String, String> {
         v["text"].as_str().ok_or(format!("{bin} output has no text"))?.to_string()
     };
     // The Mac's rules (TextRules.swift Cleanup): fillers and stutters never reach the cursor or the history.
-    // The dictionary and snippets come after it (docs/re/text-pipeline.md §2.6), so a snippet's text is never cleaned up.
-    Ok(vocab.apply(&shepetal::text_rules::cleanup(&text.split_whitespace().collect::<Vec<_>>().join(" "))))
+    // Spoken dates become numbers on the cleaned text (docs/text-rules.md).
+    // The dictionary and snippets come after both (docs/re/text-pipeline.md §2.6), so a snippet's text is inserted as written.
+    Ok(vocab.apply(&dates(&cleanup(&text.split_whitespace().collect::<Vec<_>>().join(" ")))))
 }
 
 /// whisper.cpp writes non-speech as bracketed markers (`[BLANK_AUDIO]`, `[Music]`); they must
@@ -1400,6 +1402,20 @@ mod tests {
             std::fs::write(d.join("whisper-cli"), "#!/bin/sh\nprintf ' Um, the the build is, uh, green.\\n'\n").unwrap();
             let gpu = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: true });
             assert_eq!(transcribe(&gpu, &d.join("clip.wav")).as_deref(), Ok("The build is, green."));
+        });
+    }
+
+    // docs/text-rules.md: the date rule runs on the cleaned text (a filler or stutter inside the date
+    // would hide it), and before the snippets, whose text the user stored as written.
+    #[test]
+    fn a_spoken_date_reaches_the_cursor_as_numbers() {
+        with_fake_tools("dates", |d| {
+            std::fs::write(d.join("whisper-cli"), "#!/bin/sh\nprintf ' Um, we fly on the the twenty sixth of um July.\\n'\n").unwrap();
+            let gpu = model::choose(&model::Hardware { ram_gb: 16, cores: 8, cuda: false, vulkan: true });
+            assert_eq!(transcribe(&gpu, &d.join("clip.wav")).as_deref(), Ok("We fly on 26.07."));
+            vocab::save(&d.join("shepetal"), vocab::SNIPPETS, "\"we fly\" = \"the first of March\"\n").unwrap();
+            std::fs::write(d.join("whisper-cli"), "#!/bin/sh\nprintf ' We fly.\\n'\n").unwrap();
+            assert_eq!(transcribe(&gpu, &d.join("clip.wav")).as_deref(), Ok("the first of March"));
         });
     }
 
