@@ -100,8 +100,14 @@ final class Indicator {
     }
 
     /// Text that stays next to the indicator while set and while recording, e.g. creator mode's label.
-    /// A hint covers it for its seconds. Any mode other than recording or hands-free clears it.
-    var status: String? { didSet { if labelUntil == nil, status != oldValue { setLabel(status) } } }
+    /// A hint covers it for its seconds. Any mode other than recording or hands-free clears it, and it cannot be
+    /// set outside them, so live words (F13) that come back after the release never show.
+    var status: String? {
+        didSet {
+            if mode != .recording && mode != .handsFree { status = nil }
+            if labelUntil == nil, status != oldValue { setLabel(status) }
+        }
+    }
 
     /// "Creator mode" in Settings: the label shows while recording, for screen recordings. Unset means off.
     static let creatorModeKey = "creatorMode"
