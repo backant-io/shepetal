@@ -54,11 +54,13 @@ final class TranslationTests: XCTestCase {
 
     // Source equal to target skips the step: English is never sent off to become English, and an empty
     // dictation or one whose language cannot be told stays as it is, without a hint. With Automatic a short one
-    // cannot be told: "Redis." reads as French and "x" as Slovak, and neither must ask for a download.
+    // cannot be told: "Redis." reads as French and "x" as Slovak, and neither must ask for a download. Nor
+    // may jargon the recognizer is unsure of: "Redis Postgres Kubernetes" reads as German at 0.43.
     func testEnglishSkipsTheStep() async {
         let stub = StubTranslator()
         for (text, languages) in [("Send the report to Anna by Friday.", [String]()), ("Okay, see you tomorrow.", ["en-US", "de"]),
-                                  ("", []), ("42", []), ("Redis.", []), ("x", []), ("Ship it now", [])] {
+                                  ("", []), ("42", []), ("Redis.", []), ("x", []), ("Ship it now", []),
+                                  ("Redis Postgres Kubernetes", []), ("Kafka Redis Mongo Elastic", [])] {
             let out = await step(stub, languages: languages)(text)
             XCTAssertEqual(out.text, text)
             XCTAssertNil(out.hint, text)
