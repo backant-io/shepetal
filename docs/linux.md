@@ -304,6 +304,20 @@ libuInputPlus default).
 - **Snap**: same problems as Flatpak, but `classic` confinement would work.
 - Never ship model weights in the package. They download on first run into `~/.local/share/shepetal/`.
 
+### The .deb and the AppImage
+
+`linux/packaging/` builds both (details in its README); CI (`.github/workflows/linux-release.yml`)
+installs the `.deb` in a clean ubuntu:24.04 and uploads both packages.
+
+- `.deb`: `/usr/bin/shepetal`, the systemd user unit `shepetal.service` (starts with the graphical
+  session, restarts on failure, gives up after 5 quick failures), a desktop entry and the 🤫 icon.
+  The postinst asks (debconf, default no) whether to start shepetal at login for the user who ran
+  `sudo`, and enables it for that user only. It then says how to join the `input` group and to
+  check the `fn key:` line of `shepetal probe`. Removing the package undoes the enable.
+- AppImage: `shepetal-<version>-x86_64.AppImage` runs the daemon; `install-service` writes a user
+  unit that starts that file at login.
+- Another hotkey for the service: `SHEPETAL_KEY=rightalt` in `~/.config/shepetal/env`.
+
 ## Build and test
 
 See [linux/README.md](../linux/README.md). It is one `docker run` that runs `cargo test`,

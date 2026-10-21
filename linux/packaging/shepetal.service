@@ -1,0 +1,23 @@
+# systemd user unit: starts the shepetal daemon when the graphical session starts.
+# Enable it for yourself with: systemctl --user enable --now shepetal.service
+# Pick another hotkey (when `shepetal probe` says fn is not visible) in ~/.config/shepetal/env:
+#   SHEPETAL_KEY=rightalt
+[Unit]
+Description=shepetal dictation daemon (hold fn to talk)
+Documentation=https://github.com/backant-io/shepetal/blob/main/docs/linux.md
+PartOf=graphical-session.target
+After=graphical-session.target pipewire.service
+# The daemon exits 1 when fn is not visible or the input group is missing.
+# Give up after 5 quick failures instead of looping forever.
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/shepetal daemon
+EnvironmentFile=-%h/.config/shepetal/env
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

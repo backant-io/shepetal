@@ -1,0 +1,38 @@
+#!/bin/sh
+# AppImage entry point.
+#   shepetal.AppImage                     start the daemon (through the user service when installed)
+#   shepetal.AppImage install-service     start shepetal at every login (systemd user unit)
+#   shepetal.AppImage uninstall-service   undo that
+#   shepetal.AppImage probe|daemon ...    the shepetal command itself
+set -eu
+here=$(dirname "$(readlink -f "$0")")
+unit_dir=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+
+case "${1:-}" in
+install-service)
+    [ -n "${APPIMAGE:-}" ] || { echo "install-service: run it from the AppImage file" >&2; exit 1; }
+    mkdir -p "$unit_dir"
+    # systemd expands % in ExecStart and splits on spaces unless quoted.
+    exe=$(printf '%s' "$APPIMAGE" | sed 's/%/%%/g; s/\\/\\\\/g; s/"/\\"/g')
+    sed "s|^ExecStart=.*|ExecStart=\"$exe\" daemon|" "$here/usr/share/shepetal/shepetal.service" \
+        > "$unit_dir/shepetal.service"
+    systemctl --user daemon-reload
+    systemctl --user enable shepetal.service
+    echo "shepetal starts at your next login. Start it now: systemctl --user start shepetal.service"
+    echo "If the AppImage moves, run install-service again."
+    ;;
+uninstall-service)
+    systemctl --user disable --now shepetal.service || true
+    rm -f "$unit_dir/shepetal.service"
+    systemctl --user daemon-reload
+    ;;
+"")
+    if [ -f "$unit_dir/shepetal.service" ]; then
+        exec systemctl --user start shepetal.service
+    fi
+    exec "$here/usr/bin/shepetal" daemon
+    ;;
+*)
+    exec "$here/usr/bin/shepetal" "$@"
+    ;;
+esac

@@ -1,0 +1,6 @@
+shepetal (0.0.1-1) unstable; urgency=medium
+
+  * First package: the daemon, a systemd user unit (enabled at install only
+    when the installing user agrees), a desktop entry and the 🤫 icon.
+
+ -- Pavel Hegler <business@hegler.tech>  Tue, 20 Oct 2026 21:30:00 +0000

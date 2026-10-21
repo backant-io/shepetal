@@ -1,0 +1,37 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+if [ "$1" = configure ]; then
+    user=$(/usr/lib/shepetal/user-service installing-user)
+    enabled=no
+    if [ -n "$user" ]; then
+        # config reset the answer if it was given by someone else.
+        db_get shepetal/enable-user-service
+        if [ "$RET" = true ]; then
+            /usr/lib/shepetal/user-service enable "$user"
+            enabled=yes
+        fi
+    fi
+    # stdout belongs to debconf here, so the message goes to stderr.
+    {
+        who=${user:-\$USER}
+        echo
+        echo "shepetal: the hotkey is read from /dev/input, so your user must be in the input group."
+        if [ -n "$user" ] && id -nG "$user" | tr ' ' '\n' | grep -qx input; then
+            echo "  $user is already in the input group."
+        else
+            echo "  sudo usermod -aG input $who    (then log out and back in)"
+        fi
+        echo "  Members of the input group can read every keystroke; shepetal only acts on its hotkey."
+        echo "Then run 'shepetal probe' and check its 'fn key:' line. If fn is not visible"
+        echo "  (the keyboard handles fn in firmware), set another key in ~/.config/shepetal/env,"
+        echo "  for example SHEPETAL_KEY=rightalt."
+        if [ "$enabled" = yes ]; then
+            echo "Start at login: enabled for $user (shepetal.service starts at the next login)."
+        else
+            echo "Start at login: not enabled. Run: systemctl --user enable --now shepetal.service"
+        fi
+        echo
+    } >&2
+fi

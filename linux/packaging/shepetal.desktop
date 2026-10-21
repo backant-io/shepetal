@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=shepetal
+GenericName=Dictation
+Comment=Hold fn to talk and the text is typed at the cursor. Runs on this computer.
+Exec=/usr/lib/shepetal/launch
+Icon=shepetal
+Terminal=false
+StartupNotify=false
+Categories=Utility;Accessibility;
+Keywords=dictation;speech;voice;transcription;
