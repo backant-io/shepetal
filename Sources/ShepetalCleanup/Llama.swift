@@ -268,3 +268,61 @@ public enum CleanupPrompt {
         return s + "</field>\n" + wrap(text)
     }
 }
+
+// MARK: Polish (F45)
+
+extension LlamaCleanup: TextRewriter {
+    /// A Polish that takes longer than this throws, and the selection stays as it was.
+    public static let polishDeadline: TimeInterval = 30
+
+    /// The selection rewritten as `instruction` says (F45), from an empty context: the cleanup prompt's saved
+    /// state is not used, and the next cleanup restores it as usual. The answer may run to about twice the text's
+    /// tokens; one that reaches that cap without ending is a runaway and throws, and so does one past the deadline.
+    /// The text never becomes control tokens, whatever it holds. Shares the cleanup's lock, so a dictation that
+    /// ends during a Polish waits for it.
+    public func rewrite(instruction: String, text: String) throws -> String {
+        try rewrite(instruction: instruction, text: text, until: ProcessInfo.processInfo.systemUptime + Self.polishDeadline)
+    }
+
+    func rewrite(instruction: String, text: String, until end: TimeInterval) throws -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        let (input, answer) = try polishInput(instruction: instruction, text: text)
+        guard input.count + answer <= Int(llama_n_ctx(ctx)) else { throw LoadError(errorDescription: "the text is too long to polish") }
+        llama_memory_clear(llama_get_memory(ctx), true)
+        try decode(input)
+        var bytes: [UInt8] = []
+        var piece = [CChar](repeating: 0, count: 256)
+        for _ in 0..<answer {
+            let token = llama_sampler_sample(sampler, ctx, -1)
+            if llama_vocab_is_eog(vocab, token) { return Self.clean(String(decoding: bytes, as: UTF8.self)) }
+            let n = llama_token_to_piece(vocab, token, &piece, Int32(piece.count), 0, false)
+            if n > 0 { bytes += piece[0..<Int(n)].map { UInt8(bitPattern: $0) } }
+            try decode([token])
+            guard ProcessInfo.processInfo.systemUptime < end else {
+                throw LoadError(errorDescription: "polish took longer than \(Self.polishDeadline) s")
+            }
+        }
+        throw LoadError(errorDescription: "polish did not end within \(answer) tokens")
+    }
+
+    /// The whole prompt for one Polish and the answer's token cap. The instruction is the user's own saved prompt and
+    /// goes in with the template; only the selection is kept from becoming control tokens.
+    func polishInput(instruction: String, text: String) throws -> (tokens: [llama_token], answer: Int) {
+        guard let tmpl = llama_model_chat_template(model, nil) else { throw LoadError(errorDescription: "the model has no chat template") }
+        var turns = [("system", Polish.system)]
+        for e in Polish.examples { turns += [("user", Polish.message(e.instruction, e.text)), ("assistant", e.answer)] }
+        turns.append(("user", Polish.message(instruction, Self.marker)))
+        let strings = turns.map { (strdup($0.0)!, strdup($0.1)!) }
+        defer { strings.forEach { free($0.0); free($0.1) } }
+        let messages = strings.map { llama_chat_message(role: $0.0, content: $0.1) }
+        var buf = [CChar](repeating: 0, count: 8192)
+        let n = llama_chat_apply_template(tmpl, messages, messages.count, true, &buf, Int32(buf.count))
+        guard n > 0, n < buf.count else { throw LoadError(errorDescription: "llama.cpp does not know this chat template") }
+        var prompt = String(decoding: buf[0..<Int(n)].map { UInt8(bitPattern: $0) }, as: UTF8.self)
+        if String(cString: tmpl).contains("<think>") { prompt += "<think>\n\n</think>\n\n" }
+        let (head, tail) = try Self.split(prompt: prompt)
+        let said = try tokenize(text, bos: false, special: false)
+        return (try tokenize(head, bos: true, special: true) + said + tokenize(tail, bos: false, special: true), said.count * 2 + 64)
+    }
+}

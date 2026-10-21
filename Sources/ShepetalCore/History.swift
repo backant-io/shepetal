@@ -45,6 +45,28 @@ public struct HistoryEntry: Equatable {
     }
 }
 
+/// One Polish (F45): the selected text, the prompt it went through and the model's rewrite, kept so the diff view
+/// and undo (F46) can build on it. `outcome` is `.inserted` when the rewrite was pasted over the selection and
+/// `.pasteFailed` when it was left on the clipboard (rule 8). Never leaves the Mac.
+public struct PolishEntry: Equatable {
+    public var id: String
+    public var createdAt: Date
+    public var outcome: Outcome
+    public var app: String
+    public var bundleId: String
+    public var promptName: String
+    public var instruction: String
+    public var input: String
+    public var output: String
+    public var undone: Bool
+
+    public init(id: String = UUID().uuidString, createdAt: Date = Date(), outcome: Outcome, app: String = "", bundleId: String = "",
+                promptName: String, instruction: String, input: String, output: String, undone: Bool = false) {
+        self.id = id; self.createdAt = createdAt; self.outcome = outcome; self.app = app; self.bundleId = bundleId
+        self.promptName = promptName; self.instruction = instruction; self.input = input; self.output = output; self.undone = undone
+    }
+}
+
 /// Apps whose page URL is stored with the dictation: Safari, the Chrome family, Arc, Edge, Brave,
 /// Firefox, Vivaldi and Opera.
 public enum Browser {
@@ -99,6 +121,14 @@ public final class History {
         """,
         // 3: undo cleanup (F48)
         "ALTER TABLE history ADD COLUMN reverted INTEGER NOT NULL DEFAULT 0;",
+        // 4: Polish (F45): the selection, the prompt and the rewrite; `undone` is for F46's undo
+        """
+        CREATE TABLE IF NOT EXISTS polish(
+          id TEXT PRIMARY KEY, created_at REAL NOT NULL, outcome TEXT NOT NULL, app TEXT NOT NULL, bundle_id TEXT NOT NULL,
+          prompt_name TEXT NOT NULL, instruction TEXT NOT NULL, input TEXT NOT NULL, output TEXT NOT NULL,
+          undone INTEGER NOT NULL DEFAULT 0);
+        CREATE INDEX IF NOT EXISTS polish_created ON polish(created_at);
+        """,
     ]
 
     public init(path: URL) throws {
@@ -177,6 +207,41 @@ public final class History {
         sqlite3_bind_int64(stmt, 1, reverted ? 1 : 0)
         bind(stmt, 2, id)
         try stepChangingOneRow(stmt, "revert")
+    }
+
+    /// A Polish (F45), pasted (`.inserted`) or left on the clipboard (`.pasteFailed`).
+    public func addPolish(_ p: PolishEntry) throws {
+        let stmt = try prepare("""
+            INSERT OR REPLACE INTO polish(id, created_at, outcome, app, bundle_id, prompt_name, instruction, input, output, undone)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+            """)
+        defer { sqlite3_finalize(stmt) }
+        bind(stmt, 1, p.id)
+        sqlite3_bind_double(stmt, 2, p.createdAt.timeIntervalSince1970)
+        for (i, s) in [p.outcome.rawValue, p.app, p.bundleId, p.promptName, p.instruction, p.input, p.output].enumerated() {
+            bind(stmt, Int32(i + 3), s)
+        }
+        sqlite3_bind_int64(stmt, 10, p.undone ? 1 : 0)
+        guard sqlite3_step(stmt) == SQLITE_DONE else { throw error("insert polish") }
+    }
+
+    /// Polishes, newest first.
+    public func polishes(limit: Int = 20) throws -> [PolishEntry] {
+        let stmt = try prepare("""
+            SELECT id, created_at, outcome, app, bundle_id, prompt_name, instruction, input, output, undone FROM polish
+            ORDER BY created_at DESC LIMIT ?
+            """)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_int64(stmt, 1, Int64(limit))
+        var rows: [PolishEntry] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            func text(_ i: Int32) -> String { String(cString: sqlite3_column_text(stmt, i)) }
+            rows.append(PolishEntry(id: text(0), createdAt: Date(timeIntervalSince1970: sqlite3_column_double(stmt, 1)),
+                                    outcome: Outcome(rawValue: text(2)) ?? .failed, app: text(3), bundleId: text(4),
+                                    promptName: text(5), instruction: text(6), input: text(7), output: text(8),
+                                    undone: sqlite3_column_int64(stmt, 9) != 0))
+        }
+        return rows
     }
 
     /// Newest first, archived rows included.

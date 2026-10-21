@@ -16,7 +16,7 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
 
     init(tap: FnTap) {
         self.tap = tap
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 290),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 325),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Shepetal shortcuts"
         window.isReleasedWhenClosed = false
