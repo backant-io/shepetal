@@ -159,16 +159,14 @@ final class MCPServer {
 struct AIAppsSettings: View {
     @AppStorage(MCPServer.enabledKey) private var enabled = false
     @State private var copied = false
-    /// Tests pass a private pasteboard; the button writes the general one.
-    var pasteboard: NSPasteboard = .general
 
     var body: some View {
         Toggle("Let AI apps read my meetings and dictations", isOn: $enabled)
         Text("An AI app set up with shepetal can search and read your meeting notes and dictations. shepetal answers only on this Mac; what the AI app does with the text is up to that app.")
             .font(.caption).foregroundStyle(.secondary)
         Button(copied ? "Copied: paste it into the AI app's MCP settings" : "Copy setup for AI apps") {
-            pasteboard.clearContents()
-            pasteboard.setString(MCPServer.setup(), forType: .string)
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(MCPServer.setup(), forType: .string)
             copied = true
         }
     }
