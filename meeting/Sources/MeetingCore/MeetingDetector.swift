@@ -75,7 +75,8 @@ public struct MeetingDetector: Sendable {
     /// Call when the default input/output device changes (`update` does this when `devices` change).
     public mutating func deviceChanged(now: Double) { deviceGraceUntil = now + deviceChangeGrace }
 
-    /// What the card names for `s`: the first other app on the mic, else "Microphone" or "Camera"; nil when
+    /// What the card names for `s`: the first other mic user with an app name, in the snapshot's (Core Audio's
+    /// process list) order, not the one that took the mic first; else "Microphone" or "Camera"; nil when
     /// neither is in use by anyone but Shepetal.
     public func app(in s: Snapshot) -> String? {
         let others = s.micUsers.filter { $0.pid != ownPID && $0.bundleID != ownBundleID }
