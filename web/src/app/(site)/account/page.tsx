@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
-import { BuyButton } from '@/components/BuyButton';
-import { LicenseSummary } from '@/components/LicenseSummary';
+import { BuyButton, ManageButton, PlanPicker } from '@/components/BuyButton';
+import { actionsFor, LicenseSummary } from '@/components/LicenseSummary';
 import { SignInButton } from '@/components/SignInButton';
 import { getLicense } from '@/lib/account';
 import { auth, signOut } from '@/lib/auth';
@@ -27,15 +27,18 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
 
   const license = await getLicense(email);
   const { purchased } = await searchParams;
+  const { plans, manage } = actionsFor(license);
 
   return (
     <main className="mx-auto max-w-xl px-4 pt-16 sm:px-8">
       <h1 className="sr-only">Your account</h1>
       {purchased && (
         <p role="status" className="mb-10 rounded-xl bg-[var(--raised)] px-4 py-3">
-          {license.status === 'active'
-            ? 'Thank you. shepetal is yours now.'
-            : 'Thank you. Your payment can take a minute to show up here, so reload the page in a moment.'}
+          {license.status !== 'active'
+            ? 'Thank you. Your payment can take a minute to show up here, so reload the page in a moment.'
+            : license.plan === 'lifetime'
+              ? 'Yours forever, updates included. Thank you.'
+              : 'Your subscription is on. Thank you.'}
         </p>
       )}
       <LicenseSummary license={license} />
@@ -45,8 +48,15 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
         <a href="/download" className={license.status === 'expired' ? 'btn btn-quiet' : 'btn'}>
           Download for Mac
         </a>
-        {license.status !== 'active' && <BuyButton quiet={license.status === 'trial'} />}
+        {manage && <ManageButton quiet={!license.payment_failed} />}
+        {/* A subscriber can still buy it once: the subscription then stops renewing. */}
+        {manage && license.status === 'active' && <BuyButton plan="lifetime" quiet />}
       </div>
+      {plans && (
+        <div className="mt-6">
+          <PlanPicker quiet={license.status === 'trial'} />
+        </div>
+      )}
       <p className="mt-4 text-sm text-[var(--hush)]">Needs macOS 14.4 or later and a Mac with Apple silicon.</p>
 
       <div className="mt-16 flex flex-wrap items-center justify-between gap-4 border-t border-[var(--line)] pt-6 text-sm">

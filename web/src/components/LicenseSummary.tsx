@@ -8,37 +8,56 @@ export function daysLeft(trialEndsAt: string, now = Date.now()): number {
 }
 
 const dateFmt = new Intl.DateTimeFormat('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
+const day = (iso: string | null) => (iso ? dateFmt.format(new Date(iso)) : '');
 
-/** The headline of /account: trial days left, "yours forever", or an ended trial. */
-export function LicenseSummary({ license, now = Date.now() }: { license: License; now?: number }) {
-  if (license.status === 'active') {
-    return (
-      <>
-        <p className="display text-[clamp(3rem,10vw,5rem)] leading-none">Yours forever.</p>
-        <p className="mt-4 text-[var(--hush)]">You bought shepetal. Future updates are included.</p>
-      </>
-    );
+function Summary({ title, line }: { title: string; line: string }) {
+  return (
+    <>
+      <p className="display text-[clamp(3rem,10vw,5rem)] leading-none">{title}</p>
+      <p className="mt-4 text-[var(--hush)]">{line}</p>
+    </>
+  );
+}
+
+/** What /account offers under the summary: the plan choice, the Billing Portal, or nothing. */
+export function actionsFor(license: License): { plans: boolean; manage: boolean } {
+  if (license.plan === 'lifetime') return { plans: false, manage: false };
+  if (license.plan === 'subscription') {
+    const live = license.status === 'active' || license.payment_failed;
+    return { plans: !live, manage: live };
   }
-  const ends = license.trial_ends_at ? dateFmt.format(new Date(license.trial_ends_at)) : '';
+  return { plans: true, manage: false };
+}
+
+/** The headline of /account: the plan, its next date, or what to do next. */
+export function LicenseSummary({ license, now = Date.now() }: { license: License; now?: number }) {
+  if (license.plan === 'lifetime') return <Summary title="Yours forever." line="Updates included." />;
+  if (license.plan === 'subscription') {
+    const through = day(license.paid_through);
+    if (license.payment_failed) {
+      return <Summary title="Payment failed." line="Update your card in Manage subscription to keep shepetal." />;
+    }
+    if (license.status === 'active') {
+      return license.renews ? (
+        <Summary title="$0.99 a month." line={`Renews on ${through}. Cancel anytime.`} />
+      ) : (
+        <Summary title={`Yours until ${through}.`} line="Your subscription ends that day. Resume it in Manage subscription." />
+      );
+    }
+    if (license.status === 'trial') {
+      const n = daysLeft(license.trial_ends_at ?? '', now);
+      return <Summary title={`${n} ${n === 1 ? 'day' : 'days'} left`} line={`Your subscription ended. Your free trial runs until ${day(license.trial_ends_at)}.`} />;
+    }
+    return <Summary title="Your subscription ended." line={`It ended on ${through}. Pick a plan to keep shepetal.`} />;
+  }
   if (license.status === 'expired') {
-    return (
-      <>
-        <p className="display text-[clamp(3rem,10vw,5rem)] leading-none">Your trial ended.</p>
-        <p className="mt-4 text-[var(--hush)]">
-          It ended on {ends}. Buy shepetal once for $4.99 to keep using it, with future updates included.
-        </p>
-      </>
-    );
+    return <Summary title="Your trial ended." line={`It ended on ${day(license.trial_ends_at)}. Pick a plan to keep shepetal.`} />;
   }
   const n = daysLeft(license.trial_ends_at ?? '', now);
   return (
-    <>
-      <p className="display text-[clamp(3rem,10vw,5rem)] leading-none">
-        {n} {n === 1 ? 'day' : 'days'} left
-      </p>
-      <p className="mt-4 text-[var(--hush)]">
-        Your free trial runs until {ends}. After that it is $4.99 once, and shepetal is yours forever.
-      </p>
-    </>
+    <Summary
+      title={`${n} ${n === 1 ? 'day' : 'days'} left`}
+      line={`Your free trial runs until ${day(license.trial_ends_at)}. Then $23.99 once, or $0.99 a month.`}
+    />
   );
 }
