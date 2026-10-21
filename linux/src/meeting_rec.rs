@@ -3,7 +3,8 @@
 //! shows a Record? notification. Only a click on Record starts the recording of the mic and
 //! the default sink's monitor into two WAVs (`{"meetings": {"auto_record": true}}` in config.json
 //! records without asking). When the call ends, it stops them and writes a Me / Others transcript next to them.
-//! The audio is always kept (rule 4).
+//! The audio is always kept (rule 4). The transcript then opens in the user's default viewer, with
+//! a notification that offers Copy transcript and Open folder.
 
 use serde_json::Value;
 use shepetal::{insert, meeting, model, shortcuts};
@@ -310,15 +311,20 @@ fn segments(stdout: &str) -> Vec<(u64, String)> {
     }).collect()
 }
 
+const NO_SPEECH: &str = "No speech was recorded.";
+
 /// The meeting as Markdown: one `[hh:mm:ss] Speaker: text` paragraph per turn, the channels
 /// merged by start time (Me first at the same time), a speaker's consecutive segments joined.
-/// Times count from the start of the recording.
-fn transcript(apps: &[&str], channels: &[(&str, Vec<(u64, String)>)], notes: &[String]) -> String {
+/// Times count from the start of the recording. `started` is local `DD.MM.YY HH:MM`.
+fn transcript(apps: &[&str], started: &str, secs: u64, channels: &[(&str, Vec<(u64, String)>)], notes: &[String]) -> String {
     let mut segs: Vec<_> = channels.iter().flat_map(|(who, s)| s.iter().map(move |(t, x)| (*t, *who, x.as_str()))).collect();
     segs.sort_by_key(|s| s.0); // stable, so the channel order breaks ties
-    let mut out = format!("# Meeting\n\n- Apps: {}\n- Audio: {ME} (microphone), {OTHERS} (system audio)\n", apps.join(", "));
+    let mut out = format!("# Meeting\n\n- Apps: {}\n- Started: {started}\n- Duration: {}\n- Audio: {ME} (microphone), {OTHERS} (system audio)\n", apps.join(", "), duration(secs));
     for n in notes {
         out += &format!("- {n}\n");
+    }
+    if segs.is_empty() && notes.is_empty() {
+        out += &format!("\n{NO_SPEECH}\n");
     }
     let mut last = "";
     for (t, who, text) in segs {
@@ -341,7 +347,129 @@ fn save(dir: &Path, md: &str) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
+/// What Copy transcript copies: the turns of `transcript`, one per line, with their times and
+/// speakers. Only turns start with `[`: the header lines start with `#` or `-`.
+fn turns(md: &str) -> String {
+    md.lines().filter(|l| l.starts_with('[')).map(|l| format!("{l}\n")).collect()
+}
+
+/// `32 s`, `12 min`, `1 h 05 min`.
+fn duration(secs: u64) -> String {
+    match secs {
+        0..=59 => format!("{secs} s"),
+        60..=3599 => format!("{} min", secs / 60),
+        _ => format!("{} h {:02} min", secs / 3600, secs / 60 % 60),
+    }
+}
+
+/// Unix `secs` as local `DD.MM.YY HH:MM` (Pavel's date format). std has no time zones, so it is
+/// libc's localtime_r, which follows TZ and /etc/localtime.
+fn local_time(secs: i64) -> String {
+    use std::ffi::{c_char, c_int, c_long};
+    /// struct tm as glibc, musl and macOS lay it out.
+    #[repr(C)]
+    struct Tm {
+        _sec: c_int,
+        min: c_int,
+        hour: c_int,
+        mday: c_int,
+        mon: c_int,
+        year: c_int,
+        _wday: c_int,
+        _yday: c_int,
+        _isdst: c_int,
+        _gmtoff: c_long,
+        _zone: *const c_char,
+    }
+    extern "C" {
+        // time_t is a long on every glibc, musl and macOS target this builds for.
+        fn localtime_r(t: *const c_long, tm: *mut Tm) -> *mut Tm;
+    }
+    let t = secs as c_long;
+    // SAFETY: all-zero is a valid Tm (ints and a null pointer), and localtime_r writes only it.
+    let mut tm: Tm = unsafe { std::mem::zeroed() };
+    if unsafe { localtime_r(&t, &mut tm) }.is_null() {
+        return String::new();
+    }
+    format!("{:02}.{:02}.{:02} {:02}:{:02}", tm.mday, tm.mon + 1, tm.year % 100, tm.hour, tm.min)
+}
+
+const QUIET: &str = "--hint=boolean:suppress-sound:true";
+
+/// The notification that comes with the transcript window. notify-send waits and prints the
+/// name of the clicked action. Copy transcript is offered only when there are turns to copy.
+/// Without them the body says why: no speech, or the transcription error.
+fn ready_cmd(head: &str, turns: &str, note: Option<&String>) -> Command {
+    let mut c = Command::new("notify-send");
+    c.args(["--app-name=shepetal", QUIET]);
+    if !turns.is_empty() {
+        c.arg("--action=copy=Copy transcript");
+    }
+    c.args(["--action=open=Open folder", "Meeting transcript ready"]);
+    if turns.is_empty() {
+        c.arg(format!("{head}\n{}", note.map_or(NO_SPEECH, |n| n.as_str())));
+    } else {
+        c.arg(head);
+    }
+    c.stdout(Stdio::piped());
+    die_with_parent(&mut c);
+    c
+}
+
+/// `xdg-open`: the user's default app for the file or folder.
+fn open(p: &Path) {
+    if !insert::on_path("xdg-open") {
+        return eprintln!("shepetal: cannot open {}: install xdg-utils", p.display());
+    }
+    let p = p.to_path_buf();
+    match Command::new("xdg-open").arg(&p).spawn() {
+        // Waited for on a thread of its own: with no desktop helper, xdg-open runs the app itself
+        // and returns only when it closes.
+        Ok(mut c) => {
+            std::thread::spawn(move || match c.wait() {
+                Ok(st) if !st.success() => eprintln!("shepetal: xdg-open {} failed ({st}): is there a default app for it?", p.display()),
+                _ => {}
+            });
+        }
+        Err(e) => eprintln!("shepetal: xdg-open {}: {e}", p.display()),
+    }
+}
+
+/// The transcript window: `path` (transcript.md) in the user's default viewer, and the `ask`
+/// notification with Copy transcript and Open folder. The clipboard is written only when Copy
+/// transcript is clicked, and then gets `turns`. The click can come much later, from the
+/// notification list, so this holds the meeting's own thread until then.
+// ponytail: one waiting notify-send per meeting until it is answered or dismissed.
+fn present(path: &Path, mut ask: Command, turns: &str) {
+    open(path);
+    if !insert::on_path("notify-send") {
+        return eprintln!("shepetal: no Copy transcript button: install notify-send (libnotify-bin)");
+    }
+    let out = match ask.output() {
+        Ok(o) => o,
+        Err(e) => return eprintln!("shepetal: transcript notification: notify-send: {e}"),
+    };
+    match String::from_utf8_lossy(&out.stdout).trim() {
+        "copy" => {
+            let said = match crate::copy(turns) {
+                Ok(()) => "Transcript copied".to_string(),
+                Err(e) => {
+                    eprintln!("shepetal: meeting transcript not copied: {e}");
+                    format!("Transcript not copied: {e}")
+                }
+            };
+            let _ = Command::new("notify-send").args(["--app-name=shepetal", QUIET, "--hint=boolean:transient:true", "--expire-time=3000", &said]).status();
+        }
+        "open" => open(path.parent().unwrap_or(path)),
+        _ if out.status.success() => {} // closed without a click
+        _ => eprintln!("shepetal: transcript notification: notify-send failed ({}). Its buttons need libnotify 0.7.10 or later", out.status),
+    }
+}
+
 fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
+    // `start` names the folder by its start time in ms, and this runs as soon as the recorders stop.
+    let started = dir.file_name().and_then(|n| n.to_str()?.parse::<u128>().ok()).unwrap_or_else(crate::now_ms);
+    let (when, secs) = (local_time((started / 1000) as i64), (crate::now_ms().saturating_sub(started) / 1000) as u64);
     let mut channels = vec![];
     let mut notes = vec![];
     for (who, file) in [("Me", ME), ("Others", OTHERS)] {
@@ -353,8 +481,14 @@ fn write_transcript(dir: &Path, apps: &[&str], model: &Path) {
     for n in &notes {
         eprintln!("shepetal: meeting {}: {n}", dir.display());
     }
-    match save(dir, &transcript(apps, &channels, &notes)) {
-        Ok(p) => eprintln!("shepetal: meeting transcript {}", p.display()),
+    let md = transcript(apps, &when, secs, &channels, &notes);
+    match save(dir, &md) {
+        Ok(p) => {
+            eprintln!("shepetal: meeting transcript {}", p.display());
+            let turns = turns(&md);
+            let head = format!("{}, {when}, {}", apps.join(", "), duration(secs));
+            present(&p, ready_cmd(&head, &turns, notes.first()), &turns);
+        }
         Err(e) => eprintln!("shepetal: meeting transcript in {}: {e}", dir.display()),
     }
 }
@@ -738,10 +872,11 @@ mod tests {
     }
 
     /// One Zoom call (the first 12 pw-dump reads, 0.1 s apart) through the whole loop against
-    /// fake pw-dump, pw-record, whisper-cli and notify-send. It runs in a child copy of this test
-    /// binary, because the tests in main.rs swap PATH for their own fakes. The fake notify-send
-    /// does `answer`: `record` (Record clicked), `dismiss`, or `ignore` (waits until SIGINT).
-    /// `extra` adds thresholds. Returns the fakes' dir in the parent, None in the child.
+    /// fake pw-dump, pw-record, whisper-cli, notify-send, xdg-open and clipboard tools. It runs in a
+    /// child copy of this test binary, because the tests in main.rs swap PATH for their own fakes.
+    /// The fake notify-send does `answer` to the Record? prompt: `record` (Record clicked),
+    /// `dismiss`, or `ignore` (waits until SIGINT). It closes the transcript notification without
+    /// a click. `extra` adds thresholds. Returns the fakes' dir in the parent, None in the child.
     fn call(test: &str, auto_record: bool, answer: &str, extra: &str) -> Option<PathBuf> {
         const HOME: &str = "SHEPETAL_TEST_MEETING_HOME";
         if let Ok(home) = std::env::var(HOME) {
@@ -753,10 +888,12 @@ mod tests {
             let reads = home.parent().unwrap().join("reads");
             for _ in 0..400 {
                 std::thread::sleep(Duration::from_millis(50));
-                // Done when the call is long over and every meeting recorded has its transcript.
+                // Done when the call is long over and every meeting recorded has its transcript
+                // notification, which comes after the transcript is written.
                 let n: u32 = std::fs::read_to_string(&reads).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
-                let mut dirs = std::fs::read_dir(home.join("shepetal/meetings")).into_iter().flatten().flatten();
-                if n >= 30 && dirs.all(|e| e.path().join("transcript.md").exists()) {
+                let dirs = std::fs::read_dir(home.join("shepetal/meetings")).into_iter().flatten().count();
+                let shown = std::fs::read_to_string(reads.with_file_name("ready.args")).map_or(0, |s| s.lines().count());
+                if n >= 30 && shown == dirs {
                     std::thread::sleep(Duration::from_millis(200)); // let the write finish
                     return None;
                 }
@@ -769,7 +906,9 @@ mod tests {
         std::fs::create_dir_all(d.join("bin")).unwrap();
         let (dd, call, idle) = (d.display(), pw(&[zoom()], BUILTIN), pw(&[], BUILTIN));
         let tools = [
-            ("notify-send", format!("exec 2>/dev/null\necho \"$*\" >> {dd}/prompt.args\ncase {answer} in\n\
+            ("notify-send", format!("exec 2>/dev/null\n\
+                case \"$*\" in *'Meeting transcript ready'*) echo \"$*\" >> {dd}/ready.args; exit 0 ;; esac\n\
+                echo \"$*\" >> {dd}/prompt.args\ncase {answer} in\n\
                 record) sleep 0.2; echo record ;;\n\
                 dismiss) sleep 0.2 ;;\n\
                 *) trap 'echo \"closed after read $(cat {dd}/reads)\" >> {dd}/prompt.log; exit 0' INT\n\
@@ -784,6 +923,10 @@ mod tests {
             ("whisper-cli", format!("cat \"$4\" >> {dd}/heard\ncase \"$4\" in\n\
                 *Me.wav) printf '\\n[00:00:01.000 --> 00:00:02.000]   Hello from me.\\n' ;;\n\
                 *) printf '\\n[00:00:01.500 --> 00:00:03.000]   Hi from them. [Music]\\n' ;;\nesac\n")),
+            ("xdg-open", format!("echo \"$1\" >> {dd}/opened\n")),
+            ("wl-copy", format!("cat >> {dd}/clipboard\n")),
+            ("xclip", format!("cat >> {dd}/clipboard\n")),
+            ("xsel", format!("cat >> {dd}/clipboard\n")),
         ];
         for (bin, body) in tools {
             std::fs::write(d.join("bin").join(bin), format!("#!/bin/sh\n{body}")).unwrap();
@@ -807,6 +950,7 @@ mod tests {
     fn nothing_recorded(d: &Path) {
         assert!(!d.join("rec.args").exists(), "a recorder ran: {}", std::fs::read_to_string(d.join("rec.args")).unwrap_or_default());
         assert!(!d.join("home/shepetal/meetings").exists());
+        assert!(!d.join("opened").exists() && !d.join("ready.args").exists(), "no transcript window without a recording");
         std::fs::remove_dir_all(d).unwrap();
     }
 
@@ -824,8 +968,18 @@ mod tests {
         let mut files: Vec<_> = rec.lines().map(|l| (l.rsplit('/').next().unwrap(), l.contains("stream.capture.sink = true"))).collect();
         files.sort();
         assert_eq!(files, [(ME, false), (OTHERS, true)], "only Others.wav records the sink monitor: {rec}");
-        assert_eq!(read("transcript.md"), "# Meeting\n\n- Apps: Zoom\n- Audio: Me.wav (microphone), Others.wav (system audio)\n\n\
-            [00:00:01] Me: Hello from me.\n\n[00:00:01] Others: Hi from them.\n");
+        // The header has the local start (the folder's name) and the length.
+        let md = read("transcript.md");
+        let secs: u64 = md.split("\n- Duration: ").nth(1).and_then(|r| r.split(" s\n").next()?.parse().ok()).unwrap_or_else(|| panic!("{md}"));
+        let when = local_time(dir.file_name().unwrap().to_str().unwrap().parse::<i64>().unwrap() / 1000);
+        assert_eq!(md, format!("# Meeting\n\n- Apps: Zoom\n- Started: {when}\n- Duration: {secs} s\n- Audio: Me.wav (microphone), Others.wav (system audio)\n\n\
+            [00:00:01] Me: Hello from me.\n\n[00:00:01] Others: Hi from them.\n"));
+        assert!((1..10).contains(&secs), "the recording lasted about 1.5 s, not {secs} s");
+        // Then the window and its notification, once, and nothing copied without a click.
+        assert_eq!(std::fs::read_to_string(d.join("opened")).unwrap(), format!("{}\n", dir.join("transcript.md").display()));
+        assert_eq!(std::fs::read_to_string(d.join("ready.args")).unwrap(), format!("--app-name=shepetal --hint=boolean:suppress-sound:true \
+            --action=copy=Copy transcript --action=open=Open folder Meeting transcript ready Zoom, {when}, {secs} s\n"));
+        assert!(!d.join("clipboard").exists(), "copied without a click");
         let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
         assert_eq!([mode(dir), mode(&dir.join(ME)), mode(&dir.join("transcript.md"))], [0o700, 0o600, 0o600]);
         std::fs::remove_dir_all(d).unwrap();
@@ -890,10 +1044,12 @@ mod tests {
         let s = |v: &[(u64, &str)]| v.iter().map(|(t, x)| (*t, x.to_string())).collect::<Vec<_>>();
         let me = s(&[(1_000, "Hello, can you hear me?"), (2_400, "Good."), (3_100, "I'll send the notes."), (3_725_000, "Bye.")]);
         let others = s(&[(1_000, "Yes."), (5_900, "Thanks.")]);
-        assert_eq!(transcript(&["Zoom", "Browser (Firefox)"], &[("Me", me.clone()), ("Others", others)], &[]), "\
+        assert_eq!(transcript(&["Zoom", "Browser (Firefox)"], "21.10.26 17:30", 3725, &[("Me", me.clone()), ("Others", others)], &[]), "\
 # Meeting
 
 - Apps: Zoom, Browser (Firefox)
+- Started: 21.10.26 17:30
+- Duration: 1 h 02 min
 - Audio: Me.wav (microphone), Others.wav (system audio)
 
 [00:00:01] Me: Hello, can you hear me?
@@ -906,8 +1062,121 @@ mod tests {
 
 [01:02:05] Me: Bye.
 ");
+        // Copy transcript gets the turns only, one per line.
+        let t = transcript(&["Zoom"], "21.10.26 17:30", 3725, &[("Me", me.clone()), ("Others", s(&[(1_500, "Yes.")]))], &[]);
+        assert_eq!(turns(&t), "[00:00:01] Me: Hello, can you hear me?\n[00:00:01] Others: Yes.\n[00:00:02] Me: Good. I'll send the notes. Bye.\n");
         // A channel whisper could not read is named, not left out silently.
-        let t = transcript(&["Zoom"], &[("Me", me)], &["Others was not transcribed: whisper-cli: not found".into()]);
+        let failed = ["Others was not transcribed: whisper-cli: not found".to_string()];
+        let t = transcript(&["Zoom"], "21.10.26 17:30", 3725, &[("Me", me)], &failed);
         assert!(t.contains("\n- Others was not transcribed: whisper-cli: not found\n\n[00:00:01] Me: Hello"), "{t}");
+        // A silent meeting says so, but not when the reason is a transcription error.
+        let t = transcript(&["Zoom"], "21.10.26 17:30", 40, &[("Me", vec![]), ("Others", vec![])], &[]);
+        assert!(t.ends_with("- Duration: 40 s\n- Audio: Me.wav (microphone), Others.wav (system audio)\n\nNo speech was recorded.\n"), "{t}");
+        assert!(!transcript(&["Zoom"], "21.10.26 17:30", 40, &[("Me", vec![])], &failed).contains(NO_SPEECH));
+    }
+
+    #[test]
+    fn meeting_times_are_local_and_day_first() {
+        assert_eq!([0, 59, 60, 3599, 3600 + 5 * 60 + 59].map(duration), ["0 s", "59 s", "1 min", "59 min", "1 h 05 min"]);
+        // In a child copy of this test binary with its own TZ, because the time zone is global.
+        const CHILD: &str = "SHEPETAL_TEST_TZ";
+        if std::env::var_os(CHILD).is_some() {
+            // 2026-10-21 12:00 and 2026-12-31 20:00 UTC in India (UTC+5:30, no DST).
+            return assert_eq!([local_time(1_792_584_000), local_time(1_798_747_200)], ["21.10.26 17:30", "01.01.27 01:30"]);
+        }
+        let out = Command::new(std::env::current_exe().unwrap())
+            .args(["meeting_rec::tests::meeting_times_are_local_and_day_first", "--exact"])
+            .env(CHILD, "1").env("TZ", "IST-5:30")
+            .output().unwrap();
+        let log = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.success() && log.contains("1 passed"), "{log}");
+    }
+
+    #[test]
+    fn the_ready_notification_offers_copy_only_with_speech_and_never_a_sound() {
+        let argv = |c: Command| std::iter::once(c.get_program()).chain(c.get_args()).map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>();
+        let head = "Zoom, 21.10.26 17:30, 12 min";
+        let base = ["notify-send", "--app-name=shepetal", "--hint=boolean:suppress-sound:true"];
+        assert_eq!(argv(ready_cmd(head, "[00:00:01] Me: Hi.\n", None)),
+            [&base[..], &["--action=copy=Copy transcript", "--action=open=Open folder", "Meeting transcript ready", head]].concat());
+        // No turns: nothing to copy, the folder can still be opened, and the body says why.
+        assert_eq!(argv(ready_cmd(head, "", None)),
+            [&base[..], &["--action=open=Open folder", "Meeting transcript ready", "Zoom, 21.10.26 17:30, 12 min\nNo speech was recorded."]].concat());
+        let note = "Me was not transcribed: whisper-cli: not found".to_string();
+        assert_eq!(argv(ready_cmd(head, "", Some(&note))).last().unwrap(), "Zoom, 21.10.26 17:30, 12 min\nMe was not transcribed: whisper-cli: not found");
+        // With turns, a failed channel's note stays in the transcript, out of the banner.
+        assert_eq!(argv(ready_cmd(head, "[00:00:01] Me: Hi.\n", Some(&note))).last().unwrap(), head);
+    }
+
+    /// `present` against fake xdg-open, notify-send and clipboard tools, in a child copy of this
+    /// test binary with its own PATH, on Wayland. The fake notify-send prints the file `answer`
+    /// as the clicked action.
+    #[test]
+    fn the_transcript_window_copies_only_on_a_click() {
+        const CHILD: &str = "SHEPETAL_TEST_PRESENT";
+        let Ok(d) = std::env::var(CHILD) else {
+            use std::os::unix::fs::PermissionsExt;
+            let d = std::env::temp_dir().join(format!("shepetal-present-{}", std::process::id()));
+            let _ = std::fs::remove_dir_all(&d);
+            std::fs::create_dir_all(d.join("bin")).unwrap();
+            std::fs::create_dir_all(d.join("meeting")).unwrap();
+            let dd = d.display();
+            let mut tools = vec![
+                ("notify-send", format!("echo \"$*\" >> {dd}/notify.args\ncase \"$*\" in *'Meeting transcript ready'*) cat {dd}/answer ;; esac\n")),
+                ("xdg-open", format!("echo \"$1\" >> {dd}/opened\n")),
+            ];
+            for tool in ["wl-copy", "xclip", "xsel"] {
+                tools.push((tool, format!("{{ echo {tool}; cat; }} >> {dd}/clipboard\n")));
+            }
+            for (bin, body) in tools {
+                std::fs::write(d.join("bin").join(bin), format!("#!/bin/sh\n{body}")).unwrap();
+                std::fs::set_permissions(d.join("bin").join(bin), std::fs::Permissions::from_mode(0o700)).unwrap();
+            }
+            let out = Command::new(std::env::current_exe().unwrap())
+                .args(["meeting_rec::tests::the_transcript_window_copies_only_on_a_click", "--exact", "--nocapture"])
+                .env("PATH", format!("{dd}/bin:{}", std::env::var("PATH").unwrap_or_default()))
+                .env("XDG_SESSION_TYPE", "wayland")
+                .env(CHILD, &d)
+                .output().unwrap();
+            let log = String::from_utf8_lossy(&out.stdout).into_owned() + &String::from_utf8_lossy(&out.stderr);
+            assert!(out.status.success() && log.contains("1 passed"), "{log}");
+            return std::fs::remove_dir_all(&d).unwrap();
+        };
+        let d = PathBuf::from(d);
+        let (folder, md) = (d.join("meeting"), d.join("meeting/transcript.md"));
+        // xdg-open is waited for on another thread, so its line can come after `present` returns.
+        let lines = |f: &str, n: usize| {
+            for _ in 0..200 {
+                let got: Vec<String> = std::fs::read_to_string(d.join(f)).unwrap_or_default().lines().map(String::from).collect();
+                if got.len() >= n {
+                    return got;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            panic!("{f}: fewer than {n} lines");
+        };
+        let turns = "[00:00:01] Me: Hello.\n[00:00:02] Others: Hi.\n";
+        let show = |answer: &str| {
+            std::fs::write(d.join("answer"), answer).unwrap();
+            present(&md, ready_cmd("Zoom, 21.10.26 17:30, 12 min", turns, None), turns);
+        };
+        // Closed without a click: the window opened and the notification showed, nothing copied.
+        show("");
+        assert_eq!(lines("opened", 1), [md.display().to_string()]);
+        assert_eq!(lines("notify.args", 1), ["--app-name=shepetal --hint=boolean:suppress-sound:true --action=copy=Copy transcript \
+            --action=open=Open folder Meeting transcript ready Zoom, 21.10.26 17:30, 12 min"]);
+        assert!(!d.join("clipboard").exists(), "copied without a click");
+        // Copy transcript: the turns with their times and speakers go to wl-copy, then a short,
+        // silent "Transcript copied".
+        show("copy");
+        assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), format!("wl-copy\n{turns}"));
+        assert_eq!(lines("notify.args", 3)[2], "--app-name=shepetal --hint=boolean:suppress-sound:true --hint=boolean:transient:true --expire-time=3000 Transcript copied");
+        // Open folder: the meeting folder in the user's file manager, and no second copy.
+        show("open");
+        let mut last = lines("opened", 4)[2..].to_vec();
+        last.sort();
+        assert_eq!(last, [folder.display().to_string(), md.display().to_string()]);
+        assert_eq!(std::fs::read_to_string(d.join("clipboard")).unwrap(), format!("wl-copy\n{turns}"));
+        assert_eq!(lines("notify.args", 4).len(), 4, "no confirmation without a copy");
     }
 }
