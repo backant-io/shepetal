@@ -46,8 +46,9 @@ final class MeetingFlowTests: XCTestCase {
     private let summarizer = MeetingTranscriberTests.StubSummarizer()
     private var hints: [String] = []
     private var recording: [Bool] = []
-    /// What the transcript window would show when the flow opens it.
+    /// What the transcript window would show when the flow opens it, and whether a summary is still coming.
     private var opened: [MeetingRecord?] = []
+    private var summarizing: [Bool] = []
     private let zoom = Snapshot(micUsers: [MicUser(pid: 100, bundleID: "us.zoom.xos", path: "/Applications/zoom.us.app/Contents/MacOS/zoom.us")])
 
     override func setUp() async throws {
@@ -66,7 +67,7 @@ final class MeetingFlowTests: XCTestCase {
         flow = MeetingFlow(store: store, summarizer: summarizer, engine: engine,
                            hint: { [unowned self] in hints.append($0) }, liveEvery: 0.05)
         flow.onRecording = { [unowned self] in recording.append($0) }
-        flow.onTranscript = { [unowned self] in opened.append(try? store.get($0.id)) }
+        flow.onTranscript = { [unowned self] in opened.append(try? store.get($0.id)); summarizing.append($1) }
         flow.attach(recorder)
     }
 
@@ -116,6 +117,7 @@ final class MeetingFlowTests: XCTestCase {
         XCTAssertEqual(opened.count, 1)
         XCTAssertEqual(opened.first??.segments, r.segments)
         XCTAssertNil(opened.first??.summary)
+        XCTAssertEqual(summarizing, [true])
         XCTAssertEqual(r.summary?.actionItems, [ActionItem(owner: "Me", task: "t")])
         XCTAssertEqual(hints, ["Meeting detected · recording", "Meeting recording saved", "Meeting notes ready · open Shepetal → Meetings"])
         XCTAssertEqual(recording, [true, false])
@@ -138,6 +140,22 @@ final class MeetingFlowTests: XCTestCase {
         let r = try XCTUnwrap(try store.list(limit: 5).first.flatMap { try store.get($0.id) })
         XCTAssertEqual(r.segments.map(\.speaker), [.me])
         XCTAssertNotNil(r.summary)
+    }
+
+    // The model fails on the last utterance: what was stored still opens, with no "Summarizing…" left spinning.
+    func testFailedFinalPassStillOpensTheWindowWithoutPromisingASummary() async throws {
+        var loaded: SpeechEngine?
+        connect(loaded)
+        recorder.start()
+        try capture.append(me: audio(3, on: 0.5...1.5), others: audio(3))
+        loaded = engine
+        engine.failNext = true
+        recorder.stop()
+        await flow.finishing?.value
+        XCTAssertEqual(hints.last, "Meeting transcription failed: model failed")
+        XCTAssertEqual(opened.count, 1)
+        XCTAssertNil(opened.first??.summary)
+        XCTAssertEqual(summarizing, [false])
     }
 
     func testWithoutAModelTheMeetingIsStillSavedAsEnded() throws {

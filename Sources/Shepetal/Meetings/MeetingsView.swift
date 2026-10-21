@@ -45,8 +45,11 @@ final class MeetingsModel: ObservableObject {
         refresh()
     }
 
+    /// Copy summary is greyed out until there is a summary with something in it.
+    var canCopySummary: Bool { !(record?.summary?.isEmpty ?? true) }
+
     func copySummary() {
-        guard let r = record, r.summary != nil else { return }
+        guard let r = record, canCopySummary else { return }
         copy(MeetingFormat.markdown(r, transcript: false))
         message = "Summary copied"
     }
@@ -213,7 +216,7 @@ private struct MeetingDetail: View {
             Button { model.copyTranscript() } label: { Label("Copy transcript", systemImage: "text.quote") }
                 .disabled(record.segments.isEmpty).help("Copy transcript")
             Button { model.copySummary() } label: { Label("Copy summary", systemImage: "doc.on.doc") }
-                .disabled(record.summary == nil).help("Copy summary")
+                .disabled(!model.canCopySummary).help("Copy summary")
             Button { model.export() } label: { Label("Export Markdown…", systemImage: "square.and.arrow.up") }
                 .help("Export Markdown…")
         }
@@ -227,31 +230,41 @@ private struct SummaryPane: View {
     var body: some View {
         if let s = summary {
             ScrollView {
-                VStack(alignment: .leading, spacing: 26) {
-                    if !s.overview.isEmpty {
-                        section("Overview") { Text(s.overview).lineSpacing(3) }
-                    }
-                    if !s.keyPoints.isEmpty {
-                        section("Key points") { bullets(s.keyPoints, icon: "circle.fill", size: 5, tint: .secondary) }
-                    }
-                    if !s.decisions.isEmpty {
-                        section("Decisions") { bullets(s.decisions, icon: "checkmark.seal.fill", size: 12, tint: .green) }
-                    }
-                    if !s.actionItems.isEmpty {
-                        section("Action items") {
-                            ForEach(Array(s.actionItems.enumerated()), id: \.offset) { _, a in ActionRow(item: a) }
-                        }
-                    }
-                }
-                .textSelection(.enabled)
-                .frame(maxWidth: 680, alignment: .leading)
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                SummarySections(summary: s)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: 680, alignment: .leading)
+                    .padding(24)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
             ContentUnavailableView(live ? "Summary comes after the call" : "Summary not ready yet",
                                    systemImage: "text.alignleft",
                                    description: Text("It is written on this Mac once the meeting ends."))
+        }
+    }
+}
+
+/// Overview, key points, decisions and action items, empty ones left out: the sections Copy summary copies.
+struct SummarySections: View {
+    let summary: Summary
+
+    var body: some View {
+        let s = summary
+        VStack(alignment: .leading, spacing: 26) {
+            if !s.overview.isEmpty {
+                section("Overview") { Text(s.overview).lineSpacing(3) }
+            }
+            if !s.keyPoints.isEmpty {
+                section("Key points") { bullets(s.keyPoints, icon: "circle.fill", size: 5, tint: .secondary) }
+            }
+            if !s.decisions.isEmpty {
+                section("Decisions") { bullets(s.decisions, icon: "checkmark.seal.fill", size: 12, tint: .green) }
+            }
+            if !s.actionItems.isEmpty {
+                section("Action items") {
+                    ForEach(Array(s.actionItems.enumerated()), id: \.offset) { _, a in ActionRow(item: a) }
+                }
+            }
         }
     }
 

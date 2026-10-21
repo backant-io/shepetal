@@ -343,28 +343,29 @@ Setup: as in M-MTG-1. No step needs Screen Recording access.
 Setup: as in M-MTG-1. Before the meeting, select the word `canary` in TextEdit and press Cmd+C.
 1. Record a Zoom meeting and say a few sentences, as in M-MTG-1 steps 1 to 5. Leave the meeting, click into TextEdit at once, and keep typing.
 2. Expected a few seconds after "Meeting recording saved": a "Meeting transcript" window comes to the front. Its first line reads "Zoom · DD.MM.YY HH:MM · N min" (for example "Zoom · 21.10.26 15:00 · 12 min"). Below that is the whole transcript, with each Me and Others line and its time, and "Summarizing…" above it. Your typing keeps landing in TextEdit: the window did not take the keyboard. There is no sound, and no model name appears anywhere. Cmd+V in TextEdit still pastes `canary`, because the window never writes the clipboard by itself.
-3. Expected: "Summarizing…" is replaced by the overview and the action items. Copy summary is greyed out until then.
-4. Click Copy transcript. Expected: "Transcript copied" appears next to the first line, with no sound. Cmd+V in TextEdit pastes the first line, an empty line, then one line per segment, such as `Me (0:05): I will send the slides by Friday.`, with no Markdown. Click Copy summary and paste. Expected: the summary, without the transcript.
-5. Click into the window, select a few words in one line, and press Cmd+C. Paste. Expected: only those words.
+3. Expected: "Summarizing…" is replaced by the sections the summary has, under the headings Overview, Key points, Decisions and Action items, as in the Meetings tab. Copy summary is greyed out until then.
+4. Click Copy transcript. Expected: "Transcript copied" appears next to the first line, with no sound. Cmd+V in TextEdit pastes the first line, an empty line, then one line per segment, such as `Me (0:05): I will send the slides by Friday.`, with no Markdown. Click Copy summary and paste. Expected: the summary, without the transcript, with the same sections as the window shows. Its first line is `# Zoom · DD.MM.YY HH:MM · N min`, the window's first line.
+5. Click into the window, select a few words in one line, and press Cmd+C. Paste. Expected: only those words. Turn Caps Lock on, select other words, and press Cmd+C again. Expected: those words paste, and there is no beep. If a Russian keyboard layout is installed, switch to it and repeat: the same.
 6. Click Open in Meetings. Expected: the Shepetal window opens on the Meetings tab, with this meeting open. Its Copy transcript button, next to Copy summary, copies the same text as in step 4.
 7. Record a second meeting and end it while the window is still open. Expected: the same window now shows the second meeting, and no second window opens. Close the window: it stays closed until the next meeting ends.
 8. No speech: choose 🤫 > Start meeting recording, stay silent for 20 s, then choose Stop meeting recording. Expected: the window says "No speech was recorded". The first line has no app name ("DD.MM.YY HH:MM · < 1 min"). Copy transcript and Copy summary are greyed out, and Open in Meetings opens the meeting.
+8a. A decision and nothing else: choose 🤫 > Start meeting recording and say only "We decided to ship on Friday.", "Okay." and "Sounds good.", then stop it. Expected: "Summarizing…" goes away and the window shows Decisions with "We decided to ship on Friday.". Copy summary pastes that decision under `## Decisions`. Record another meeting by hand and say only "Okay.". Expected: "Summarizing…" is replaced by "No summary for this meeting", and Copy summary stays greyed out.
 9. Choose 🤫 > Start meeting recording and say a sentence. Put Safari in full screen and click into its address bar. Then choose 🤫 > Stop meeting recording. Expected: the window shows over full-screen Safari, and typing still goes into the address bar.
 10. After Settings > Recordings > Delete recordings after 24 hours has removed a meeting's audio (as in M-HUB-3 step 2, with `touch -t` on its folder), open that meeting in the Meetings tab. Expected: its transcript and summary are still there, and Copy transcript still works.
 
 ### M-ACC-1: first launch, sign-in and the free trial
-Needs shepetal.backant.io live, and a build that requires sign-in: either `ShepetalRequiresSignIn` is true in its Info.plist, or start it with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
-0. Without `ShepetalRequiresSignIn` or the variable, signed out: expected the menu still offers Sign in, but no sign-in hint shows at launch and fn dictates normally.
-1. Sign out first if this Mac was signed in (🤫 menu > Sign out). Quit and open Shepetal. Expected: next to 🤫 "Sign in with Google to start your free 30-day trial" for a few seconds; the 🤫 menu shows "Not signed in" and "Sign in with Google to start your free 30-day trial…". Open Shepetal… > Home shows the same under Account.
-2. Hold fn in TextEdit. Expected: nothing is recorded or inserted, and the hint "Sign in with Google to start your free 30-day trial" shows next to 🤫.
-3. Choose Sign in with Google… Expected: a sign-in sheet opens shepetal.backant.io and goes to Google; if the browser is already signed in to Google, one click picks the account. Nothing to type. The menu says "Signing in with Google…". Expected: after the sheet closes, within a few seconds the menu shows "Free trial: 30 days left · <your email>", Get Shepetal for $4.99 (lifetime, updates included)… and Sign out. Run `security find-generic-password -s io.backant.shepetal.account` in Terminal. Expected: an item exists (do not print its secret).
+Needs shepetal.backant.io live, and a build that requires sign-in: the release package, `REQUIRE_SIGNIN=1 scripts/make-app.sh --install` (the "Built" line ends with "sign-in required"), or any build started with `SHEPETAL_REQUIRE_SIGNIN=1 dist/Shepetal.app/Contents/MacOS/Shepetal`. Add `SHEPETAL_ACCOUNT_URL=http://localhost:3000` to test against a local copy of the site.
+0. Without `ShepetalRequiresSignIn` or the variable (a plain `scripts/make-app.sh` build), signed out: expected the menu still offers Sign in, but no sign-in hint shows at launch, no window opens by itself, and fn dictates normally.
+1. Sign out first if this Mac was signed in (🤫 menu > Sign out). Quit and open Shepetal. Expected: next to 🤫 "Sign in with Google to start your free 30-day trial" for a few seconds, and the Shepetal window opens by itself on Home. Its first section, Account, says "Not signed in" with a large "Sign in with Google to start your free 30-day trial" button. The 🤫 menu shows "Not signed in" and "Sign in with Google to start your free 30-day trial…". Close the window and wait two minutes: it does not open again by itself.
+2. Hold fn in TextEdit. Expected: nothing is recorded or inserted, no new file appears in `~/Library/Application Support/Shepetal/audio`, the menu-bar mic indicator (orange dot) never shows, the hint "Sign in with Google to start your free 30-day trial" shows next to 🤫 with no error ring and no mic message, and the Shepetal window comes to the front on Home.
+3. Choose Sign in with Google… Expected: a sign-in sheet opens shepetal.backant.io and goes to Google; if the browser is already signed in to Google, one click picks the account. Nothing to type. The menu says "Signing in with Google…". Expected: after the sheet closes, within a few seconds the menu and the top of Home show "Signed in as <your email> · Trial, 30 days left", Get Shepetal for $4.99 (lifetime, updates included)… and Sign out. Quit and reopen Shepetal: the window does not open by itself. Run `security find-generic-password -s io.backant.shepetal.account` in Terminal. Expected: an item exists (do not print its secret).
 4. Hold fn and dictate into TextEdit. Expected: it works as in M-FN-1.
 4a. Sign out, choose Sign in with Google… again and close the sheet with Cancel. Expected: no error, the menu is back to "Not signed in" with the Sign in item. Sign in again.
 5. Quit and reopen Shepetal with Wi-Fi off. Expected: the trial line is unchanged and dictation still works (7-day offline grace). Turn Wi-Fi back on.
 
 ### M-ACC-2: buy, lifetime, sign out
-1. Choose Get Shepetal for $4.99… Expected: Stripe Checkout opens in the browser. Pay with a Stripe test card on a test deployment. Expected: within about a minute of paying, the menu says "Yours forever · <email>" and has no Buy item.
-2. On the site, end the trial of a test account (or wait for it). Reopen Shepetal. Expected: the menu says "Trial ended" with Get Shepetal for $4.99…; holding fn shows "Trial ended: get Shepetal for $4.99" and records nothing.
+1. Choose Get Shepetal for $4.99… Expected: Stripe Checkout opens in the browser. Pay with a Stripe test card on a test deployment. Expected: within about a minute of paying, the menu and Home say "Signed in as <email> · Yours forever" and have no Buy item.
+2. On the site, end the trial of a test account (or wait for it). Reopen Shepetal. Expected: once the license check answers, the window opens on Home with "Signed in as <email> · Trial ended" and Get Shepetal for $4.99 (once per launch); holding fn shows "Trial ended: get Shepetal for $4.99", opens Home and records nothing.
 3. Choose Sign out. Expected: "Not signed in", fn shows the sign-in hint, and `security find-generic-password -s io.backant.shepetal.account` finds nothing.
 4. While dictating a long hands-free note, watch Little Snitch or `nettop -p shepetal`: expected no connection during the dictation.
 
@@ -661,13 +662,36 @@ In the L-SC steps the shortcuts have their defaults: Esc cancels, Shift+Alt+Z is
 (Automated: `hands_free_toggle_starts_stops_and_cancels`, `hands_free_is_reported_for_the_toggle_and_the_double_tap`, `the_hotkey_stops_a_toggled_dictation_without_starting_another`, `the_toggle_ends_a_double_tap_dictation`.)
 
 ### L-SC-5: shortcut settings
-1. Put `{"shortcuts": {"paste_last": "z"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon; echo $?`. Expected: `shepetal: /home/<you>/.config/shepetal/config.json: paste_last: "z" needs a modifier: ctrl, alt, shift or meta` and `1`.
+1. Put `{"shortcuts": {"paste_last": "z"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon; echo $?`. Expected: `shepetal: /home/<you>/.config/shepetal/config.json: paste_last: "z" needs a modifier: ctrl, alt, shift, meta or a mouse button` and `1`.
 2. With `{"shortcuts": {"paste_last": "ctrl+alt+shift+z"}}`. Expected: `... paste_last: "ctrl+alt+shift+z" has 4 keys, at most 3 are allowed` and `1`.
 3. With `{"shortcuts": {"hands_free": "shift+alt+z"}}`. Expected: `... hands_free: "shift+alt+z" is already paste_last` and `1`.
 4. With `{"shortcuts": {"paste_last": "ctrl+alt+v"}}` the daemon starts. Dictate a sentence and press Ctrl+Alt+V. Expected: the sentence is typed again, Shift+Alt+Z does nothing, and Shift+Alt+X still copies (a shortcut left out keeps its default).
 5. With `{"shortcuts": {"copy_last": "rightalt+x"}}`, run `SHEPETAL_KEY=rightalt shepetal daemon`. Expected: `... copy_last: "rightalt+x" uses rightalt, the dictation hotkey` and exit code 1. Remove the file and run `SHEPETAL_KEY=rightalt shepetal daemon` again. Dictate with Right Alt, then press Shift+Left Alt+Z. Expected: the sentence is typed again (a generic `alt` means Left Alt when Right Alt is the hotkey).
 6. Remove `~/.config/shepetal/config.json`.
 (Automated: `validation_rejects_what_wispr_rejects`, `combos_that_clash_with_the_hotkey_are_rejected`, `config_errors_name_the_shortcut_and_place`, `config_overrides_and_other_settings_are_skipped`, `config_file_location_and_missing_file`, `key_names_map_to_evdev_codes`.)
+
+### L-SC-7: a combo as the dictation key
+1. Put `{"shortcuts": {"dictation": "ctrl+alt"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon` without `SHEPETAL_KEY`. Expected: `hold ctrl+alt to talk`, and the keyboards that have Ctrl or Alt.
+2. In a text editor hold Ctrl, then Alt, and speak; let go. Expected: the text is typed once the keys are up. Do it again pressing Right Alt first, then Right Ctrl: the same.
+3. Hold Ctrl+Alt, let go of Alt and press it again within half a second while Ctrl stays down, then let go of both. Expected: hands-free (🤫 orange). Press Ctrl+Alt again: the text is typed.
+4. Tap Ctrl+Alt quickly. Expected: nothing is typed and `Hold ctrl+alt to talk · double-tap for hands-free` shows next to 🤫 for about 3 s.
+5. Press Ctrl+Alt+T (or any Ctrl+Alt+key your desktop uses). Expected: the desktop's action happens and nothing is typed (a chord, kept as `*.cancelled.wav`).
+6. Hold only Ctrl for 2 s. Expected: no recording.
+7. Each of these, one at a time, makes `shepetal daemon; echo $?` exit with `1` and the reason after `config.json: dictation:`: `"a"` (`needs a modifier`), `"7"` (the same), `"shift+a"` (`types a character`), `"ctrl+alt+shift+meta"` (`has 4 keys, at most 3 are allowed`), `"leftctrl"` (`a key you press all the time`), `"alt+tab"` (`a shortcut the desktop or apps already use`), `"mouse1"` (`left and right click cannot be shortcuts`).
+8. With `{"shortcuts": {"dictation": "ctrl+alt"}}` still in the file, run `SHEPETAL_KEY=rightctrl shepetal daemon`. Expected: `hold rightctrl to talk`: `SHEPETAL_KEY` wins over the file.
+9. Remove `~/.config/shepetal/config.json`.
+(Automated: `a_combo_is_a_dictation_key_held_in_any_order`, `dictation_validation_matches_the_mac`, `other_shortcuts_may_not_overlap_a_combo_dictation_key`, `shepetal_key_still_picks_one_key_and_wins_over_the_config`, `a_combo_or_mouse_dictation_key_reads_every_device_that_sends_part_of_it`.)
+
+### L-SC-8: mouse buttons
+Needs a mouse with back and forward side buttons.
+1. `sudo evtest`, pick the mouse, and press its back and forward buttons. Write down the names it prints (`BTN_SIDE`/`BTN_EXTRA`, or `BTN_BACK`/`BTN_FORWARD`). Quit evtest.
+2. Put `{"shortcuts": {"dictation": "mouse4", "hands_free": "mouse5"}}` in `~/.config/shepetal/config.json` and run `shepetal daemon`. Expected: `hold mouse4 to talk`, and the mouse among the input devices.
+3. Hold the back button and speak in a text editor; while still holding it, left-click in the editor once. Let go. Expected: the text is typed (the click did not cancel), and the browser or file manager under the pointer may also go back, since nothing is swallowed.
+4. Double-click the back button, speak, press it again. Expected: hands-free, then the text is typed.
+5. Press the forward button, speak, press it again. Expected: the text is typed (the hands-free key). Pressed twice within half a second: nothing is typed and a `*.cancelled.wav` is kept.
+6. Set `{"shortcuts": {"dictation": "ctrl+mouse4"}}`: holding Ctrl and the back button records; the back button alone does nothing.
+7. Unplug the mouse and start the daemon with step 6's file. Expected: `no input device reports "ctrl+mouse4" (evdev code 275)` and exit code 1. Remove `~/.config/shepetal/config.json`.
+(Automated: `a_mouse_button_is_a_dictation_key_and_clicks_do_not_cancel_it`, `a_combo_or_mouse_dictation_key_reads_every_device_that_sends_part_of_it`.)
 
 ### L-SC-6: 20-minute cap
 1. Start a hands-free dictation (double-tap fn or Ctrl+Meta+Space) and leave it running for 20 min, speaking now and then.

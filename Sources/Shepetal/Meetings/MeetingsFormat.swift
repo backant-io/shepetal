@@ -54,7 +54,7 @@ enum MeetingFormat {
     /// The Markdown file. Copy summary uses it without the transcript. Empty sections are left out.
     static func markdown(_ r: MeetingRecord, transcript: Bool = true, timeZone: TimeZone = .current,
                          now: Date = Date()) -> String {
-        var parts = ["# \(r.meeting.app)", "\(date(r.meeting.startedAt, timeZone: timeZone)) · \(duration(r.meeting, now: now))"]
+        var parts = ["# \(headline(r.meeting, timeZone: timeZone, now: now))"]
         func section(_ title: String, _ lines: [String]) {
             if !lines.isEmpty { parts.append("## \(title)\n\n" + lines.joined(separator: "\n")) }
         }
@@ -75,6 +75,11 @@ enum MeetingFormat {
         let app = m.app.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ":", with: "-")
         return "\(app) \(date(m.startedAt, timeZone: timeZone).replacingOccurrences(of: ":", with: "")).md"
     }
+}
+
+extension Summary {
+    /// The summarizer found nothing to say (no speech, or no sentence it could use).
+    var isEmpty: Bool { overview.isEmpty && keyPoints.isEmpty && decisions.isEmpty && actionItems.isEmpty }
 }
 
 /// MeetingStoring kept in memory: previews, tests, and the tab until the app passes its on-disk store.
