@@ -3,7 +3,7 @@
 #   - it starts with --no-permission-prompts and stays running in the background for SOAK seconds;
 #   - it is a menu-bar-only app (LaunchServices type UIElement: no Dock icon, no app switcher entry);
 #   - its 🤫 panel is on screen, 18 pt tall, 8 pt in from the bottom-left corner of the main display;
-#   - its menu-bar 🤫 is shown, and "Quit Shepetal" from that real status menu ends it, with no crash
+#   - its menu-bar 🤫 is shown, and "Quit shepetal" from that real status menu ends it, with no crash
 #     report (--quit-from-menu-after; nothing is clicked).
 # It also tries a screenshot; without Screen Recording permission macOS leaves windows out of it,
 # so the window-list check above is the one that counts.
@@ -114,7 +114,7 @@ fi
 panel_ok || fail "the 🤫 panel is gone after ${UP}s: $(tr '\n' ' ' < "$DIR/windows.txt")"
 echo "ok: still running in the background with 🤫 shown after ${UP}s (rss $(ps -o rss= -p "$PID" | tr -d ' ') KB)"
 for _ in $(seq 1 120); do kill -0 "$PID" 2>/dev/null || break; sleep 0.25; done
-kill -0 "$PID" 2>/dev/null && fail "Quit Shepetal from the menu did not end the app"
+kill -0 "$PID" 2>/dev/null && fail "Quit shepetal from the menu did not end the app"
 wait "$PID" && CODE=0 || CODE=$?
 PID=
 [ "$CODE" = 0 ] || fail "the app ended with status $CODE, not 0: $(tail -3 "$DIR/stderr.log")"
