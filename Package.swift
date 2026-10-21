@@ -8,6 +8,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/FluidInference/FluidAudio", exact: "0.17.7"),
         .package(path: "meeting"),
+        .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),  // auto-updates (docs/install-and-update.md)
     ],
     targets: [
         // Pure Swift: gesture state machine, model tiers, audio store, history, text rules.
@@ -19,6 +20,7 @@ let package = Package(
             .product(name: "FluidAudio", package: "FluidAudio"),
             .product(name: "MeetingCore", package: "meeting"),
             .product(name: "MeetingMac", package: "meeting"),
+            .product(name: "Sparkle", package: "Sparkle"),
         ]),
         // Meeting summarizer: not an LLM (rule 6).
         .target(name: "ShepetalSummary", dependencies: ["ShepetalCore"], resources: [.copy("actions_model.json")]),

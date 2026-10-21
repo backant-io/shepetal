@@ -45,6 +45,9 @@ suite_scripts() {
   python3 scripts/parity.py --self-test
   python3 -I scripts/extract_identifiers.py --self-test
   python3 scripts/check_re_docs.py --self-test
+  python3 scripts/mac/release_guard.py --self-test   # the Mac release (docs/install-and-update.md 4)
+  swift scripts/mac/verify-update.swift --self-test
+  scripts/test-uninstall-script.sh
   if [ -d "$RE/asar" ]; then python3 scripts/check_re_docs.py; else python3 scripts/check_re_docs.py --no-bundle; fi
   if [ -f "$RE/identifier-map.tsv" ]; then
     python3 scripts/parity.py --completeness "$RE/identifier-map.tsv" "$RE/identifiers"

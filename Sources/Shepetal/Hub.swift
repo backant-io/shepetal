@@ -16,10 +16,13 @@ final class Hub {
          status: @escaping () -> (model: String, fnWatched: Bool),
          retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void,
          openPermissions: @escaping () -> Void, loginItem: LoginItem, openDictionary: @escaping () -> Void,
-         restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore()) {
+         restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore(),
+         updater: SparkleUpdater? = nil, uninstallBlocker: @escaping () -> String? = { nil }) {
         model = HubModel(pipeline: pipeline, engine: engine, status: status, retention: retention,
                          setRetention: setRetention, openPermissions: openPermissions, loginItem: loginItem,
                          openDictionary: openDictionary, restoreFnKey: restoreFnKey)
+        model.updater = updater
+        model.uninstallBlocker = uninstallBlocker
         meetings = MeetingsModel(store: meetingStore)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -28,6 +31,9 @@ final class Hub {
         window.contentView = NSHostingView(rootView: HubView(model: model, meetings: meetings))
         window.center()
     }
+
+    /// A re-transcribe in History is under way (an update waits for it).
+    var retranscribing: Bool { model.busy != nil }
 
     func show() {
         model.reload()
@@ -82,6 +88,8 @@ final class HubModel: ObservableObject {
     let loginItem: LoginItem
     let openDictionary: () -> Void
     private let restore: () -> Void
+    var updater: SparkleUpdater?
+    var uninstallBlocker: () -> String? = { nil }
 
     @Published var query = "" { didSet { reload() } }
     @Published var showArchived = false { didSet { reload() } }
@@ -165,6 +173,11 @@ final class HubModel: ObservableObject {
     func restoreFnKey() {
         restore()
         objectWillChange.send()
+    }
+
+    var automaticallyInstalls: Bool {
+        get { updater?.automaticallyInstalls ?? false }
+        set { updater?.automaticallyInstalls = newValue; objectWillChange.send() }
     }
 }
 
@@ -254,6 +267,10 @@ private struct HistoryTab: View {
 
 private struct SettingsTab: View {
     @ObservedObject var model: HubModel
+    static let version: String = {
+        let i = Bundle.main.infoDictionary ?? [:]
+        return "\(i["CFBundleShortVersionString"] as? String ?? "dev") (\(i["CFBundleVersion"] as? String ?? "0"))"
+    }()
     @AppStorage(MeetingRecorder.autoRecordKey) private var autoRecordMeetings = false
 
     var body: some View {
@@ -274,6 +291,9 @@ private struct SettingsTab: View {
             }
             Button("Permissions…", action: model.openPermissions)
             Text("Shortcuts, the microphone and languages are in the 🤫 menu.").font(.caption).foregroundStyle(.secondary)
+            if model.updater != nil { Toggle("Install updates automatically", isOn: $model.automaticallyInstalls) }
+            LabeledContent("Version", value: Self.version)
+            UninstallSection(blocker: model.uninstallBlocker)  // last and quiet: never clicked by accident
         }
         .formStyle(.grouped)
     }

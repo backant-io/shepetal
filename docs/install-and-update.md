@@ -1,6 +1,8 @@
 # Install and update on the Mac
 
-Design, 21.10.26. This doc covers the Mac installer and auto-updates that Pavel asked for ("a proper installer and auto updates"). It follows his decision of 21.10.26: **a drag-and-drop DMG, no .pkg**. It replaces the .pkg from #112 and covers F98 (auto-updater, deferred while dictating) and part of F88 (permission onboarding). Nothing in it is built yet. Implementation slices are at the end, followed by the list of what Pavel must provide.
+Design, 21.10.26. This doc covers the Mac installer and auto-updates that Pavel asked for ("a proper installer and auto updates"). It follows his decision of 21.10.26: **a drag-and-drop DMG, no .pkg**. It replaces the .pkg from #112 and covers F98 (auto-updater, deferred while dictating) and part of F88 (permission onboarding). Implementation slices are at the end, followed by the list of what Pavel must provide.
+
+**Status (21.10.26, feat/mac-installer-updates):** slices 1 to 5 are built: signing, the DMG, onboarding, Move to Applications, Uninstall in Settings, Sparkle with the idle gate, and the release pipeline, which runs as a dry run until the credentials exist. The Sparkle EdDSA key pair was generated in Pavel's login Keychain (its public key is in make-app.sh). Not built: slice 6 (the web `/appcast.xml` and `/download` on feat/web), the admin prompt for a root-owned copy when moving or uninstalling (it says to use Finder instead), the "Ask" button for System Audio (macOS asks at the first meeting), and `SURequireSignedFeed` (off, because the Worker's empty fallback feed is unsigned; generate_appcast signs the feed anyway).
 
 ## What exists today (checked 21.10.26)
 

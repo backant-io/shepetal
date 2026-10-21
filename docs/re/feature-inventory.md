@@ -142,7 +142,7 @@ Platforms: M = macOS, W = Windows, i = iPhone (mobile details in `mobile-and-pla
 | F95 | Focus mode (block distracting apps and URLs) | M W | n | local block list: during a focus session, watch the frontmost app and the browser URL (F23) and hide or cover blocked ones | P2 | S `focusModeEnabled`, `focusModeBlockedApps`; H `SetFocusMode` |
 | F96 | Typing reminder (nudges you to use voice when you type a lot) | M W | n | optional | P2 | N `TypingReminderEnabled` |
 | F97 | Deep links (`wispr-flow://`) for login and actions | M W | n | `shepetal://` for settings | P2 | `setAsDefaultProtocolClient("wispr-flow")` |
-| F98 | Auto-updater (deferred while dictating) | M W | y | opt-in GitHub Releases updater | P1 | `autoUpdater.setFeedURL` dl.wisprflow.com; F `defer-updates-while-active` |
+| F98 | Auto-updater (deferred while dictating) | M W | y | GitHub Releases updater, daily, on by default with an opt-out (Mac: Sparkle 2, docs/install-and-update.md) | P1 | `autoUpdater.setFeedURL` dl.wisprflow.com; F `defer-updates-while-active` |
 | F99 | Helper crash recovery and relaunch | M W | n | supervise the helper, restart with backoff | P0 | `index.js` helper launcher `relaunchCount`; N `HelperPersistentFailure` |
 | F100 | In-app notifications center (tips, server announcements) | M W | y | local error toasts only | P2 | T `RemoteNotifications`; S `notificationSettings` |
 | F101 | Extensions / agent tool bridge (spawns external agent CLIs) | M | y | later plugin hook | P2 | `agentToolBridge.js`; F `extension-system` |

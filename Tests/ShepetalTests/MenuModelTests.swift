@@ -185,6 +185,12 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(updates(true)?.isEnabled, true)
         XCTAssertEqual(updates(false)?.isEnabled, false, "greyed out until an updater can check")
         XCTAssertFalse(NoUpdateChecker().canCheckForUpdates)
+
+        // A scheduled check that found an update while automatic install is off renames the item instead of opening a
+        // window at a random moment; the menu keeps its length.
+        let found = MenuModel.groups(MenuState(canCheckForUpdates: true, checkForUpdatesTitle: "Update to 0.2.1…"))
+        XCTAssertTrue(found.joined().contains { $0.title == "Update to 0.2.1…" && $0.action == .checkForUpdates })
+        XCTAssertEqual(found.joined().count, MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count)
     }
 
     func testLabelsUseTheBrandAndNoEmojiOrModelName() {
@@ -238,7 +244,7 @@ final class MenuModelTests: XCTestCase {
         let app = try AppSource.code("App.swift")
         for line in ["permissionsMissing: !Permission.missing.isEmpty,", "engineProblem: engine == nil ? engineStatus : nil,",
                      "recordingMeeting: meetings.current != nil,", "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
-                     "canCheckForUpdates: updater.canCheckForUpdates)",
+                     "canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)",
                      "case .permissions: showOnboarding()", "case .meeting: meetings.toggle()",
                      "case .showMeeting(let id): if let m = try? meetingFlow?.store.get(id)?.meeting { openTranscript(m) }",
                      "openTranscript = MeetingTranscriptWindow.follow(meetingFlow)",

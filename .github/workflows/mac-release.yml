@@ -1,0 +1,132 @@
+# The Mac release (docs/install-and-update.md 4), all in scripts/mac/release.sh:
+# - a v*-mac tag: guard, build, sign, DMG, notarize, staple, appcast, check, then a DRAFT release. Pavel tries the
+#   DMG, writes the notes and publishes it (a full release); publishing is what switches /download and the update
+#   feed. Missing secrets make it a dry run, and then no draft is made.
+# - a PR that touches the release path, or a manual run: the same script with --dry-run and no secrets; the DMG and
+#   appcast are kept as a workflow artifact for 3 days.
+name: Mac release
+on:
+  push:
+    tags: ['v*-mac']
+  pull_request:
+    paths:
+      - scripts/mac/**
+      - scripts/make-app.sh
+      - scripts/make-dmg.sh
+      - .github/workflows/mac-release.yml
+      - Package.swift
+      - Package.resolved
+  workflow_dispatch:
+permissions:
+  contents: read
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+  HOMEBREW_NO_AUTO_UPDATE: 1
+  HOMEBREW_NO_INSTALL_CLEANUP: 1
+
+jobs:
+  dry-run:
+    if: github.event_name != 'push'
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # the build number is the commit count
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build/repositories
+            .build/checkouts
+            .build/artifacts
+          key: swiftpm-release-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-release-
+      - run: brew install uv
+      - run: VERSION=0.0.0 scripts/mac/release.sh --dry-run
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mac-release-dry-run
+          path: |
+            dist/*.dmg
+            dist/*.sha256
+            dist/appcast.xml
+          retention-days: 3
+
+  release:
+    if: github.event_name == 'push'
+    runs-on: macos-26
+    timeout-minutes: 90
+    environment: mac-release  # the secrets live only here, and it deploys only from v*-mac tags
+    permissions:
+      contents: write  # the draft release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0  # a shallow clone would ship build 1; the guard refuses it
+      - run: git fetch origin main  # the guard checks that the tag is on main
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build/repositories
+            .build/checkouts
+            .build/artifacts
+          key: swiftpm-release-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-release-
+      - run: brew install uv
+      - run: scripts/ci/run-checks.sh --only swift
+      - name: Credentials into a throwaway keychain and 0600 files in RUNNER_TEMP
+        env:
+          MAC_DEVELOPER_ID_P12: ${{ secrets.MAC_DEVELOPER_ID_P12 }}
+          MAC_DEVELOPER_ID_P12_PASSWORD: ${{ secrets.MAC_DEVELOPER_ID_P12_PASSWORD }}
+          NOTARY_KEY_P8: ${{ secrets.NOTARY_KEY_P8 }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          SPARKLE_ED_PRIVATE_KEY: ${{ secrets.SPARKLE_ED_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          umask 077
+          if [ -n "$MAC_DEVELOPER_ID_P12" ]; then
+            KC=$RUNNER_TEMP/release.keychain-db
+            KCPW=$(openssl rand -hex 24)  # random per run, so not a secret
+            security create-keychain -p "$KCPW" "$KC"
+            security set-keychain-settings -lut 3600 "$KC"
+            security unlock-keychain -p "$KCPW" "$KC"
+            printf '%s' "$MAC_DEVELOPER_ID_P12" | base64 --decode > "$RUNNER_TEMP/id.p12"
+            # ponytail: security import takes the .p12 password only as -P; the runner is a single-use VM.
+            security import "$RUNNER_TEMP/id.p12" -k "$KC" -P "$MAC_DEVELOPER_ID_P12_PASSWORD" -T /usr/bin/codesign
+            rm -f "$RUNNER_TEMP/id.p12"
+            security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
+            security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+            echo "KEYCHAIN=$KC" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$NOTARY_KEY_P8" ]; then
+            printf '%s' "$NOTARY_KEY_P8" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+            { echo "NOTARY_KEY_FILE=$RUNNER_TEMP/notary.p8"; echo "NOTARY_KEY_ID=$NOTARY_KEY_ID"; echo "NOTARY_ISSUER_ID=$NOTARY_ISSUER_ID"; } >> "$GITHUB_ENV"
+          fi
+          if [ -n "$SPARKLE_ED_PRIVATE_KEY" ]; then
+            printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key"
+            echo "SPARKLE_KEY_FILE=$RUNNER_TEMP/sparkle.key" >> "$GITHUB_ENV"
+          fi
+      - run: TAG="$GITHUB_REF_NAME" scripts/mac/release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Draft release (never published here)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . dist/release.env
+          if [ "$MODE" != release ]; then
+            echo "::error::Dry run (a secret is missing in the mac-release environment): no draft release was made"
+            exit 1
+          fi
+          gh release create "$TAG" --draft --verify-tag --title "Shepetal $VERSION for Mac" \
+            --notes "Draft. Try the DMG, write the notes, then click Publish release (a full release, not a pre-release)." \
+            "dist/Shepetal-$VERSION.dmg" "dist/Shepetal-$VERSION.dmg.sha256" dist/appcast.xml
+      - if: always()
+        run: |
+          [ -z "${KEYCHAIN:-}" ] || security delete-keychain "$KEYCHAIN" || true
+          rm -f "$RUNNER_TEMP/id.p12" "$RUNNER_TEMP/notary.p8" "$RUNNER_TEMP/sparkle.key"

@@ -18,8 +18,15 @@
 #   VERSION=0.1.1 scripts/make-app.sh ...   the version shown in Finder and in the zip name (default 0.1.0)
 #   REQUIRE_SIGNIN=1|0 ...         1: dictation needs Google sign-in and a trial or license
 #                                  (ShepetalRequiresSignIn in Info.plist). Default 1 with --zip and from
-#                                  scripts/make-pkg.sh (the release), else 0, so a build from source dictates
+#                                  scripts/make-dmg.sh (the release), else 0, so a build from source dictates
 #                                  without signing in. SHEPETAL_REQUIRE_SIGNIN=1|0 overrides it when the app starts.
+#   UPDATES=1 ...                  Sparkle auto-updates: writes SUFeedURL and SUPublicEDKey (make-dmg.sh does).
+#                                  Without it the app never updates itself, so a release never replaces a dev build.
+#   TIMESTAMP=1 ...                a secure timestamp on every signature (notarization needs it; needs the network)
+#   EXPECT_DR=<file> ...           fail unless the app's designated requirement is exactly the one in <file>
+#
+# A real identity signs with the hardened runtime and scripts/mac/Shepetal.entitlements, nested code first
+# (Sparkle's helpers, then each framework, then the app), never with --deep.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 INSTALL=0; ZIP=0
@@ -31,6 +38,19 @@ for a in "$@"; do
   esac
 done
 REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-$ZIP}
+# Sparkle's EdDSA public key (public by design). Its private key is in Pavel's login Keychain and in the
+# mac-release environment's SPARKLE_ED_PRIVATE_KEY; it is never committed (docs/install-and-update.md 3).
+# A release dry run without that key passes a throwaway one (its DMG can never update).
+SPARKLE_PUBLIC_KEY=${SPARKLE_PUBLIC_KEY:-aXU+sm8y+UDKwB2M7DxhacVN/BAgTqMsHq2rMc3fibs=}
+case ${UPDATES:-0} in
+  1) UPDATE_KEYS="<key>SUFeedURL</key><string>https://shepetal.backant.io/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
+  <key>SUEnableAutomaticChecks</key><true/>
+  <key>SUScheduledCheckInterval</key><integer>86400</integer>
+  <key>SUAutomaticallyUpdate</key><true/>"; UPDATES_NOTE="updates on" ;;
+  0) UPDATE_KEYS=''; UPDATES_NOTE="updates off" ;;
+  *) echo "UPDATES must be 1 or 0" >&2; exit 2 ;;
+esac
 case $REQUIRE_SIGNIN in
   1) SIGNIN_KEY='<key>ShepetalRequiresSignIn</key><true/>'; SIGNIN="sign-in required" ;;
   0) SIGNIN_KEY=''; SIGNIN="sign-in not required" ;;
@@ -70,12 +90,14 @@ if [ ! -f "$ICON" ] || [ scripts/make-icon.swift -nt "$ICON" ]; then
 fi
 cp "$ICON" "$APP/Contents/Resources/AppIcon.icns"
 cp scripts/uninstall-mac.sh "$APP/Contents/Resources/uninstall.sh"  # removes the app, keeps recordings
-# Dynamic frameworks the binary links (for example llama.cpp for the cleanup model) go in Frameworks.
+# Dynamic frameworks the binary links (Sparkle, llama.cpp for the cleanup model) go in Frameworks. ditto keeps
+# a versioned framework's symlinks. Sparkle's XPC services are only for sandboxed apps, and this one is not.
 for f in "$BIN"/*.framework; do
   [ -e "$f" ] || continue
   mkdir -p "$APP/Contents/Frameworks"
-  cp -R "$f" "$APP/Contents/Frameworks/"
+  ditto "$f" "$APP/Contents/Frameworks/$(basename "$f")"
 done
+rm -rf "$APP/Contents/Frameworks/Sparkle.framework/XPCServices" "$APP/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices"
 if [ -d "$APP/Contents/Frameworks" ]; then
   install_name_tool -add_rpath @executable_path/../Frameworks "$APP/Contents/MacOS/Shepetal"
 fi
@@ -102,24 +124,38 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSAudioCaptureUsageDescription</key><string>Shepetal records the other people in a meeting so it can transcribe it on this Mac. Audio never leaves it.</string>
   <key>NSHumanReadableCopyright</key><string>MIT License</string>
   $SIGNIN_KEY
+  $UPDATE_KEYS
 </dict>
 </plist>
 PLIST
 plutil -lint "$APP/Contents/Info.plist"
 
-# Nested code (frameworks, bundles with code) is signed before the app itself.
+SIGN=(--force --sign "$IDENTITY")
+[ "${TIMESTAMP:-0}" = 1 ] && SIGN+=(--timestamp) || SIGN+=(--timestamp=none)
+APP_SIGN=()
+if [ "$IDENTITY" != - ]; then SIGN+=(--options runtime); APP_SIGN=(--entitlements scripts/mac/Shepetal.entitlements); fi
+# Inside-out: Sparkle's helpers, then each framework, then the app.
+SPARKLE=$APP/Contents/Frameworks/Sparkle.framework/Versions/B
+for n in "$SPARKLE/Autoupdate" "$SPARKLE/Updater.app"; do [ -e "$n" ] && codesign "${SIGN[@]}" "$n"; done
 if [ -d "$APP/Contents/Frameworks" ]; then
-  for f in "$APP/Contents/Frameworks"/*; do codesign --force --sign "$IDENTITY" "$f"; done
+  for f in "$APP/Contents/Frameworks"/*; do codesign "${SIGN[@]}" "$f"; done
 fi
-codesign --force --sign "$IDENTITY" --identifier io.backant.shepetal "$APP"
-codesign --verify --strict --verbose=2 "$APP"
+codesign "${SIGN[@]}" ${APP_SIGN[@]+"${APP_SIGN[@]}"} --identifier io.backant.shepetal "$APP"
+codesign --verify --deep --strict --verbose=2 "$APP"
+if [ -n "${EXPECT_DR:-}" ]; then
+  DR=$(codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => //p')
+  if [ "$DR" != "$(cat "$EXPECT_DR")" ]; then
+    printf 'The designated requirement changed, so every user would have to grant the permissions again.\n  built:  %s\n  pinned: %s (%s)\n' "$DR" "$(cat "$EXPECT_DR")" "$EXPECT_DR" >&2
+    exit 1
+  fi
+fi
 if [ "$IDENTITY" = "-" ]; then
   echo "Signed ad-hoc: macOS will ask for permissions again after every rebuild." >&2
 else
   echo "Signed with: $(codesign -dvv "$APP" 2>&1 | awk -F= '/^Authority=/ { print $2; exit }')"
   codesign -d -r- "$APP" 2>&1 | sed -n 's/^designated => /Designated requirement: /p'
 fi
-echo "Built $PWD/$APP ($SHORT_VERSION, build $BUILD, $COMMIT, $SIGNIN)"
+echo "Built $PWD/$APP ($SHORT_VERSION, build $BUILD, $COMMIT, $SIGNIN, $UPDATES_NOTE)"
 
 if [ "$ZIP" = 1 ]; then
   Z=dist/Shepetal-$SHORT_VERSION-mac.zip
@@ -142,7 +178,7 @@ if [ "$INSTALL" = 1 ]; then
   fi
   rm -rf "$DEST" 2>/dev/null || true  # set -e: a root-owned copy must reach the message below
   if [ -e "$DEST" ]; then
-    echo "Cannot replace $DEST: the .pkg installer made it root-owned. Install with dist/Shepetal-<version>.pkg (scripts/make-pkg.sh), or remove it in Finder first." >&2
+    echo "Cannot replace $DEST: the old .pkg installer made it root-owned. Move it to the Trash in Finder first." >&2
     [ "$WAS_RUNNING" = 1 ] && open "$DEST"
     exit 1
   fi

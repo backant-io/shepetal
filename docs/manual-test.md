@@ -4,23 +4,66 @@ Steps a person has to run: they need physical keys, a voice, or a permission gra
 
 ## Mac
 
-Setup: install the app once, either from the release zip (README > Mac > Install) or with `scripts/make-app.sh --install`, which builds it and installs it to `/Applications/Shepetal.app`. Open it from Finder or with `open /Applications/Shepetal.app`. If the 🌐/fn key opens the emoji picker or starts macOS Dictation, set System Settings > Keyboard > "Press 🌐 key to" to "Do Nothing". If Wispr Flow is running with fn as its shortcut, both apps hear fn and both insert text: quit Wispr Flow (or move its shortcut off fn) before testing Shepetal.
+Setup: install the app once, either from the release DMG (README > Mac > Install) or with `scripts/make-app.sh --install`, which builds it and installs it to `/Applications/Shepetal.app`. Open it from Finder or with `open /Applications/Shepetal.app`. If the 🌐/fn key opens the emoji picker or starts macOS Dictation, set System Settings > Keyboard > "Press 🌐 key to" to "Do Nothing". If Wispr Flow is running with fn as its shortcut, both apps hear fn and both insert text: quit Wispr Flow (or move its shortcut off fn) before testing Shepetal.
 
 The app is signed with a certificate when the build machine has one (`scripts/make-app.sh` prints "Signed with: …"). Then macOS keeps the permissions across rebuilds and updates. If it prints "Signed ad-hoc", every rebuild counts as a new app for macOS and the permissions have to be granted again. To run the M-PERM tests from scratch, quit Shepetal and reset its grants with `tccutil reset All io.backant.shepetal`.
 
-### M-SETUP-1: first run from the installer
-1. In System Settings > Keyboard, set "Press 🌐 key to" to Change Input Source (to see the installer fix it).
-2. Download `Shepetal-<version>.pkg` from the release and open it (right-click › Open, or Privacy & Security › Open Anyway if macOS blocks it). Click Continue, Install, enter your password.
-3. Expected: when the installer finishes, Shepetal opens by itself: no Dock icon, 🤫 in the menu bar and, tiny, in the bottom-left corner. The permissions window opens.
-4. Expected: System Settings > Keyboard shows "Press 🌐 key to: Do Nothing" (reopen the pane), and pressing fn no longer switches the input source. System Settings > General > Login Items & Extensions lists Shepetal under Open at Login, and Open shepetal > Settings shows Start at login turned on. At this first launch "🌐 key set to Do Nothing so fn can dictate" shows next to 🤫 for a few seconds, once.
-5. Grant Microphone, Input Monitoring and Accessibility. Expected: each row turns ✅, the 🤫 menu no longer has "Permissions needed…" at the top, and Home's fn key line reads "Watched: hold fn to talk, double-tap for hands-free".
-6. Click into any text field, hold fn, say a sentence, release. Expected: the sentence is typed there.
+### M-DMG-1: the DMG
+1. Download `Shepetal-<version>.dmg` from the release in Safari and open it.
+2. Expected: no Gatekeeper warning beyond "downloaded from the internet" (a notarized release; a dry-run or unnotarized DMG is refused by macOS 15 until Privacy & Security › Open Anyway). The window shows Shepetal.app on the left, Applications on the right, the curved arrow between them, "shepetal" at the top and "Drag Shepetal into Applications" under the icons, with no toolbar or sidebar. Check that the icon labels read well in both Light and Dark appearance (System Settings › Appearance).
+3. Drag Shepetal into Applications. Expected: it copies; the volume icon on the desktop is 🤫.
+
+### M-MOVE-1: moving itself to Applications
+1. Remove /Applications/Shepetal.app (to the Trash), open the DMG, and open Shepetal from the DMG window.
+2. Expected: "Move Shepetal to Applications?" with Move to Applications (default) and Not Now. Click Move. Expected: Shepetal quits and opens again from /Applications (`ps -o comm= -p $(pgrep -x Shepetal)` shows /Applications/Shepetal.app), and the permissions granted to the DMG copy are kept.
+3. Open the DMG copy again. Expected: no question this time (asked once).
+4. With a NEWER build in /Applications, open an older DMG's copy and click Move. Expected: the newer copy opens and nothing is replaced.
+
+### M-ONB-1: first-run onboarding
+1. On a fresh macOS user account (or after `tccutil reset All io.backant.shepetal` and `defaults delete io.backant.shepetal onboardingDone`), open Shepetal.
+2. Expected: the "Welcome to Shepetal" window. Microphone, Accessibility and Input Monitoring each show ⚠️ with an Open button, and System Audio Recording (optional) too. Continue is disabled.
+3. Click each Open. Expected: the first click asks macOS (the Microphone prompt), then System Settings opens the matching pane. Grant each one: within a second its row turns ✅. Once the three required rows are ✅, Continue is enabled, whatever System Audio says.
+4. Release build (sign-in required) and signed out: Expected: the next step is the Account section with Sign in with Google; Continue is enabled once signed in. A build from source skips this step.
+5. Try it: click the field, hold fn, say a sentence, release. Expected: the sentence lands in the field and "✅ It works" shows. While the speech model is not ready, the field is disabled and the engine line says why.
+6. "Start Shepetal when I log in" is ticked. Close the window with the red button instead of Done. Expected: no login item (System Settings › General › Login Items), and the window opens again at the next launch.
+7. Open Shepetal again, go through to Done. Expected: the window closes, Settings shows Start at login on, and the next launch opens no onboarding while all three permissions are granted.
+8. 🤫 › Permissions needed… or Settings › Permissions… Expected: the same window, at step 1.
+
+### M-UPD-1: updating from an older build
+Test feed: a pre-release whose assets hold `appcast.xml` and the DMG (pre-release assets are public; the Worker ignores pre-releases). Both builds must be release builds signed with the same Developer ID and carry the committed `SUPublicEDKey`.
+1. Install build A (for example 0.2.0) from its DMG, grant the permissions, sign in, turn on Start at login.
+2. `defaults write io.backant.shepetal ShepetalFeedURL https://github.com/backant-io/shepetal/releases/download/<pre-release tag>/appcast.xml` (https only; anything else is ignored), then quit and open Shepetal.
+3. 🤫 › Check for Updates… Expected: Sparkle's window offers build B (0.2.1). Click Install and Relaunch. Expected: Shepetal restarts as B (Settings › Version), with the permissions, the login item and the sign-in kept (no permission prompt, fn dictates straight away).
+4. Clean up: `defaults delete io.backant.shepetal ShepetalFeedURL`.
+5. Downgrade: drag build A's DMG copy over B in /Applications, open it, and click Check for Updates…. Expected: B is offered again. Sparkle never offers A to B.
+6. From v0.1.0 (Apple Development signed, no Sparkle): it never updates itself. Install the first Developer ID DMG by hand once; macOS asks for Microphone, Input Monitoring and Accessibility again, and once to read the sign-in token (Always Allow) or you sign in again.
+
+### M-UPD-2: an update waits for idle
+1. With the test feed from M-UPD-1 and Settings › Install updates automatically on, start a long dictation (double-tap fn) right before a background check finds B (or click Check for Updates…, then Install and Relaunch while dictating).
+2. Expected: no restart during the dictation; after Install and Relaunch, "Shepetal restarts to update when the dictation ends" next to 🤫, and the restart comes right after it ends. The same during a meeting recording and its transcription ("…when the meeting ends").
+3. A background-downloaded update installs only once fn has been left alone for 20 minutes (or when you quit).
+4. Turn Install updates automatically off. Expected: a found update shows as "Update to <version>…" in the 🤫 menu instead of a window popping up.
+
+### M-UNINST-1: uninstall, recordings kept
+1. Open shepetal › Settings and scroll to the bottom. Expected: a small grey "Uninstall Shepetal…" link is the last item; there is no uninstall in the 🤫 menu.
+2. Start a dictation (double-tap fn), click the link. Expected: the sheet says "Finish the dictation first" and Uninstall is disabled. Stop the dictation: within a second Uninstall is enabled.
+3. Press Return. Expected: the sheet closes (Cancel is the default), nothing changed. Open it again and press Esc: same.
+4. Open it again and click Uninstall without ticking the box. Expected: Shepetal quits; Shepetal.app and `~/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3` are in the Trash; Login Items no longer lists Shepetal; "Press 🌐 key to" is back to the value Shepetal replaced; the sign-in token is gone from Keychain Access (`io.backant.shepetal.account`); `~/Library/Application Support/Shepetal` is still there.
+5. Drag Shepetal.app back out of the Trash and open it. Expected: it works again after onboarding (permissions, sign-in).
+
+### M-UNINST-2: uninstall with the data
+1. Tick "Also delete my recordings". Expected: the line changes to "Your recordings, transcripts and history also go to the Trash."
+2. Click Uninstall. Expected: as M-UNINST-1, and `~/Library/Application Support/Shepetal` is in the Trash too, and `defaults read io.backant.shepetal` finds no domain.
+
+### M-UNINST-3: a waiting update does not bring the app back
+1. With the test feed from M-UPD-1 and automatic install on, let Sparkle download B in the background (Console: `Shepetal` "will install on quit"), then uninstall right away (fn untouched for less than 20 minutes, so it waits).
+2. Expected: after Shepetal quits, /Applications/Shepetal.app stays gone (the uninstall stops `io.backant.shepetal-sparkle-updater` and trashes `~/Library/Caches/io.backant.shepetal`). If it comes back, the waiting installer must be stopped some other way: report it.
 
 ### M-SETUP-4: the 🌐 key at launch, restore and uninstall
 1. Quit Shepetal. Set "Press 🌐 key to" to Show Emoji & Symbols. Open Shepetal.
 2. Expected: "🌐 key set to Do Nothing so fn can dictate" next to 🤫 for a few seconds, and the setting reads Do Nothing. Quit and open Shepetal again: no message this time.
 3. In Open shepetal > Settings choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the setting is back to that value, and the button goes away.
-4. Run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
+4. The fallback for an app that won't open: run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
 
 ### M-SETUP-5: no false "fn not received"
 "fn not received" only shows when the 🌐 key's keycode 179 reaches Shepetal and fn's keycode 63 does not (another app took fn). Ordinary keys never show it. The positive case cannot be produced by hand; `FnHealthTests` and `FnTapTests` cover it.
@@ -260,7 +303,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. In Open shepetal > Settings, turn on Start at login.
 2. Expected: the toggle stays on. If macOS wants approval instead, "Allow Shepetal in System Settings > General > Login Items" shows next to 🤫, System Settings opens at Login Items and the toggle stays off. Allow Shepetal there. The toggle is then on the next time you open Settings.
 3. Log out and log back in. Expected: 🤫 is in the bottom-left corner and in the menu bar without you opening Shepetal, and there is no Dock icon.
-4. Turn Start at login off. Expected: the toggle is off, and Shepetal is gone from Login Items. The installer turns it on; builds signed with the same certificate keep it.
+4. Turn Start at login off. Expected: the toggle is off, and Shepetal is gone from Login Items. Onboarding turns it on (ticked by default, applied on Done); builds signed with the same certificate keep it.
 
 ### M-MENU-1: the 🤫 menu
 Setup: all three permissions granted, speech recognition loaded, signed in with a trial of more than 7 days (or a build from source that does not require sign-in, signed in), and at least one meeting recorded.
