@@ -1,13 +1,13 @@
 # The Windows workspace (windows/): release build, tests, the per-user installer, a silent
 # install and uninstall of it, and the installer as an artifact. Its own file, apart from ci.yml,
-# so it runs only when windows/ changes.
+# so it runs only when windows/ or the shared text-rule vectors it tests against change.
 name: Windows
 on:
   pull_request:
-    paths: ["windows/**", ".github/workflows/windows.yml"]
+    paths: ["windows/**", "Tests/fixtures/text-rules/**", ".github/workflows/windows.yml"]
   push:
     branches: [main]
-    paths: ["windows/**", ".github/workflows/windows.yml"]
+    paths: ["windows/**", "Tests/fixtures/text-rules/**", ".github/workflows/windows.yml"]
 permissions:
   contents: read
 

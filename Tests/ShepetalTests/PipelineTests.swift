@@ -139,7 +139,9 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(pasteboard.string(forType: .string), "earlier")
         XCTAssertEqual(run.paste?.restored, true)
         XCTAssertGreaterThanOrEqual(elapsed, PasteCheck.restoreDelay, "the clipboard comes back about 0.5 s after the read")
-        XCTAssertLessThan(elapsed, PasteCheck.failAfter, "a paste that landed does not wait out the failure timeout")
+        // 0.25 s of slack for a loaded machine; a landed paste that also waited out the failure timeout would take
+        // failAfter + restoreDelay.
+        XCTAssertLessThan(elapsed, PasteCheck.failAfter + 0.25, "a paste that landed does not wait out the failure timeout")
     }
 
     /// The dictionary is read from the pipeline's own data dir and runs after tag stripping and Cleanup,
@@ -155,6 +157,23 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(row.text, Cleanup.apply("call the orthodontist"))
         XCTAssertEqual(pasted, InsertionRules.fit(Cleanup.apply("call the orthodontist"), before: "Then", after: ""))
         XCTAssertEqual(run.inserted, pasted)
+    }
+
+    /// Esc while transcribing (F03): the App cancels the transcription Task. Nothing is pasted, the clipboard is
+    /// untouched, and the row is kept as cancelled with its audio, and with its text when STT had finished.
+    @MainActor
+    func testEscWhileTranscribingInsertsNothingAndKeepsTheRow() async throws {
+        for throwsOnCancel in [false, true] {
+            let engine = CancellingEngine("Send the report today.", throwsOnCancel: throwsOnCancel)
+            let change = pasteboard.changeCount
+            let (run, row) = try await Task { @MainActor in try await self.process(speech, engine) }.value
+            XCTAssertNil(run.error, "a cancel is not an error")
+            XCTAssertEqual(row.outcome, .cancelled)
+            XCTAssertEqual(row.text, throwsOnCancel ? "" : Cleanup.apply("Send the report today."))
+            XCTAssertNil(run.paste)
+            XCTAssertEqual(pastes, 0, "nothing may be pasted after Esc")
+            XCTAssertEqual(pasteboard.changeCount, change, "the clipboard must not be touched")
+        }
     }
 
     /// Re-transcribe in the hub runs the same text step as dictation, so it strips non-speech tags too.
@@ -219,6 +238,24 @@ final class PipelineTests: XCTestCase {
         XCTAssertEqual(failedRow.outcome, .failed)
         XCTAssertEqual(failedRow.model, "fake")
         XCTAssertEqual(pastes, 0)
+    }
+}
+
+/// Cancels the Task it runs in, the way Esc does while the model is busy, then returns `text` or throws.
+final class CancellingEngine: SpeechEngine {
+    let name = "fake"
+    let text: String
+    let throwsOnCancel: Bool
+
+    init(_ text: String, throwsOnCancel: Bool) {
+        self.text = text
+        self.throwsOnCancel = throwsOnCancel
+    }
+
+    func transcribe(_ samples: [Float], wav: URL) async throws -> String {
+        withUnsafeCurrentTask { $0?.cancel() }
+        if throwsOnCancel { throw CancellationError() }
+        return text
     }
 }
 

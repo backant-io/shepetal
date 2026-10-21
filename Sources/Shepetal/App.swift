@@ -17,9 +17,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var engineStatus = "Loading on-device speech recognition…"
     private var cleanupStatus = "Cleanup: loading…"
     private var downloadingCleanup = false
-    private var busy = false
+    private var busy = false { didSet { syncTap() } }
+    private var pasting = false  // paste last is under way
     private var tick: DispatchWorkItem?
     private var onboarding: Onboarding?
+    private var shortcuts: ShortcutsWindow?
+    private var transcription: Task<Void, Never>?
+    private var inserting = false { didSet { syncTap() } }  // the paste is under way, too late for Esc
     private var timers: [Timer] = []
     private var focusAtStart: (app: Int32, window: AXUIElement?)?
     private lazy var secureInput = SecureInput(indicator: indicator)
@@ -63,12 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                   stopMic: { [mic] in mic.stop() },
                                   transcribe: { [weak self] in self?.transcribe($0) })
         }
+        let minutes = UserDefaults.standard.integer(forKey: "maxDictationMinutes")
+        if minutes > 0 { dictation?.gesture.maxDuration = TimeInterval(minutes * 60) }
+        tap.updateRouter { $0.shortcuts = ShortcutsWindow.saved }
+        // Off the tap callback: opening the mic is slow, and a slow callback gets the tap turned off.
+        tap.onInput = { [weak self] input, t in DispatchQueue.main.async { MainActor.assumeIsolated { self?.key(input, at: t) } } }
         wireMicAndSpeech()
-        tap.onChange = { [weak self] down, t in self?.fnReceived(); self?.fn(down, at: t) }
         fnWatch.onUnreported = { [weak self] in self?.fnProblem(FnHealth.hint) }
         fnWatch.active = { [weak self] in self?.tap.isRunning == true }
         fnWatch.start()
-        tap.onOtherKey = { [weak self] t in self?.run { $0.otherKeyDown(at: t) } }
         startTapIfAllowed()
         // Retention runs hourly; the tap starts as soon as Input Monitoring is granted.
         timers.append(Timer.scheduledTimer(withTimeInterval: 3600, repeats: true) { [weak self] _ in
@@ -102,7 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if !Permission.missing.isEmpty {
             if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
         }
-        if hintAtLaunch { indicator.show(Hint.shortPress, seconds: Hint.seconds) }
+        if hintAtLaunch { indicator.show(holdHint, seconds: Hint.seconds) }
+        if CommandLine.arguments.contains("--show-shortcuts") { openShortcuts() }
         applyFnKeySetting()
     }
 
@@ -135,15 +143,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Closes the meeting files so their WAV headers are written (rule 4).
     func applicationWillTerminate(_ notification: Notification) { meetings.stop() }
 
-    // MARK: fn → gestures
+    // MARK: keys → gestures
 
-    private func fn(_ down: Bool, at t: TimeInterval) {
-        if down, busy, dictation?.gesture.state == .idle {
+    /// `t`: when the key moved (`FnClock`), which can be well before the main thread reads it.
+    private func key(_ input: KeyInput, at t: TimeInterval) {
+        let idle = dictation?.gesture.state == .idle
+        if [.pttDown, .pttUp, .toggle].contains(input) { fnReceived() }
+        switch input {
+        case .pasteLast: pasteLast()
+        case .copyLast: copyLast()
+        case .recorded(let chord): shortcuts?.recorded(chord)
+        case .dismiss where idle:
+            // Esc while transcribing: Pipeline inserts nothing and keeps the row as cancelled.
+            guard let transcription, !inserting else { return }
+            transcription.cancel()
+            indicator.show(Hint.cancelled, seconds: Hint.seconds)
+        case .pttDown where (busy || pasting) && idle, .toggle where (busy || pasting) && idle:
             indicator.show("Still transcribing the last one", seconds: Hint.seconds)
-            return
+        case .pttDown where idle && !Account.shared.allowFnDown(), .toggle where idle && !Account.shared.allowFnDown():
+            return  // signed out or trial over
+        default:
+            run { $0.handle(input, at: t) }
+            if input == .dismiss { indicator.show(Hint.cancelled, seconds: Hint.seconds) }
         }
-        if down, dictation?.gesture.state == .idle, !Account.shared.allowFnDown() { return }  // signed out or trial over
-        run { down ? $0.fnDown(at: t) : $0.fnUp(at: t) }
     }
 
     /// One fn event through the session (mic, kept audio, transcription), then the indicator.
@@ -154,8 +176,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             fail(error.localizedDescription)
         }
+        syncTap()
         scheduleTick()
     }
+
+    /// What the tap's thread reads to decide whether Esc is ours: a dictation, or a transcription before its paste.
+    private func syncTap() { tap.isActive = (busy && !inserting) || (dictation?.gesture.state ?? .idle) != .idle }
+
+    /// The short-press hint and the menu's first line, named after the hold-to-talk chord.
+    private var holdHint: String { Hint.holdToTalk(Key.label(tap.router.shortcuts.chord(.ptt))) }
 
     private func scheduleTick() {
         tick?.cancel()
@@ -176,8 +205,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .lockHandsFree: indicator.set(.handsFree)
         case .tooShort:
             indicator.set(.idle)
-            indicator.show(Hint.shortPress, seconds: Hint.seconds)
+            indicator.show(holdHint, seconds: Hint.seconds)
         case .cancel: indicator.set(.idle)
+        case .warnDuration: indicator.show(Hint.oneMinuteLeft, seconds: 5)
         case .stop: break  // transcribe(_:) shows processing
         }
     }
@@ -211,16 +241,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         indicator.set(.processing)
         let appAtStart = appAtStart
         let start = focusAtStart
-        Task {
+        transcription = Task {
             let app = await appAtStart?.value ?? AppContext()
-            let run = await pipeline.process(samples, engine: engine, app: app, context: FocusedText.context,
-                                             selection: FocusedText.selected,
-                                             focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
-                                             secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
+            // Pipeline reads the context right after its last cancel check; a cancel during the paste
+            // would cut the paste's waits short.
+            let run = await pipeline.process(samples, engine: engine, app: app, context: { [weak self] in
+                self?.inserting = true
+                return FocusedText.context()
+            }, selection: FocusedText.selected,
+               focusKept: { PasteGate.focusKept(start: start, now: FocusedText.window()) },
+               secureInput: SecureInput.blocker, sendPaste: Inserter.postCmdV)
             busy = false
-            if let error = run.error { fail(error) } else { indicator.set(.idle) }
-            if Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
+            inserting = false
+            transcription = nil
+            if let error = run.error, !Task.isCancelled { fail(error) } else { indicator.set(.idle) }
+            if !Task.isCancelled, Mic.isQuiet(samples), run.error == nil || run.entry.text.isEmpty { indicator.show(MicHealth.quietHint, seconds: 4) }
         }
+    }
+
+    /// Paste last / copy last: the newest history text, a paste that did not land included.
+    private func lastHistoryText() -> String? {
+        let text = lastText(in: (try? pipeline?.history.recent(limit: 50)) ?? [])
+        if text == nil { indicator.show(Hint.nothingToPaste, seconds: Hint.seconds) }
+        return text
+    }
+
+    /// Only between dictations, one at a time, and through the same gate as dictation: under secure input the
+    /// text goes to the clipboard instead (rule 8).
+    private func pasteLast() {
+        guard let pipeline, !busy, !pasting, dictation?.gesture.state == .idle, let text = lastHistoryText() else { return }
+        if let app = SecureInput.blocker() {
+            pipeline.inserter.leaveOnClipboard(text)
+            return fail(PasteGate.secureInput(app))
+        }
+        pasting = true
+        Task {
+            let paste = await pipeline.inserter.insert(text, sendPaste: Inserter.postCmdV)
+            pasting = false
+            if !paste.landed { fail(PasteGate.notLanded) }
+        }
+    }
+
+    private func copyLast() {
+        guard let text = lastHistoryText() else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        indicator.show("Copied", seconds: 1.5)
     }
 
     private func fail(_ message: String) {
@@ -252,6 +318,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func startTapIfAllowed() {
+        // listen-only → active once Accessibility is granted, and back when it is revoked
+        if tap.isRunning, tap.canSwallow != Permission.accessibility.granted { tap.stop() }
         guard !tap.isRunning, Permission.inputMonitoring.granted else { return }
         if tap.start() {
             tapFailed = false
@@ -281,7 +349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
-        menu.addItem(withTitle: tap.isRunning ? "Hold fn to talk, double-tap for hands-free" : "fn is not being watched yet", action: nil, keyEquivalent: "")
+        menu.addItem(withTitle: tap.isRunning ? holdHint : "fn is not being watched yet", action: nil, keyEquivalent: "")
         menu.addItem(withTitle: engineStatus, action: nil, keyEquivalent: "")
         menu.addItem(item("Open Shepetal…", #selector(openHub)))
         Account.shared.menuItems().forEach(menu.addItem)
@@ -309,6 +377,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let recentItem = NSMenuItem(title: "Recent (click to copy)", action: nil, keyEquivalent: "")
         recentItem.submenu = recent
         menu.addItem(recentItem)
+        let keys = tap.router.shortcuts
+        menu.addItem(item("Paste last text (\(Key.label(keys.chord(.pasteLast))))", #selector(menuPasteLast)))
+        menu.addItem(item("Copy last text (\(Key.label(keys.chord(.copyLast))))", #selector(menuCopyLast)))
+        menu.addItem(item("Shortcuts…", #selector(openShortcuts)))
 
         let keep = NSMenu()
         for (r, title) in [(Retention.keep, "Keep recordings"), (.delete24h, "Delete recordings after 24 hours")] {
@@ -350,6 +422,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func setRetention(_ sender: NSMenuItem) {
         retention = Retention(rawValue: sender.representedObject as? String ?? "") ?? .keep
+    }
+
+    @objc private func menuPasteLast() { pasteLast() }
+    @objc private func menuCopyLast() { copyLast() }
+
+    @objc private func openShortcuts() {
+        shortcuts = shortcuts ?? ShortcutsWindow(tap: tap)
+        NSApp.activate(ignoringOtherApps: true)
+        shortcuts?.window?.center()
+        shortcuts?.showWindow(nil)
     }
 
     /// Opening the app again while it runs (Finder, Spotlight, `open`) shows the hub.
