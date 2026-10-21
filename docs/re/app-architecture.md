@@ -139,7 +139,7 @@ Permissions (`index.js`, `$.$` enum and `Ae` deep-link switch; `prefs.permission
 
 ## 9. Auto-updater
 - Electron `autoUpdater` (Squirrel.Mac) with `setFeedURL` pointing at `https://dl.wisprflow.com/<channel>/<platform>/<arch>` (`RELEASES.json` on Windows), channels `wispr-flow` and `wispr-flow-override`. An update is applied only when the last push-to-talk was more than 20 minutes ago (`Q=12e5` ms compared with `minutesSinceLastPTT`), and not while a dictation is in progress. Flag `defer-updates-while-active` adds more deferral, and `prefs.updateRetry` tracks errors. There is also a managed-config (MDM) update policy (`updateRetry.lastManagedConfig`). Builds are published to S3 (`@electron-forge/publisher-s3`), and makers produce DMG, ZIP, Squirrel, WiX, deb and rpm (so a Linux build exists in the toolchain).
-- shepetal: GitHub Releases plus Sparkle (mac) or the Tauri updater, opt-in, and never mid-dictation.
+- shepetal: GitHub Releases plus Sparkle (mac) or the Tauri updater, never mid-dictation. Mac: on by default with a daily background check and an opt-out in Settings (Pavel, 21.10.26; docs/install-and-update.md 3).
 
 ## 10. Telemetry and network (what shepetal must NOT do)
 - Analytics: PostHog (`us.i.posthog.com`, `eu.i.posthog.com` and a proxy on Wispr's own domain), Segment (`api.segment.io`, `cdn.segment.com`), and Datadog browser logs (`logs.browser-intake-datadoghq.com`). The analytics event enum in `index.js` has 1065 event names. The biggest groups are onboarding_* (160), notetaker_* (131), meeting_* (37), insights_* (30) and flow_* (30); others include paste_text_outcome, paywall_* and mcp_tool_called. The helper forwards its own events (`TrackAnalyticsEvent`, `PasteAnalytics`).

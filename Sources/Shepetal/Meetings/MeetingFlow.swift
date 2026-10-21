@@ -15,6 +15,8 @@ final class MeetingFlow {
     private var transcriber: MeetingTranscriber?
     /// The final pass of the meeting that ended last.
     private(set) var finishing: Task<Void, Never>?
+    /// Final passes not done yet (an update waits for them).
+    private(set) var unfinished = 0
     /// True while a meeting records (the menu bar shows it for the whole meeting).
     var onRecording: (Bool) -> Void = { _ in }
     /// A recorded meeting's whole transcript is stored and its summary follows (the transcript window opens).
@@ -60,7 +62,9 @@ final class MeetingFlow {
         do { try store.save(m) } catch { return hint("Meeting not stored: \(error.localizedDescription)") }
         guard let t else { return hint("Meeting saved · no speech model to transcribe it yet") }
         let previous = finishing
+        unfinished += 1
         finishing = Task { [weak self, hint] in
+            defer { self?.unfinished -= 1 }
             await previous?.value  // one meeting's final pass at a time
             do {
                 _ = try await t.finish { self?.onTranscript(m, true) }

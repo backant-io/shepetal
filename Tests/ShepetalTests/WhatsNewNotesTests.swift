@@ -21,7 +21,7 @@ final class WhatsNewNotesTests: XCTestCase {
 
     func testTheDefaultBuildVersionHasReleaseNotes() throws {
         let versions = WhatsNewWindow.notes.map(\.version)
-        for script in ["scripts/make-app.sh", "scripts/make-pkg.sh"] {
+        for script in ["scripts/make-app.sh", "scripts/make-dmg.sh"] {
             let v = try defaultVersion(script)
             XCTAssertTrue(versions.contains(v), "\(script) builds \(v), which has no entry in WhatsNewWindow.notes")
         }

@@ -53,7 +53,8 @@ final class AppearanceTests: XCTestCase {
     }
 
     func testPermissionsWindowFollowsTheSystem() throws {
-        assertFollowsTheSystem(try XCTUnwrap(Onboarding(allowRequests: false).window), "the permissions window")
+        let w = Onboarding(allowRequests: false, engine: { (false, "") }, loginItem: LoginItem(say: { _ in }))
+        assertFollowsTheSystem(try XCTUnwrap(w.window), "the welcome (permissions) window")
     }
 
     /// A fixed SwiftUI fill leaves every view's appearance alone, so the source is checked too: no forced color

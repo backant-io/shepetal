@@ -1,6 +1,7 @@
 import AppKit
 import AVFoundation
 import ShepetalCore
+import SwiftUI
 
 enum Permission: CaseIterable {
     case microphone, inputMonitoring, accessibility
@@ -51,57 +52,127 @@ enum Permission: CaseIterable {
     static var missing: [Permission] { allCases.filter { !$0.granted } }
 }
 
-/// One window, one row per permission: its state, why it is needed, and a button that asks
-/// (unless prompts are off) and opens the matching System Settings pane.
+/// The first-run window (docs/install-and-update.md 2, `OnboardingFlow`): the permissions with live status, sign-in
+/// when the build needs it, then a test dictation and Start at login. It opens at the first launch and whenever a
+/// required permission is missing; Permissions… and Permissions needed… open it at step 1.
+@MainActor
 final class Onboarding: NSWindowController {
-    private let allowRequests: Bool
-    private var rows: [(Permission, NSTextField)] = []
-    private var timer: Timer?
+    private let model: OnboardingModel
 
-    init(allowRequests: Bool) {
-        self.allowRequests = allowRequests
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 460, height: 190),
+    init(allowRequests: Bool, engine: @escaping () -> (ready: Bool, status: String), loginItem: LoginItem) {
+        model = OnboardingModel(allowRequests: allowRequests, engine: engine, loginItem: loginItem)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Shepetal permissions"
+        window.title = "Welcome to Shepetal"
         window.isReleasedWhenClosed = false
         super.init(window: window)
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 12
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        let intro = NSTextField(wrappingLabelWithString: "Shepetal runs on this Mac only. It needs three permissions:")
-        stack.addArrangedSubview(intro)
-        for p in Permission.allCases {
-            let label = NSTextField(labelWithString: "")
-            let button = NSButton(title: "Grant…", target: self, action: #selector(grant(_:)))
-            button.tag = Permission.allCases.firstIndex(of: p)!
-            let row = NSStackView(views: [label, NSView(), button])
-            row.widthAnchor.constraint(equalToConstant: 428).isActive = true
-            stack.addArrangedSubview(row)
-            rows.append((p, label))
+        model.close = { [weak window] in window?.close() }
+        window.contentView = NSHostingView(rootView: OnboardingView(model: model))
+        // Closed is seen: it opens again at launch only while a required permission is missing, never at every
+        // login. Start at login still waits for Done.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+            UserDefaults.standard.set(true, forKey: OnboardingFlow.doneKey)
         }
-        window.contentView = stack
-        refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.refresh() }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
-    deinit { timer?.invalidate() }
-
-    func refresh() {
-        for (p, label) in rows {
-            label.stringValue = "\(p.granted ? "✅" : "⚠️") \(p.title): \(p.why)"
-        }
+    /// Back to step 1, with the sign-in step only while it is needed.
+    func restart() {
+        model.flow = OnboardingFlow(signInNeeded: Account.signInRequired() && !Account.shared.signedIn)
+        model.tried = ""
     }
 
-    @objc private func grant(_ sender: NSButton) {
-        let p = Permission.allCases[sender.tag]
+    static var done: Bool { UserDefaults.standard.bool(forKey: OnboardingFlow.doneKey) }
+}
+
+@MainActor
+final class OnboardingModel: ObservableObject {
+    let allowRequests: Bool
+    let engine: () -> (ready: Bool, status: String)
+    let loginItem: LoginItem
+    var close: () -> Void = {}
+    @Published var flow = OnboardingFlow(signInNeeded: false)
+    @Published var tried = ""
+
+    init(allowRequests: Bool, engine: @escaping () -> (ready: Bool, status: String), loginItem: LoginItem) {
+        self.allowRequests = allowRequests; self.engine = engine; self.loginItem = loginItem
+    }
+
+    var requiredGranted: Bool { Permission.missing.isEmpty }
+    /// Read only on the sign-in step, so the window (and its test) never touches the account before then.
+    var signedIn: Bool { flow.step == .signIn && Account.shared.signedIn }
+
+    func next() {
+        guard let r = flow.next(requiredGranted: requiredGranted, signedIn: signedIn), r.done else { return }
+        if r.registerLoginItem, !loginItem.isOn { loginItem.toggle() }
+        UserDefaults.standard.set(true, forKey: OnboardingFlow.doneKey)
+        close()
+    }
+
+    /// The first click asks macOS, so the app is listed in the pane, then the pane opens.
+    func grant(_ p: Permission) {
         let firstMicAsk = p == .microphone && AVCaptureDevice.authorizationStatus(for: .audio) == .notDetermined
         if allowRequests { p.request() }
         if !(allowRequests && firstMicAsk) { NSWorkspace.shared.open(p.settingsURL) }
+    }
+
+    /// System Audio Recording, for meetings only. macOS asks at the first meeting recording.
+    static let systemAudioPane = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
+}
+
+private struct OnboardingView: View {
+    @ObservedObject var model: OnboardingModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in  // live permission status
+            VStack(alignment: .leading, spacing: 0) {
+                Form { step }.formStyle(.grouped)
+                HStack {
+                    if model.flow.index > 0 { Button("Back") { model.flow.back() } }
+                    Spacer()
+                    Button(model.flow.isLast ? "Done" : "Continue", action: model.next)
+                        .keyboardShortcut(.defaultAction)
+                        .disabled(!model.flow.canContinue(requiredGranted: model.requiredGranted, signedIn: model.signedIn))
+                }
+                .padding([.horizontal, .bottom])
+            }
+        }
+        .frame(width: 520)
+    }
+
+    @ViewBuilder private var step: some View {
+        switch model.flow.step {
+        case .permissions:
+            Section("Shepetal runs on this Mac only. It needs these permissions:") {
+                ForEach(Permission.allCases, id: \.self) { p in
+                    row(p.granted, p.title, p.why) { model.grant(p) }
+                }
+                let audio = SystemMeetingCapture.systemAudioStatus()
+                row(audio == 0, "System Audio Recording (optional)", "to record the other people in a meeting") {
+                    NSWorkspace.shared.open(OnboardingModel.systemAudioPane)
+                }
+            }
+        case .signIn:
+            AccountSection()
+        case .tryIt:
+            let engine = model.engine()
+            Section("Try it") {
+                if !engine.ready { Text(engine.status).foregroundStyle(.secondary) }
+                TextField("Click here, hold fn and say something.", text: $model.tried, axis: .vertical)
+                    .lineLimit(3...5).disabled(!engine.ready)
+                if !model.tried.isEmpty { Text("✅ It works") }
+                Toggle("Start Shepetal when I log in", isOn: $model.flow.startAtLogin)
+            }
+        }
+    }
+
+    private func row(_ granted: Bool, _ title: String, _ why: String, open: @escaping () -> Void) -> some View {
+        HStack {
+            Text("\(granted ? "✅" : "⚠️") \(title): \(why)")
+            Spacer()
+            if !granted { Button("Open", action: open) }
+        }
     }
 }
 

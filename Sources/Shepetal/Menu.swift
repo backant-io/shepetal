@@ -43,6 +43,7 @@ struct MenuState {
     var recent: [HistoryEntry] = []
     var pasteLast: Set<Int> = Shortcuts.defaults[.pasteLast] ?? []
     var canCheckForUpdates = false
+    var checkForUpdatesTitle = "Check for Updates…"
 }
 
 /// The 🤫 menu, short and grouped by intent: what needs doing (only when it does), meetings, the window, updates
@@ -61,7 +62,7 @@ enum MenuModel {
         [contextual(s),
          meetings(s),
          [MenuEntry(title: "Open shepetal", action: .openApp)],
-         s.canCheckForUpdates ? [MenuEntry(title: "Check for Updates…", action: .checkForUpdates)] : [],
+         s.canCheckForUpdates ? [MenuEntry(title: s.checkForUpdatesTitle, action: .checkForUpdates)] : [],
          [paste(s.pasteLast)] + (recent(s.recent).isEmpty ? [] : [MenuEntry(title: "Recent", submenu: recent(s.recent))]),
          [MenuEntry(title: "Shortcuts…", action: .shortcuts), MenuEntry(title: "Microphone", action: .microphone),
           MenuEntry(title: "Languages", action: .languages)],
@@ -160,15 +161,19 @@ enum MenuModel {
     }
 }
 
-/// Check for Updates… The Sparkle updater (feat/mac-installer-updates) plugs in here: SPUUpdater has both members.
+/// Check for Updates…: `SparkleUpdater` in release builds (Install.swift).
 @MainActor
 protocol UpdateChecking {
+    /// The item shows, enabled, only when this is true: never a grey item (Pavel, 21.10.26).
     var canCheckForUpdates: Bool { get }
+    /// "Update to 0.2.1…" once a scheduled check found one that waits for the user.
+    var menuTitle: String { get }
     func checkForUpdates()
 }
 
-/// Until then the item is hidden.
+/// Builds without a feed (from source, test builds): the item is hidden.
 struct NoUpdateChecker: UpdateChecking {
     var canCheckForUpdates: Bool { false }
+    var menuTitle: String { "Check for Updates…" }
     func checkForUpdates() {}
 }

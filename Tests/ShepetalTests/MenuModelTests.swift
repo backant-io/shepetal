@@ -262,8 +262,17 @@ final class MenuModelTests: XCTestCase {
             return m.items.first { $0.title == "Check for Updates…" }
         }
         XCTAssertEqual(updates(true)?.representedObject as? MenuAction, .checkForUpdates)
+        XCTAssertEqual(updates(true)?.isEnabled, true)
         XCTAssertNil(updates(false), "hidden until an updater can check, never greyed out")
         XCTAssertFalse(NoUpdateChecker().canCheckForUpdates)
+        // With Sparkle the item is always there and enabled: a click while Sparkle downloads says so instead.
+        XCTAssertTrue(try AppSource.code("Install.swift").contains("var canCheckForUpdates: Bool { true }"))
+
+        // A scheduled check that found an update while automatic install is off renames the item instead of opening a
+        // window at a random moment; the menu keeps its length.
+        let found = MenuModel.groups(MenuState(canCheckForUpdates: true, checkForUpdatesTitle: "Update to 0.2.1…"))
+        XCTAssertTrue(found.joined().contains { $0.title == "Update to 0.2.1…" && $0.action == .checkForUpdates })
+        XCTAssertEqual(found.joined().count, MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count)
     }
 
     /// Pavel, 21.10.26: "Menu bar menu must drop all the grayed-out text fields." The real menu, built the way
@@ -424,7 +433,7 @@ final class MenuModelTests: XCTestCase {
                      "meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],",
                      "recent: (try? pipeline?.history.recent(limit: 10)) ?? [],",
                      "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
-                     "canCheckForUpdates: updater.canCheckForUpdates)",
+                     "canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)",
                      "cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,", "downloadingCleanup: pipeline?.downloadingCleanup == true,"] {
             XCTAssertTrue(state.contains(line), "menuNeedsUpdate: \(line)")
         }

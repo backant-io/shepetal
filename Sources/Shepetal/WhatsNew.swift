@@ -5,7 +5,7 @@ import ShepetalCore
 /// nothing opens at launch.
 final class WhatsNewWindow: NSWindowController {
     /// In our own words, newest first, dates DD.MM.YY. The default VERSION in scripts/make-app.sh and
-    /// scripts/make-pkg.sh must have an entry (WhatsNewNotesTests), so a version bump comes with its notes.
+    /// scripts/make-dmg.sh must have an entry (WhatsNewNotesTests), so a version bump comes with its notes.
     static let notes: [(version: String, date: String, lines: [String])] = [
         ("0.1.0", "20.10.26", [
             "Hold fn and talk: the text is typed where your cursor is. Double-tap fn for hands-free, then tap fn once to stop.",

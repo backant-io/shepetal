@@ -45,6 +45,9 @@ enum Watchdog {
     /// nothing when no watchdog runs (the test and installer modes).
     static func quitting() { if let home { markCleanQuit(dir: home) } }
 
+    /// Uninstall: the watchdog goes first, because the data folder with its clean-quit marker goes to the Trash.
+    static func stop() { child?.terminate(); child = nil }
+
     /// Tells the watchdog that `pid` is quitting on purpose, so its exit is not a crash.
     static func markCleanQuit(dir: URL, pid: pid_t = getpid()) {
         try? String(pid).write(to: dir.appendingPathComponent("clean-quit"), atomically: true, encoding: .utf8)

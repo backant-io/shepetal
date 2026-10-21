@@ -10,7 +10,7 @@ final class Account: NSObject, ObservableObject {
                                 stateURL: Paths.root.appendingPathComponent("account.json"), required: signInRequired())
 
     /// Whether dictation needs a trial or a license. Release builds (`scripts/make-app.sh --zip`,
-    /// `scripts/make-pkg.sh`) set `ShepetalRequiresSignIn` = true in Info.plist; a build from source does not, so
+    /// `scripts/make-dmg.sh`) set `ShepetalRequiresSignIn` = true in Info.plist; a build from source does not, so
     /// it dictates without signing in. SHEPETAL_REQUIRE_SIGNIN=1 or 0 overrides it for a hand test.
     static func signInRequired(env: [String: String] = ProcessInfo.processInfo.environment,
                                info: [String: Any]? = Bundle.main.infoDictionary) -> Bool {

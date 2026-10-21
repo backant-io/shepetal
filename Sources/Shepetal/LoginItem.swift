@@ -2,7 +2,7 @@ import AppKit
 import ServiceManagement
 import ShepetalCore
 
-/// "Start at login" through `SMAppService.mainApp`. A person toggling it in Settings, or the installer (`--postinstall`), registers or
+/// "Start at login" through `SMAppService.mainApp`. A person toggling it in Settings or ticking it in onboarding registers or
 /// unregisters it; tests and the end-to-end run never do.
 @MainActor
 final class LoginItem: NSObject {

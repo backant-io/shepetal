@@ -33,7 +33,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var tapFailed = false
     private lazy var loginItem = LoginItem { [weak self] in self?.indicator.show($0, seconds: 6) }
     private var hub: Hub?
-    private let updater: any UpdateChecking = NoUpdateChecker()
+    private var updater: any UpdateChecking = NoUpdateChecker()
+    private var lastFnPress: Date?
     private var appAtStart: Task<AppContext, Never>?
     private var meetingFlow: MeetingFlow?
     /// F09: mute or pause other audio while dictating (Settings, both off by default); never during a meeting.
@@ -61,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let crashHint = Watchdog.start()  // F99: first, so a crash in the rest of the launch is caught too
+        if allowPrompts, MoveToApplications.offerIfNeeded() { return }  // the copy in /Applications takes over; Quit stays quit
         indicator = Indicator()
         let updated = WhatsNewWindow.atLaunch()  // before Pipeline creates history.sqlite (how an update from 0.1.0 is told from a first install)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -107,6 +109,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch { fail("Meetings: \(error.localizedDescription)") }
         meetings.watch()
         applyRetention()
+        updater = SparkleUpdater.make(activity: { [weak self] in self?.activity ?? Activity() },
+                                      hint: { [weak self] in self?.indicator.show($0, seconds: 6) })
 
         if let updated { indicator.show(WhatsNew.hint(updated), seconds: 6) }  // once; the account and permission hints below replace it
         // Before the permission check, so a missing-permission message replaces the account hint, not the reverse.
@@ -119,8 +123,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }, restored: { [weak self] in
             if self?.indicator.mode == .error { self?.indicator.set(.idle) }
         })
-        if !Permission.missing.isEmpty {
-            if allowPrompts { showOnboarding() } else { fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))") }
+        if allowPrompts {
+            if OnboardingFlow.opensAtLaunch(done: Onboarding.done, requiredMissing: !Permission.missing.isEmpty) { showOnboarding() }
+        } else if !Permission.missing.isEmpty {
+            fail("Needs \(Permission.missing.map(\.title).joined(separator: ", "))")
         }
         if hintAtLaunch { indicator.show(holdHint, seconds: Hint.seconds) }
         if CommandLine.arguments.contains("--show-shortcuts") { openShortcuts() }
@@ -143,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The tap delivered fn (keycode 63): an earlier "fn not received" no longer holds.
     private func fnReceived(down: Bool, at t: TimeInterval) {
         fnWatch.fn(down: down, at: t)
+        if down { lastFnPress = Date() }  // an update waits 20 minutes after it
         guard [FnHealth.hint, FnHealth.taken].contains(FnDiagnostics.problem) else { return }
         FnDiagnostics.problem = nil
         if indicator.mode == .error { indicator.set(.idle) }
@@ -157,6 +164,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Closes the meeting files so their WAV headers are written (rule 4).
     func applicationWillTerminate(_ notification: Notification) {
         Watchdog.quitting()  // F99: first, so a crash in meetings.stop() still stays quit
+        guard statusItem != nil else { return }  // quit right after moving itself: nothing was started
         meetings.stop()
         media.end()  // F09: the sound back on, what it paused resumed
     }
@@ -376,8 +384,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         catch { fail("Meeting retention: \(error.localizedDescription)") }
     }
 
+    /// What an update and Uninstall wait for.
+    private var activity: Activity {
+        Activity(dictating: busy || inserting || pasting || (dictation?.gesture.state ?? .idle) != .idle,
+                 meeting: meetings.current != nil || (meetingFlow?.unfinished ?? 0) > 0,
+                 retranscribing: hub?.retranscribing == true, lastFnPress: lastFnPress)
+    }
+
     private func showOnboarding() {
-        onboarding = onboarding ?? Onboarding(allowRequests: allowPrompts)
+        onboarding = onboarding ?? Onboarding(allowRequests: allowPrompts,
+                                              engine: { [weak self] in (self?.engine != nil, self?.engineStatus ?? "") },
+                                              loginItem: loginItem)
+        onboarding?.restart()
         NSApp.activate(ignoringOtherApps: true)
         onboarding?.window?.center()
         onboarding?.showWindow(nil)
@@ -397,7 +415,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],
                               recent: (try? pipeline?.history.recent(limit: 10)) ?? [],
                               pasteLast: tap.router.shortcuts.chord(.pasteLast),
-                              canCheckForUpdates: updater.canCheckForUpdates)
+                              canCheckForUpdates: updater.canCheckForUpdates, checkForUpdatesTitle: updater.menuTitle)
         MenuModel.build(MenuModel.groups(state), into: menu, target: self, action: #selector(menuAction(_:))) { [mic, speech] in
             switch $0 {
             case .microphone: mic.menuItem()
@@ -467,6 +485,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          loginItem: loginItem, openDictionary: { [speech] in speech.openDictionary() },
                          restoreFnKey: { [weak self] in self?.restoreFnKey() },
                          meetingStore: meetingFlow?.store ?? InMemoryMeetingStore(),
+                         updater: updater as? SparkleUpdater,
+                         uninstallBlocker: { [weak self] in UninstallPlan.blocker(self?.activity ?? Activity()) },
                          openWhatsNew: { [weak self] in self?.openWhatsNew() },
                          notices: { [weak self] in self?.indicator.notices.newestFirst ?? [] })
         return hub
