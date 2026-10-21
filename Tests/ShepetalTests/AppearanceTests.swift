@@ -71,7 +71,7 @@ final class AppearanceTests: XCTestCase {
         XCTAssertTrue(files.contains("Hub.swift"), dir.path)
         let forced = #"preferredColorScheme|colorScheme\(|\\.colorScheme,|NSAppearance\(named|\.appearance\s*="#
         let fixed = #"(background|foreground|textcolor)[^\n]*(\.white\b|\.black\b|Color\((\.s?rgb|\.displayp3|red|white|hue)|NSColor\((red|white|calibrated|device|srgb|displayp3))"#
-        for f in files where !["Indicator.swift", "Meetings/MeetingCard.swift", "ShareCard.swift"].contains(f) {
+        for f in files where !["Indicator.swift", "Meetings/MeetingCard.swift", "ShareCardView.swift"].contains(f) {
             let code = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8)
                 .components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
                 .joined(separator: "\n")

@@ -23,9 +23,18 @@ final class ShareCardTests: XCTestCase {
         try assertCard(ShareCard.png(stats))
     }
 
-    // A blank card would still be a valid PNG: the numbers must change the pixels.
+    // A blank card would still be a valid PNG: the numbers must change the pixels. The first render in a process can
+    // differ from later ones, so one render warms up and the same card must then give the same pixels; only then
+    // does a different count prove the number is drawn, whatever ran before this test.
     func testTheNumbersAreDrawn() throws {
-        XCTAssertNotEqual(ShareCard.png(stats), ShareCard.png(ShareStats(words: 99, wpm: 142, streak: 7)))
+        func pixels(_ s: ShareStats) throws -> Data {
+            let rep = try XCTUnwrap(NSBitmapImageRep(data: try XCTUnwrap(ShareCard.png(s))))
+            return Data(bytes: try XCTUnwrap(rep.bitmapData), count: rep.bytesPerRow * rep.pixelsHigh)
+        }
+        _ = ShareCard.png(stats)
+        let card = try pixels(stats)
+        XCTAssertEqual(card, try pixels(stats), "the same card renders the same")
+        XCTAssertNotEqual(card, try pixels(ShareStats(words: 99, wpm: 142, streak: 7)))
     }
 
     func testCopyPutsThePNGOnThePasteboardItIsGiven() throws {
