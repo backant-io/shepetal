@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import Link from 'next/link';
+import { preload } from 'react-dom';
 import { SiteHeader } from '@/components/landing/SiteHeader';
 import { SignInButton } from '@/components/SignInButton';
 import '@/brand/tokens.css';
@@ -43,6 +44,8 @@ export const viewport: Viewport = {
 };
 
 export default function SiteLayout({ children }: { children: React.ReactNode }) {
+  // The serif draws the hero title, the largest paint; without this the browser finds it only after the CSS.
+  preload('/fonts/shepetal-serif.woff2', { as: 'font', type: 'font/woff2', crossOrigin: '' });
   return (
     <div className="flex min-h-screen flex-col">
       <a href="#content" className="skip">

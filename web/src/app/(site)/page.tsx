@@ -386,7 +386,7 @@ const FAQ: [string, React.ReactNode][] = [
     'Who knows a meeting is being recorded?',
     'You decide. Nothing records until you click Record, and automatic recording is off until you turn it on. Let people know before you record them.',
   ],
-  ['How are dates written?', 'As numbers. Say “the twenty-sixth of July” and it lands as 26.07.26.'],
+  ['What happens after 30 days?', 'You buy it once for $4.99, with every update.'],
 ];
 
 export default function Home() {
@@ -428,7 +428,8 @@ export default function Home() {
             Instant.
           </h2>
           <p className="big-num">
-            4x<span className="unit"> faster than typing.</span>
+            4<span className="x">×</span>
+            <span className="unit"> faster than typing.</span>
           </p>
         </div>
       </section>
@@ -500,52 +501,6 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Recordings */}
-      <section className="sec rec-sec" aria-labelledby="rec-title">
-        <div className="wrap rec">
-          <div className="head">
-            <h2 id="rec-title" className="t-h1">
-              Your recordings are in a folder on your Mac.
-            </h2>
-            <p className="t-lead muted">Keep them, or delete the audio after 24 hours.</p>
-          </div>
-          <InView className="settings-wrap">
-            <div
-              className="settings"
-              role="img"
-              aria-label="Illustration: shepetal Settings. The Recordings menu is open with two choices, Keep recordings and Delete recordings after 24 hours, and the second one is picked."
-            >
-              <Win title="shepetal">
-                <div className="set-tabs" aria-hidden="true">
-                  <span>Home</span>
-                  <span>History</span>
-                  <span>Meetings</span>
-                  <span className="on">Settings</span>
-                </div>
-                <div className="set-form" aria-hidden="true">
-                  <div className="set-row">
-                    <span>Recordings</span>
-                    <span className="popup">
-                      <span className="popup-a">Keep recordings</span>
-                      <span className="popup-b">Delete recordings after 24 hours</span>
-                    </span>
-                  </div>
-                  <div className="set-menu">
-                    <span className="m-keep">Keep recordings</span>
-                    <span className="m-del">Delete recordings after 24 hours</span>
-                  </div>
-                  <div className="set-row">
-                    <span>Always record meetings automatically</span>
-                    <span className="switch" />
-                  </div>
-                  <p className="set-note">A detected meeting records only after you click Record next to the indicator.</p>
-                </div>
-              </Win>
-            </div>
-          </InView>
-        </div>
-      </section>
-
       {/* The name, and the maker */}
       <section id="story" className="sec story-sec" aria-labelledby="name-title">
         <div className="wrap story">
@@ -570,7 +525,7 @@ export default function Home() {
             </p>
             <div className="reading">
               <p>
-                You already know what you want to say before your hands catch up. I have built shepetal so one key puts what you say wherever
+                You already know what you want to say before your hands catch up. I built shepetal so one key puts what you say wherever
                 your cursor is.
               </p>
               <p>It all runs on your Mac, because I wanted my own voice to stay on mine.</p>

@@ -1,38 +1,38 @@
 import { Fragment } from 'react';
 import { SignInButton } from '@/components/SignInButton';
-import { HERO_JS, plan, SCENES } from './hero-timeline';
+import { FADE, HERO_JS, HOLD, plan, SCENES } from './hero-timeline';
 import { Icons, Shush, Win } from './Mac';
 import { SendToMac } from './ShareBar';
 
 export const TRY = 'Try 30 days free';
 
 /** A line as word spans, so the inline script can move each word on its own. */
-function WordSpans({ text, className }: { text: string; className?: string }) {
+function WordSpans({ text }: { text: string }) {
   return text.split(' ').map((w, i) => (
     <Fragment key={i}>
       {i > 0 && ' '}
-      <span className={className}>{w}</span>
+      <span>{w}</span>
     </Fragment>
   ));
 }
 
-/** Where the words land: a caret at the insertion point, the words, and the caret after them. */
+/** Where the words land: a caret at the insertion point, the line (pasted whole), and the caret after it. */
 function Typed({ text }: { text: string }) {
   return (
     <span className="hd-text">
       <i className="hd-caret" />
-      <WordSpans text={text} className="hd-word" />
+      <span className="hd-words">{text}</span>
       <i className="hd-caret" />
     </span>
   );
 }
 
-const [MAIL, CHAT, NOTE] = SCENES.map((s) => s.said);
+const [MAIL, CHAT, TERM] = SCENES.map((s) => s.said);
 
 /**
- * The demo stage: a Mac screen at dusk where one key writes a spoken line into a mail, a chat and a note.
+ * The demo stage: a Mac screen at dusk where one key writes a spoken line into a mail, a chat and a terminal.
  * The server renders the finished email (what reduced motion and no JavaScript show); the inline script
- * after it sets the rest frame before the first paint and plays the pass once (hero-timeline.ts).
+ * after it sets the rest frame before the first paint and plays the pass on a loop (hero-timeline.ts).
  */
 function Stage() {
   return (
@@ -55,10 +55,6 @@ function Stage() {
           <div className="hd-row">
             <span>To:</span>
             <span className="hd-chip">Maja Novak</span>
-          </div>
-          <div className="hd-row hd-subject">
-            <span>Subject:</span>
-            <span>Trip to Bled</span>
           </div>
           <div className="hd-body">
             <p>Hi Maja,</p>
@@ -89,11 +85,12 @@ function Stage() {
           </div>
         </Win>
 
-        <Win title="Notes" className="hd-win hd-note">
+        <Win title="~/shop" className="hd-win hd-term">
           <div className="hd-body">
-            <p className="hd-note-title">Packing list</p>
+            <p className="hd-dim">~/shop on main</p>
+            <p className="hd-dim">Describe the change.</p>
             <p>
-              <Typed text={NOTE} />
+              <span className="hd-ps">›</span> <Typed text={TERM} />
             </p>
           </div>
         </Win>
@@ -122,9 +119,9 @@ function Stage() {
           <span className="hd-pill-write">Writing</span>
         </span>
       </div>
-      <button type="button" className="hero-replay" aria-label="Play the demo again" />
-      <figcaption className="sr">shepetal writing spoken sentences into an email, a chat and a note.</figcaption>
-      <script dangerouslySetInnerHTML={{ __html: `(${HERO_JS})(${JSON.stringify(plan())})` }} />
+      <button type="button" className="hero-pause" aria-label="Pause the demo" />
+      <figcaption className="sr">shepetal writing spoken sentences into an email, a chat and a terminal.</figcaption>
+      <script dangerouslySetInnerHTML={{ __html: `(${HERO_JS})(${JSON.stringify(plan())},${JSON.stringify({ hold: HOLD, fade: FADE })})` }} />
     </figure>
   );
 }
@@ -137,9 +134,8 @@ export function Hero() {
         <h1 id="hero-title" className="hero-title">
           Press one key.
         </h1>
-        <p className="hero-sub">
-          <span>Your words appear wherever you speak.</span> <strong>Instant. Works offline. 100% private.</strong>
-        </p>
+        <p className="hero-sub">Your words appear wherever you speak.</p>
+        <p className="hero-proof">Instant. Works offline. 100% private.</p>
         <div className="cta-row hero-cta" id="hero-cta">
           <SignInButton redirectTo="/account" className="btn">
             {TRY}

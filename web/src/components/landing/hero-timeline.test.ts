@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { onsets, plan, REVEAL_MAX, SCENES, WRITE_DELAY } from './hero-timeline';
+import { LAND_MS, onsets, plan, SCENES, WRITE_DELAY } from './hero-timeline';
 
 const scenes = plan();
 
@@ -9,11 +9,16 @@ describe('hero demo timeline', () => {
   });
 
   it('never lands text before the key comes up plus the paste, because the app writes on release and the demo must not promise more', () => {
-    for (const s of scenes) for (const t of s.land) expect(t).toBeGreaterThanOrEqual(s.up + WRITE_DELAY);
+    for (const s of scenes) expect(s.land).toBeGreaterThanOrEqual(s.up + WRITE_DELAY);
   });
 
-  it('finishes every line reveal in 560 ms or less, the brand limit for the word reveal', () => {
-    for (const s of scenes) expect(s.landEnd - s.land[0]).toBeLessThanOrEqual(REVEAL_MAX);
+  it('lands each line whole in 200 ms or less, because the app pastes it at once and the page claims Instant', () => {
+    expect(LAND_MS).toBeLessThanOrEqual(200);
+    for (const s of scenes) expect(s.landEnd - s.land).toBe(LAND_MS);
+  });
+
+  it('keeps the whole pass under 14 s, so a visitor sees all three apps before the loop starts over', () => {
+    expect(scenes[scenes.length - 1].to).toBeLessThanOrEqual(14000);
   });
 
   it('speaks at a believable pace: each word after the one before, at least 150 ms apart, and the key up after the last', () => {
@@ -33,7 +38,6 @@ describe('hero demo timeline', () => {
     scenes.forEach((s, i) => {
       if (i) expect(s.from).toBe(scenes[i - 1].to);
       expect(s.said.length).toBe(SCENES[i].said.split(' ').length);
-      expect(s.land.length).toBe(s.said.length);
       expect(s.to).toBeGreaterThanOrEqual(s.out);
     });
   });

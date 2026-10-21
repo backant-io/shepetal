@@ -163,6 +163,22 @@ html {
   -webkit-backdrop-filter: saturate(1.3) blur(16px);
   border-bottom: 1px solid color-mix(in srgb, var(--sh-border) 55%, transparent);
 }
+/* At the top of the page the header is clear, with no hairline, over the hero's light; it becomes the bar as you scroll. */
+@supports (animation-timeline: scroll()) {
+  .site-head {
+    animation: head-bar linear both;
+    animation-timeline: scroll();
+    animation-range: 0 48px;
+  }
+  @keyframes head-bar {
+    from {
+      background-color: transparent;
+      border-bottom-color: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
+}
 .site-head-in {
   display: flex;
   align-items: center;
@@ -231,11 +247,12 @@ html {
   border-radius: 12px;
   font-weight: 600;
   white-space: nowrap;
-  transition: transform var(--sh-dur-fast) var(--sh-ease-settle), background var(--sh-dur-fast) var(--sh-ease-settle);
+  transition: background-color 160ms var(--sh-ease-settle), box-shadow 160ms var(--sh-ease-settle), transform 120ms var(--sh-ease-settle);
 }
 .lp .btn:hover,
 .site-head .btn:hover {
   background: color-mix(in srgb, var(--sh-primary-fill) 84%, var(--sh-accent));
+  box-shadow: 0 8px 20px -10px rgb(38 20 28 / 0.5);
 }
 .lp .btn-quiet {
   background: transparent;
@@ -253,6 +270,12 @@ html {
 }
 .site-head .btn-line:hover {
   background: color-mix(in srgb, var(--sh-text) 6%, transparent);
+}
+/* Once the hero's button has scrolled away, the header's is the filled one (ShareBar.tsx sets data-cta). */
+.site-head[data-cta='solid'] .btn-line {
+  background: var(--sh-primary-fill);
+  color: var(--sh-on-primary);
+  box-shadow: none;
 }
 .btn-lg {
   padding: 1.05rem 1.5rem;
@@ -416,19 +439,27 @@ html {
 /* One centred axis: the claim, one button, then the demo stage, whole above the fold from 390x664 up.
    The copy never moves. The stage is a Mac screen at dusk in both themes; its windows follow the theme.
    Base styles are the finished email (reduced motion, no JavaScript); the inline script sets the rest frame
-   and plays the pass with WAAPI (Hero.tsx, hero-timeline.ts). Only opacity and transform animate. */
+   and plays the pass with WAAPI (Hero.tsx, hero-timeline.ts). Only opacity and transform animate.
+   The hero runs up under the header (--head-h, the header and its hairline), so the top of the page is one light. */
+:root {
+  --head-h: 57px;
+}
+@media (min-width: 760px) {
+  :root {
+    --head-h: 65px;
+  }
+}
 .hero {
   position: relative;
-  padding-block: 20px clamp(56px, 7vw, 104px);
+  margin-top: calc(-1 * var(--head-h));
+  padding-block: calc(var(--head-h) + 20px) clamp(56px, 7vw, 104px);
   background: linear-gradient(180deg, var(--sh-neutral-0) 0%, var(--sh-bg) 70%);
   isolation: isolate;
-  --hero-sub: var(--sh-neutral-700);
   --hero-btn-hover: var(--sh-neutral-800);
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .hero {
     background: radial-gradient(120% 70% at 50% -10%, var(--sh-neutral-800) 0%, var(--sh-bg) 70%);
-    --hero-sub: var(--sh-neutral-300);
     --hero-btn-hover: var(--sh-neutral-0);
   }
 }
@@ -447,23 +478,19 @@ html {
   /* One line in any font, so a fallback can never wrap it and move the page when the font swaps in. */
   white-space: nowrap;
 }
+/* One voice: the promise in the text colour, the claims under it as a quieter line. */
 .hero-sub {
   margin-top: 17px;
   font-size: 17px;
   line-height: 24px;
-}
-.hero-sub span,
-.hero-sub strong {
-  display: block;
   text-wrap: balance;
 }
-.hero-sub span {
-  font-weight: 450;
-  color: var(--hero-sub);
-}
-.hero-sub strong {
-  font-weight: 550;
-  color: var(--sh-text);
+.hero-proof {
+  margin-top: 6px;
+  font-size: 15px;
+  line-height: 22px;
+  letter-spacing: 0.01em;
+  color: var(--sh-text-muted);
 }
 .hero-cta {
   width: 100%;
@@ -479,6 +506,8 @@ html {
 }
 .lp .hero-cta .btn:hover {
   background: var(--hero-btn-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 rgb(38 20 28 / 0.2), 0 14px 32px -12px rgb(38 20 28 / 0.6);
 }
 .hero-quiet {
   margin-top: 10px;
@@ -493,12 +522,15 @@ html {
 }
 @media (min-width: 760px) {
   .hero {
-    padding-top: 40px;
+    padding-top: calc(var(--head-h) + 40px);
   }
   .hero-sub {
     margin-top: 24px;
     font-size: 21px;
     line-height: 30px;
+  }
+  .hero-proof {
+    margin-top: 8px;
   }
   .hero-cta {
     margin-top: 28px;
@@ -538,7 +570,7 @@ html {
   text-align: left;
   user-select: none;
   -webkit-user-select: none;
-  animation: hd-stage-in var(--sh-dur-slow) var(--sh-ease-settle) both;
+  animation: hd-stage-in 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .hero-stage::before {
   content: '';
@@ -548,37 +580,40 @@ html {
   opacity: 0.05;
   pointer-events: none;
 }
+/* Dark: the plate is lifted off the page and has an edge, so it reads as a screen and not a hole. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme='light']) .hero-stage {
     --hd-bar: var(--sh-neutral-850);
     --hd-chip: var(--sh-neutral-800);
     --hd-edge: rgb(250 238 232 / 0.1);
-  }
-  :root:not([data-theme='light']) .hero-stage::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--sh-blush) 8%, transparent);
-    pointer-events: none;
+    background: radial-gradient(150% 100% at 50% 100%, var(--sh-mulberry-700) 0%, var(--sh-neutral-900) 82%);
+    box-shadow: 0 0 0 1px rgb(250 238 232 / 0.14), inset 0 1px 0 rgb(255 255 255 / 0.06), 0 60px 140px -40px rgb(160 50 100 / 0.45);
   }
 }
+/* The stage rises and is opaque within the first quarter, so the plate never passes through a washed mauve. */
 @keyframes hd-stage-in {
   from {
     opacity: 0;
-    transform: translateY(12px);
+    transform: translateY(28px) scale(0.98);
+  }
+  25% {
+    opacity: 1;
   }
 }
 @keyframes hd-win-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(14px);
+  }
+  30% {
+    opacity: 1;
   }
 }
 
-/* The menu bar: Wi-Fi off and the 🤫 say offline and Mac without a word. */
+/* The menu bar: Wi-Fi off and the 🤫 say offline and Mac without a word. It stays above the stack of windows. */
 .hd-menu {
   position: absolute;
+  z-index: 1;
   inset: 0 0 auto;
   display: flex;
   align-items: center;
@@ -607,11 +642,12 @@ html {
   height: 14px;
 }
 
-/* The app windows: one at a time, in the same place, so the apps change and the key stays. */
+/* The app windows, in the same place: each new app rises in front and the ones before step back into a stack
+   (12 px up and 5% narrower a step, from the top edge), so the pass ends on all three apps. Always opaque. */
 .hd-win {
   position: absolute;
-  top: 34px;
-  bottom: 116px;
+  top: 52px;
+  bottom: 124px;
   left: 0;
   right: 0;
   width: calc(100% - 32px);
@@ -625,12 +661,13 @@ html {
   font-size: 15px;
   line-height: 22px;
   box-shadow: 0 0 0 1px var(--hd-edge), 0 24px 60px -20px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.2);
+  transform-origin: 50% 0;
 }
 .hd-mail {
-  animation: hd-win-in var(--sh-dur-slow) var(--sh-ease-settle) 60ms both;
+  animation: hd-win-in 700ms cubic-bezier(0.16, 1, 0.3, 1) 180ms both;
 }
 .hd-chat,
-.hd-note {
+.hd-term {
   opacity: 0;
 }
 .hd-win .win-bar {
@@ -664,15 +701,8 @@ html {
   background: var(--hd-chip);
   font-size: 13.5px;
 }
-.hd-subject,
-.hd-msg:first-child {
-  display: none;
-}
 .hd-body {
   padding: 12px 16px;
-}
-.hd-note-title {
-  font-weight: 700;
 }
 .hd-thread {
   margin-top: auto;
@@ -686,6 +716,15 @@ html {
 }
 .hd-msg + .hd-msg {
   margin-top: 12px;
+}
+/* The earlier message only where the window has the room for it (wide and tall screens). */
+.hd-msg:first-child {
+  display: none;
+}
+@media (min-width: 1200px) and (min-height: 836px) {
+  .hd-msg:first-child {
+    display: flex;
+  }
 }
 .hd-msg b {
   font-weight: 600;
@@ -715,12 +754,27 @@ html {
   border-radius: 10px;
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--sh-accent) 14%, transparent);
 }
+/* The terminal: dark in both themes, a coding agent waiting for a prompt. */
+.hd-term {
+  --hd-win: #1c1a1d;
+  --hd-bar: #2a272b;
+  --hd-line: rgb(255 255 255 / 0.08);
+  color: #ececee;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+.hd-term .win-title {
+  color: #ececee;
+}
+.hd-dim {
+  font-size: 13px;
+  color: #a8a5ab;
+}
+.hd-ps {
+  color: #a8a5ab;
+}
 
 /* Where the words land. The caret is 0 wide, so showing or hiding it never moves a word.
    The caret at the insertion point blinks while it waits; the one after landed text is solid, as after typing. */
-.hd-word {
-  display: inline-block;
-}
 .hd-caret {
   position: relative;
   display: inline-block;
@@ -750,38 +804,50 @@ html {
   }
 }
 
-/* What is said: the key, and each app's line in the same slot. Spoken words are serif, written words sans. */
+/* What is said: the key and each app's line, in one glass bar under the window. The lines share one slot,
+   so the bar keeps its width. Spoken words are serif, written words sans. */
 .hd-said {
   position: absolute;
-  left: 16px;
-  right: 16px;
+  left: 0;
+  right: 0;
   bottom: 56px;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin-inline: auto;
   display: flex;
-  justify-content: center;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 16px 6px 6px;
+  border-radius: 26px;
+  background: rgb(28 10 19 / 0.55);
+  box-shadow: inset 0 0 0 1px rgb(250 238 232 / 0.1);
+  opacity: 0;
 }
+/* The key the headline names: a lit keycap that visibly goes down while you speak. */
 .hd-key {
   position: relative;
   flex: none;
   display: grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
-  margin-top: -4px;
-  border: 1px solid var(--sh-neutral-300);
-  border-radius: 6px;
-  font: 520 12px/1 var(--sh-font-text);
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  font: 560 14px/1 var(--sh-font-text);
+  color: var(--sh-neutral-50);
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.18), rgb(255 255 255 / 0.06));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.28), 0 0 0 1px rgb(250 238 232 / 0.22);
   opacity: 0;
 }
 .hd-key i {
   position: absolute;
-  inset: -1px;
+  inset: 0;
   border-radius: inherit;
-  box-shadow: 0 2px 0 rgb(200 186 182 / 0.45);
+  box-shadow: 0 4px 0 rgb(0 0 0 / 0.35), 0 8px 18px rgb(0 0 0 / 0.3);
 }
 .hd-lines {
   display: grid;
   min-width: 0;
+  text-align: center;
 }
 .hd-line {
   grid-area: 1 / 1;
@@ -795,7 +861,7 @@ html {
   opacity: 0;
 }
 
-/* The indicator, drawn as the app draws it, larger: red while it records, a blue pulse while it writes. */
+/* The indicator, where the app draws it (bottom left) and larger: red while it records, a blue pulse while it writes. */
 .hd-ind {
   position: absolute;
   left: 12px;
@@ -842,23 +908,43 @@ html {
   opacity: 0;
 }
 
-/* Replay: a click or a tap anywhere on the stage plays the pass again. */
-.hero-replay {
+/* Pause and play (WCAG 2.2.2): the demo loops, so it can be held. Bottom right, opposite the indicator. */
+.hero-pause {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  border-radius: 16px;
-  background: transparent;
+  right: 12px;
+  bottom: 12px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgb(28 10 19 / 0.55);
+  color: rgb(250 238 232 / 0.85);
   cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms;
 }
-.hero-replay:focus-visible {
+.hero-pause:hover {
+  background: rgb(28 10 19 / 0.8);
+}
+.hero-pause::before {
+  content: '';
+  width: 10px;
+  height: 12px;
+  border-inline: 3px solid currentColor;
+}
+.hero-pause[aria-label^='Play']::before {
+  width: 11px;
+  margin-left: 2px;
+  border: 0;
+  background: currentColor;
+  clip-path: polygon(0 0, 100% 50%, 0 100%);
+}
+.hero-pause:focus-visible {
   outline: 2px solid var(--sh-accent);
   outline-offset: 2px;
-  border-radius: 18px;
 }
 @media (scripting: none), (prefers-reduced-motion: reduce) {
-  .hero-replay {
+  .hero-pause {
     display: none;
   }
 }
@@ -869,14 +955,8 @@ html {
     margin-top: 36px;
   }
   .hero-stage {
-    height: clamp(320px, 100svh - 456px, 420px);
+    height: clamp(320px, 100svh - 456px, 388px);
     border-radius: 20px;
-  }
-  .hero-replay {
-    border-radius: 20px;
-  }
-  .hero-replay:focus-visible {
-    border-radius: 22px;
   }
   .hd-menu {
     justify-content: space-between;
@@ -887,8 +967,8 @@ html {
     display: flex;
   }
   .hd-win {
-    top: 44px;
-    bottom: 114px;
+    top: 56px;
+    bottom: 140px;
     width: calc(100% - 40px);
     font-size: 17px;
     line-height: 26px;
@@ -911,23 +991,25 @@ html {
     font-size: 15px;
     line-height: 21px;
   }
-  .hd-msg:first-child {
-    display: flex;
-  }
   .hd-composer {
-    margin: 14px 20px 18px;
-    padding: 11px 14px;
+    margin: 12px 20px 14px;
+    padding: 9px 14px;
     font-size: 16px;
     line-height: 24px;
   }
+  .hd-dim {
+    font-size: 15px;
+  }
   .hd-said {
-    left: 24px;
-    right: 24px;
     bottom: 72px;
-    gap: 12px;
+    padding: 6px 20px 6px 6px;
+    border-radius: 999px;
   }
   .hd-key {
-    margin-top: -1px;
+    width: 44px;
+    height: 44px;
+    border-radius: 11px;
+    font-size: 15px;
   }
   .hd-line {
     font-size: 22px;
@@ -954,50 +1036,83 @@ html {
     font-size: 13px;
     line-height: 28px;
   }
+  .hero-pause {
+    right: 24px;
+    bottom: 24px;
+  }
 }
-/* Wide: the line sits in the indicator row, centred, like a film subtitle. */
+/* Tall screens: the headline gets more air above it, and the stage still ends where it did. */
+@media (min-width: 760px) and (min-height: 860px) {
+  .hero {
+    padding-top: calc(var(--head-h) + 72px);
+  }
+  .hero-stage {
+    height: clamp(320px, 100svh - 488px, 388px);
+  }
+}
+/* Wide: the bar sits in the indicator row, centred like a film subtitle, clear of the indicator and its label,
+   and the landed text is the largest thing on the stage after the headline. */
 @media (min-width: 960px) {
   .hd-win {
-    bottom: 80px;
+    bottom: 90px;
+    font-size: 22px;
+    line-height: 32px;
   }
   .hd-said {
-    left: 0;
-    right: 0;
-    bottom: 20px;
-    height: 44px;
-    align-items: center;
-  }
-  .hd-key {
-    margin-top: 0;
-  }
-  /* The first line sets the slot, so the key and the first line are centred; the longer lines run on to the right. */
-  .hd-lines {
-    position: relative;
+    bottom: 18px;
   }
   .hd-line {
-    white-space: nowrap;
+    font-size: 20px;
+    line-height: 28px;
   }
-  .hd-line + .hd-line {
-    position: absolute;
-    top: 0;
-    left: 0;
+  .hd-ind {
+    bottom: 24px;
+  }
+  .hd-pill {
+    bottom: 32px;
+  }
+  .hero-pause {
+    bottom: 28px;
+  }
+  .hd-composer {
+    font-size: 20px;
+    line-height: 28px;
+  }
+  .hd-term {
+    font-size: 20px;
+    line-height: 30px;
   }
 }
-/* Short screens: the Subject row and the earlier chat message only where the window has the room. */
-@media (min-width: 760px) and (min-height: 836px) {
-  .hd-subject {
-    display: flex;
+/* Wider: a bigger key and line. */
+@media (min-width: 1200px) {
+  .hd-win {
+    bottom: 104px;
+  }
+  .hd-said {
+    padding: 8px 22px 8px 8px;
+  }
+  .hd-key {
+    width: 52px;
+    height: 52px;
+  }
+  .hd-line {
+    font-size: 22px;
+    line-height: 30px;
+  }
+  .hd-ind {
+    bottom: 30px;
+  }
+  .hd-pill {
+    bottom: 38px;
+  }
+  .hero-pause {
+    bottom: 34px;
   }
 }
-@media (min-width: 760px) and (max-height: 835px) {
-  .hd-msg:first-child {
-    display: none;
-  }
-}
-/* Short laptop screens (1280x720): tighter copy, so the whole stage still fits above the fold. */
+/* Short laptop screens (1280x720): tighter copy and windows, so the whole stage still fits above the fold. */
 @media (min-width: 760px) and (max-height: 760px) {
   .hero {
-    padding-top: 28px;
+    padding-top: calc(var(--head-h) + 28px);
   }
   .hero-sub {
     margin-top: 18px;
@@ -1013,6 +1128,12 @@ html {
   }
   .hero-stage {
     height: clamp(300px, 100svh - 392px, 420px);
+  }
+  .hd-win {
+    line-height: 28px;
+  }
+  .hd-body {
+    padding-block: 12px;
   }
 }
 
@@ -1423,6 +1544,11 @@ html {
 .big-num .unit {
   font-size: 0.42em;
   letter-spacing: 0;
+}
+/* The times sign, small and raised, so it never reads as a capital X next to the 4. */
+.big-num .x {
+  font-size: 0.62em;
+  vertical-align: 0.18em;
 }
 /* Phones: the words go under 4x on a line of their own height. */
 @media (max-width: 599px) {
@@ -1898,187 +2024,6 @@ html {
   }
 }
 
-/* ---------- Recordings ---------- */
-.rec-sec {
-  padding-top: 0;
-}
-.rec {
-  display: grid;
-  gap: 40px;
-  align-items: center;
-}
-@media (min-width: 980px) {
-  .rec {
-    grid-template-columns: 1fr 1fr;
-    gap: 72px;
-  }
-}
-.settings {
-  position: relative;
-  padding: 8% 7%;
-  border-radius: 20px;
-  background: radial-gradient(120% 120% at 70% 0%, var(--sh-neutral-100), var(--sh-neutral-200));
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .settings {
-    background: radial-gradient(120% 120% at 70% 0%, var(--sh-neutral-850), var(--sh-neutral-900));
-  }
-}
-.set-tabs {
-  display: flex;
-  justify-content: center;
-  gap: 4px;
-  padding: 8px;
-  border-bottom: 1px solid var(--m-line);
-  font-size: 11.5px;
-  color: var(--m-muted);
-}
-.set-tabs span {
-  padding: 3px 10px;
-  border-radius: 6px;
-}
-.set-tabs .on {
-  color: var(--m-text);
-  background: color-mix(in srgb, var(--m-text) 8%, transparent);
-}
-.set-form {
-  position: relative;
-  display: grid;
-  gap: 0;
-  padding: 16px 18px 20px;
-}
-.set-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 0;
-  border-bottom: 1px solid var(--m-line);
-  font-size: 13px;
-}
-.popup {
-  position: relative;
-  display: grid;
-  padding: 3px 26px 3px 10px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--m-text) 7%, transparent);
-  font-size: 12px;
-}
-.popup::after {
-  content: '';
-  position: absolute;
-  right: 9px;
-  top: 50%;
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid var(--m-muted);
-  border-bottom: 1.5px solid var(--m-muted);
-  transform: translateY(-70%) rotate(45deg);
-}
-.popup > span {
-  grid-area: 1 / 1;
-}
-/* The still: "Delete recordings after 24 hours" is picked. In motion, the menu opens and the choice changes. */
-.popup-a {
-  visibility: hidden;
-  animation: pick-a 3.4s linear both;
-}
-.popup-b {
-  animation: pick-b 3.4s linear both;
-}
-@keyframes pick-a {
-  0%,
-  64% {
-    visibility: visible;
-  }
-  65%,
-  100% {
-    visibility: hidden;
-  }
-}
-@keyframes pick-b {
-  0%,
-  64% {
-    visibility: hidden;
-  }
-  65%,
-  100% {
-    visibility: visible;
-  }
-}
-.set-menu {
-  position: absolute;
-  right: 12px;
-  top: 46px;
-  z-index: 2;
-  display: grid;
-  padding: 5px;
-  border-radius: 8px;
-  background: var(--m-win);
-  box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.25), 0 10px 30px -8px rgb(0 0 0 / 0.35);
-  font-size: 12px;
-  opacity: 0;
-  animation: menu 3.4s linear both;
-}
-.set-menu span {
-  padding: 4px 10px;
-  border-radius: 5px;
-}
-.m-del {
-  animation: hl 3.4s linear both;
-}
-@keyframes menu {
-  0%,
-  22% {
-    opacity: 0;
-    transform: translateY(-4px);
-  }
-  26%,
-  62% {
-    opacity: 1;
-    transform: none;
-  }
-  65%,
-  100% {
-    opacity: 0;
-  }
-}
-@keyframes hl {
-  0%,
-  44% {
-    background: transparent;
-    color: inherit;
-  }
-  46%,
-  100% {
-    background: var(--sh-neutral-700);
-    color: #fff;
-  }
-}
-.switch {
-  width: 30px;
-  height: 18px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--m-text) 18%, transparent);
-  position: relative;
-}
-.switch::after {
-  content: '';
-  position: absolute;
-  left: 2px;
-  top: 2px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
-}
-.set-note {
-  margin-top: 12px;
-  font-size: 11.5px;
-  color: var(--m-muted);
-}
-
 /* ---------- The name, and the maker ---------- */
 .story-sec {
   padding-top: 0;
@@ -2256,6 +2201,12 @@ html {
   width: clamp(180px, 22vw, 300px);
   height: auto;
   margin-bottom: clamp(16px, 3vw, 40px);
+}
+/* Phones see the footer's wordmark on the same screen, so this one goes. */
+@media (max-width: 759px) {
+  .final-mark {
+    display: none;
+  }
 }
 .final .t-h1 {
   max-width: 16em;

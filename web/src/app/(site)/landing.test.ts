@@ -58,7 +58,8 @@ describe('landing page', () => {
     for (const claim of [
       'Works in every app.',
       'Instant.',
-      '4x faster than typing.',
+      // 4×: the times sign, set small so it never reads as a capital X (words() spaces out the inline span)
+      '4 × faster than typing.',
       '100% private. Your data is yours.',
       'Works offline.',
       'Meetings, transcribed on your Mac.',
@@ -98,7 +99,7 @@ describe('landing page', () => {
   it('says what happens, never the steps: the instruction line is banned from brand copy (voice.md, Oct 21)', () => {
     expect(visible).not.toMatch(/hold fn,? (?:speak|talk)|speak, let go|hold fn and say|hold fn\. speak/i);
     expect(hero).toMatch(/>\s*Press one key\.\s*<\/h1>/);
-    expect(hero).toContain('<span>Your words appear wherever you speak.</span>');
+    expect(hero).toMatch(/>\s*Your words appear wherever you speak\.\s*</);
   });
 
   it('keeps the hero bold and clean: no footnotes, no fine print, no instructions (Pavel, Oct 21)', () => {
