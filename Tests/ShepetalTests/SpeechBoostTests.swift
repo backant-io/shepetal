@@ -21,11 +21,11 @@ final class SpeechBoostTests: XCTestCase {
 
     private var heard: [[Float]] = []
 
-    private func engine(_ booster: VocabularyBooster, dictionary: String = "Postgres") -> ParakeetEngine {
+    private func engine(_ booster: VocabularyBooster, dictionary: String = "Postgres", says text: String = "post gress") -> ParakeetEngine {
         ParakeetEngine(recognize: { [unowned self] samples in
             heard.append(samples)
             let timing = TokenTiming(token: "▁postgres", tokenId: 1, startTime: 0, endTime: 0.4, confidence: 0.9)
-            return ASRResult(text: "post gress", confidence: 0.9, duration: 0.4, processingTime: 0, tokenTimings: [timing])
+            return ASRResult(text: text, confidence: 0.9, duration: 0.4, processingTime: 0, tokenTimings: [timing])
         }, booster: booster, dictionary: { Vocabulary(dictionary) })
     }
 
@@ -80,6 +80,24 @@ final class SpeechBoostTests: XCTestCase {
         XCTAssertEqual(failing.calls.count, 1)
     }
 
+    /// The keyword model knows English only, while Parakeet on Automatic writes 25 languages. On this Mac it wrote
+    /// "Las redes sociales" as "Las Redis sociales" with Redis in the dictionary (docs/models.md).
+    func testADictationInAnotherLanguageKeepsTheModelText() async throws {
+        for text in ["Las redes sociales están llenas de ruido hoy.", "Wir haben den Cache von Redis auf Postgres verschoben.",
+                     "Nous avons déplacé le cache de Rodiver Postgre.", "Abbiamo spostato la cache da reddis a postgress."] {
+            let booster = FakeBooster()
+            let out = try await engine(booster, dictionary: "Redis\nPostgres", says: text).transcribe([0.1], wav: wav)
+            XCTAssertEqual(out, text)
+            XCTAssertTrue(booster.calls.isEmpty, "not boosted: \(text)")
+        }
+        // English, and dictations too short to tell, are boosted; so is the launch warm-up, which hears nothing.
+        for text in ["We moved the cache from Redis to postgars.", "Redis.", "Postgres.", "npm install.", "post gress", ""] {
+            let booster = FakeBooster()
+            _ = try await engine(booster, says: text).transcribe([0.1], wav: wav)
+            XCTAssertEqual(booster.calls.count, 1, "boosted: \(text)")
+        }
+    }
+
     /// The rescorer's own text drops the punctuation of a word it replaces; the user's sentence must keep it.
     func testRescoredTermsKeepTheSentencePunctuation() {
         XCTAssertEqual(KeywordBooster.replacing([("postgars.", "Postgres"), ("redisc", "Redis")],
@@ -126,15 +144,56 @@ final class SpeechBoostTests: XCTestCase {
         XCTAssertTrue(ModelHub.offlineMode, "after the download FluidAudio may not fetch models on its own again")
     }
 
+    /// The keyword model's line in the 🤫 menu: nothing on a normal day (#210 keeps that menu at 12 items), and
+    /// only for someone whose dictionary the default model would otherwise ignore.
     @MainActor
-    func testMenuOffersTheDownloadOnlyUntilItIsThere() {
+    func testMenuOffersTheDownloadOnlyWhenTheDictionaryNeedsIt() {
         let menu = SpeechMenu()
         let missing = FakeBooster()
         missing.isInstalled = false
-        let item = menu.boostItem(speechInstalled: true, booster: missing)
-        XCTAssertEqual(item?.title, "Download dictionary support (about 100 MB)")
-        XCTAssertNotNil(item?.action)
-        XCTAssertNil(menu.boostItem(speechInstalled: true, booster: FakeBooster()), "installed: nothing to offer")
-        XCTAssertNil(menu.boostItem(speechInstalled: false, booster: missing), "speech recognition's own download comes first")
+        menu.booster = missing
+        menu.dictionary = { Vocabulary("Postgres") }
+        XCTAssertEqual(menu.dictionarySupport(speechInstalled: true), .offered)
+        XCTAssertNil(menu.dictionarySupport(speechInstalled: false), "speech recognition's own download comes first")
+        menu.dictionary = { Vocabulary("# only the header\n") }
+        XCTAssertNil(menu.dictionarySupport(speechInstalled: true), "no dictionary words: nothing to boost, nothing to offer")
+        menu.dictionary = { Vocabulary("Postgres") }
+        menu.booster = FakeBooster()
+        XCTAssertNil(menu.dictionarySupport(speechInstalled: true), "installed: nothing to offer")
+    }
+
+    /// One download at a time, shown as running until it is done, and the keyword model loaded before "ready", so
+    /// the first dictation after it does not wait for the load.
+    @MainActor
+    func testDownloadShowsWhileItRunsThenLoadsTheKeywordModel() async throws {
+        let menu = SpeechMenu()
+        let booster = FakeBooster()
+        booster.isInstalled = false
+        var downloads = 0, notices: [String] = [], failures: [String] = []
+        menu.booster = booster
+        menu.dictionary = { Vocabulary("Redis\n*Postgres") }
+        menu.downloadBooster = { downloads += 1; booster.isInstalled = true }
+        menu.notice = { notices.append($0) }
+        menu.fail = { failures.append($0) }
+
+        let task = try XCTUnwrap(menu.downloadBoost())
+        XCTAssertEqual(menu.dictionarySupport(speechInstalled: true), .downloading)
+        XCTAssertNil(menu.downloadBoost(), "a second click starts no second download")
+        await task.value
+        XCTAssertEqual(downloads, 1)
+        XCTAssertEqual(booster.calls.map(\.terms), [["Postgres", "Redis"]], "loaded with the user's own terms")
+        XCTAssertEqual(notices, ["Downloading dictionary support…", "Dictionary support is ready"])
+        XCTAssertEqual(failures, [])
+        XCTAssertNil(menu.dictionarySupport(speechInstalled: true), "installed: the line leaves the menu")
+
+        // A failed download says so in plain words, loads nothing and offers the download again.
+        let offline = FakeBooster()
+        offline.isInstalled = false
+        menu.booster = offline
+        menu.downloadBooster = { throw URLError(.notConnectedToInternet) }
+        await menu.downloadBoost()?.value
+        XCTAssertEqual(failures, ["Download failed: check the internet connection and try again"])
+        XCTAssertTrue(offline.calls.isEmpty)
+        XCTAssertEqual(menu.dictionarySupport(speechInstalled: true), .offered)
     }
 }

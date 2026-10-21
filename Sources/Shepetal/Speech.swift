@@ -1,5 +1,6 @@
 import AppKit
 import FluidAudio
+import NaturalLanguage
 import ShepetalCore
 
 protocol SpeechEngine: AnyObject {
@@ -124,31 +125,44 @@ final class SpeechMenu: NSObject {
 
     /// Shows a notice next to 🤫.
     var notice: (String) -> Void = { _ in }
+    /// F39: the keyword model, its download and the dictionary it listens for. Seams, so tests fetch nothing and
+    /// read no dictionary.txt of the user's.
+    var booster: VocabularyBooster = KeywordBooster.shared
+    var downloadBooster: () async throws -> Void = { try await KeywordBooster.download() }
+    var dictionary: () -> Vocabulary = { Vocabulary.load(Paths.dictionary) }
     private var downloadingBoost = false
 
-    /// F39: the keyword model's download, offered once on-device speech recognition is there and only until the
-    /// keyword model is. Whisper takes the dictionary as a prompt and needs none of it.
-    func boostItem(speechInstalled: Bool = ParakeetEngine.isInstalled, booster: VocabularyBooster = KeywordBooster.shared) -> NSMenuItem? {
-        guard speechInstalled, !booster.isInstalled else { return nil }
-        let i = NSMenuItem(title: downloadingBoost ? "Downloading dictionary support…" : "Download dictionary support (about 100 MB)",
-                           action: downloadingBoost ? nil : #selector(downloadBoost), keyEquivalent: "")
-        i.target = self
-        return i
+    /// F39: what the 🤫 menu offers for the keyword model (`MenuState.dictionarySupport`). Only with on-device
+    /// speech recognition there (whisper takes the dictionary as a prompt and needs none of it), only with words in
+    /// the dictionary (without them the menu stays as short as #210 left it), and only until the keyword model is.
+    func dictionarySupport(speechInstalled: Bool = ParakeetEngine.isInstalled) -> DictionarySupport? {
+        if downloadingBoost { return .downloading }
+        guard speechInstalled, !booster.isInstalled, !dictionary().promptTerms.isEmpty else { return nil }
+        return .offered
     }
 
-    @objc private func downloadBoost() {
+    /// The menu's Download dictionary support. nil while a download already runs.
+    @discardableResult
+    func downloadBoost() -> Task<Void, Never>? {
+        guard !downloadingBoost else { return nil }
         downloadingBoost = true
         notice("Downloading dictionary support…")
-        Task {
+        return Task {
             defer { downloadingBoost = false }
-            do { try await KeywordBooster.download() } catch {
+            do { try await downloadBooster() } catch {
                 fail("Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""))
                 return
             }
+            // Loads the keyword model now, as Parakeet's warm-up does at launch, so the next dictation does not wait.
+            let terms = dictionary().promptTerms
+            if !terms.isEmpty { _ = await booster.boost("", timings: [], samples: [Float](repeating: 0, count: 16_000), terms: terms) }
             notice("Dictionary support is ready")
         }
     }
 }
+
+/// The keyword model's line in the 🤫 menu (F39).
+enum DictionarySupport { case offered, downloading }
 
 /// Parakeet TDT 0.6B v3 through FluidAudio (CoreML, Neural Engine), from FluidAudio's model cache.
 final class ParakeetEngine: SpeechEngine {
@@ -207,7 +221,7 @@ final class ParakeetEngine: SpeechEngine {
         // The dictionary (F39, #30), read fresh for every dictation like the replacements. The load's warm-up
         // gets here too, with no timings, so the keyword model loads before the user speaks.
         let terms = dictionary().promptTerms
-        guard !terms.isEmpty, booster.isInstalled else { return result.text }
+        guard !terms.isEmpty, booster.isInstalled, KeywordBooster.knowsTheLanguage(of: result.text) else { return result.text }
         return await booster.boost(result.text, timings: result.tokenTimings ?? [], samples: heard, terms: terms) ?? result.text
     }
 }
@@ -232,6 +246,18 @@ actor KeywordBooster: VocabularyBooster {
     /// dictionary it wrote "copy the finance lead" as "copy the dentist" in scripts/e2e-mac.sh.
     static let config = VocabularyRescorer.Config(spotterRescueEnabled: false)
     static var directory: URL { CtcModels.defaultCacheDirectory(for: .ctc110m) }
+
+    /// The keyword model knows English only. On "Las redes sociales están llenas de ruido" it wrote "Las Redis
+    /// sociales", so a dictation clearly in another language keeps Parakeet's text (docs/models.md). Short ones are
+    /// still boosted: the recognizer reads "Redis." alone as French (0.52) and "Postgres." as German (0.20).
+    /// ponytail: all or nothing per dictation; check each replaced word against the language if non-English
+    /// dictations need their terms too.
+    static func knowsTheLanguage(of text: String) -> Bool {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        guard let (language, p) = recognizer.languageHypotheses(withMaximum: 1).first else { return true }
+        return language == .english || p < 0.9
+    }
 
     nonisolated let directory: URL
     private var models: CtcModels?
