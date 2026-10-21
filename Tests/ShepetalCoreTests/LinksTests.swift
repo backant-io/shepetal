@@ -5,6 +5,9 @@ import XCTest
 final class LinksTests: XCTestCase {
     let a = "https://example.com/a", b = "https://example.com/b", c = "http://intranet.local/c?id=7"
 
+    /// Without a model the text is what was said, so every command in it was said.
+    func insert(_ text: String, links: [String]) -> String { Links.insert(text, links: links, said: text) }
+
     // Only a whole http(s) URL is a link. Text around it, other schemes, and a URL carrying a password are not.
     func testOnlyAWholeWebURLIsKept() {
         XCTAssertEqual(Links.url(from: "  https://example.com/a?b=1#c\n"), "https://example.com/a?b=1#c")
@@ -51,15 +54,15 @@ final class LinksTests: XCTestCase {
 
     func testCommandsInsertTheirLink() {
         let links = [a, b, c]
-        XCTAssertEqual(Links.insert("Here it is, insert link.", links: links), "Here it is, \(a)", "a final period after the link goes")
-        XCTAssertEqual(Links.insert("Insert link.", links: links), a)
-        XCTAssertEqual(Links.insert("Insert the last link", links: links), a)
-        XCTAssertEqual(Links.insert("insert last link", links: links), a)
-        XCTAssertEqual(Links.insert("The old one: insert link two. Thanks", links: links), "The old one: \(b). Thanks",
+        XCTAssertEqual(insert("Here it is, insert link.", links: links), "Here it is, \(a)", "a final period after the link goes")
+        XCTAssertEqual(insert("Insert link.", links: links), a)
+        XCTAssertEqual(insert("Insert the last link", links: links), a)
+        XCTAssertEqual(insert("insert last link", links: links), a)
+        XCTAssertEqual(insert("The old one: insert link two. Thanks", links: links), "The old one: \(b). Thanks",
                        "a period mid-text stays")
-        XCTAssertEqual(Links.insert("insert link number 3", links: links), c)
-        XCTAssertEqual(Links.insert("Insert link Three!", links: links), "\(c)!")
-        XCTAssertEqual(Links.insert("first insert link one then insert link 2", links: links), "first \(a) then \(b)")
+        XCTAssertEqual(insert("insert link number 3", links: links), c)
+        XCTAssertEqual(insert("Insert link Three!", links: links), "\(c)!")
+        XCTAssertEqual(insert("first insert link one then insert link 2", links: links), "first \(a) then \(b)")
     }
 
     // Without a model, ordinary speech about links is text.
@@ -68,14 +71,39 @@ final class LinksTests: XCTestCase {
         for said in ["Send me that link.", "Paste the link here.", "Can you insert the link into the doc?",
                      "Insert links later.", "I'll insert a link.", "insertlink", "Click Insert, then Link.",
                      "Uninsert link"] {
-            XCTAssertEqual(Links.insert(said, links: links), said, said)
+            XCTAssertEqual(insert(said, links: links), said, said)
+        }
+    }
+
+    // Security review: only a command the user said pastes a link. The cleanup model's text, or the field around the
+    // cursor it read (F24), adds none, no second one, and no other one than the user named.
+    func testOnlyACommandTheUserSaidInsertsALink() {
+        let links = [a, b]
+        XCTAssertEqual(Links.insert("Here it is, insert link.", links: links, said: "Here it is."), "Here it is, insert link.")
+        XCTAssertEqual(Links.insert("insert link and insert link", links: links, said: "insert link and"), "\(a) and insert link")
+        XCTAssertEqual(Links.insert("insert link two", links: links, said: "insert link"), "insert link two")
+        XCTAssertEqual(Links.insert("Insert link two.", links: links, said: "insert link number 2"), b, "the same link, said another way")
+    }
+
+    // Security review: a link with a secret in its query or fragment (a reset token, a sign-in code, a signed or
+    // OAuth URL) is never kept, so it can never be pasted. Ordinary parameters and anchors are kept.
+    func testALinkCarryingASecretIsNotKept() {
+        for no in ["https://example.com/reset?token=s3cret", "https://example.com/callback?state=x&code=abc",
+                   "https://bucket.s3.amazonaws.com/f.pdf?X-Amz-Signature=abc", "https://api.example.com/v1?apiKey=abc",
+                   "https://example.com/?SESSIONID=1", "https://example.com/login?password=x", "https://example.com/?auth=x",
+                   "https://example.com/done#access_token=abc&token_type=bearer"] {
+            XCTAssertNil(Links.url(from: no), no)
+        }
+        for yes in ["https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://example.com/report?id=7",
+                    "https://docs.example.com/api#keys"] {
+            XCTAssertEqual(Links.url(from: yes), yes)
         }
     }
 
     // A command whose link is not there stays as said, so nothing silently disappears.
     func testMissingLinkKeepsTheWords() {
-        XCTAssertEqual(Links.insert("insert link", links: []), "insert link")
-        XCTAssertEqual(Links.insert("insert link three", links: [a, b]), "insert link three")
+        XCTAssertEqual(insert("insert link", links: []), "insert link")
+        XCTAssertEqual(insert("insert link three", links: [a, b]), "insert link three")
     }
 
     // Password managers mark copies Concealed; Shepetal's own pastes are Concealed and Transient.
