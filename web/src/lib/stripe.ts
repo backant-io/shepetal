@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import {
   activate,
   applySubscription,
+  liveSubscription,
   renewingSubscription,
   setCustomer,
   userByCustomer,
@@ -113,21 +114,68 @@ async function portalConfiguration(): Promise<string> {
   throw new Error('no Billing Portal configuration with metadata app=shepetal: run web/scripts/stripe-setup.mjs');
 }
 
-/** POST /api/billing/portal: the Stripe Billing Portal for the user's customer, or null if they never checked out. */
-export async function portalUrl(user: User, base: string): Promise<string | null> {
+/**
+ * POST /api/billing/portal: the Stripe Billing Portal for the user's customer (card, invoices, cancel), or null if
+ * they never checked out. flow 'cancel' opens straight on the cancel confirmation of their subscription.
+ */
+export async function portalUrl(user: User, base: string, flow?: 'cancel'): Promise<string | null> {
   if (!user.stripe_customer_id) return null;
+  const sub = flow === 'cancel' ? renewingSubscription(user) : null;
+  if (flow === 'cancel' && !sub) return null;
   const session = await getStripe().billingPortal.sessions.create({
     customer: user.stripe_customer_id,
     configuration: await portalConfiguration(),
     return_url: `${base}/account`,
+    ...(sub && {
+      flow_data: {
+        type: 'subscription_cancel' as const,
+        subscription_cancel: { subscription: sub },
+        after_completion: { type: 'redirect' as const, redirect: { return_url: `${base}/account?cancelled=1` } },
+      },
+    }),
   });
   return session.url;
 }
 
+/**
+ * POST /api/billing/cancel and /api/billing/resume: the subscription stops renewing (it keeps working until its
+ * period end, with no further charge), or renews again. Stored right away from Stripe's answer, so the settings show
+ * it before the webhook arrives. False if the user has no subscription in that state.
+ */
+export async function setCancelAtPeriodEnd(user: User, cancel: boolean): Promise<boolean> {
+  const id = cancel ? renewingSubscription(user) : user.sub_id && user.cancel_at_period_end && user.sub_status === 'active' ? user.sub_id : null;
+  if (!id) return false;
+  const s = await getStripe().subscriptions.update(id, { cancel_at_period_end: cancel });
+  await applySubscription(user.id, snapshot(s));
+  return true;
+}
+
+/**
+ * Switch to lifetime: the lifetime license was paid, so the subscription ends now. No further charge: no
+ * proration, no final invoice, and an unpaid renewal invoice is voided. Safe to run twice (Stripe retries the webhook).
+ */
+async function endSubscriptionForLifetime(subId: string): Promise<void> {
+  const stripe = getStripe();
+  const s = await stripe.subscriptions.retrieve(subId);
+  if (s.status !== 'canceled' && s.status !== 'incomplete_expired') {
+    await stripe.subscriptions.cancel(subId, { invoice_now: false, prorate: false }, { idempotencyKey: `shepetal-lifetime-${subId}` });
+  }
+  for await (const inv of stripe.invoices.list({ subscription: subId, status: 'open', limit: 100 })) {
+    await stripe.invoices.voidInvoice(inv.id);
+  }
+  const ended = await stripe.subscriptions.retrieve(subId);
+  const userId = Number(ended.metadata?.user_id);
+  if (userId) await applySubscription(userId, snapshot(ended));
+}
+
 /** The subscription fields the account stores. Reads the item's period on API versions that moved it there. */
 function snapshot(s: Stripe.Subscription): Subscription {
-  const item = s.items?.data?.[0] as { current_period_start?: number; current_period_end?: number } | undefined;
+  const item = s.items?.data?.[0] as
+    | { current_period_start?: number; current_period_end?: number; price?: { unit_amount?: number | null; currency?: string } }
+    | undefined;
   return {
+    amount: item?.price?.unit_amount ?? null,
+    currency: item?.price?.currency ?? null,
     id: s.id,
     status: s.status,
     current_period_start: s.current_period_start ?? item?.current_period_start ?? 0,
@@ -182,10 +230,10 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       // no_payment_required: a code that takes the whole price off.
       if (s.payment_status !== 'paid' && s.payment_status !== 'no_payment_required') return;
       if (!(await activate(userId))) return console.error(`stripe webhook: no user ${s.client_reference_id} for paid session ${s.id}`);
-      // Bought the lifetime license while subscribed: the subscription stops renewing and runs out at its period end.
+      // Switched to lifetime while subscribed: the subscription ends now, with no further charge.
       const user = await userById(userId);
-      const renewing = user && renewingSubscription(user);
-      if (renewing) await getStripe().subscriptions.update(renewing, { cancel_at_period_end: true });
+      const live = user && liveSubscription(user);
+      if (live) await endSubscriptionForLifetime(live);
       return;
     }
     case 'customer.subscription.created':

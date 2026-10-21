@@ -78,7 +78,7 @@ const fakeStripe = createServer((req, res) => {
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const url = new URL(req.url, 'http://x');
-    const params = Object.fromEntries(new URLSearchParams(req.method === 'GET' ? url.search : body));
+    const params = { ...Object.fromEntries(url.searchParams), ...Object.fromEntries(new URLSearchParams(req.method === 'GET' ? '' : body)) };
     stripeCalls.push({ method: req.method, path: url.pathname, params, auth: req.headers.authorization });
     res.setHeader('content-type', 'application/json');
     const route = `${req.method} ${url.pathname}`;
@@ -105,9 +105,14 @@ const fakeStripe = createServer((req, res) => {
     if (route === 'GET /v1/subscriptions/sub_e2e') return reply(fakeSub);
     if (route === 'GET /v1/invoices/in_e2e') return reply({ id: 'in_e2e', object: 'invoice', status: fakeSub.status === 'past_due' ? 'open' : 'paid' });
     if (route === 'POST /v1/subscriptions/sub_e2e') {
-      if (params.cancel_at_period_end === 'true') fakeSub.cancel_at_period_end = true;
+      if (params.cancel_at_period_end) fakeSub.cancel_at_period_end = params.cancel_at_period_end === 'true';
       return reply(fakeSub);
     }
+    if (route === 'DELETE /v1/subscriptions/sub_e2e') {
+      Object.assign(fakeSub, { status: 'canceled', ended_at: Math.floor(Date.now() / 1000) });
+      return reply(fakeSub);
+    }
+    if (route === 'GET /v1/invoices') return reply({ object: 'list', has_more: false, data: [] });
     if (route === 'GET /v1/billing_portal/configurations') {
       return reply({ object: 'list', has_more: false, data: [{ id: 'bpc_other', object: 'billing_portal.configuration', metadata: {} }, { id: 'bpc_e2e', object: 'billing_portal.configuration', metadata: { app: 'shepetal' } }] });
     }
@@ -430,7 +435,26 @@ async function main() {
   assert.equal((await hook(event('customer.subscription.updated', fakeSub))).status, 200);
   ok('webhook: a cancelled subscription stays active until its period end with renews false; resumed, it renews again');
 
-  // The lifetime license, bought while subscribed: the subscription stops renewing.
+  // Plan settings: the plan, cancel at period end and resume through the API, the portal as a link.
+  Object.assign(fakeSub, { items: { object: 'list', data: [{ price: { unit_amount: 99, currency: 'usd' } }] } });
+  assert.equal((await hook(event('customer.subscription.updated', fakeSub))).status, 200);
+  let plan = await app('GET', '/api/account/plan', { token: accessToken });
+  assert.equal(plan.status, 200, JSON.stringify(plan.body));
+  assert.deepEqual(plan.body.subscription, { status: 'active', paid_through: through, next_billing_date: through, ends_at: null, amount: 99, currency: 'usd', amount_display: '$0.99', interval: 'month' });
+  assert.deepEqual(plan.body.actions, { cancel: true, resume: false, switch_to_lifetime: true, portal: true, choose_plan: false });
+  const cancelled = await app('POST', '/api/billing/cancel', { token: accessToken });
+  assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
+  assert.equal(calls('/v1/subscriptions/sub_e2e').at(-1)?.params.cancel_at_period_end, 'true');
+  assert.deepEqual([cancelled.body.status, cancelled.body.subscription.status, cancelled.body.subscription.ends_at], ['active', 'cancels_at_period_end', through]);
+  assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 409, body: { error: 'no_renewing_subscription' } });
+  const resumed = await app('POST', '/api/billing/resume', { token: accessToken });
+  assert.equal(resumed.body.subscription.status, 'active');
+  const link = await fetch(`${BASE}/api/billing/portal`, { redirect: 'manual', headers: { authorization: `Bearer ${accessToken}` } });
+  assert.deepEqual([link.status, link.headers.get('location')], [303, 'https://billing.stripe.com/p/session/test_e2e']);
+  assert.equal((await app('GET', '/api/account/plan')).status, 401);
+  ok('plan settings: GET /api/account/plan (active, next billing date, $0.99), cancel at period end, resume, GET /api/billing/portal redirects to the portal');
+
+  // Switch to lifetime: bought while subscribed, the subscription ends at once with no further charge.
   const lt = await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'lifetime' } });
   assert.equal(lt.status, 200, JSON.stringify(lt.body));
   const sent = calls('/v1/checkout/sessions').at(-1).params;
@@ -445,9 +469,12 @@ async function main() {
   assert.equal(paid.status, 200, await paid.clone().text());
   lic = await app('GET', '/api/license', { token: accessToken });
   assert.deepEqual(lic.body, { status: 'active', plan: 'lifetime', trial_ends_at: null, paid_through: null, renews: false, payment_failed: false, email });
-  assert.equal(calls('/v1/subscriptions/sub_e2e').at(-1)?.params.cancel_at_period_end, 'true', 'the subscription stops renewing');
+  assert.equal(calls('/v1/subscriptions/sub_e2e', 'DELETE').length, 1, 'the subscription is cancelled now');
+  assert.deepEqual(calls('/v1/subscriptions/sub_e2e', 'DELETE')[0].params, { invoice_now: 'false', prorate: 'false' }, 'no final invoice, no proration');
+  plan = await app('GET', '/api/account/plan', { token: accessToken });
+  assert.deepEqual([plan.body.plan, plan.body.subscription, plan.body.actions.cancel], ['lifetime', null, false]);
   assert.deepEqual(await app('POST', '/api/checkout', { token: accessToken, json: {} }), { status: 409, body: { error: 'already_active' } });
-  ok(`checkout lifetime: mode payment, shepetal_lifetime, client_reference_id ${userId}; the paid webhook makes it lifetime, stops the subscription renewing, and checkout is 409 after`);
+  ok(`switch to lifetime: mode payment, shepetal_lifetime, client_reference_id ${userId}; the paid webhook makes it lifetime and cancels the subscription now (no invoice, no proration); checkout is 409 after`);
 
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.
   await check('/app/login POST: no code without the CSRF token, with a wrong one, cross-site, or signed out', async () => {

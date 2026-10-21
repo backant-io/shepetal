@@ -20,6 +20,8 @@ export type User = {
   current_period_end?: string | null;
   cancel_at_period_end?: number | null;
   paid_through?: string | null;
+  sub_amount?: number | null;
+  sub_currency?: string | null;
 };
 
 /** Body of GET /api/license (see API.md). */
@@ -124,6 +126,9 @@ export type Subscription = {
   current_period_end: number;
   cancel_at_period_end: boolean;
   ended_at: number | null;
+  /** What a renewal charges (the price's unit_amount and currency), when known. */
+  amount?: number | null;
+  currency?: string | null;
 };
 
 const TERMINAL = new Set(['canceled', 'incomplete', 'incomplete_expired']);
@@ -167,15 +172,91 @@ export async function applySubscription(userId: number, sub: Subscription): Prom
   const r = await db()
     .prepare(
       `UPDATE users SET plan = CASE WHEN plan = 'lifetime' THEN plan ELSE 'subscription' END,
-         sub_id = ?2, sub_status = ?3, current_period_end = ?4, cancel_at_period_end = ?5, paid_through = ?6
+         sub_id = ?2, sub_status = ?3, current_period_end = ?4, cancel_at_period_end = ?5, paid_through = ?6,
+         sub_amount = COALESCE(?7, sub_amount), sub_currency = COALESCE(?8, sub_currency)
        WHERE id = ?1`,
     )
-    .bind(userId, sub.id, sub.status, iso(sub.current_period_end), sub.cancel_at_period_end ? 1 : 0, paidThrough(sub, stored))
+    .bind(userId, sub.id, sub.status, iso(sub.current_period_end), sub.cancel_at_period_end ? 1 : 0, paidThrough(sub, stored),
+      sub.amount ?? null, sub.currency ?? null)
     .run();
   return r.meta.changes === 1;
 }
 
-/** A subscription that will charge again: an owner of the lifetime license should not keep paying for it. */
+/** A subscription that has not ended yet (renewing, cancelled to its period end, or past due), or null. */
+export function liveSubscription(user: User): string | null {
+  return user.sub_id && !TERMINAL.has(user.sub_status ?? '') ? user.sub_id : null;
+}
+
+/** A subscription that will charge again, so it can be cancelled to its period end. */
 export function renewingSubscription(user: User): string | null {
   return user.sub_id && RENEWING.has(user.sub_status ?? '') && !user.cancel_at_period_end ? user.sub_id : null;
+}
+
+/** Body of GET /api/account/plan (API.md): what the plan settings on /account show and offer. */
+export type PlanSettings = {
+  plan: Plan;
+  /** Whether shepetal works now, as in GET /api/license. */
+  status: License['status'];
+  email: string;
+  /** While the free trial runs. */
+  trial: { ends_at: string; days_left: number } | null;
+  lifetime: { purchased_at: string | null } | null;
+  subscription: {
+    /** active: renews; cancels_at_period_end: cancelled, works until ends_at; past_due: a renewal failed; ended. */
+    status: 'active' | 'cancels_at_period_end' | 'past_due' | 'ended';
+    /** The end of the paid time (GET /api/license's paid_through). */
+    paid_through: string | null;
+    /** The next charge, for an active subscription; null once cancelled, past due or ended. */
+    next_billing_date: string | null;
+    /** When it stops: the period end once cancelled, or when it ended. */
+    ends_at: string | null;
+    /** What each renewal charges, in the smallest currency unit (99 = $0.99), and how to show it. */
+    amount: number | null;
+    currency: string | null;
+    amount_display: string | null;
+    interval: 'month';
+  } | null;
+  /** What the settings can offer now. */
+  actions: { cancel: boolean; resume: boolean; switch_to_lifetime: boolean; portal: boolean; choose_plan: boolean };
+};
+
+const money = (amount: number | null | undefined, currency: string | null | undefined) =>
+  amount == null || !currency ? null : new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(amount / 100);
+
+export function planSettings(user: User, now = Date.now()): PlanSettings {
+  const l = licenseOf(user, now);
+  const trial =
+    l.status === 'trial' && l.trial_ends_at
+      ? { ends_at: l.trial_ends_at, days_left: Math.max(0, Math.ceil((Date.parse(l.trial_ends_at) - now) / DAY_MS)) }
+      : null;
+  let subscription: PlanSettings['subscription'] = null;
+  if (l.plan === 'subscription') {
+    const status = l.payment_failed ? 'past_due' : l.status !== 'active' ? 'ended' : l.renews ? 'active' : 'cancels_at_period_end';
+    subscription = {
+      status,
+      paid_through: l.paid_through,
+      next_billing_date: status === 'active' ? l.paid_through : null,
+      ends_at: status === 'cancels_at_period_end' || status === 'ended' ? l.paid_through : null,
+      amount: user.sub_amount ?? null,
+      currency: user.sub_currency ?? null,
+      amount_display: money(user.sub_amount, user.sub_currency),
+      interval: 'month',
+    };
+  }
+  const live = subscription && subscription.status !== 'ended';
+  return {
+    plan: l.plan,
+    status: l.status,
+    email: l.email,
+    trial,
+    lifetime: l.plan === 'lifetime' ? { purchased_at: user.purchased_at } : null,
+    subscription,
+    actions: {
+      cancel: subscription?.status === 'active' || subscription?.status === 'past_due',
+      resume: subscription?.status === 'cancels_at_period_end',
+      switch_to_lifetime: !!live,
+      portal: !!user.stripe_customer_id,
+      choose_plan: l.plan === 'trial' || subscription?.status === 'ended',
+    },
+  };
 }
