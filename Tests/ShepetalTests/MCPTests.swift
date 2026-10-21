@@ -73,6 +73,7 @@ final class MCPTests: XCTestCase {
         XCTAssertEqual(unknown["protocolVersion"] as? String, MCPServer.protocolVersions.last, "an unknown version gets our latest")
 
         XCTAssertNil(s.handle(#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#), "a notification gets no reply")
+        XCTAssertNil(s.handle(#"{"jsonrpc":"2.0","method":"ping"}"#), "no id, no reply, even for a method we know")
         XCTAssertNil(s.handle("   "))
         XCTAssertEqual((try send(s, 3, "ping")["result"] as? [String: Any])?.count, 0)
 
