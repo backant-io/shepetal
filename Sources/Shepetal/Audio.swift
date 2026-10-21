@@ -64,6 +64,8 @@ class Recorder {
     private var health = MicHealth(start: 0)
     private var events: [MicHealth.Event] = []
     private var observer: NSObjectProtocol?
+    private var restartsLeft = 0  // on `queue`: per dictation, so a device that keeps changing still ends it
+    private static let maxRestarts = 3
     private(set) var device: MicDevice?
     /// Main thread: the engine stopped itself because the device or its format changed.
     var onConfigurationChange: (() -> Void)?
@@ -81,6 +83,7 @@ class Recorder {
         self.device = device
         isRecording = true
         queue.async { [self] in
+            restartsLeft = Self.maxRestarts
             do { try open(device) } catch {
                 NSLog("shepetal: mic: %@ did not open: %@", device?.name ?? "the default input", String(describing: error))
                 let message = "Microphone: \(error.localizedDescription)"
@@ -116,7 +119,7 @@ class Recorder {
     func open(_ device: MicDevice?) throws {
         let engine = AVAudioEngine()
         let input = engine.inputNode
-        if let device, device.uid != AudioDevices.defaultInputUID {
+        if let device, MicChoice.needsMove(device, systemDefault: AudioDevices.defaultInputUID) {
             guard var id = AudioDevices.id(forUID: device.uid), let unit = input.audioUnit,
                   AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0,
                                        &id, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr else {
@@ -148,10 +151,12 @@ class Recorder {
     /// so the three rebuilds went by in under a second with no buffer, and every dictation was empty (the
     /// 21.10.26 retest: zero-length WAVs, "No audio from the microphone"). So a running engine is left alone, a
     /// stopped one with the same input format starts again, and only a new format (Bluetooth switching to its
-    /// headset profile) or a failed restart needs a new engine (`onConfigurationChange`).
+    /// headset profile), a failed restart or more than `maxRestarts` need a new engine (`onConfigurationChange`),
+    /// and `Mic` ends the dictation after its own rebuild cap. A running engine that stops delivering is `.stalled`.
     func engineChanged(running: Bool, formatKept: Bool) {
         guard !running else { return NSLog("shepetal: mic: configuration change, still recording") }
-        if formatKept {
+        if formatKept, restartsLeft > 0 {
+            restartsLeft -= 1
             do { try restart(); return NSLog("shepetal: mic: configuration change, started again") } catch {
                 NSLog("shepetal: mic: could not start again: %@", String(describing: error))
             }
@@ -278,6 +283,7 @@ final class Mic: NSObject {
             case .silent: notice("No sound from \(name). Is it muted?")
             case .stillSilent: notice("Still no sound from \(name). Pick another mic in the 🤫 menu.")
             case .noAudio: stopDictation(transcribe: false, "\(name.prefix(1).uppercased() + name.dropFirst()) sent no audio")
+            case .stalled: stopDictation(transcribe: true, "\(name.prefix(1).uppercased() + name.dropFirst()) stopped sending audio")
             }
         }
     }
