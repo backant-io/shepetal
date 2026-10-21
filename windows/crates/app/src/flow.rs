@@ -8,8 +8,8 @@ use input::{Key, KeyEvent, Mode};
 use shepetal_core::gesture::{short_press_hint, Action, Gesture, HINT_MS, MAX_LENGTH_WARNING, VK_ESCAPE};
 use shepetal_core::text;
 
-/// The dictation hotkey. Windows keyboards don't report fn, so it is Ctrl+Win, the default of
-/// Wispr's Windows app. `win.rs` parses it for the hook, and the short-press hint names it.
+/// The default dictation hotkey. Windows keyboards don't report fn, so it is Ctrl+Win, the default
+/// of Wispr's Windows app. Tray > Hotkey picks another (`Flow::hotkey`).
 pub const HOTKEY: &str = "Ctrl+Win";
 
 /// Why a clip was kept. Every recording is kept (goal rule 4); cancelled and too-short ones are
@@ -80,6 +80,8 @@ pub struct Flow<M, S, I, O> {
     pub show: O,
     /// Text clean-up from the core crate, applied before insertion.
     pub rules: fn(&str) -> String,
+    /// The hotkey's name, which the short-press hint gives. `HOTKEY` until the app sets the saved one.
+    pub hotkey: String,
     state: State,
     /// When the error ring goes back to idle.
     error_until: Option<u64>,
@@ -89,7 +91,7 @@ pub struct Flow<M, S, I, O> {
 
 impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
     pub fn new(mic: M, store: S, insert: I, show: O, rules: fn(&str) -> String) -> Self {
-        Flow { mic, store, insert, show, rules, state: State::Idle, error_until: None, pending: None }
+        Flow { mic, store, insert, show, rules, hotkey: HOTKEY.into(), state: State::Idle, error_until: None, pending: None }
     }
 
     /// True while a clip is being recorded or transcribed.
@@ -129,7 +131,7 @@ impl<M: Mic, S: Store, I: Insert, O: Show> Flow<M, S, I, O> {
                     Ok(()) => {
                         self.mode(Mode::Idle);
                         if why == Kept::TooShort {
-                            self.show.hint(&short_press_hint(HOTKEY));
+                            self.show.hint(&short_press_hint(&self.hotkey));
                         }
                     }
                 }
@@ -344,6 +346,15 @@ mod tests {
         take(&log);
         assert_eq!(f.action(Action::Cancel, 5200), None);
         assert_eq!(take(&log), ["mic stop", "keep 16 Cancelled", "mode Idle"], "a cancel shows no hint");
+    }
+
+    #[test]
+    fn the_short_press_hint_names_the_hotkey_picked_in_the_tray() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        f.hotkey = "Alt+Win".into();
+        f.action(Action::Start, 0);
+        f.action(Action::TooShort, 600);
+        assert_eq!(take(&log).last().unwrap(), "hint Hold Alt+Win to talk · double-tap for hands-free");
     }
 
     #[test]

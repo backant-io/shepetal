@@ -24,6 +24,18 @@ pub fn retention(value: Option<&str>) -> Retention {
     value.and_then(Retention::parse).unwrap_or_default()
 }
 
+/// The dictation hotkey, in `input::Hotkey::parse` syntax. The tray offers `input::HOTKEYS`.
+pub const HOTKEY_VALUE: &str = "Hotkey";
+
+/// The hotkey a stored value means: any hotkey `input::Hotkey::parse` takes (the tray writes one
+/// of `input::HOTKEYS`; regedit can set others), else Ctrl+Win.
+pub fn hotkey(value: Option<&str>) -> String {
+    match value.map(str::trim) {
+        Some(v) if input::Hotkey::parse(v).is_ok() => v.to_string(),
+        _ => crate::flow::HOTKEY.to_string(),
+    }
+}
+
 /// With delete after 24 h, how often the audio folder is checked while Shepetal runs, so a clip
 /// goes within a minute of turning 24 hours old.
 pub const PRUNE_EVERY_MS: u64 = 60_000;
@@ -104,6 +116,20 @@ mod tests {
         // The value written is the one read back.
         for r in [Retention::Keep, Retention::Delete24h] {
             assert_eq!(retention(Some(r.as_str())), r);
+        }
+    }
+
+    #[test]
+    fn hotkey_is_ctrl_win_unless_a_valid_one_is_stored() {
+        assert_eq!(hotkey(None), "Ctrl+Win");
+        assert_eq!(hotkey(Some("Alt+Win")), "Alt+Win");
+        assert_eq!(hotkey(Some(" F13 ")), "F13");
+        assert_eq!(hotkey(Some("Ctrl+Shift+F1")), "Ctrl+Shift+F1", "set in regedit");
+        for bad in ["", "Ctrl+Nope", "Ctrl+Ctrl", "Ctrl+Alt+Shift+Win"] {
+            assert_eq!(hotkey(Some(bad)), "Ctrl+Win", "{bad:?}");
+        }
+        for h in input::HOTKEYS {
+            assert_eq!(hotkey(Some(h)), h, "every tray choice reads back");
         }
     }
 

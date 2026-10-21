@@ -39,6 +39,8 @@ pub enum Event {
     /// Tray menu: Recordings > Keep recordings (false) or Delete recordings after 24 hours
     /// (true) was picked. The app saves the choice, then calls `Ui::set_delete_after_24h`.
     DeleteAfter24h(bool),
+    /// Tray menu: Hotkey > `HOTKEYS[n]` was picked. The app saves it, then calls `Ui::set_hotkey`.
+    Hotkey(usize),
     /// Tray menu: Recent > item `n` (0 is the newest) of the list last given to `Ui::set_recent`.
     /// The app copies that text.
     CopyRecent(usize),
@@ -71,6 +73,25 @@ pub fn recordings_menu(delete_after_24h: bool) -> [(&'static str, bool, bool); 2
         ("Keep recordings", !delete_after_24h, false),
         ("Delete recordings after 24 hours", delete_after_24h, true),
     ]
+}
+
+/// The tray's Hotkey choices; the first is the default. Each one, plus Space, is its hands-free
+/// chord. Not offered: Ctrl+Alt, which is AltGr on many layouts (typing @ would start a
+/// dictation), and keys that type or toggle something (Caps Lock, letters).
+pub const HOTKEYS: [&str; 4] = ["Ctrl+Win", "Alt+Win", "Shift+Win", "F13"];
+
+/// The tray's Hotkey submenu: each choice and whether it is checked. A hotkey set some other way
+/// (regedit) checks none.
+pub fn hotkey_menu(current: &str) -> [(&'static str, bool); HOTKEYS.len()] {
+    // All keys are held at once, so Win+Alt is Alt+Win.
+    let keys = |s: &str| {
+        Hotkey::parse(s).ok().map(|mut h| {
+            h.0.sort_unstable();
+            h
+        })
+    };
+    let current = keys(current);
+    HOTKEYS.map(|h| (h, keys(h) == current))
 }
 
 /// How many transcripts the tray's Recent submenu lists, as on the Mac.
@@ -172,6 +193,22 @@ impl Chord {
 
     pub fn hotkey(&self) -> &Hotkey {
         &self.hotkey
+    }
+
+    /// Switches to `hotkey`. If the old one was held, its release is reported first, so the
+    /// gesture never waits for an up that will not come.
+    pub fn set_hotkey(&mut self, hotkey: Hotkey) -> Option<KeyEvent> {
+        let was = self.active;
+        *self = Chord {
+            hotkey,
+            esc: self.esc,
+            space: self.space,
+            ..Chord::default()
+        };
+        was.then_some(KeyEvent {
+            key: Key::Hotkey,
+            down: false,
+        })
     }
 
     pub fn feed(&mut self, vk: u16, down: bool) -> Option<KeyEvent> {
@@ -733,6 +770,84 @@ mod tests {
             ring_alpha(Mode::Processing, 2 * PULSE_MS),
             1.0,
             "and repeats"
+        );
+    }
+
+    #[test]
+    fn hotkey_choices_parse_and_the_current_one_is_checked() {
+        assert_eq!(HOTKEYS[0], "Ctrl+Win", "the default comes first");
+        for h in HOTKEYS {
+            assert!(Hotkey::parse(h).is_ok(), "{h}");
+        }
+        assert_eq!(
+            hotkey_menu("Ctrl+Win").map(|(_, on)| on),
+            [true, false, false, false]
+        );
+        assert_eq!(
+            hotkey_menu("win+alt").map(|(_, on)| on),
+            [false, true, false, false],
+            "same keys, any order or case"
+        );
+        assert_eq!(
+            hotkey_menu("F13").map(|(_, on)| on),
+            [false, false, false, true]
+        );
+        assert_eq!(
+            hotkey_menu("Ctrl+Shift+F1").map(|(_, on)| on),
+            [false; 4],
+            "set in regedit"
+        );
+        assert!(
+            !HOTKEYS
+                .iter()
+                .any(|h| Hotkey::parse(h) == Hotkey::parse("Ctrl+Alt")),
+            "AltGr"
+        );
+    }
+
+    #[test]
+    fn switching_the_hotkey_releases_a_held_one_and_takes_the_new_keys() {
+        let mut c = Chord::new(Hotkey::default());
+        c.feed(0xA2, true); // VK_LCONTROL
+        assert_eq!(
+            c.feed(VK_LWIN, true),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: true
+            })
+        );
+        assert_eq!(
+            c.set_hotkey(Hotkey::parse("F13").unwrap()),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: false
+            })
+        );
+        assert_eq!(
+            c.feed(VK_LWIN, false),
+            None,
+            "the old keys are plain keys now"
+        );
+        assert_eq!(c.feed(0xA2, false), None);
+        assert_eq!(
+            c.feed(0x7C, true),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: true
+            }),
+            "F13"
+        );
+        assert_eq!(
+            c.set_hotkey(Hotkey::default()),
+            Some(KeyEvent {
+                key: Key::Hotkey,
+                down: false
+            })
+        );
+        assert_eq!(
+            c.set_hotkey(Hotkey::default()),
+            None,
+            "nothing held, nothing to release"
         );
     }
 

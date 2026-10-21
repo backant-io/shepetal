@@ -38,6 +38,8 @@ const ID_LOGIN: usize = 6;
 const ID_RECORDINGS: usize = 7;
 /// Recent submenu: transcript `n` is `ID_RECENT + n`.
 const ID_RECENT: usize = 100;
+/// Hotkey submenu: `HOTKEYS[n]` is `ID_HOTKEY + n`.
+const ID_HOTKEY: usize = 200;
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// The last mode set was Recording or HandsFree. Set on the caller's thread so the hook sees it
@@ -51,6 +53,7 @@ enum Cmd {
     StartAtLogin(bool),
     DeleteAfter24h(bool),
     Recent(Vec<String>),
+    Hotkey(Hotkey, String),
     Quit,
 }
 
@@ -93,6 +96,14 @@ impl Ui {
         self.send(Cmd::Recent(texts));
     }
 
+    /// Switches the hook to `name` (`Hotkey::parse` syntax) and checks it in the Hotkey submenu.
+    /// The app owns the setting and calls this after each `Event::Hotkey`.
+    pub fn set_hotkey(&self, name: &str) -> std::result::Result<(), String> {
+        let hotkey = Hotkey::parse(name)?;
+        self.send(Cmd::Hotkey(hotkey, name.to_string()));
+        Ok(())
+    }
+
     pub fn quit(&self) {
         self.send(Cmd::Quit);
     }
@@ -106,16 +117,18 @@ impl Ui {
     }
 }
 
-/// Starts the input thread: installs the hook for `hotkey` and Esc, shows the overlay and adds
+/// Starts the input thread: installs the hook for the hotkey `name` (`Hotkey::parse`) and Esc, shows the overlay and adds
 /// the tray icon. Events arrive on the receiver until Quit.
-pub fn spawn(hotkey: Hotkey) -> Result<(Ui, Receiver<Event>)> {
+pub fn spawn(name: &str) -> Result<(Ui, Receiver<Event>)> {
+    let hotkey = Hotkey::parse(name).map_err(|e| Error::new(E_INVALIDARG, e))?;
+    let name = name.to_string();
     let (events, rx) = channel();
     let (tx, cmds) = channel();
     let (ready_tx, ready) = sync_channel(1);
     std::thread::Builder::new()
         .name("shepetal-input".into())
         .spawn(move || unsafe {
-            let hwnd = init(hotkey, events, cmds).map(|h| h.0 as isize);
+            let hwnd = init(hotkey, name, events, cmds).map(|h| h.0 as isize);
             let ok = hwnd.is_ok();
             let _ = ready_tx.send(hwnd.map_err(|e| (e.code(), e.message())));
             if !ok {
@@ -239,6 +252,8 @@ struct State {
     start_at_login: bool,
     delete_after_24h: bool,
     recent: Vec<String>,
+    /// The hotkey's name, for the check mark.
+    hotkey: String,
     /// What the overlay shows now, to skip redraws that change nothing.
     shown: Option<(Frame, Rect, u32)>,
 }
@@ -249,7 +264,12 @@ fn with<R>(f: impl FnOnce(&mut State) -> R) -> Option<R> {
     STATE.with(|s| s.try_borrow_mut().ok()?.as_mut().map(f))
 }
 
-unsafe fn init(hotkey: Hotkey, events: Sender<Event>, cmds: Receiver<Cmd>) -> Result<HWND> {
+unsafe fn init(
+    hotkey: Hotkey,
+    name: String,
+    events: Sender<Event>,
+    cmds: Receiver<Cmd>,
+) -> Result<HWND> {
     // Physical pixels on every monitor, whatever the app's manifest says.
     SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     let instance: HINSTANCE = GetModuleHandleW(None)?.into();
@@ -317,6 +337,7 @@ unsafe fn init(hotkey: Hotkey, events: Sender<Event>, cmds: Receiver<Cmd>) -> Re
         start_at_login: false,
         delete_after_24h: false,
         recent: Vec::new(),
+        hotkey: name,
         shown: None,
     };
     s.tray(NIM_ADD); // fails before Explorer runs; TaskbarCreated adds it then
@@ -356,6 +377,16 @@ impl State {
                 Cmd::StartAtLogin(on) => self.start_at_login = on,
                 Cmd::DeleteAfter24h(on) => self.delete_after_24h = on,
                 Cmd::Recent(texts) => self.recent = texts,
+                Cmd::Hotkey(hotkey, name) => {
+                    HOOK.with(|h| {
+                        if let Some(h) = h.borrow_mut().as_mut() {
+                            if let Some(up) = h.chord.set_hotkey(hotkey) {
+                                h.emit(up);
+                            }
+                        }
+                    });
+                    self.hotkey = name;
+                }
                 Cmd::Quit => return self.shutdown(),
             }
         }
@@ -425,7 +456,7 @@ impl State {
 
 /// The tray menu. Runs a modal loop, so the state is only borrowed before and after it.
 unsafe fn menu() {
-    let Some((ctrl, paused, login, delete, recent)) = with(|s| {
+    let Some((ctrl, paused, login, delete, recent, hotkey)) = with(|s| {
         let recent: Vec<String> = s
             .recent
             .iter()
@@ -438,11 +469,12 @@ unsafe fn menu() {
             s.start_at_login,
             s.delete_after_24h,
             recent,
+            s.hotkey.clone(),
         )
     }) else {
         return;
     };
-    let Ok(menu) = build_menu(paused, login, delete, &recent) else {
+    let Ok(menu) = build_menu(paused, login, delete, &recent, &hotkey) else {
         return;
     };
     let mut pt = POINT::default();
@@ -462,6 +494,9 @@ unsafe fn menu() {
         }
         ID_LOGIN => {
             let _ = s.events.send(Event::StartAtLogin);
+        }
+        id if (ID_HOTKEY..ID_HOTKEY + HOTKEYS.len()).contains(&id) => {
+            let _ = s.events.send(Event::Hotkey(id - ID_HOTKEY));
         }
         id if (ID_RECENT..ID_RECENT + RECENT).contains(&id) => {
             let _ = s.events.send(Event::CopyRecent(id - ID_RECENT));
@@ -496,6 +531,7 @@ unsafe fn build_menu(
     login: bool,
     delete_after_24h: bool,
     recent: &[String],
+    hotkey: &str,
 ) -> Result<HMENU> {
     let check = |on| MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED };
     let menu = CreatePopupMenu()?;
@@ -522,6 +558,11 @@ unsafe fn build_menu(
         w!("Recent (click to copy)"),
     )?;
     AppendMenuW(menu, check(paused), ID_PAUSE, w!("Pause"))?;
+    let keys = CreatePopupMenu()?;
+    for (i, (name, on)) in hotkey_menu(hotkey).into_iter().enumerate() {
+        AppendMenuW(keys, check(on), ID_HOTKEY + i, &HSTRING::from(name))?;
+    }
+    AppendMenuW(menu, MF_POPUP, keys.0 as usize, w!("Hotkey"))?;
     let recordings = CreatePopupMenu()?;
     for (i, (label, on, _)) in recordings_menu(delete_after_24h).into_iter().enumerate() {
         AppendMenuW(

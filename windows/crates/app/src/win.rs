@@ -6,7 +6,7 @@
 use crate::dialog::{self, Card};
 use crate::flow::{self, Flow, Kept};
 use crate::meeting::{self, Show};
-use crate::system::{self, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RETENTION_VALUE, RUN_KEY, RUN_VALUE, SETTINGS_KEY};
+use crate::system::{self, HOTKEY_VALUE, MIC_CONSENT, MIC_CONSENT_DESKTOP, MIC_SETTINGS, MUTEX, RETENTION_VALUE, RUN_KEY, RUN_VALUE, SETTINGS_KEY};
 use shepetal_core::gesture::{Action, Gesture, HINT_MS};
 use shepetal_core::retention::Retention;
 use std::path::{Path, PathBuf};
@@ -78,6 +78,17 @@ fn set_retention(r: Retention) -> Result<(), String> {
     match set_reg_string(SETTINGS_KEY, RETENTION_VALUE, r.as_str()) {
         ERROR_SUCCESS => Ok(()),
         e => Err(format!("Could not save the Recordings setting (error {e}).")),
+    }
+}
+
+fn hotkey() -> String {
+    system::hotkey(reg_string(HKEY_CURRENT_USER, SETTINGS_KEY, HOTKEY_VALUE).as_deref())
+}
+
+fn set_hotkey(name: &str) -> Result<(), String> {
+    match set_reg_string(SETTINGS_KEY, HOTKEY_VALUE, name) {
+        ERROR_SUCCESS => Ok(()),
+        e => Err(format!("Could not save the hotkey (error {e}).")),
     }
 }
 
@@ -242,7 +253,8 @@ pub fn run() {
     if !onboarding(&data.join("models"), model) {
         return;
     }
-    let (ui, events) = match input::spawn(input::Hotkey::parse(flow::HOTKEY).unwrap_or_default()) {
+    let hotkey = hotkey();
+    let (ui, events) = match input::spawn(&hotkey) {
         Ok(x) => x,
         Err(e) => return message(&format!("Shepetal can't watch the keyboard or show its 🤫: {e}")),
     };
@@ -269,6 +281,7 @@ pub fn run() {
         ui,
         flow::rules,
     );
+    flow.hotkey = hotkey;
     let mut gesture = Gesture::default();
     let t0 = Instant::now();
     let ms = |at: Instant| at.saturating_duration_since(t0).as_millis() as u64;
@@ -322,6 +335,17 @@ pub fn run() {
                 flow.transcribed(text, now);
                 history = recent(&store);
                 flow.show.set_recent(history.clone());
+                vec![]
+            }
+            Ok(Msg::Input(input::Event::Hotkey(n))) => {
+                let name = input::HOTKEYS[n];
+                match set_hotkey(name).and_then(|()| flow.show.set_hotkey(name)) {
+                    Ok(()) => {
+                        flow.hotkey = name.into();
+                        flow.show.show_hint(&format!("Hold {name} to talk"), HINT);
+                    }
+                    Err(e) => flow.error(&e, now),
+                }
                 vec![]
             }
             Ok(Msg::Input(input::Event::CopyRecent(n))) => {
