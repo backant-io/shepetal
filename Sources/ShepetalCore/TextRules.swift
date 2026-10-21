@@ -11,6 +11,8 @@ public enum InsertionRules {
     static let closing: Set<Character> = [")", "]", "}", "\"", "'", "”", "’", "»"]
     /// The space before a following word is non-breaking, so apps that trim trailing ASCII spaces keep it.
     public static let nbsp = "\u{00A0}"
+    /// A final "DD.MM." with a real day and month: its dot is the date's. "It costs 19.99." ends in a price.
+    static let dayMonthEnd = #"(?<![\w.])(?:0[1-9]|[12][0-9]|3[01])\.(?:0[1-9]|1[0-2])\.$"#
 
     public static func fit(_ dictated: String, before: String, after: String, selected: String = "") -> String {
         var text = dictated.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -45,7 +47,7 @@ public enum InsertionRules {
         } else if !sel.isEmpty || continues {
             // A final "DD.MM." keeps its dot: it is the date's, not the sentence's (docs/text-rules.md).
             while let last = text.last, sentenceEnd.contains(last),
-                  text.range(of: #"(?<![\w.])[0-9]{2}\.[0-9]{2}\.$"#, options: .regularExpression) == nil {
+                  text.range(of: dayMonthEnd, options: .regularExpression) == nil {
                 text.removeLast()
             }
         }
@@ -139,166 +141,317 @@ public enum Cleanup {
 
 /// Spoken dates become numbers, `DD.MM.YY` or `DD.MM.` (docs/text-rules.md). English and German words at once,
 /// since the rule is not told the language. Runs on the cleaned text, before the dictionary and `fit`.
-/// Every case in Tests/fixtures/text-rules/dates.json must pass, on every platform.
+/// Every case in Tests/fixtures/text-rules/dates.json must pass, on every platform. It reads words the way
+/// `dates` in windows/crates/core/src/text.rs does, so the platforms stay alike.
 public enum Dates {
     public static func apply(_ text: String) -> String {
-        let ns = text as NSString
-        var out = "", copied = 0
-        // A date starts at a word that does not follow a letter, digit or dot.
-        for start in wordStart.matches(in: text, range: NSRange(location: 0, length: ns.length)).map(\.range.location)
-        where start >= copied {
-            let rest = NSRange(location: start, length: ns.length - start)
-            for (rx, monthFirst) in [(dayFirst, false), (monthFirst, true)] {
-                // The first match is checked as a whole: "twenty ninth of February twenty twenty five" stays.
-                guard let m = rx.firstMatch(in: text, options: [.anchored, .withTransparentBounds], range: rest),
-                      let date = convert(m, ns, monthFirst: monthFirst) else { continue }
-                out += ns.substring(with: NSRange(location: copied, length: start - copied)) + date
-                copied = NSMaxRange(m.range)
-                break
+        let w = Words(text)
+        var out = String.UnicodeScalarView(), copied = 0, i = 0
+        while i < w.at.count {
+            guard let f = w.date(i) else { i += 1; continue }
+            if let date = f.date {
+                out.append(contentsOf: w.s[copied..<w.at[i].0])
+                out.append(contentsOf: date.unicodeScalars)
+                copied = f.end
             }
+            i = f.next
         }
-        return out + ns.substring(from: copied)
+        out.append(contentsOf: w.s[copied...])
+        return String(out)
     }
 
-    static func words(_ s: String) -> [String] { s.split(separator: " ").map(String.init) }
-    static let enOrdinals = words("first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth "
-                                  + "thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth")
-    static let enNumbers = words("one two three four five six seven eight nine ten eleven twelve thirteen fourteen "
-                                 + "fifteen sixteen seventeen eighteen nineteen")
-    static let deNumbers = words("ein zwei drei vier fünf sechs sieben acht neun zehn elf zwölf dreizehn vierzehn "
-                                 + "fünfzehn sechzehn siebzehn achtzehn neunzehn")
+    static func list(_ s: String) -> [String] { s.split(separator: " ").map(String.init) }
+    static let monthsEn = list("january february march april may june july august september october november december")
+    static let monthsDe = list("januar februar märz april mai juni juli august september oktober november dezember")
+    static let units = list("one two three four five six seven eight nine")
+    static let teens = list("ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen")
+    static let tens = list("twenty thirty forty fifty sixty seventy eighty ninety")
+    static let ordinals = list("first second third fourth fifth sixth seventh eighth ninth tenth eleventh twelfth "
+                               + "thirteenth fourteenth fifteenth sixteenth seventeenth eighteenth nineteenth")
+    static let einer = list("ein zwei drei vier fünf sechs sieben acht neun")
+    static let zehner = list("zehn elf zwölf dreizehn vierzehn fünfzehn sechzehn siebzehn achtzehn neunzehn")
+    static let ziger = list("zwanzig dreißig vierzig fünfzig sechzig siebzig achtzig neunzig")
+    static let ordnung = list("erst zweit dritt viert fünft sechst siebt acht neunt")
+    /// What may follow a short year: `.` `;` `:` `!` `?` `)` and closing quotes ("July 26, 26", „... sechsundzwanzig“).
+    static let ends: Set<Unicode.Scalar> = Set(".;:!?)\"'’”“»«".unicodeScalars)
 
-    static let enOrd: [String: Int] = {
-        var d = Dictionary(uniqueKeysWithValues: enOrdinals.enumerated().map { ($1, $0 + 1) })
-        d["twentieth"] = 20; d["thirtieth"] = 30; d["thirty first"] = 31
-        for (i, u) in enOrdinals.prefix(9).enumerated() { d["twenty \(u)"] = 21 + i }
-        return d
-    }()
-    /// 1 to 99 in words, with tens and units apart: "twenty six".
-    static let enCard: [String: Int] = {
-        var d = Dictionary(uniqueKeysWithValues: enNumbers.enumerated().map { ($1, $0 + 1) })
-        for (i, t) in words("twenty thirty forty fifty sixty seventy eighty ninety").enumerated() {
-            d[t] = 20 + 10 * i
-            for (j, u) in enNumbers.prefix(9).enumerated() { d["\(t) \(u)"] = 21 + 10 * i + j }
-        }
-        return d
-    }()
-    /// 1 to 99 in words, one word: "sechsundzwanzig".
-    static let deCard: [String: Int] = {
-        var d = Dictionary(uniqueKeysWithValues: deNumbers.enumerated().map { ($1, $0 + 1) })
-        d["eins"] = 1
-        for (i, t) in words("zwanzig dreißig vierzig fünfzig sechzig siebzig achtzig neunzig").enumerated() {
-            d[t] = 20 + 10 * i
-            for (j, u) in deNumbers.prefix(9).enumerated() { d["\(u)und\(t)"] = 21 + 10 * i + j }
-        }
-        return d
-    }()
-    /// German ordinal stems; the word adds -e, -er, -en, -es or -em.
-    static let deOrdStem: [String: Int] = {
-        let stems = words("erst zweit dritt viert fünft sechst siebt acht neunt zehnt elft zwölft dreizehnt vierzehnt "
-                          + "fünfzehnt sechzehnt siebzehnt achtzehnt neunzehnt")
-        var d = Dictionary(uniqueKeysWithValues: stems.enumerated().map { ($1, $0 + 1) })
-        d["siebent"] = 7; d["zwanzigst"] = 20; d["dreißigst"] = 30; d["einunddreißigst"] = 31
-        for (i, u) in deNumbers.prefix(9).enumerated() { d["\(u)undzwanzigst"] = 21 + i }
-        return d
-    }()
-    static let months: [String: Int] = [
-        "january": 1, "february": 2, "march": 3, "april": 4, "may": 5, "june": 6, "july": 7, "august": 8,
-        "september": 9, "october": 10, "november": 11, "december": 12,
-        "januar": 1, "februar": 2, "märz": 3, "mai": 5, "juni": 6, "juli": 7, "oktober": 10, "dezember": 12,
-    ]
+    /// 1 for the first entry of `list`.
+    static func pos(_ list: [String], _ w: some StringProtocol) -> Int? { list.firstIndex { $0 == w }.map { $0 + 1 } }
+    static func month(_ w: String) -> Int? { pos(monthsEn, w) ?? pos(monthsDe, w) }
 
-    /// Case, hyphens and the ASCII spellings of umlauts and ß.
-    static func fold(_ s: String) -> String {
-        [("-", " "), ("ae", "ä"), ("oe", "ö"), ("ue", "ü"), ("ss", "ß")]
-            .reduce(s.lowercased()) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
-    }
-    /// Longest first, so "twenty six" wins over "twenty"; a hyphen equals a space.
-    static func alt<S: Sequence<String>>(_ words: S) -> String {
-        words.sorted { $0.count > $1.count }.map { $0.replacingOccurrences(of: " ", with: "[ -]") }.joined(separator: "|")
-    }
-    static func umlauts(_ p: String) -> String {
-        [("ä", "(?:ä|ae)"), ("ö", "(?:ö|oe)"), ("ü", "(?:ü|ue)"), ("ß", "(?:ß|ss)")]
-            .reduce(p) { $0.replacingOccurrences(of: $1.0, with: $1.1) }
+    /// English 1 to 99: "six", "twelve", "twenty six".
+    static func enNumber(_ p: String) -> Int? {
+        let parts = p.split(separator: " ", maxSplits: 1)
+        if parts.count == 2 {
+            guard let t = pos(tens, parts[0]), let u = pos(units, parts[1]) else { return nil }
+            return t * 10 + 10 + u
+        }
+        return pos(units, p) ?? pos(teens, p).map { $0 + 9 } ?? pos(tens, p).map { $0 * 10 + 10 }
     }
 
-    static let (dayFirst, monthFirst, wordStart): (NSRegularExpression, NSRegularExpression, NSRegularExpression) = {
-        let enOrdRe = alt(enOrd.keys)
-        let deOrd = umlauts("(?:\(alt(deOrdStem.keys)))(?:er|en|es|em|e)")
-        let notTens = "(?<!twenty )(?<!twenty-)(?<!thirty )(?<!thirty-)"  // in "twenty ninth" the day is 29, never 9
-        let dayWord = "(?:\(notTens)(?:\(enOrdRe))|\(deOrd))"
-        let dayDigit = "(?:[0-9]{1,2}(?:st|nd|rd|th)|[0-9]{1,2}\\.|[0-9]{1,2})"
-        let month = umlauts(alt(months.keys))
-        let enTens = alt(enCard.filter { $0.value >= 10 }.keys)
-        let enYear = "(?:(?:twenty|nineteen)[ -](?:oh[ -](?:\(alt(enNumbers.prefix(9))))|\(enTens))"
-            + "|two thousand(?:(?: and)? (?:\(alt(enCard.keys))))?)"
-        let deYear = umlauts("(?:(?:zweitausend|neunzehnhundert)(?:[ ]?(?:und)?[ ]?(?:\(alt(deCard.keys))))?)")
-        // A short year only before punctuation or the end: "July fourth twenty six people" is a count.
-        let short = umlauts("(?:[0-9]{2}|\(enTens)|\(alt(deCard.filter { $0.value >= 10 }.keys)))") + "(?=[.,;:!?)]|$)"
-        let year = "(?:,? (?<year>[0-9]{4}|\(enYear)|\(deYear)|\(short)))?(?!\\w)(?<dot>\\.)?"
-        let b = "(?<![\\w.])"
-        func rx(_ p: String) -> NSRegularExpression { try! NSRegularExpression(pattern: p, options: .caseInsensitive) }
-        return (rx("\(b)(?:the )?(?<day>\(dayWord)|\(dayDigit))(?<of> of)? (?<month>\(month))\(year)"),
-                rx("\(b)(?<month>\(month))(?: the)? (?<day>(?:\(enOrdRe))|[0-9]{1,2}(?:st|nd|rd|th)?)\(year)"),
-                rx("\(b)\\w"))
-    }()
-
-    static func convert(_ m: NSTextCheckingResult, _ ns: NSString, monthFirst: Bool) -> String? {
-        func group(_ name: String) -> String? {
-            let r = m.range(withName: name)
-            return r.location == NSNotFound ? nil : ns.substring(with: r)
+    /// English day 1 to 31: "first", "twentieth", "twenty sixth".
+    static func enOrdinal(_ p: String) -> Int? {
+        let parts = p.split(separator: " ", maxSplits: 1)
+        if parts.count == 2 {
+            if parts[0] == "twenty" { return pos(Array(ordinals.prefix(9)), parts[1]).map { $0 + 20 } }
+            return parts[0] == "thirty" && parts[1] == "first" ? 31 : nil
         }
-        guard let monthText = group("month"), let mo = months[fold(monthText)], let dayText = group("day"),
-              let d = dayValue(dayText) else { return nil }
-        if monthFirst, fold(monthText) == "may", monthText != "May" { return nil }  // "you may first want to" is the verb
-        let yearText = group("year")
-        let yy = yearText.flatMap(yearValue)
-        if yearText != nil, yy == nil { return nil }
-        guard valid(d, mo, year: yearText.map { fullYear($0, yy!) }) else { return nil }
-        // "Fourth of July" without a year is the holiday's name (docs/text-rules.md, decision).
-        if !monthFirst, yearText == nil, d == 4, mo == 7, group("of") != nil { return nil }
-        guard let yy else { return String(format: "%02d.%02d.", d, mo) }  // a following "." is the date's own dot
-        return String(format: "%02d.%02d.%02d", d, mo, yy) + (group("dot") ?? "")
+        return pos(ordinals, p) ?? ["twentieth": 20, "thirtieth": 30][p]
     }
 
-    static func dayValue(_ s: String) -> Int? {
-        let digits = s.prefix { $0.isASCII && $0.isNumber }  // "26", "26th", "26."
-        if !digits.isEmpty { return Int(digits) }
-        let f = fold(s)
-        if let n = enOrd[f] { return n }
-        for end in ["er", "en", "es", "em", "e"] where f.hasSuffix(end) {
-            if let n = deOrdStem[String(f.dropLast(end.count))] { return n }
+    /// German 1 to 99 as one word: "eins", "zwölf", "sechsundzwanzig".
+    static func deNumber(_ w: some StringProtocol) -> Int? {
+        if let r = w.range(of: "und") {
+            guard let t = pos(ziger, w[r.upperBound...]), let e = pos(einer, w[..<r.lowerBound]) else { return nil }
+            return t * 10 + 10 + e
         }
+        if w == "eins" { return 1 }
+        return pos(einer, w) ?? pos(zehner, w).map { $0 + 9 } ?? pos(ziger, w).map { $0 * 10 + 10 }
+    }
+
+    /// German day as one word with its ending: "erste", "siebten", "zwölfter", "sechsundzwanzigsten".
+    static func deOrdinal(_ w: String) -> Int? {
+        guard let end = ["er", "en", "es", "em", "e"].first(where: w.hasSuffix) else { return nil }
+        let stem = w.dropLast(end.count)
+        if stem == "siebent" { return 7 }
+        if let n = pos(ordnung, stem) { return n }
+        if stem.hasSuffix("t"), let n = pos(zehner, stem.dropLast()) { return n + 9 }
+        if stem.hasSuffix("st"), let n = deNumber(stem.dropLast(2)), n >= 20 { return n }
         return nil
     }
 
-    static func yearValue(_ s: String) -> Int? {
-        if let n = Int(s) { return n % 100 }
-        let f = fold(s)
-        if let n = enCard[f] ?? deCard[f] { return n }
-        for head in ["zweitausend", "neunzehnhundert"] where f.hasPrefix(head) {
-            var rest = f.dropFirst(head.count).trimmingCharacters(in: .whitespaces)
-            if rest.hasPrefix("und") { rest = rest.dropFirst(3).trimmingCharacters(in: .whitespaces) }
-            return rest.isEmpty ? 0 : deCard[rest]
-        }
-        let w = words(f)
-        if w.starts(with: ["two", "thousand"]) {
-            let rest = w.dropFirst(2).filter { $0 != "and" }.joined(separator: " ")
-            return rest.isEmpty ? 0 : enCard[rest]
-        }
-        return enCard[w.dropFirst(w.dropFirst().first == "oh" ? 2 : 1).joined(separator: " ")]
+    /// zweitausend, zweitausendsechsundzwanzig, zweitausend sechsundzwanzig, zweitausendundfünf, neunzehnhundert...
+    static func deYear(_ p: String) -> Int? {
+        let all = p.replacingOccurrences(of: " ", with: "")
+        guard let head = ["zweitausend", "neunzehnhundert"].first(where: all.hasPrefix) else { return nil }
+        let rest = all.dropFirst(head.count)
+        if rest.isEmpty { return 0 }
+        return deNumber(rest.hasPrefix("und") ? rest.dropFirst(3) : rest)
     }
 
-    static func fullYear(_ s: String, _ yy: Int) -> Int {
-        if s.count == 4, let n = Int(s) { return n }
-        let f = fold(s)
-        return (f.hasPrefix("nineteen") || f.hasPrefix("neunzehn") ? 1900 : 2000) + yy
+    /// "26", "26th" or "1st": the day, and whether it is bare digits (only those take the German "26.").
+    static func digitDay(_ w: String) -> (Int, Bool)? {
+        let b = Array(w.utf8)
+        let n = b.firstIndex { !(48...57).contains($0) } ?? b.count
+        guard (1...2).contains(n), ["", "st", "nd", "rd", "th"].contains(String(decoding: b[n...], as: UTF8.self))
+        else { return nil }
+        return (Int(String(decoding: b[..<n], as: UTF8.self))!, n == b.count)
     }
 
-    /// 29 February needs a leap year only when a year is given.
-    static func valid(_ d: Int, _ m: Int, year: Int?) -> Bool {
-        var days = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
-        if m == 2, let y = year, !(y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)) { days = 28 }
-        return (1...days).contains(d)
+    static func digits(_ w: String, _ n: Int) -> Int? {
+        w.utf8.count == n && w.utf8.allSatisfy { (48...57).contains($0) } ? Int(w) : nil
+    }
+
+    /// A date found at a word: its numbers, the word after it, and where it ends in `s`. `date` is nil for a
+    /// phrase that stays as it is, as a whole: its month starts no other date.
+    struct Found { let date: String?, next: Int, end: Int }
+    typealias Year = (yy: Int, full: Int, next: Int)
+
+    /// The text as words (runs of `\w`) and what is between them, by Unicode scalar like the Rust `char`s.
+    struct Words {
+        let s: [Unicode.Scalar]
+        let at: [(Int, Int)]
+        /// Word `i` in lowercase, with ae, oe, ue and ss read as ä, ö, ü and ß.
+        let folded: [String]
+
+        init(_ text: String) {
+            s = Array(text.unicodeScalars)
+            var at: [(Int, Int)] = [], i = 0
+            while i < s.count {
+                guard Words.isWord(s[i]) else { i += 1; continue }
+                let a = i
+                while i < s.count, Words.isWord(s[i]) { i += 1 }
+                at.append((a, i))
+            }
+            self.at = at
+            let s = s
+            folded = at.map { a, b in
+                [("ae", "ä"), ("oe", "ö"), ("ue", "ü"), ("ss", "ß")].reduce(Words.string(s[a..<b]).lowercased()) {
+                    $0.replacingOccurrences(of: $1.0, with: $1.1)
+                }
+            }
+        }
+
+        /// Regex `\w`, as Rust's `is_alphanumeric() || '_'`.
+        static func isWord(_ c: Unicode.Scalar) -> Bool {
+            c.properties.isAlphabetic || c.properties.numericType != nil || c == "_"
+        }
+        static func isDigit(_ c: Unicode.Scalar) -> Bool { ("0"..."9").contains(c) }
+        static func string(_ s: ArraySlice<Unicode.Scalar>) -> String { String(String.UnicodeScalarView(s)) }
+
+        /// "" past the end.
+        func word(_ i: Int) -> String { i < folded.count ? folded[i] : "" }
+
+        /// The text after word `i` up to the next word, or to the end after the last one.
+        func gap(_ i: Int) -> String {
+            guard i < at.count else { return "" }
+            return Words.string(s[at[i].1..<(i + 1 < at.count ? at[i + 1].0 : s.count)])
+        }
+
+        /// A hyphen equals a space inside a spoken number.
+        func spaced(_ i: Int) -> Bool { [" ", "-"].contains(gap(i)) }
+
+        /// The longest run of up to `max` spaced words from `i` that `f` reads: its value and length.
+        func longest(_ i: Int, _ max: Int, _ f: (String) -> Int?) -> (Int, Int)? {
+            for n in stride(from: max, through: 1, by: -1) where i + n <= at.count && (i..<i + n - 1).allSatisfy(spaced) {
+                if let v = f((i..<i + n).map(word).joined(separator: " ")) { return (v, n) }
+            }
+            return nil
+        }
+
+        func date(_ i: Int) -> Found? {
+            let a = at[i].0
+            if a > 0, s[a - 1] == "." { return nil }  // inside "26.07.26": already numbers
+            if a > 1, ",:/-".unicodeScalars.contains(s[a - 1]), Words.isDigit(s[a - 2]) {
+                return nil  // inside a number: "10:30 July 4th"
+            }
+            return dayFirst(i) ?? monthFirst(i)
+        }
+
+        /// `[the] DAY [of] MONTH [,] [YEAR]`
+        func dayFirst(_ i: Int) -> Found? {
+            let the = word(i) == "the" && gap(i) == " "
+            let d = i + (the ? 1 : 0)
+            // A spelled day is the whole number: in "twenty ninth" the day is 29, never "ninth", and "forty first",
+            // "hundred and first" and "sechs und zwanzigsten" are no day. Cleanup leaves "twenty, ninth" from
+            // "twenty, uh, ninth".
+            let big = ["hundred", "thousand"]
+            let numberBefore = d > 0 && [" ", "-", ", "].contains(gap(d - 1)) && (pos(tens, word(d - 1)) != nil
+                || big.contains(word(d - 1)) || (word(d - 1) == "and" && d > 1 && spaced(d - 2) && big.contains(word(d - 2))))
+            let undBefore = d > 1 && word(d - 1) == "und" && gap(d - 1) == " " && gap(d - 2) == " "
+                && pos(einer, word(d - 2)) != nil
+            let day: Int, n: Int, bare: Bool, en: Bool
+            if !numberBefore, let r = longest(d, 2, enOrdinal) {
+                (day, n, bare, en) = (r.0, r.1, false, true)
+            } else if !undBefore, let v = deOrdinal(word(d)) {
+                (day, n, bare, en) = (v, 1, false, false)
+            } else {
+                guard let r = digitDay(word(d)) else { return nil }
+                (day, n, bare, en) = (r.0, 1, r.1, false)
+            }
+            let g = gap(d + n - 1)
+            let dot = bare && g == ". "
+            guard g == " " || dot else { return nil }
+            // "of" never ends a phrase, so a comma after it is a dropped filler's: "the first of, um, March".
+            let of = word(d + n) == "of" && [" ", ", "].contains(gap(d + n))
+            if en && !of { return nil }  // "my first April", "this is my third September"
+            if bare && of { return nil }  // "week 2 of March", "Chapter 3 of May's report" count, they are no day
+            let m = d + n + (of ? 1 : 0)
+            guard let mo = month(word(m)) else { return nil }
+            if gap(m).hasPrefix("-") { return nil }  // "die erste Juli-Woche" is a week
+            if dot && pos(monthsDe, word(m)) == nil {
+                return nil  // the German "26." needs a German month: "version 2. March is next", "5. May I ask"
+            }
+            if !of && ["may", "march"].contains(word(m)) && !capital(m) {
+                return nil  // "the second may be better", "the first march was long"
+            }
+            let keep = Found(date: nil, next: m + 1, end: 0)
+            let year = self.year(m)
+            if of && year == nil && (day, mo) == (4, 7) { return keep }  // "Happy Fourth of July!" is the holiday's name
+            return found(day, mo, m, year) ?? keep  // "the 31st of February" stays, and "February 15" in it is no date
+        }
+
+        /// `MONTH [the] DAY [,] [YEAR]`, with an English month and an English or digit day. German puts the day
+        /// first, so "Mai 2" in "I met Mai 2 weeks ago" is no date.
+        func monthFirst(_ i: Int) -> Found? {
+            guard let mo = pos(monthsEn, word(i)) else { return nil }
+            if word(i) == "may" && !capital(i) { return nil }  // "you may first want to"
+            guard gap(i) == " " else { return nil }
+            let the = word(i + 1) == "the" && gap(i + 1) == " "
+            let d = i + 1 + (the ? 1 : 0)
+            let day: Int, n: Int
+            if let r = longest(d, 2, enOrdinal) {
+                if gap(d + r.1 - 1).hasPrefix("-") { return nil }  // "In March second-quarter numbers dropped"
+                (day, n) = r
+            } else if joined(d) {
+                return nil  // "June 26.07.2026", "July 10:30", "March 3-5", "July 26%"
+            } else {
+                guard let r = digitDay(word(d)) else { return nil }
+                (day, n) = (r.0, 1)
+            }
+            let year = self.year(d + n - 1)
+            let last = year.map { $0.next - 1 } ?? d + n - 1
+            if the && mo == 5 && gap(last) == " " && word(last + 1) == "be" {
+                return nil  // "May the fourth be with you" is a wish
+            }
+            return found(day, mo, d + n - 1, year)
+        }
+
+        /// The year after word `last` (a comma between is fine): its last two digits, the full year and the
+        /// word after it.
+        func year(_ last: Int) -> Year? {
+            guard [" ", ", "].contains(gap(last)) else { return nil }
+            let y = last + 1, w = word(y)
+            let yy: Int, full: Int, n: Int
+            if let v = Dates.digits(w, 4) {
+                guard (1900...2099).contains(v) else { return nil }  // "On May 5th 1350 visitors came" is a count
+                (yy, full, n) = (v % 100, v, 1)
+            } else {
+                let century = w.hasPrefix("nineteen") || w.hasPrefix("neunzehn") ? 1900 : 2000
+                guard let r = spokenYear(y, w) else { return nil }
+                (yy, full, n) = (r.0, century + r.0, r.1)
+            }
+            // A year ending in 00 is also a round count: "On July 4th two thousand people marched". And a year
+            // never stops inside a hyphenated word: "nineteen twenty-first" is not 1920.
+            let l = y + n - 1
+            return (yy != 0 || ends(l)) && !gap(l).hasPrefix("-") ? (yy, full, y + n) : nil
+        }
+
+        /// A spelled or two-digit year at word `y` (`w`): its last two digits and its length in words.
+        func spokenYear(_ y: Int, _ w: String) -> (Int, Int)? {
+            if w == "nineteen" && spaced(y) && word(y + 1) == "hundred" { return (0, 2) }
+            // twenty twenty-six, nineteen ninety nine, twenty oh nine
+            if (w == "twenty" || w == "nineteen") && spaced(y) {
+                if word(y + 1) == "oh" && spaced(y + 1), let u = pos(units, word(y + 2)) { return (u, 3) }
+                if let r = longest(y + 1, 2, enNumber), r.0 >= 10 { return (r.0, 1 + r.1) }
+            }
+            // two thousand, two thousand five, two thousand and twenty six
+            if w == "two" && spaced(y) && word(y + 1) == "thousand" {
+                let and = spaced(y + 1) && word(y + 2) == "and" && spaced(y + 2) ? 1 : 0
+                guard spaced(y + 1), let r = longest(y + 2 + and, 2, enNumber) else { return (0, 2) }
+                return (r.0, 2 + and + r.1)
+            }
+            // zweitausend sechs und zwanzig is 2026 as a whole, never 2006
+            if let found = longest(y, 4, deYear) { return found }
+            // A short year (26, twenty six, sechsundzwanzig) only where `ends`: in "July fourth twenty six people
+            // came" it is a count.
+            let short = Dates.digits(w, 2).map { ($0, 1) }
+                ?? (longest(y, 2, enNumber) ?? deNumber(w).map { ($0, 1) }).flatMap { $0.0 >= 10 ? $0 : nil }
+            guard let r = short, ends(y + r.1 - 1) else { return nil }
+            return r
+        }
+
+        /// The end of the text, or `.` `;` `:` `!` `?` `)` or a quote without a digit right after it, follows word
+        /// `k`. A comma does not count: in "May 15, 16, and 17" the 16 is a day, and in "March 5, 10:30" a time.
+        func ends(_ k: Int) -> Bool {
+            let e = at[k].1
+            guard e < s.count else { return true }
+            return Dates.ends.contains(s[e]) && !(e + 1 < s.count && Words.isDigit(s[e + 1]))
+        }
+
+        /// Word `k` runs on into another number or a sign: only a space, the end, or `,` or what `ends` takes,
+        /// without a digit right after it, ends a day. "26.07.2026", "10:30", "3-5", "26/27" and "26%" stay.
+        func joined(_ k: Int) -> Bool {
+            guard k < at.count, at[k].1 < s.count else { return false }
+            let e = at[k].1, c = s[e]
+            return !c.properties.isWhitespace
+                && (!(c == "," || Dates.ends.contains(c)) || (e + 1 < s.count && Words.isDigit(s[e + 1])))
+        }
+
+        /// Word `i` starts with a capital: "May", "MAY".
+        func capital(_ i: Int) -> Bool { s[at[i].0].properties.isUppercase }
+
+        /// The date as numbers if it exists, from its fields and its last word before the year.
+        func found(_ day: Int, _ mo: Int, _ last: Int, _ year: Year?) -> Found? {
+            let leap = { (y: Int) in y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) }
+            let feb = year.map { leap($0.full) ? 29 : 28 } ?? 29
+            guard (1...[31, feb, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mo - 1]).contains(day) else { return nil }
+            if let y = year {
+                return Found(date: String(format: "%02d.%02d.%02d", day, mo, y.yy), next: y.next, end: at[y.next - 1].1)
+            }
+            // A "." right after "DD.MM." is the date's own dot.
+            let end = at[last].1, dot = end < s.count && s[end] == "." ? 1 : 0
+            return Found(date: String(format: "%02d.%02d.", day, mo), next: last + 1, end: end + dot)
+        }
     }
 }
