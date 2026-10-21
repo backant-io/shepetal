@@ -56,34 +56,40 @@ final class AppearanceTests: XCTestCase {
     }
 
     /// A fixed SwiftUI fill leaves every view's appearance alone, so the source is checked too: no forced color
-    /// scheme, no pinned appearance and no fixed white or black background outside 🤫 and the meeting card.
+    /// scheme, no pinned appearance and no fixed white, black or RGB background or text colour outside 🤫 and the
+    /// meeting card.
+    /// ponytail: a line scan, so a fixed colour kept in a variable or an asset catalog passes; the runtime checks
+    /// above only draw the Home tab and an empty transcript window, and M-THEME-1 covers the rest by hand.
     func testNoWindowSourceForcesAColorScheme() throws {
         let dir = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .appendingPathComponent("../../Sources/Shepetal").standardizedFileURL
         let files = try FileManager.default.subpathsOfDirectory(atPath: dir.path).filter { $0.hasSuffix(".swift") }
         XCTAssertTrue(files.contains("Hub.swift"), dir.path)
         let forced = #"preferredColorScheme|colorScheme\(|\\.colorScheme,|NSAppearance\(named|\.appearance\s*="#
-        let fixed = #"background[^\n]*(\.white|\.black|Color\((red|white)|NSColor\((red|white|calibrated|device|srgb))"#
+        let fixed = #"(background|foreground|textcolor)[^\n]*(\.white\b|\.black\b|Color\((\.s?rgb|\.displayp3|red|white|hue)|NSColor\((red|white|calibrated|device|srgb|displayp3))"#
         for f in files where !["Indicator.swift", "Meetings/MeetingCard.swift"].contains(f) {
             let code = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8)
                 .components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
                 .joined(separator: "\n")
             if let r = code.range(of: forced, options: .regularExpression) { XCTFail("\(f) forces light or dark: \(code[r])") }
-            if let r = code.range(of: fixed, options: .regularExpression) { XCTFail("\(f) paints a fixed background: \(code[r])") }
+            if let r = code.range(of: fixed, options: [.regularExpression, .caseInsensitive]) {
+                XCTFail("\(f) paints a fixed colour: \(code[r])")
+            }
         }
     }
 
+    /// The plate's CGColor is resolved when 🤫 is built, so it is built in Light: a system colour that is dark
+    /// only in Dark mode would fail here.
     func testIndicatorStaysDarkInLightMode() throws {
+        NSApp.appearance = NSAppearance(named: .aqua)
         let indicator = Indicator(screen: { NSRect(x: 0, y: 0, width: 1440, height: 900) }, present: { _ in })
         XCTAssertFalse(indicator.panel.isVisible, "tests must not put 🤫 on screen")
         let label = try XCTUnwrap(indicator.panel.contentView?.subviews.compactMap { $0 as? NSTextField }.first)
-        for name in [NSAppearance.Name.aqua, .darkAqua] {
-            NSApp.appearance = NSAppearance(named: name)
-            assertDarkHUD(label, label.layer?.backgroundColor, "🤫's hint in \(name.rawValue)")
-        }
+        assertDarkHUD(label, label.layer?.backgroundColor, "🤫's hint in Light")
     }
 
     func testMeetingCardStaysDarkInLightMode() throws {
+        NSApp.appearance = NSAppearance(named: .aqua)  // built in Light, like 🤫 above
         let card = MeetingCard(screen: { NSRect(x: 0, y: 0, width: 1440, height: 900) }, present: { _ in },
                                onRecord: {}, onNotNow: {})
         XCTAssertFalse(card.panel.isVisible, "tests must not put the card on screen")
