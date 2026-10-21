@@ -19,6 +19,8 @@ final class Pipeline {
         var inserted: String = ""
         var paste: Inserter.Result?
         var cleanupModel: String?    // set when the local model's rewrite was used
+        var snippet: Snippet?        // F40: the whole dictation was this snippet's trigger
+        var translationHint: String? // F41: why the text was not translated, for the hint next to 🤫
         var error: String?
     }
 
@@ -32,6 +34,8 @@ final class Pipeline {
     private(set) var downloadingCleanup = false
     let models: URL  // the downloaded cleanup model's dir
     let dictionary: URL  // dictionary.txt in this pipeline's data dir
+    let snippets: URL  // snippets.toml next to it (F40)
+    let voiceFile: URL  // voice.json in this pipeline's data dir: My voice (F38), read on every dictation
     /// Formatted or Raw per app (F33), read on every dictation. Tests pass their own UserDefaults suite.
     var appFormat = AppFormat()
     /// Writes a recording's WAV. Runs off the main thread: on Pavel's nearly full disk, while macOS purged
@@ -44,6 +48,14 @@ final class Pipeline {
     var pressEnterCommand: () -> Bool = { UserDefaults.standard.bool(forKey: PressEnter.key) }
     /// Where Settings' style picks are read (F37). Tests pass a throwaway suite.
     var styleDefaults = UserDefaults.standard
+    /// F41's Translate to English, after the text step and before the fit, for dictation and re-transcribe. Tests set it.
+    var translate = TranslateStep()
+    /// F28: the links copied in the last 24 hours, newest first, nil for one never offered (LinkWatcher). Tests
+    /// set their own.
+    var recentLinks: () -> [String?] = { [] }
+    /// F18: the seconds after which a dictation still in speech-to-text or cleanup gets `process`'s `slow`, read at
+    /// each dictation (`defaults write io.backant.shepetal slowNoticeSeconds <s>`; 0 is off). Tests set it.
+    var slowAfter: () -> TimeInterval = { SlowNotice.seconds() }
 
     /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
     /// Tests pass a temp `root` and a private named pasteboard.
@@ -55,6 +67,8 @@ final class Pipeline {
         writeAudio = { try store.save($0, id: $1) }
         history = try History(path: root.appendingPathComponent("history.sqlite"))
         dictionary = root.appendingPathComponent("dictionary.txt")
+        snippets = root.appendingPathComponent("snippets.toml")
+        voiceFile = root.appendingPathComponent("voice.json")
         models = root.appendingPathComponent("models")
     }
 
@@ -65,18 +79,25 @@ final class Pipeline {
     /// `focusKept` says whether the window focused when the dictation started is still focused (nil: unknown),
     /// and `secureInput` names the app holding secure input. When focus moved or secure input is on, nothing is
     /// pasted and the text is left on the clipboard (rule 8). Focus is never moved back. The defaults skip them.
+    /// `slow` runs once, on the main actor, when the text is still not ready after `slowAfter` seconds (F18).
     /// `decided` gets the outcome (an error message, or nil when the text landed) as soon as it is known; the
     /// WAV and the history row can still be waiting on the disk then. `process` returns once both are written.
     func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
                  context: () -> FocusedText.Context, willPaste: () -> Void = {},
                  focusKept: () -> Bool? = { nil }, secureInput: () -> String? = { nil },
-                 sendPaste: (CGEvent) -> Void, decided: (String?) -> Void = { _ in }) async -> Run {
+                 sendPaste: (CGEvent) -> Void, slow: @escaping @MainActor () -> Void = {},
+                 decided: (String?) -> Void = { _ in }) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
                                           durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
         let id = run.entry.id, write = writeAudio
         let saving = Task.detached { try write(samples, id) }  // first, so the audio survives anything below
-        let error = await transcribeAndInsert(samples, engine, t0, context, willPaste, focusKept, secureInput, sendPaste, &run)
+        // F18: `slow` runs once when speech-to-text and cleanup outlast `slowAfter`; never once the paste starts, nor after Esc.
+        let watch = SlowWatch(after: slowAfter(), slow)
+        let error = await withTaskCancellationHandler {
+            await transcribeAndInsert(samples, engine, t0, context, { watch.stop(); willPaste() }, focusKept, secureInput, sendPaste, &run)
+        } onCancel: { watch.stop() }
+        watch.stop()
         decided(error)
         let saveError = await saved(saving, &run)
         run.error = saveError ?? error
@@ -127,7 +148,17 @@ final class Pipeline {
             CleanupContext(before: $0.before, after: $0.after, selected: $0.selected)
         } ?? .none)
         let command = pressEnterCommand() ? PressEnter.split(cleaned.text, raw: run.entry.rawText) : (text: cleaned.text, enter: false)
-        run.entry.text = command.text
+        run.snippet = cleaned.snippet
+        // F41: the row's raw text keeps what was said. A snippet goes in exactly as stored, untranslated (F40).
+        var translated: (text: String, hint: String?) = (command.text, nil)
+        if run.snippet == nil { translated = await translate(command.text) }
+        run.entry.text = translated.text
+        run.translationHint = translated.hint
+        // F28: links go in after the text step and only for commands in the raw transcript, so neither the field
+        // around the cursor nor the model can paste one, and re-transcribing a row never inserts today's links. Only
+        // the paste gets them: the history row keeps the command, so a link never reaches the disk. A snippet is
+        // pasted exactly as stored (F40).
+        let text = run.snippet == nil ? Links.insert(run.entry.text, links: recentLinks(), said: run.entry.rawText) : run.entry.text
         run.cleanupModel = cleaned.usedModel ? cleanup?.name : nil
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
@@ -137,13 +168,15 @@ final class Pipeline {
         }
         // Rule 8 before the field is read: when the text is not pasted, the field that has focus now is not
         // where it goes. And again right before the paste: focus or secure input can change during the read.
-        if let message = blocked(focusKept, secureInput, &run) { return message }
+        if let message = blocked(text, focusKept, secureInput, &run) { return message }
         willPaste()
         let (before, after, selected) = field ?? context()
-        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selected)
-        if let message = blocked(focusKept, secureInput, &run) { return message }
+        // F40: a snippet goes in exactly as stored, without the fit to the cursor.
+        run.inserted = run.snippet == nil ? InsertionRules.fit(text, before: before, after: after, selected: selected) : text
+        if let message = blocked(text, focusKept, secureInput, &run) { return message }
         // F22: the app's paste mode. Rule 8 is asked again wherever the mode waits, and before Return (F42).
-        let paste = await inserter.insert(run.inserted, mode: PasteMode.current(for: run.entry.bundleId), sendPaste: sendPaste,
+        let paste = await inserter.insert(run.inserted, html: run.snippet?.rendered.html,
+                                          mode: PasteMode.current(for: run.entry.bundleId), sendPaste: sendPaste,
                                           stillFocused: { PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) == nil },
                                           pressReturn: command.enter)
         run.paste = paste
@@ -153,9 +186,9 @@ final class Pipeline {
 
     /// Rule 8: nothing is pasted when focus moved or secure input is on. The text waits on the clipboard as
     /// dictated, since the user pastes it somewhere else.
-    private func blocked(_ focusKept: () -> Bool?, _ secureInput: () -> String?, _ run: inout Run) -> String? {
+    private func blocked(_ text: String, _ focusKept: () -> Bool?, _ secureInput: () -> String?, _ run: inout Run) -> String? {
         guard let message = PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) else { return nil }
-        run.inserted = InsertionRules.fit(run.entry.text, before: "", after: "")
+        run.inserted = run.snippet == nil ? InsertionRules.fit(text, before: "", after: "") : text
         inserter.leaveOnClipboard(run.inserted)
         run.entry.outcome = .pasteFailed
         return message
@@ -169,15 +202,23 @@ final class Pipeline {
 
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub), in the
     /// mode `appFormat` gives the app: `AppFormat.finish` (F33), with the style picked for the app's category (F37)
-    /// and `context`, the text around the cursor for the cleanup model (F24; re-transcription has none). `bundleId`
-    /// and `url` are the run's or the row's. InsertionRules fits the result to the cursor afterwards. Runs off the
-    /// main thread.
+    /// and `context`, the text around the cursor for the cleanup model (F24; re-transcription has none), and My voice
+    /// from `voiceFile` (F38). `bundleId` and `url` are the run's or the row's. InsertionRules fits the result to the
+    /// cursor afterwards. Runs off the main thread. A dictation that is only a snippet's trigger is that snippet's
+    /// text, in either mode (F40).
     func finishText(_ raw: String, bundleId: String = "", url: String = "",
-                    context: CleanupContext = .none) async -> (text: String, usedModel: Bool) {
-        let model = cleanup, dictionary = dictionary, mode = appFormat.mode(for: bundleId)
+                    context: CleanupContext = .none) async -> (text: String, usedModel: Bool, snippet: Snippet?) {
+        let model = cleanup, dictionary = dictionary, snippets = snippets, voiceFile = voiceFile, mode = appFormat.mode(for: bundleId)
         let style = Styles.chosen(bundleId: bundleId, url: url, styleDefaults)
+        // F36: the email layout, last, in Formatted email apps only (Raw means no formatting).
+        let email = mode == .formatted && EmailFormat.isEmail(bundleId: bundleId, url: url)
+        let signature = styleDefaults.string(forKey: EmailFormat.signatureKey) ?? ""
         return await Task.detached {
-            AppFormat.finish(raw, mode: mode, model: model, vocabulary: Vocabulary.load(dictionary), style: style, context: context)
+            let vocabulary = Vocabulary.load(dictionary, snippets: snippets)
+            if let s = vocabulary.snippet(raw) { return (s.rendered.plain, false, s) }
+            let done = AppFormat.finish(raw, mode: mode, model: model, vocabulary: vocabulary, style: style, context: context,
+                                        voice: MyVoice.load(voiceFile))
+            return (email ? EmailFormat.apply(done.text, signature: signature) : done.text, done.usedModel, nil)
         }.value
     }
 
@@ -207,7 +248,8 @@ final class Pipeline {
         guard let path = cleanupPath else { return "Rules only on this Mac" }
         guard FileManager.default.fileExists(atPath: path) else { return "Rules only (download the cleanup model from the 🤫 menu)" }
         do {
-            cleanup = try await Task.detached { try LlamaCleanup(path: path) }.value
+            let voiceFile = voiceFile
+            cleanup = try await Task.detached { try LlamaCleanup(path: path, voice: MyVoice.load(voiceFile)) }.value
             return "On"
         } catch {
             // The UI names no model, file or path; the detail goes to stderr.

@@ -61,7 +61,7 @@ struct ShareActions {
     /// The PNG, plus TIFF for apps that read only that. Returns the note the sheet shows.
     func copy() -> String {
         guard let png = ShareCard.png(stats) else { return "Could not make the image" }
-        pasteboard.clearContents()
+        pasteboard.clearOnThisMac()  // #253: stays on this Mac
         pasteboard.setData(png, forType: .png)
         if let tiff = NSImage(data: png)?.tiffRepresentation { pasteboard.setData(tiff, forType: .tiff) }
         return "Copied: paste it into a message or a post"

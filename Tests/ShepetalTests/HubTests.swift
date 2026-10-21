@@ -172,6 +172,17 @@ final class HubTests: XCTestCase {
                       "openedHub() must hand the Hub the menu's own controllers")
     }
 
+    // F81: Settings has Meeting transcripts next to Recordings, and the launch and hourly sweep apply it to the
+    // meeting store, leaving out the meeting being recorded, as the audio retention does.
+    func testTranscriptRetentionIsInSettingsAndInTheHourlySweep() throws {
+        let settings = try AppSource.body(of: "private struct SettingsTab: View {", in: try AppSource.code("Hub.swift"))
+        XCTAssertTrue(settings.contains("TranscriptRetentionPicker(store: meetings)"), "Settings lacks Meeting transcripts")
+        let rest = try AppSource.body(of: "    private func applyRetention() {", in: try AppSource.code("App.swift"))
+        let sweep = rest[..<(try XCTUnwrap(rest.range(of: "\n    }\n")).lowerBound)]
+        XCTAssertTrue(sweep.contains("applyTranscriptRetention(days: TranscriptRetention.days, recording: meetings.current?.id)"),
+                      "applyRetention() does not sweep transcripts")
+    }
+
     // MARK: Dictionary tab (F91)
 
     private var dictionaryURL: URL { pipeline.dictionary }
