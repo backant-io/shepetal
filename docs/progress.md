@@ -4,6 +4,12 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### mac80 wave 1 (integration PR #225)
+
+- **Merged:** #209 (F66), #221 (F32, F34, F35; lands #44), #220 (F99), #222 (F39), #211 (F60), #216 (F114), #212 (F100), #217 (F93), #213 (F102), #218 (F09) and #219 (F111). Their hot-file wiring, wiring tests, manual steps and ledger rows came in #225.
+- **Mac column:** 31 of 124 cells counted before, 44 after. All 13 new cells are `hand-test`, waiting on M-NEW-1, M-CRASH-1, M-CLEAN-1, M-CLEAN-2, M-DICT-2, M-BLOCK-1, M-CRT-1, M-MEDIA-1, M-STATS-1, M-NOTICE-1 and M-THEME-1 (F66 on M-MTG-1, M-MTG-2 and M-MTG-7).
+- **For Pavel:** What's new… went to Home so the 🤫 menu keeps its 12 items (#210). The F102 switch had to stay in the menu, after Languages, which makes 13 items while an app is in front.
+
 ### windows (#118 follow-ups, PR #192; #140, PR #183)
 
 - **Done in #192:** Tray > Recordings (keep, the default, or delete after 24 hours; pruned at launch, on pick and every minute), the 19/20 min length cap, transcripts kept as `<stamp>.txt` with Tray > Recent (click to copy), Tray > Hotkey (Ctrl+Win, Alt+Win, Shift+Win, F13), download progress on first run (a press says how far it is instead of a blue ring for minutes), and a failed `CreateMutexW` no longer starts a second instance. Settings live under `HKCU\Software\Shepetal`; the uninstaller removes them. Unit tests on Linux with deliberate breaks; hand steps 3, 6, 8, 12, 13 and 18 in windows/README.md, none run on a PC.

@@ -192,6 +192,31 @@ public final class History {
         return rows
     }
 
+    /// Totals over the delivered dictations (inserted and paste_failed, archived rows included) made at
+    /// or after `since`. too_short, cancelled, no_speech and failed rows are not counted.
+    /// ponytail: scans every delivered row and counts words in Swift; keep a word_count column if it gets slow.
+    public func stats(since: Date = .distantPast, typingWpm: Double = DictationStats.defaultTypingWpm) throws -> DictationStats {
+        let stmt = try prepare("""
+            SELECT app, text, duration_ms FROM history
+            WHERE outcome IN ('\(Outcome.inserted.rawValue)', '\(Outcome.pasteFailed.rawValue)') AND created_at >= ?
+            """)
+        defer { sqlite3_finalize(stmt) }
+        sqlite3_bind_double(stmt, 1, since.timeIntervalSince1970)
+        var s = DictationStats(typingWpm: typingWpm)
+        var byApp: [String: Int] = [:]
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let app = String(cString: sqlite3_column_text(stmt, 0))
+            let words = DictationStats.wordCount(String(cString: sqlite3_column_text(stmt, 1)))
+            s.dictations += 1
+            s.words += words
+            s.speakingMs += Int(sqlite3_column_int64(stmt, 2))
+            byApp[app.isEmpty ? "unknown app" : app, default: 0] += words
+        }
+        s.apps = byApp.map { DictationStats.AppWords(app: $0.key, words: $0.value) }
+            .sorted { $0.words != $1.words ? $0.words > $1.words : $0.app < $1.app }
+        return s
+    }
+
     /// `%` and `_` in what the user typed are literal characters, not LIKE wildcards.
     static func escapeLike(_ s: String) -> String {
         s.replacingOccurrences(of: "\\", with: "\\\\")
@@ -223,5 +248,37 @@ public final class History {
     private func error(_ op: String) -> NSError {
         NSError(domain: "History", code: Int(sqlite3_errcode(db)),
                 userInfo: [NSLocalizedDescriptionKey: "\(op): \(String(cString: sqlite3_errmsg(db)))"])
+    }
+}
+
+/// The Home tab's "Your stats" (F60), from `History.stats(since:typingWpm:)`. All zeros when nothing was dictated.
+public struct DictationStats: Equatable {
+    public struct AppWords: Equatable {
+        public var app: String
+        public var words: Int
+    }
+
+    /// The typing speed "time saved" is measured against. The `typingWpm` user default overrides it.
+    public static let defaultTypingWpm = 40.0
+
+    public var dictations = 0
+    public var words = 0
+    public var speakingMs = 0
+    public var typingWpm = defaultTypingWpm
+    /// Every app with a delivered dictation, most words first, ties by name. "unknown app" when none was recorded.
+    public var apps: [AppWords] = []
+
+    public init(typingWpm: Double = defaultTypingWpm) { self.typingWpm = typingWpm }
+
+    public var speakingMinutes: Double { Double(speakingMs) / 60_000 }
+    public var wpm: Double { speakingMs > 0 ? Double(words) / speakingMinutes : 0 }
+    /// Typing the same words at `typingWpm`, minus the time spent speaking them; never below zero.
+    public var timeSavedMinutes: Double { typingWpm > 0 ? max(0, Double(words) / typingWpm - speakingMinutes) : 0 }
+
+    /// Words as the system's word breaks see them: punctuation is not a word, and Chinese or Japanese without spaces still splits.
+    static func wordCount(_ s: String) -> Int {
+        var n = 0
+        s.enumerateSubstrings(in: s.startIndex..., options: [.byWords, .substringNotRequired]) { _, _, _, _ in n += 1 }
+        return n
     }
 }

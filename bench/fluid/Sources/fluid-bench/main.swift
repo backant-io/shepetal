@@ -3,6 +3,9 @@
 // The first JSON line is {"load", "dir"}: CoreML load + ANE compile time after the download.
 // FLUID_ENCODER=int8 (default, FluidAudio's own default) | int8-v2 | int4 picks the encoder build.
 // FLUID_ITN=1 runs FluidAudio's NeMo inverse text normalization on the text, inside the timed span.
+// FLUID_VOCAB=a,b,c rescores the text against those dictionary terms with the CTC 110M keyword model, as the app
+// does (F39, KeywordBooster in Sources/Shepetal/Speech.swift), inside the timed span. The keyword model is
+// downloaded into FluidAudio's default cache if missing.
 import FluidAudio
 import Foundation
 
@@ -28,13 +31,24 @@ let load = secs(clock.now - t)
 if files.isEmpty { print(dir.path); exit(0) }
 json(["load": load, "dir": dir.path])
 
+var boost: VocabularyBoostingSession?
+if let terms = ProcessInfo.processInfo.environment["FLUID_VOCAB"]?.split(separator: ",").map(String.init), !terms.isEmpty {
+    let ctc = try await CtcModels.load(from: try await CtcModels.download())
+    let vocabulary = CustomVocabularyContext(terms: terms.map { CustomVocabularyTerm(text: $0) },
+                                             minSimilarity: 0.7)  // KeywordBooster.minSimilarity
+    boost = try await VocabularyBoostingSession(vocabulary: vocabulary, ctcModels: ctc,
+                                                config: .init(spotterRescueEnabled: false))  // KeywordBooster.config
+}
+
 let conv = AudioConverter()
 for (i, f) in ([files.first!] + files).enumerated() {  // first pass over file 1 is the warm-up, not printed
     let samples = try conv.resampleAudioFile(path: f)
     var state = TdtDecoderState.make(decoderLayers: await asr.decoderLayerCount)
     t = clock.now
     let r = try await asr.transcribe(samples, decoderState: &state)
-    let text = itn ? TextNormalizer.shared.normalizeSentence(r.text) : r.text
+    var text = r.text
+    if let boost, let out = await boost.rescore(text: text, tokenTimings: r.tokenTimings ?? [], audioSamples: samples) { text = out.text }
+    if itn { text = TextNormalizer.shared.normalizeSentence(text) }
     let lat = secs(clock.now - t)
     if i > 0 { json(["f": (f as NSString).lastPathComponent, "text": text, "lat": lat]) }
 }

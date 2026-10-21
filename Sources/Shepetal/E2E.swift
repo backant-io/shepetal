@@ -2,7 +2,8 @@ import AppKit
 import ShepetalCore
 
 /// `shepetal --e2e <wav>...`: the real pipeline on audio files. Each file goes through the capture
-/// resampler, the speech model, cleanup, the audio store, history, and the pasteboard + Cmd+V insertion
+/// resampler, the speech model, cleanup (rules plus the local model when it loads), the audio store, history,
+/// and the pasteboard + Cmd+V insertion
 /// into a text view this process owns. Prints one JSON line per file.
 /// It runs while people and other tests use the Mac, so it shows no window, never takes focus, and pastes
 /// through a private pasteboard instead of the user's clipboard.
@@ -59,6 +60,7 @@ final class E2E: NSObject, NSApplicationDelegate {
             return 1
         }
         let loadMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
+        let cleanupStatus = await pipeline.loadCleanup()
         // The app each dictation records, fixed so history can be checked against it. The page-URL lookup is a
         // slow stand-in for a browser's AX walk: resolve must return at once and run it off the main thread.
         let resolveStart = ProcessInfo.processInfo.systemUptime
@@ -100,6 +102,8 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["audio_dir_mode"] = Self.mode(dir)
             out["history_outcome"] = stored?.outcome.rawValue ?? "missing"
             out["history_audio_path"] = stored?.audioPath ?? ""
+            out["cleanup_status"] = cleanupStatus
+            out["cleanup_model"] = run.cleanupModel ?? ""
             out["app_resolve_ms"] = Int(resolveMs)
             out["history_app"] = stored?.app ?? ""
             out["history_bundle_id"] = stored?.bundleId ?? ""

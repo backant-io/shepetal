@@ -16,10 +16,12 @@ final class Hub {
          status: @escaping () -> (model: String, fnWatched: Bool),
          retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void,
          openPermissions: @escaping () -> Void, loginItem: LoginItem, openDictionary: @escaping () -> Void,
-         restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore()) {
+         restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore(),
+         openWhatsNew: @escaping () -> Void = {}, notices: @escaping () -> [NoticeLog.Notice] = { [] }) {
         model = HubModel(pipeline: pipeline, engine: engine, status: status, retention: retention,
                          setRetention: setRetention, openPermissions: openPermissions, loginItem: loginItem,
-                         openDictionary: openDictionary, restoreFnKey: restoreFnKey)
+                         openDictionary: openDictionary, restoreFnKey: restoreFnKey, openWhatsNew: openWhatsNew,
+                         notices: notices)
         meetings = MeetingsModel(store: meetingStore)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 580),
                           styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
@@ -64,7 +66,7 @@ extension Pipeline {
         var e = entry
         let samples = try AudioStore.read(wav)
         e.rawText = try await engine.transcribe(await Task.detached { VoiceIsolation.apply(samples) }.value, wav: wav)
-        e.text = Self.finishText(e.rawText, dictionary: dictionary)
+        e.text = await finishText(e.rawText).text
         e.model = engine.name
         try history.update(e)
         return e
@@ -81,6 +83,8 @@ final class HubModel: ObservableObject {
     let openPermissions: () -> Void
     let loginItem: LoginItem
     let openDictionary: () -> Void
+    let openWhatsNew: () -> Void  // the release notes (F111)
+    let notices: () -> [NoticeLog.Notice]  // what 🤫 showed, newest first (F100)
     private let restore: () -> Void
 
     @Published var query = "" { didSet { reload() } }
@@ -93,10 +97,12 @@ final class HubModel: ObservableObject {
 
     init(pipeline: Pipeline, engine: @escaping () -> SpeechEngine?, status: @escaping () -> (model: String, fnWatched: Bool),
          retention: @escaping () -> Retention, setRetention: @escaping (Retention) -> Void, openPermissions: @escaping () -> Void,
-         loginItem: LoginItem, openDictionary: @escaping () -> Void, restoreFnKey: @escaping () -> Void) {
+         loginItem: LoginItem, openDictionary: @escaping () -> Void, restoreFnKey: @escaping () -> Void,
+         openWhatsNew: @escaping () -> Void, notices: @escaping () -> [NoticeLog.Notice]) {
         self.pipeline = pipeline; self.engine = engine; self.status = status
         self.retention = retention; self.setRetention = setRetention; self.openPermissions = openPermissions
         self.loginItem = loginItem; self.openDictionary = openDictionary; restore = restoreFnKey
+        self.openWhatsNew = openWhatsNew; self.notices = notices
     }
 
     func reload() {
@@ -195,6 +201,7 @@ private struct HomeTab: View {
             Form {
                 AccountSection()
                 LabeledContent("Speech recognition", value: s.model)
+                LabeledContent("Cleanup", value: model.pipeline.cleanupStatus)
                 LabeledContent("fn key", value: s.fnWatched ? "Watched: hold fn to talk, double-tap for hands-free"
                                                             : "Not watched yet (needs Input Monitoring)")
                 if let problem = FnDiagnostics.problem {
@@ -203,6 +210,18 @@ private struct HomeTab: View {
                 LabeledContent("Permissions", value: missing.isEmpty ? "All granted"
                                                      : "Missing: " + missing.map(\.title).joined(separator: ", "))
                 if !missing.isEmpty { Button("Open Permissions…", action: model.openPermissions) }
+                StatsSection(history: model.pipeline.history)
+                Section("Recent notices") {
+                    let notices = model.notices()
+                    if notices.isEmpty { Text("None yet").foregroundStyle(.secondary) }
+                    ForEach(Array(notices.enumerated()), id: \.offset) { _, n in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(NoticeLog.time(n.time)).font(.caption).foregroundStyle(.secondary)
+                            Text(n.text).textSelection(.enabled)
+                        }
+                    }
+                }
+                Section { Button("What's new…", action: model.openWhatsNew) }
                 Section("Donate") {
                     ForEach(AppDelegate.donate, id: \.1) { title, url in Link(title, destination: URL(string: url)!) }
                 }
@@ -255,6 +274,9 @@ private struct HistoryTab: View {
 private struct SettingsTab: View {
     @ObservedObject var model: HubModel
     @AppStorage(MeetingRecorder.autoRecordKey) private var autoRecordMeetings = false
+    @AppStorage(Indicator.creatorModeKey) private var creatorMode = false
+    @AppStorage(MediaControl.muteKey) private var muteWhileDictating = false
+    @AppStorage(MediaControl.pauseKey) private var pauseWhileDictating = false
 
     var body: some View {
         Form {
@@ -262,11 +284,18 @@ private struct SettingsTab: View {
             Text(autoRecordMeetings ? "A detected meeting records right away, with the red ring next to 🤫 the whole time."
                                     : "A detected meeting records only after you click Record next to 🤫.")
                 .font(.caption).foregroundStyle(.secondary)
+            Toggle("Mute other audio while dictating", isOn: $muteWhileDictating)
+            Toggle("Pause media while dictating", isOn: $pauseWhileDictating)
+            Text("Only while another app is playing, and never during a meeting or a call. When you stop, shepetal turns the sound back on and resumes what it paused. Pause presses the play/pause key, so a video you paused just before dictating may start instead.")
+                .font(.caption).foregroundStyle(.secondary)
             Picker("Recordings", selection: Binding(get: model.retention, set: model.changeRetention)) {
                 Text("Keep recordings").tag(Retention.keep)
                 Text("Delete recordings after 24 hours").tag(Retention.delete24h)
             }
             Button("Open recordings folder") { NSWorkspace.shared.open(Paths.audio) }
+            Toggle("Creator mode: show “\(Indicator.creatorLabel)” next to 🤫 while recording", isOn: $creatorMode)
+            Text("For screen recordings and streams, so viewers see when you dictate.")
+                .font(.caption).foregroundStyle(.secondary)
             Toggle("Start at login", isOn: Binding(get: { model.loginItem.isOn }, set: { _ in model.toggleLogin() }))
             Button("Dictionary…", action: model.openDictionary)
             if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {

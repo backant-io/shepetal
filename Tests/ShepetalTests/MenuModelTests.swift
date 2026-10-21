@@ -31,7 +31,7 @@ final class MenuModelTests: XCTestCase {
     /// Everything that can show at once: what Pavel sees on a bad day.
     private var busy: MenuState {
         MenuState(permissionsMissing: true, engineProblem: "Loading on-device speech recognition…", canDownloadEngine: true,
-                  access: .trial(daysLeft: 3), recordingMeeting: true, meetings: (0..<12).map { meeting($0) },
+                  cleanupDownloadMB: 1281, cleanupDownloadFailed: true, access: .trial(daysLeft: 3), recordingMeeting: true, meetings: (0..<12).map { meeting($0) },
                   recent: [entry("Send the report today."), entry("", .tooShort)], canCheckForUpdates: true)
     }
 
@@ -79,9 +79,60 @@ final class MenuModelTests: XCTestCase {
 
         let groups = MenuModel.groups(busy)
         XCTAssertEqual(groups[0].map(\.title), ["Permissions needed…", "Loading on-device speech recognition…",
-                                                 "Download on-device speech recognition (about 470 MB)", "Get shepetal for $4.99…"],
+                                                 "Download on-device speech recognition (about 470 MB)",
+                                                 "Cleanup model download failed. Try again later.", "Download cleanup model (about 1.3 GB)",
+                                                 "Get shepetal for $4.99…"],
                        "every contextual item is in the first group")
         XCTAssertEqual(groups[1].first?.title, "Stop meeting recording", "then the menu as usual")
+    }
+
+    /// The local cleanup model is optional (the rules clean up without it), so the menu offers it without the
+    /// yellow mark, and only until it is downloaded. Its status is Home's Cleanup line, not a grey menu line.
+    func testTheCleanupModelIsOfferedUntilItIsDownloaded() throws {
+        func top(_ s: MenuState) -> [MenuEntry] { MenuModel.contextual(s) }
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: nil)), [], "downloaded, or an Intel Mac: nothing")
+        let offer = try XCTUnwrap(top(MenuState(cleanupDownloadMB: 1281)).first)
+        XCTAssertEqual(offer.title, "Download cleanup model (about 1.3 GB)")
+        XCTAssertEqual(offer.action, .downloadCleanup)
+        XCTAssertFalse(offer.attention, "dictation works without it")
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: 533)).map(\.title), ["Download cleanup model (about 0.5 GB)"], "8 GB Macs")
+
+        let downloading = top(MenuState(cleanupDownloadMB: 1281, downloadingCleanup: true))
+        XCTAssertEqual(downloading.map(\.title), ["Downloading the cleanup model…"],
+                       "no download item while it runs, so a second click cannot start a second download")
+        XCTAssertFalse(downloading[0].enabled)
+        XCTAssertEqual(top(MenuState(cleanupDownloadMB: 1281, cleanupDownloadFailed: true)).map(\.action), [nil, .downloadCleanup],
+                       "after a failed download: a grey line, and the item again")
+    }
+
+    /// F39 (#30): the keyword model's download is with what needs doing, only while SpeechMenu offers it (speech
+    /// recognition there, words in the dictionary, keyword model missing), and greyed out while it runs.
+    func testDictionarySupportShowsOnlyWhenOfferedAndGreysOutWhileItDownloads() throws {
+        XCTAssertEqual(MenuModel.groups(MenuState()).joined().count, 12, "a normal day keeps the 12 items")
+
+        let offered = MenuModel.contextual(MenuState(dictionarySupport: .offered))
+        XCTAssertEqual(offered, [MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport)])
+        XCTAssertEqual(MenuModel.groups(MenuState(dictionarySupport: .offered))[0], offered, "at the top")
+        let running = MenuModel.contextual(MenuState(dictionarySupport: .downloading))
+        XCTAssertEqual(running.map(\.title), ["Downloading dictionary support…"])
+        for t in offered.map(\.title) + running.map(\.title) {
+            XCTAssertTrue(ModelNameTests.offending("\"\(t)\"").isEmpty, "model name in \(t)")
+        }
+
+        let built = { (s: DictionarySupport) -> NSMenuItem? in
+            let m = NSMenu()
+            MenuModel.build(MenuModel.groups(MenuState(dictionarySupport: s)), into: m, target: self, action: #selector(self.noop(_:)))
+            return m.items.first
+        }
+        XCTAssertEqual(built(.offered)?.isEnabled, true)
+        XCTAssertEqual(built(.offered)?.representedObject as? MenuAction, .downloadDictionarySupport)
+        XCTAssertEqual(built(.downloading)?.isEnabled, false, "greyed out: a second click starts nothing")
+
+        let app = try AppSource.code("App.swift")
+        for line in ["dictionarySupport: speech.dictionarySupport(),", "case .downloadDictionarySupport: speech.downloadBoost()",
+                     "speech.notice = { [weak self] in self?.indicator.show($0, seconds: 4) }"] {
+            XCTAssertTrue(app.contains(line), "App.swift: \(line)")
+        }
     }
 
     func testMeetingsRecordAndListThePastOnesNewestFirst() throws {
@@ -235,6 +286,7 @@ final class MenuModelTests: XCTestCase {
         let account = try AppSource.code("AccountView.swift")
         let moved: [(menu: String, window: String, place: String)] = [
             ("On-device speech recognition", "LabeledContent(\"Speech recognition\", value: s.model)", home),
+            ("Cleanup:", "LabeledContent(\"Cleanup\", value: model.pipeline.cleanupStatus)", home),
             ("Signed in as", "Text(account.summaryLine)", account),
             ("Sign out", "Button(\"Sign out\")", account),
             ("Check license now", "Button(\"Check license now\")", account),
@@ -284,12 +336,17 @@ final class MenuModelTests: XCTestCase {
                      "meetings: (try? meetingFlow?.store.list(limit: MenuModel.pastMeetingsShown + 1)) ?? [],",
                      "recent: (try? pipeline?.history.recent(limit: 10)) ?? [],",
                      "pasteLast: tap.router.shortcuts.chord(.pasteLast),",
-                     "canCheckForUpdates: updater.canCheckForUpdates)"] {
+                     "canCheckForUpdates: updater.canCheckForUpdates)",
+                     "cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,", "downloadingCleanup: pipeline?.downloadingCleanup == true,",
+                     "cleanupDownloadFailed: pipeline?.cleanupDownloadFailed == true,"] {
             XCTAssertTrue(state.contains(line), "menuNeedsUpdate: \(line)")
         }
+        XCTAssertTrue(app.contains("Task { await pipeline?.loadCleanup() }"), "the cleanup model loads at launch")
         XCTAssertEqual(try lines(of: "@objc private func menuAction(_ sender: NSMenuItem) {").filter { $0.hasPrefix("case .") }, [
             "case .permissions: showOnboarding()",
             "case .download: downloadModel()",
+            "case .downloadCleanup: Task { await pipeline?.downloadCleanup() }",
+            "case .downloadDictionarySupport: speech.downloadBoost()",
             "case .signIn: Account.shared.signIn()",
             "case .cancelSignIn: Account.shared.cancelSignIn()",
             "case .buy: Account.shared.buy()",
