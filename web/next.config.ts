@@ -15,9 +15,10 @@ const securityHeaders = [
     value: [
       "default-src 'self'",
       "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline' https://api.fontshare.com https://fonts.googleapis.com",
+      "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: https: blob:",
-      "font-src 'self' data: https://api.fontshare.com https://cdn.fontshare.com https://fonts.gstatic.com",
+      // The brand fonts are self-hosted (src/brand/fonts).
+      "font-src 'self' data:",
       "connect-src 'self'",
       "frame-src 'self'",
       "frame-ancestors 'none'",
@@ -32,6 +33,8 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   // Pin the root: stray lockfiles in parent folders otherwise become the workspace root.
   outputFileTracingRoot: __dirname,
+  // No experimental.inlineCss: it puts the CSS in the page twice (a <style> and the RSC payload), 49.8 KB gzip
+  // against 24.9 KB plus a cacheable stylesheet, and Lighthouse mobile scored one point lower with it.
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

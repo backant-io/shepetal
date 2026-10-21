@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Terms of Use',
-  description: 'The terms for using Shepetal, its free trial and the one-time purchase.',
+  description: 'The terms for using shepetal, its free trial and the one-time purchase.',
   alternates: { canonical: '/terms' },
 };
 
@@ -15,7 +15,7 @@ export default function TermsOfUse() {
 
       <div className="prose-legal mt-12">
         <p>
-          The website at shepetal.backant.io (the &quot;Site&quot;) and the Shepetal app (together, the
+          This website (the &quot;Site&quot;) and the shepetal app (together, the
           &quot;Service&quot;) belong to Backant Inc. (&quot;Company&quot;, &quot;us&quot;, &quot;our&quot; and
           &quot;we&quot;). Certain features of the Service may be subject to additional guidelines, terms or rules,
           which will be posted on the Site in connection with such features and are incorporated by reference into
@@ -48,8 +48,8 @@ export default function TermsOfUse() {
           method, and it ends on its own without any charge.
         </p>
         <p>
-          After the trial you can buy Shepetal with a one-time payment of $4.99 USD. A purchase gives you a perpetual
-          license to use Shepetal, including the future updates we release, and there is no subscription or recurring
+          After the trial you can buy shepetal with a one-time payment of $4.99 USD. A purchase gives you a perpetual
+          license to use shepetal, including the future updates we release, and there is no subscription or recurring
           charge. Payments are processed by Stripe under Stripe&apos;s own terms. If we change the price, the change
           applies only to purchases made afterwards.
         </p>
@@ -58,7 +58,7 @@ export default function TermsOfUse() {
         <p>
           Subject to these Terms, Company grants you a non-transferable, non-exclusive, revocable, limited license to
           use the Service for your own personal or internal business use, during your trial and, after a purchase,
-          without time limit. The Shepetal source code is published under the MIT License, and nothing in these Terms
+          without time limit. The shepetal source code is published under the MIT License, and nothing in these Terms
           limits the rights that license gives you to the source code.
         </p>
         <p>

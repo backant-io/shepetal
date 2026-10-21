@@ -1,11 +1,11 @@
 import { auth } from '@/lib/auth';
 import { latestInstallerUrl } from '@/lib/download';
 
-const COMING_SOON = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Shepetal for Mac is coming soon</title></head>
+const COMING_SOON = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>shepetal for Mac is coming soon</title></head>
 <body style="font-family:system-ui,sans-serif;max-width:32rem;margin:6rem auto;padding:0 1rem;line-height:1.5">
-<h1>Shepetal for Mac is coming soon</h1>
+<h1>shepetal for Mac is coming soon</h1>
 <p>The installer is not out yet. It will be here as soon as it is ready.</p>
-<p><a href="/">Back to Shepetal</a></p></body></html>`;
+<p><a href="/">Back to shepetal</a></p></body></html>`;
 
 // GET /download (API.md): signed in only. 302 to the latest installer, or a coming-soon page.
 export async function GET(req: Request) {

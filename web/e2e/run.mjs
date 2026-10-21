@@ -184,7 +184,9 @@ async function d1(sql) {
 async function main() {
   const wrangler = (args) => execFileSync(join(BIN, 'wrangler'), args, { cwd: WEB, stdio: ['ignore', 'pipe', 'pipe'] });
   if (!process.env.E2E_SKIP_BUILD) {
-    execFileSync(join(BIN, 'opennextjs-cloudflare'), ['build'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
+    // The flag: @opennextjs/cloudflare refuses Next 15.5 as past its support window. A test build only;
+    // npm run deploy keeps refusing until Next is upgraded.
+    execFileSync(join(BIN, 'opennextjs-cloudflare'), ['build', '--dangerouslyUseUnsupportedNextVersion'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
     ok('opennextjs-cloudflare build');
   }
   const state = join(tmp, 'state');
@@ -192,9 +194,12 @@ async function main() {
   ok('migrations applied to a fresh local D1');
 
   const log = createWriteStream(logFile);
+  // --local-upstream: with the custom-domain route in wrangler.toml, wrangler dev otherwise rewrites Host and
+  // Origin to shepetal.backant.io, and the consent POST fails its Origin check against AUTH_URL with a 403.
   worker = spawn(
     join(BIN, 'wrangler'),
     ['dev', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(await freePort()),
+      '--local-upstream', `localhost:${port}`,
       '--persist-to', state, '--env-file', envFile, '--show-interactive-dev-session=false'],
     { cwd: WEB, detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
   );
@@ -207,6 +212,29 @@ async function main() {
     await sleep(500);
   }
   ok(`wrangler dev answers on ${BASE}`);
+
+  // ---- 0. The landing page renders on the Worker, starts the trial with the sign-in form and
+  // loads every script, style, font and image from the site itself (no trackers, no font CDN).
+  await check('landing page: sign-in form, nothing loaded from another server, fonts only from self', async () => {
+    const res = await fetch(`${BASE}/`);
+    const html = await res.text();
+    assert.equal(res.status, 200);
+    assert.ok(html.includes('Try 30 days free') && /<form[^>]*action=/.test(html), 'the trial button is a sign-in form');
+    // Assets (src, srcset, stylesheets, preloads) and visible links; the canonical <link> names the site's own domain.
+    // The only outside links are the cited speaking and typing rate sources.
+    const outside = [
+      ...html.matchAll(/\b(?:src|srcset)="(https?:\/\/[^"]+)"/g),
+      ...html.matchAll(/<(?:a|link(?![^>]*rel="(?:canonical|alternate)"))\b[^>]*\bhref="(https?:\/\/[^"]+)"/g),
+    ].map((m) => m[1]).filter((u) => !u.startsWith('https://ncvs.org/') && !u.startsWith('https://doi.org/10.1145/'));
+    assert.deepEqual(outside, [], 'no asset or link to another server');
+    assert.match(res.headers.get('content-security-policy') ?? '', /font-src 'self' data:/);
+    // The X card: a large image at an absolute URL, served as a static file.
+    assert.match(html, /<meta property="og:image" content="https:\/\/[^"]+\/og\.jpg"/);
+    assert.match(html, /<meta name="twitter:card" content="summary_large_image"/);
+    const og = await fetch(`${BASE}/og.jpg`);
+    assert.equal(og.status, 200);
+    assert.match(og.headers.get('content-type') ?? '', /^image\/jpeg/);
+  });
 
   // ---- 1. Signed out, /app/login runs the Google sign-in and comes back to the same URL.
   const login = pkce();

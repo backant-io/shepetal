@@ -1,0 +1,46 @@
+/* The website's own cut of the brand fonts: Latin and Latin-1 plus š and the typographic punctuation,
+   and only the weights the site uses. 120 KB in place of 270 KB, so the first paint on a phone comes sooner.
+   Modified fonts get a new name (SIL OFL 1.1 and identity.md): "shepetal Serif" is Newsreader,
+   "shepetal Sans" is Hanken Grotesk. Both licenses are in fonts/. Rebuild them with fonts/subset.py.
+   A character outside the cut falls back to the width-matched local face below, then to the full brand fonts from tokens.css. */
+@font-face {
+  font-family: 'shepetal Serif';
+  src: url('./fonts/shepetal-serif.woff2') format('woff2');
+  font-weight: 300 440;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20-7E, U+A0-FF, U+160-161, U+B7, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2032-2033, U+2122, U+2192, U+2212;
+}
+@font-face {
+  font-family: 'shepetal Sans';
+  src: url('./fonts/shepetal-sans.woff2') format('woff2');
+  font-weight: 400 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+20-7E, U+A0-FF, U+160-161, U+B7, U+2013-2014, U+2018-2019, U+201C-201D, U+2022, U+2026, U+2032-2033, U+2122, U+2192, U+2212;
+}
+/* Width-matched fallbacks: until the site fonts arrive, the hero title wraps the same way, so nothing jumps
+   when they swap in. local() matches the full or PostScript name, never the family name. Windows lands on Georgia. */
+@font-face {
+  font-family: 'shepetal Serif fallback';
+  src: local('Iowan Old Style Roman'), local('IowanOldStyle-Roman');
+  /* Iowan is 3.1% wider than shepetal Serif at the title's weight 340 (1.8% at 380), measured in Chrome. */
+  size-adjust: 97%;
+  /* shepetal Serif's own ascent and descent (1470 and 530 of 2000 units), divided by size-adjust,
+     so the text also sits at the same height when the font swaps in */
+  ascent-override: 75.8%;
+  descent-override: 27.3%;
+  line-gap-override: 0%;
+}
+@font-face {
+  font-family: 'shepetal Sans fallback';
+  src: local('Arial');
+  size-adjust: 100.2%;
+  ascent-override: 99.8%;
+  descent-override: 30.2%;
+  line-gap-override: 0%;
+}
+:root {
+  --sh-font-display: 'shepetal Serif', 'shepetal Serif fallback', 'Newsreader', Georgia, serif;
+  --sh-font-text: 'shepetal Sans', 'shepetal Sans fallback', 'Hanken Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
