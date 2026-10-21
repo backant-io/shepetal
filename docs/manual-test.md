@@ -22,9 +22,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. In the 🤫 menu choose Restore 🌐 key setting (Change Input Source, the value it first replaced). Expected: the setting is back to that value.
 4. Run `/Applications/Shepetal.app/Contents/Resources/uninstall.sh`. Expected: Shepetal quits, is gone from /Applications and from Login Items, the 🌐 key setting is what it was before Shepetal changed it, and `~/Library/Application Support/Shepetal` is still there.
 
-### M-SETUP-5: fn not received
-1. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s.
-2. Expected: a yellow ring and "fn not received: re-grant Input Monitoring" next to 🤫; Open Shepetal… > Home shows the same under fn problem. Turn Shepetal back on: within 2 s fn dictates again.
+### M-SETUP-5: no false "fn not received"
+"fn not received" only shows when the 🌐 key's keycode 179 reaches Shepetal and fn's keycode 63 does not (another app took fn). Ordinary keys never show it. The positive case cannot be produced by hand; `FnHealthTests` and `FnTapTests` cover it.
+1. With all three permissions granted, type a few sentences in TextEdit. Hold Down arrow for 2 s, then Left arrow for 2 s. Press ⌘C, ⌘V, ⇧ with letters, ⌥←, ⌘Space (then Esc), ⌃⌘V. Hold ⌃⌥ together for 2 s. Press fn+Delete and fn+↓. Hold ⌃, then hold fn for 2 s, release both. Tap fn, double-tap fn, and hold fn for 2 s (a dictation, fine).
+2. Expected: no "fn not received" next to 🤫 at any point, no yellow ring, and Open Shepetal… > Home shows no fn problem.
+3. In System Settings > Privacy & Security > Input Monitoring, turn Shepetal off. Hold fn for 2 s. Expected: "Input Monitoring access was turned off" with a yellow ring and the Permissions window, not "fn not received". Turn Shepetal back on: within 2 s fn dictates again.
 
 ### M-SETUP-2: permissions survive a rebuild
 1. With all three permissions granted, quit Shepetal, run `scripts/make-app.sh --install` (it must print "Signed with: Apple Development…" or "Developer ID…"), and open the app again.
@@ -219,6 +221,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 2. Expected: "leave the cursor the cursor right after it", with a lowercase "the cursor" and no period. Shepetal asks the app for its accessibility tree when the dictation starts. Note if VS Code then asks whether you use a screen reader, or turns on screen reader mode.
 3. If any dictation in M-INS-1 to M-INS-8 went in as dictated (capital and period), run `log show --last 10m --predicate 'eventMessage CONTAINS "shepetal: context"'` in Terminal and add the lines to the report. Each dictation logs one line: the field's role, its length and the selection, or which attribute could not be read and the AX error code. The text itself is never logged.
 
+### M-DATE-1: spoken dates become numbers (F32, docs/text-rules.md)
+1. In an empty TextEdit document, hold fn and say "Twenty sixth of July twenty twenty-six." Expected: "26.07.26."
+2. On a new line, say "Sechsundzwanzigster Juni sechsundzwanzig." Expected: "26.06.26."
+3. On a new line type "and then we rest", put the cursor at the start of the line, and say "We leave on the first of March." Expected: "We leave on 01.03. and then we rest". The date keeps its last dot.
+4. Say "May I ask a question?" Expected: it stays in words.
+
 ### M-FOC-1: text only goes into the window that stayed in focus (F27, rule 8)
 1. Open a TextEdit document and Notes. Copy a word, say "earlier", from anywhere. Click into the TextEdit document. Double-tap fn and say a sentence.
 2. Click into a Notes note, then tap fn once to stop.
@@ -285,9 +293,9 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 ### M-MTG-1: Zoom call, detected, recorded after one click, and transcribed (rule 7)
 Setup: quit Shepetal, run `scripts/make-app.sh --install` from main, and open `/Applications/Shepetal.app`. You need a second person or a second device (a phone in the same Zoom meeting, speaker on, away from the Mac's mic). Open Shepetal… > Settings: "Always record meetings automatically" is off (the default).
 1. Start or join a Zoom meeting in the zoom.us app, with your mic unmuted. Click into Zoom's chat box.
-2. Expected about 5 s after Zoom opens the mic: a small card just above the 🤫 in the bottom-left corner says "Meeting detected · Zoom", with Record and Not now. Nothing records yet: 🤫 has no red ring, the menu bar shows "🤫", and the 🤫 menu shows "Start meeting recording".
+2. Expected about 5 s after Zoom opens the mic: a small card just above the 🤫 in the bottom-left corner says "Meeting detected · zoom.us", with Record and Not now. Nothing records yet: 🤫 has no red ring, the menu bar shows "🤫", and the 🤫 menu shows "Start meeting recording".
 3. Click Record. Expected: the card goes away, and typing still goes into Zoom's chat box (the click did not take focus or bring Shepetal forward). "Meeting detected · recording" shows next to 🤫, 🤫 gets a red ring that stays for the whole meeting, the menu bar shows "🤫●", and the 🤫 menu shows "Stop meeting recording". The first time, macOS asks whether Shepetal may record system audio: allow it. If the hint says "… mic only (turn on System Audio Recording)", add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording > System Audio Recording Only, then leave and rejoin the call.
-4. Open 🤫 > Open Shepetal… > Meetings. Expected: a "Zoom" meeting at the top, still running. Within about a minute its transcript fills in, with your lines labelled Me and the other side's labelled Others.
+4. Open 🤫 > Open Shepetal… > Meetings. Expected: a "zoom.us" meeting at the top, still running. Within about a minute its transcript fills in, with your lines labelled Me and the other side's labelled Others.
 5. Say "I will send the slides by Friday." Have the other side say "I will review the budget tomorrow."
 6. Leave the meeting. Expected within about 5 s: "Meeting recording saved", then "Meeting notes ready · open Shepetal → Meetings", the red ring goes away, and the menu bar goes back to "🤫". The meeting's Summary lists the action items "Me: send the slides (Friday)" and "Others: review the budget (tomorrow)" (the wording may differ slightly).
 7. Type `budget` in the Meetings search. Expected: the meeting is found. Click Copy summary and paste in TextEdit: the summary is pasted, without the transcript. Export Markdown writes a `.md` file where you choose.
@@ -298,9 +306,11 @@ Setup: quit Shepetal, run `scripts/make-app.sh --install` from main, and open `/
 12. Always record: in Open Shepetal… > Settings, turn on "Always record meetings automatically". Join a Zoom meeting. Expected: no card; about 5 s after Zoom opens the mic, "Meeting detected · recording" next to 🤫, the red ring, "🤫●", and "Stop meeting recording" in the menu. Stop meeting recording ends it. Turn the setting off again.
 
 ### M-MTG-2: Google Meet in a browser
-1. Meet in Chrome or Safari is found by the tab's window title, which macOS only shows to apps with screen recording access. Add Shepetal under System Settings > Privacy & Security > Screen & System Audio Recording (the upper list), then quit and reopen Shepetal.
-2. Join a Google Meet call in Chrome with the mic on. Expected: the card says "Meeting detected · Google Meet (Chrome)" (or "Google Meet (Safari)"). Click Record: the meeting is listed under that name. Repeat steps 4 to 8 of M-MTG-1.
-3. Without screen recording access, Meet is not detected. Use 🤫 > Start meeting recording before the call and Stop meeting recording after it. Expected: the same transcript and summary, listed as "Manual".
+Setup: as in M-MTG-1. Shepetal needs no Screen Recording access; if you added it for an older build, you can leave it or remove it.
+1. Join a Google Meet call in Chrome with the mic on. Expected about 5 s after Chrome opens the mic: the card says "Meeting detected · Google Chrome". Click Record: the meeting is listed as "Google Chrome". Repeat steps 4 to 8 of M-MTG-1.
+2. Switch to another tab or window for a minute during the call. Expected: no event, the recording goes on.
+3. Do step 1 in Safari. Expected: "Meeting detected · Safari" (Safari's mic is held by its WebKit GPU process, which is named after Safari).
+4. Camera only: mute the mic before you join, with the camera on. Expected: "Meeting detected · Camera".
 
 ### M-MTG-3: dictation during a meeting
 1. During a recorded Zoom call, click into TextEdit, hold fn, say a sentence, and release. Expected: the sentence is inserted as usual, no second meeting starts or is offered, and the ring around 🤫 stays red throughout.
@@ -322,12 +332,12 @@ Setup: as in M-MTG-1, but wear headphones so the Mac's mic does not hear the oth
 4. Run `ls -la ~/Library/Application\ Support/Shepetal/meetings/<newest>/`. Expected: only `Me.wav` (`-rw-------`), no `Others.wav`.
 5. Turn Shepetal back on under System Audio Recording Only, quit and reopen Shepetal, and record another meeting. Expected: the hint has no "mic only", and the new folder holds both `Me.wav` and `Others.wav`.
 
-### M-MTG-7: Microsoft Teams and a Slack huddle (F66)
-Setup: as in M-MTG-1. For steps 2 and 3, Shepetal needs screen recording access as in M-MTG-2 step 1, because a huddle is found by its Slack window title (#145).
+### M-MTG-7: Microsoft Teams, a Slack huddle and the camera alone (F66)
+Setup: as in M-MTG-1. No step needs Screen Recording access.
 1. Join a call in the Microsoft Teams app with the mic on. Expected about 5 s after Teams opens the mic: the card says "Meeting detected · Microsoft Teams". Click Record, talk for at least 15 s (no meeting ends sooner), then leave the call. Expected about 4 s later: "Meeting recording saved", the red ring goes away, and Meetings lists the meeting as "Microsoft Teams".
-2. In the Slack app, start a huddle with someone. Expected about 5 s after the huddle opens the mic: "Meeting detected · Slack". Click Record, talk for at least 15 s, then leave the huddle. Expected: "Meeting recording saved" about 4 s after no Slack window title says "huddle" any more (up to about 30 s while one still does), and Meetings lists the meeting as "Slack".
-3. In a Slack message box, record an audio clip without a huddle. Expected: no card, and nothing records.
-4. Turn screen recording access off for Shepetal, quit and reopen it, and start a huddle again. Expected: no card. 🤫 > Start meeting recording still records it by hand, listed as "Manual"; stop it from the menu.
+2. In the Slack app, start a huddle with someone. Expected about 5 s after the huddle opens the mic: "Meeting detected · Slack". Click Record, talk for at least 15 s, then leave the huddle. Expected about 4 s after Slack lets go of the mic: "Meeting recording saved", and Meetings lists the meeting as "Slack".
+3. Not now with video: join a Zoom call with the camera on and click Not now. Mute the mic and stay for a minute. Expected: no new card while the camera is on. Leave the call, wait 5 s, and open Photo Booth. Expected about 5 s later: "Meeting detected · Camera". Click Not now and quit Photo Booth.
+4. Any mic use counts: record an audio clip in a Slack message box, without a huddle. Expected: a card about 5 s after the clip starts if it runs that long. Click Not now: nothing records.
 
 ### M-MTG-8: the transcript window after a meeting (F69, F120)
 Setup: as in M-MTG-1. Before the meeting, select the word `canary` in TextEdit and press Cmd+C.
@@ -487,31 +497,29 @@ The only field signal a keyboard gets is `documentIdentifier`. This step checks 
 The Mac `meeting/` CLI on its own. The Mac app uses the same detector and capture (M-MTG-1 to M-MTG-7). Build it with `cd meeting && swift build`, and run the commands from `meeting/`. Expected output lines are quoted as the CLI prints them.
 
 ### MEET-1: probe
-1. Quit every app that uses the mic. Run `.build/debug/shepetal-meeting probe`.
-2. Expected: `no process is using the mic` and `meeting apps now: []`. It needs no permission. `calendar event now:` names the event in progress if your terminal app has Calendar access, otherwise `none (or no Calendar access)`. The CLI never asks for Calendar access.
-3. Join a Zoom call and run `probe` again. Expected: a line whose bundle id starts with `us.zoom.xos`, and `meeting apps now: ["Zoom"]`.
+1. Quit every app that uses the mic or a camera. Run `.build/debug/shepetal-meeting probe`.
+2. Expected: `no process is using the mic`, `camera in use: no` and `meeting now: none`. It needs no permission and shows no prompt.
+3. Join a Zoom call and run `probe` again. Expected: a `mic` line with a bundle id that starts with `us.zoom.`, the app `zoom.us` and a pid, then `meeting now: zoom.us`. With the camera on, `camera in use: yes`. No line has a window title or a URL.
 
 ### MEET-2: watch a Zoom call
-1. Run `START_AFTER=2 END_AFTER=3 .build/debug/shepetal-meeting watch` (the defaults are 5 s and 30 s).
-2. Join a real Zoom call, or a test call at https://zoom.us/test. Expected: about 2 s after Zoom takes the mic, `started(app: "Zoom")`.
+1. Run `START_AFTER=2 END_AFTER=3 .build/debug/shepetal-meeting watch` (the defaults are 5 s and 4 s).
+2. Join a real Zoom call, or a test call at https://zoom.us/test. Expected: about 2 s after Zoom takes the mic, `started(app: "zoom.us")`.
 3. During the call, switch your default mic or output, for example to AirPods. Expected: no event.
-4. Stay in the call for at least 15 s (no meeting ends sooner), then leave it. Expected: about 4 s later, `ended(app: "Zoom")`.
+4. Stay in the call for at least 15 s (no meeting ends sooner), then leave it. Expected: about 3 s later, `ended(app: "zoom.us")`.
 
 ### MEET-3: watch a Google Meet call
-1. Browser meetings are found by window title, which macOS shows only to apps with Screen Recording access. Turn it on for your terminal app in System Settings > Privacy & Security > Screen & System Audio Recording, then restart the terminal. Without it, browser meetings are not found.
-2. Run `watch` as in MEET-2 and join a Google Meet call in Chrome. Expected: `started(app: "Google Meet (Chrome)")`.
-3. Switch to another tab for a minute and back. Expected: no event.
-4. Close the Meet tab. Expected: about 4 s later, an `ended` line for the same app.
+1. Run `watch` as in MEET-2, with no Screen Recording access for your terminal, and join a Google Meet call in Chrome. Expected: `started(app: "Google Chrome")`.
+2. Switch to another tab for a minute and back. Expected: no event.
+3. Close the Meet tab. Expected: about 3 s later, `ended(app: "Google Chrome")`.
 
 ### MEET-4: shepetal's own dictation does not count
-1. Set up a calendar event that runs now, as in MEET-5, so any other app holding the mic would count. Start `watch` with no call.
+1. Start `watch` with no call.
 2. Dictate with the shepetal Mac app for about 10 s.
 3. Expected: no event.
 
-### MEET-5: calendar meeting
-1. Give your terminal app Calendar full access. Create a calendar event that runs now.
-2. With `watch` running, start a mic app that is not a meeting app, for example QuickTime Player > File > New Audio Recording.
-3. Expected: after the start delay, `started(app: "QuickTime Player: <event title>")`.
+### MEET-5: camera alone
+1. With `watch` running, open Photo Booth. Expected: after the start delay, `started(app: "Camera")`, and macOS asks your terminal for no camera access.
+2. Quit Photo Booth. Expected: `ended(app: "Camera")` once 15 s have passed since the start.
 
 ### MEET-6: record a call
 1. During a real Zoom or Meet call where someone else talks, run `.build/debug/shepetal-meeting record 15`.
@@ -569,7 +577,7 @@ The automated part of every step runs with the Docker command in `linux/README.m
 2. In the clone's `linux` folder: `mkdir -p ~/.local/bin && ln -s "$PWD/indicator/shepetal-indicator" ~/.local/bin/`. If `~/.local/bin` is new, log out and back in so it is on PATH. Check that `command -v shepetal-indicator` prints it.
 3. For GNOME Wayland only, in the same folder: `cp -r gnome-extension ~/.local/share/gnome-shell/extensions/shepetal-indicator@backant.io`, log out and back in, then `gnome-extensions enable shepetal-indicator@backant.io`.
 4. `shepetal daemon`. Expected: a small 🤫 in the bottom-left corner of the screen. On GNOME Wayland the daemon also prints `shepetal: on GNOME Wayland 🤫 comes from the shepetal GNOME Shell extension (linux/gnome-extension/)`.
-(Automated: `socket_is_owner_only_in_a_private_runtime_dir`, `the_indicator_is_started_again_when_it_exits`.)
+(Automated: `socket_is_owner_only_in_a_private_runtime_dir`, `the_indicator_is_started_again_when_it_exits`, `an_indicator_that_keeps_crashing_backs_off_and_one_that_ran_long_restarts_soon`.)
 
 ### L-KEY-1: fn visible on an Apple keyboard
 1. Connect an Apple keyboard (Magic Keyboard, USB or Bluetooth) and run `shepetal probe`.
@@ -663,8 +671,17 @@ In the L-SC steps the shortcuts have their defaults: Esc cancels, Shift+Alt+Z is
 
 ### L-SC-6: 20-minute cap
 1. Start a hands-free dictation (double-tap fn or Ctrl+Meta+Space) and leave it running for 20 min, speaking now and then.
-2. Expected: at 19 min next to 🤫 shows `Recording stops in 1 minute` (stderr: `shepetal: hint: Recording stops in 1 minute`). At 20 min the recording stops by itself and the text is typed. Write down how long the text took after the stop: the whole clip goes to the model at once.
+2. Expected: at 19 min next to 🤫 shows `Recording stops in 1 minute` (stderr: `shepetal: hint: Recording stops in 1 minute`), and a desktop notification says the same. At 20 min the recording stops by itself and the text is typed. Write down how long the text took after the stop: the whole clip goes to the model at once.
 (Automated: `warning_at_19_minutes_and_stop_at_20`, `a_20_minute_hold_stops_and_the_late_release_does_nothing`.)
+
+### L-LEN-1: a configurable cap (F10)
+1. `sudo apt install libnotify-bin` (for `notify-send`). Put `{"dictation": {"max_minutes": 2}}` in `~/.config/shepetal/config.json` and start `shepetal daemon`, with a text editor focused.
+2. Double-tap fn and keep talking. Expected: after 1 minute `Recording stops in 1 minute` shows next to 🤫 and as a desktop notification (on GNOME Wayland without the extension, only the notification). After 2 minutes the recording stops by itself and everything said is typed, as if you had tapped fn. No sound plays.
+3. Hold fn (no double-tap) and keep talking for over 2 minutes. Expected: the same warning at 1 minute; at 2 minutes the text is typed while fn is still down, and letting go of fn afterwards starts nothing and shows no hint.
+4. `ls -t ~/.local/share/shepetal/audio | head -2`. Expected: both recordings are there, not marked cancelled, each about 2 minutes long.
+5. Put `{"dictation": {"max_minutes": 0}}` in the file and start the daemon. Expected: it exits with `...config.json: dictation.max_minutes: expected whole minutes from 1 to 1440, got 0`.
+6. Remove `dictation` from the file and restart. Expected: the cap is back to 20 minutes (L-SC-6).
+(Automated: `the_cap_is_configurable_for_holds_double_taps_and_the_toggle`, `a_one_minute_cap_warns_at_the_start`, `max_minutes_must_be_whole_minutes_from_1_to_a_day`, `a_dictation_that_reaches_the_cap_is_warned_stopped_and_typed`, `warning_at_19_minutes_and_stop_at_20`, `a_20_minute_hold_stops_and_the_late_release_does_nothing`.)
 
 ### L-AUD-1: every recording is kept, owner-only
 1. After L-FN-1 to L-FN-4, run `stat -c '%a %U %n' ~/.local/share/shepetal/audio ~/.local/share/shepetal/audio/*`.
@@ -839,6 +856,13 @@ The dictionary and snippets live in `~/.config/shepetal/` and are read again at 
 1. With no daemon running, on any of the desktops: `printf 'recording\nhint Hello from shepetal\n' | (cat; sleep 5) | shepetal indicator`.
 2. Expected: a red ring and `Hello from shepetal` next to 🤫 for about 2 s, then 🤫 disappears when the command ends.
 (Automated: `every_indicator_gets_the_state_and_late_ones_the_current_one`.)
+
+### L-IND-7: shepetal-indicator not installed, then installed (#130)
+1. On Ubuntu 24.04 in "Ubuntu on Xorg", move the link away: `mv ~/.local/bin/shepetal-indicator ~/.local/bin/shepetal-indicator.off`, then run `shepetal daemon` and leave it running for 2 min.
+2. Expected: no 🤫, dictation still works, and stderr has exactly one line `shepetal: 🤫 indicator not started: shepetal-indicator: not installed, or python3 is missing (see docs/linux.md); looking for it again every 64s at most`. No `indicator exited (exit status: 127)` lines, and `top` shows the daemon idle.
+3. `mv ~/.local/bin/shepetal-indicator.off ~/.local/bin/shepetal-indicator`. Expected: 🤫 appears within about 64 s without restarting the daemon.
+4. `pkill -f shepetal-indicator`. Expected: one `indicator exited (...)` line and 🤫 back after about 2 s.
+(Automated: `a_missing_indicator_is_looked_up_on_path_and_never_spawned`, `a_missing_indicator_is_reported_once_and_looked_for_with_backoff`, `an_indicator_that_keeps_crashing_backs_off_and_one_that_ran_long_restarts_soon`, `the_indicator_is_started_again_when_it_exits`.)
 
 ### L-MEET-1: a Zoom call in probe
 1. Install the Zoom `.deb` from zoom.us and join a call (zoom.us/test, or a call with a second device). Unmute.

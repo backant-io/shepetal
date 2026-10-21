@@ -37,9 +37,11 @@ const ID_LOGIN: usize = 6;
 /// Recordings submenu: item `i` of `recordings_menu` is `ID_RECORDINGS + i`.
 const ID_RECORDINGS: usize = 7;
 /// Recent submenu: transcript `n` is `ID_RECENT + n`.
-const ID_RECENT: usize = 100;
+const ID_RECENT: usize = 1000;
 /// Hotkey submenu: `HOTKEYS[n]` is `ID_HOTKEY + n`.
-const ID_HOTKEY: usize = 200;
+const ID_HOTKEY: usize = 1100;
+/// The account lines: ID_ACCOUNT + their index in `State::account`.
+const ID_ACCOUNT: usize = 100;
 
 static TASKBAR_CREATED: AtomicU32 = AtomicU32::new(0);
 /// The last mode set was Recording or HandsFree. Set on the caller's thread so the hook sees it
@@ -54,6 +56,7 @@ enum Cmd {
     DeleteAfter24h(bool),
     Recent(Vec<String>),
     Hotkey(Hotkey, String),
+    Account(Vec<MenuLine>),
     Quit,
 }
 
@@ -102,6 +105,12 @@ impl Ui {
         let hotkey = Hotkey::parse(name)?;
         self.send(Cmd::Hotkey(hotkey, name.to_string()));
         Ok(())
+    }
+
+    /// The account lines at the top of the tray menu (trial days left, Sign in, Buy, Sign out).
+    /// The app owns the account and calls this whenever they change.
+    pub fn set_account(&self, lines: Vec<MenuLine>) {
+        self.send(Cmd::Account(lines));
     }
 
     pub fn quit(&self) {
@@ -254,6 +263,7 @@ struct State {
     recent: Vec<String>,
     /// The hotkey's name, for the check mark.
     hotkey: String,
+    account: Vec<MenuLine>,
     /// What the overlay shows now, to skip redraws that change nothing.
     shown: Option<(Frame, Rect, u32)>,
 }
@@ -338,6 +348,7 @@ unsafe fn init(
         delete_after_24h: false,
         recent: Vec::new(),
         hotkey: name,
+        account: Vec::new(),
         shown: None,
     };
     s.tray(NIM_ADD); // fails before Explorer runs; TaskbarCreated adds it then
@@ -387,6 +398,7 @@ impl State {
                     });
                     self.hotkey = name;
                 }
+                Cmd::Account(lines) => self.account = lines,
                 Cmd::Quit => return self.shutdown(),
             }
         }
@@ -456,7 +468,7 @@ impl State {
 
 /// The tray menu. Runs a modal loop, so the state is only borrowed before and after it.
 unsafe fn menu() {
-    let Some((ctrl, paused, login, delete, recent, hotkey)) = with(|s| {
+    let Some((ctrl, paused, login, account, delete, recent, hotkey)) = with(|s| {
         let recent: Vec<String> = s
             .recent
             .iter()
@@ -467,6 +479,7 @@ unsafe fn menu() {
             s.ctrl,
             s.paused,
             s.start_at_login,
+            s.account.clone(),
             s.delete_after_24h,
             recent,
             s.hotkey.clone(),
@@ -474,7 +487,7 @@ unsafe fn menu() {
     }) else {
         return;
     };
-    let Ok(menu) = build_menu(paused, login, delete, &recent, &hotkey) else {
+    let Ok(menu) = build_menu(paused, login, &account, delete, &recent, &hotkey) else {
         return;
     };
     let mut pt = POINT::default();
@@ -511,6 +524,11 @@ unsafe fn menu() {
             s.shutdown();
             let _ = s.events.send(Event::Quit);
         }
+        id if id >= ID_ACCOUNT => {
+            if let Some(id) = account.get(id - ID_ACCOUNT).and_then(|l| l.id) {
+                let _ = s.events.send(Event::Account(id));
+            }
+        }
         _ => {}
     });
 }
@@ -529,12 +547,29 @@ fn open_url(url: &'static str) {
 unsafe fn build_menu(
     paused: bool,
     login: bool,
+    account: &[MenuLine],
     delete_after_24h: bool,
     recent: &[String],
     hotkey: &str,
 ) -> Result<HMENU> {
     let check = |on| MF_STRING | if on { MF_CHECKED } else { MF_UNCHECKED };
     let menu = CreatePopupMenu()?;
+    for (i, line) in account.iter().enumerate() {
+        let flags = if line.id.is_some() {
+            MF_STRING
+        } else {
+            MF_STRING | MF_GRAYED
+        };
+        AppendMenuW(
+            menu,
+            flags,
+            ID_ACCOUNT + i,
+            &HSTRING::from(menu_text(&line.label)),
+        )?;
+    }
+    if !account.is_empty() {
+        AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null())?;
+    }
     let donate = CreatePopupMenu()?;
     AppendMenuW(donate, MF_STRING, ID_COFFEE, w!("Buy Me a Coffee"))?;
     AppendMenuW(donate, MF_STRING, ID_SPONSORS, w!("GitHub Sponsors"))?;

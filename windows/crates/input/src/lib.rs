@@ -46,6 +46,22 @@ pub enum Event {
     CopyRecent(usize),
     /// Tray menu: Quit. The tray icon, overlay and hook are already gone.
     Quit,
+    /// Tray menu: the account line with this id (see `MenuLine`) was clicked.
+    Account(u16),
+}
+
+/// A line of the account part of the tray menu, set with `Ui::set_account`. A click on one with
+/// an id sends `Event::Account(id)`; one without is greyed-out text (the trial's days left).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MenuLine {
+    pub label: String,
+    pub id: Option<u16>,
+}
+
+/// A menu item's text as Windows shows it: an `&` is a mnemonic unless doubled, and an email or
+/// an error may hold one.
+pub fn menu_text(label: &str) -> String {
+    label.replace('&', "&&")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -419,6 +435,15 @@ pub fn overlay_rect(work: Rect, dpi: u32, label_w: i32) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn menu_text_keeps_ampersands_visible() {
+        assert_eq!(
+            menu_text("Free trial: 3 days left · a&b@c.de"),
+            "Free trial: 3 days left · a&&b@c.de"
+        );
+        assert_eq!(menu_text("Sign out"), "Sign out");
+    }
 
     const LCTRL: u16 = 0xA2;
     const RCTRL: u16 = 0xA3;

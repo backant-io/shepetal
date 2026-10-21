@@ -118,9 +118,10 @@ final class Pipeline {
     }
 
     /// Everything between speech-to-text and insertion, shared by dictation and re-transcription (Hub).
-    /// Cleanup, then the personal dictionary (F39); InsertionRules fits the result to the cursor afterwards.
+    /// Cleanup, spoken dates as numbers (docs/text-rules.md), then the personal dictionary (F39), whose text is
+    /// inserted as written; InsertionRules fits the result to the cursor afterwards.
     static func finishText(_ raw: String, dictionary: URL) -> String {
-        Vocabulary.load(dictionary).apply(Cleanup.apply(SpeechGuard.stripTags(raw)))
+        Vocabulary.load(dictionary).apply(Dates.apply(Cleanup.apply(SpeechGuard.stripTags(raw))))
     }
 
     private func saved(_ saving: Task<URL, Error>, _ run: inout Run) async -> String? {
