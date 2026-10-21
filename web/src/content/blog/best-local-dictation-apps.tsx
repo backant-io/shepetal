@@ -15,7 +15,7 @@ export const bestLocal: Article = {
   dek: 'Six dictation apps that turn your voice into text on the Mac itself, ranked on the four things that make local dictation worth having.',
   short: (
     <p>
-      shepetal is first: on your Mac by default and only, offline, private and paid once. VoiceInk is the open source pick, Superwhisper and
+      shepetal is first: on your Mac by default and only, offline and private. VoiceInk is the open source pick, Superwhisper and
       Spokenly are the free ones with the most settings, MacWhisper is for files and recordings, and Apple Dictation is built in.
     </p>
   ),
@@ -49,7 +49,7 @@ export const bestLocal: Article = {
           <Ranked rank={1} id="shepetal" verdict="Our pick for local dictation">
             <p>
               <Link href="/">shepetal</Link> runs on your Mac from the first word, every time. Works offline. 100% private. Your data is
-              yours. Paid once. On top of that: instant, in every app, and meetings, transcribed on your Mac.
+              yours. On top of that: instant, in every app, and meetings, transcribed on your Mac.
             </p>
           </Ranked>
           <Ranked rank={2} id="voiceink" verdict="The open source pick">

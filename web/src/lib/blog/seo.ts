@@ -7,7 +7,7 @@ export const AUTHOR = { name: 'shepetal' };
 export const TWITTER = '@shepetal_app';
 
 /** The lines the call to action carries (components/blog/parts.tsx). Articles leave them to it, so each is said once a page. */
-export const CTA_CLAIMS = ['Write at the speed of thought.', 'Press one key. Your words appear wherever you speak.', '30 days free', '$4.99. Yours forever.', 'For Mac.'];
+export const CTA_CLAIMS = ['Write at the speed of thought.', 'Press one key. Your words appear wherever you speak.', '30 days free', 'For Mac.'];
 
 /** ISO date and time, with the zone, for structured data and Open Graph. */
 export const isoTime = (date: string) => `${date}T09:00:00+02:00`;

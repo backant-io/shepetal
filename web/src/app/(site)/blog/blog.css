@@ -481,11 +481,6 @@
   line-height: 1.5;
   max-width: 30em;
 }
-.bl-cta-price {
-  font-size: var(--sh-size-lead);
-  font-weight: 600;
-  margin-top: 4px;
-}
 .bl-cta-meta {
   font-size: var(--sh-size-small);
   color: rgb(250 238 232 / 0.72);

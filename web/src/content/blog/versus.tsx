@@ -467,7 +467,7 @@ export const VERSUS: Article[] = [
     short: (
       <p>
         Pick Wispr Flow for polished text on every device with nothing to configure. Pick VoiceInk for local dictation on an Apple silicon
-        Mac with open source code and many settings. shepetal is local and paid once as well, with meetings transcribed on your Mac.
+        Mac with open source code and many settings. shepetal is local as well, with meetings transcribed on your Mac.
       </p>
     ),
     sections: [

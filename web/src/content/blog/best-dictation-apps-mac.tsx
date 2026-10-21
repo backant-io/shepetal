@@ -15,7 +15,7 @@ export const bestMac: Article = {
   dek: 'Ten apps that turn your voice into text on a Mac, from the free one built in to cloud subscriptions, ranked on what matters when you dictate all day.',
   short: (
     <p>
-      shepetal is our first pick for most people on a Mac: on your Mac, in every app, paid once. Wispr Flow is the pick if you
+      shepetal is our first pick for most people on a Mac: on your Mac and in every app. Wispr Flow is the pick if you
       dictate on several devices and want cloud polish. Superwhisper suits people who like to tune their tools, and Apple Dictation is the
       free place to start.
     </p>

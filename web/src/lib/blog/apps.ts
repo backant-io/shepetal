@@ -13,7 +13,8 @@ export const APPS: Record<AppId, App> = {
     url: 'https://shepetal.backant.io',
     maker: 'Pavel Hegler, Backant Inc.',
     platforms: 'Mac',
-    price: '$4.99 once, with updates',
+    // The price lines are pending (Pavel, October 21, 2026): no figure until they are final. Tables link the price page.
+    price: 'See the current price',
     free: 'A 30-day trial',
     recognition: 'On your Mac',
     offline: 'Yes',

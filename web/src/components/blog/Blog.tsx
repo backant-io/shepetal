@@ -20,6 +20,12 @@ export function ToArticle({ slug, children }: { slug: string; children: ReactNod
 
 type Row = { key: keyof App; label: string };
 
+/** One fact. shepetal's price links the landing page's price section, where the current price is (no figure on the blog). */
+function cell(a: App, key: keyof App) {
+  if (a.id === 'shepetal' && key === 'price') return <Link href="/#price">{a.price}</Link>;
+  return a[key];
+}
+
 export const ROWS: Row[] = [
   { key: 'price', label: 'Price' },
   { key: 'free', label: 'Free to try' },
@@ -59,7 +65,7 @@ export function Compare({ ids, rows = ROWS, caption }: { ids: AppId[]; rows?: Ro
               </th>
               {apps.map((a) => (
                 <td key={a.id} role="cell" data-label={a.name} data-us={a.id === 'shepetal' || undefined}>
-                  {a[r.key]}
+                  {cell(a, r.key)}
                 </td>
               ))}
             </tr>
@@ -100,7 +106,7 @@ export function Ranked({ rank, id, verdict, children }: { rank: number; id: AppI
       <dl className="bl-facts">
         <div>
           <dt>Price</dt>
-          <dd>{a.price}</dd>
+          <dd>{cell(a, 'price')}</dd>
         </div>
         <div>
           <dt>Speech recognition</dt>
@@ -148,7 +154,7 @@ export function AppTable({ ids, cols, caption }: { ids: AppId[]; cols: Row[]; ca
                 </th>
                 {cols.map((c) => (
                   <td key={c.key} role="cell" data-label={c.label}>
-                    {a[c.key]}
+                    {cell(a, c.key)}
                   </td>
                 ))}
               </tr>

@@ -24,8 +24,8 @@ export function Cards({ list, large }: { list: Article[]; large?: boolean }) {
 }
 
 /**
- * The blog's one Mulberry field (the afterglow), with blush text only. The brand line, the canonical line and the price
- * claims, as written; the other claims appear once each in the article itself (CTA_CLAIMS in seo.ts, checked in blog.test.ts).
+ * The blog's one Mulberry field (the afterglow), with blush text only. The brand line, the canonical line and "For Mac.",
+ * as written (no price until the new price lines are final); the other claims appear once each in the article itself (CTA_CLAIMS in seo.ts, checked in blog.test.ts).
  * "Try 30 days free" is the landing page's Google sign-in form (it starts the 30 days and lands on /account, where the
  * download is), so it works without JavaScript; "Buy shepetal" goes to the landing page's price section.
  */
@@ -36,7 +36,6 @@ export function BlogCta() {
         <img src="/brand/shepetal-wordmark-on-dark.svg" alt="shepetal" width={200} height={54} loading="lazy" decoding="async" className="bl-cta-mark" />
         <h2 id="cta-h">Write at the speed of thought.</h2>
         <p className="bl-cta-lead">Press one key. Your words appear wherever you speak.</p>
-        <p className="bl-cta-price">$4.99. Yours forever.</p>
         <div className="bl-cta-row">
           <SignInButton redirectTo="/account" className="bl-btn">
             Try 30 days free

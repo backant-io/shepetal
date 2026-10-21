@@ -97,6 +97,14 @@ describe('blog articles', () => {
     }
   });
 
+  it('names no shepetal price while the new price lines are pending, and never the retired line', () => {
+    expect(APPS.shepetal.price).not.toMatch(/\d|\$/);
+    for (const a of ARTICLES) {
+      expect(text(a), a.slug).not.toMatch(/\$4\.99|yours forever|\$23\.99|\$0\.99/i);
+    }
+    expect(CTA_CLAIMS.join(' ')).not.toMatch(/\$|forever/i);
+  });
+
   it('writes the name in lowercase and never with the š, which belongs to the one line on the landing page', () => {
     for (const a of ARTICLES) {
       expect(text(a), a.slug).not.toMatch(/Shepetal|SHEPETAL|š/);

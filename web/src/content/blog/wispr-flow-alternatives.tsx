@@ -15,8 +15,7 @@ export const alternatives: Article = {
   dek: 'Wispr Flow is cloud dictation on a subscription. If you want your voice on your Mac, a price you pay once or something free, here is where to look.',
   short: (
     <p>
-      For dictation that stays on your Mac, pick shepetal, VoiceInk or Superwhisper in a local mode. To pay once, shepetal, VoiceInk and
-      MacWhisper. For cloud polish like Wispr Flow’s, Aqua Voice, Willow and Monologue. For free, Apple Dictation, Spokenly and
+      For dictation that stays on your Mac, pick shepetal, VoiceInk or Superwhisper in a local mode. To pay once, VoiceInk and MacWhisper. For cloud polish like Wispr Flow’s, Aqua Voice, Willow and Monologue. For free, Apple Dictation, Spokenly and
       Superwhisper’s free plan.
     </p>
   ),
@@ -43,7 +42,6 @@ export const alternatives: Article = {
           <p>
             <Link href="/">shepetal</Link> runs on your Mac and nowhere else. 100% private. Your data is yours. Works offline. Instant. One key
             works in every app, terminals and code editors included, and meetings are transcribed on your Mac with a summary and action items.
-            Paid once.
           </p>
           <h3>VoiceInk</h3>
           <p>
@@ -70,7 +68,7 @@ export const alternatives: Article = {
       body: (
         <>
           <p>
-            shepetal and VoiceInk are paid once. Superwhisper sells a lifetime Pro license for $249.99.
+            VoiceInk is paid once. Superwhisper sells a lifetime Pro license for $249.99.
           </p>
           <p>
             <AppLink id="macwhisper" /> Pro is €64 once with lifetime updates. It is a transcription app first: files, recordings and meetings,
@@ -141,7 +139,7 @@ export const alternatives: Article = {
     },
     {
       q: 'Is there a Wispr Flow alternative without a subscription?',
-      a: 'shepetal and VoiceInk are paid once, MacWhisper Pro is €64 once and Superwhisper sells a $249.99 lifetime license. The table above has every price.',
+      a: 'VoiceInk is paid once, MacWhisper Pro is €64 once and Superwhisper sells a $249.99 lifetime license. The table above has every price.',
     },
     {
       q: 'Which Wispr Flow alternative runs on Windows?',
