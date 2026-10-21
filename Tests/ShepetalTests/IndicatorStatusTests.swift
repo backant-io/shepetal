@@ -38,6 +38,12 @@ extension IndicatorTests {
         XCTAssertEqual(indicator.labelText, Hint.oneMinuteLeft, "a new status waits for the hint to end")
         RunLoop.main.run(until: Date().addingTimeInterval(0.3))
         XCTAssertEqual(indicator.labelText, "changed", "the label comes back after the hint")
+
+        // After a hint (the launch hint, a short-press hint) the next dictation must still show the label.
+        indicator.set(.idle)
+        indicator.set(.recording)
+        indicator.status = Indicator.creatorLabel
+        XCTAssertEqual(indicator.labelText, Indicator.creatorLabel, "an ended hint must not block later labels")
     }
 
     /// Release, Esc, too short, a mic end or an error: the label must not stay on screen after the dictation.
