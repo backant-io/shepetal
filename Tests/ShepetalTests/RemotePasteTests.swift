@@ -1,4 +1,5 @@
 import AppKit
+import Carbon
 import XCTest
 import ShepetalCore
 @testable import Shepetal
@@ -125,6 +126,28 @@ final class RemotePasteTests: XCTestCase {
         XCTAssertFalse(e[3].flags.contains(.maskShift), "Shift is up again after the key")
         XCTAssertTrue(e.allSatisfy { $0.flags.isDisjoint(with: [.maskCommand, .maskSecondaryFn, .maskControl]) })
         XCTAssertEqual(Inserter.events(PasteMode.Keystroke(code: 34)).count, 2, "a plain key has no modifier events")
+    }
+
+    // A dead key is no key for its accent: posted, it types nothing and joins the next key in the target app. On a
+    // German layout "^abc" typed "âbc", "`echo`" typed "ècho`", and a text ending in one joined the user's next
+    // keystroke. Real layouts, read without switching the user's: the defect was the flag UCKeyTranslate got.
+    func testDeadKeysAreNeverTyped() throws {
+        let qwertz = Inserter.layout(try Self.source("com.apple.keylayout.ABC-QWERTZ"))
+        for c in "^`´~¨" { XCTAssertNil(qwertz[c], "\(c) is only a dead key on ABC-QWERTZ") }
+        XCTAssertNil(PasteMode.keystrokes("^abc", layout: qwertz), "so the text goes to the clipboard with the ⌘V hint")
+        XCTAssertNil(PasteMode.keystrokes("`echo`", layout: qwertz))
+        XCTAssertNotNil(PasteMode.keystrokes("echo abc", layout: qwertz))
+        // On US, Option+E is the dead acute and Shift+Option+E types it alone; "`" and "^" are plain keys there.
+        let us = Inserter.layout(try Self.source("com.apple.keylayout.US"))
+        XCTAssertEqual(us["´"], PasteMode.Keystroke(code: 14, shift: true, option: true))
+        XCTAssertNotNil(PasteMode.keystrokes("^abc `echo`", layout: us))
+    }
+
+    /// A keyboard layout that ships with macOS, by id. Reading it does not change the user's input source.
+    static func source(_ id: String) throws -> TISInputSource {
+        let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+        let list = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource]
+        return try XCTUnwrap(list?.first, "\(id) ships with macOS")
     }
 
     // A character the layout cannot type sends the whole text to the clipboard with the ⌘V hint, nothing typed.

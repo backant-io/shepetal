@@ -70,6 +70,16 @@ final class PressReturnTests: XCTestCase {
         XCTAssertEqual(returns, 0)
     }
 
+    // Typed: the text went to the first window key by key, then focus moved: Return must not follow it.
+    func testNoReturnWhenFocusMovedAfterTheLastTypedKey() async throws {
+        let keys = try XCTUnwrap(PasteMode.keystrokes("See you soon.", layout: Inserter.layout())).count
+        var asked = 0
+        let r = await insert(.typed, stillFocused: { asked += 1; return asked <= keys })
+        XCTAssertTrue(r.landed, "every key went to the window that kept focus")
+        XCTAssertEqual(asked, keys + 1, "rule 8 is asked once more, before Return")
+        XCTAssertEqual(returns, 0)
+    }
+
     func testNoReturnWithoutTheCommand() async {
         let r = await insert(pressReturn: false)
         XCTAssertTrue(r.landed)

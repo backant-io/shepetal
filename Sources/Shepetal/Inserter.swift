@@ -161,11 +161,16 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
         return (0..<128).first { type($0, 0) == 0x76 }.map { CGKeyCode($0) } ?? 9
     }
 
-    /// Each character the active keyboard layout types, and its key: no modifier first, then Shift, Option and
-    /// Shift+Option, so a character gets its simplest key. The keypad is left out (a remote side may have Num Lock
-    /// off), and so are control characters but Tab. Dead keys give their accent alone. Empty without a layout.
-    static func layout() -> [Character: PasteMode.Keystroke] {
-        guard let type = keyboardLayout() else { return [:] }
+    /// Each character a layout (the active one by default) types with one key press, and its key: no modifier
+    /// first, then Shift, Option and Shift+Option, so a character gets its simplest key. The keypad is left out (a
+    /// remote side may have Num Lock off), and so are control characters but Tab. Dead keys are left out: posted,
+    /// one types nothing and joins the next key in the target app ("^" then "a" is "â"), so a text with its accent
+    /// goes to the clipboard. Empty without a layout.
+    /// ponytail: an accented letter that needs a dead key plus a letter is not typed either; add those two-key
+    /// sequences if typed mode users dictate accents.
+    static func layout(_ source: TISInputSource? = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue())
+        -> [Character: PasteMode.Keystroke] {
+        guard let type = keyboardLayout(source) else { return [:] }
         var map: [Character: PasteMode.Keystroke] = [:]
         // UCKeyTranslate takes Carbon's modifier bits shifted right by 8: Shift is 2, Option 8.
         for (state, shift, option) in [(UInt32(0), false, false), (2, true, false), (8, false, true), (10, true, true)] {
@@ -178,10 +183,11 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
         return map
     }
 
-    /// What one key types on the active layout with a Carbon modifier state, or nil; nil without a layout.
-    private static func keyboardLayout() -> ((_ code: Int, _ state: UInt32) -> UniChar?)? {
-        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
-              let ptr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+    /// What one key types on a layout with a Carbon modifier state, or nil, translated with dead keys on, as the
+    /// target app has them: a dead key is nil. nil without a layout.
+    private static func keyboardLayout(_ source: TISInputSource? = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue())
+        -> ((_ code: Int, _ state: UInt32) -> UniChar?)? {
+        guard let source, let ptr = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
         let data = Unmanaged<CFData>.fromOpaque(ptr).takeUnretainedValue() as Data
         let kbd = UInt32(LMGetKbdType())
         return { code, state in
@@ -191,9 +197,8 @@ final class Inserter: NSObject, NSPasteboardItemDataProvider {
                     var dead: UInt32 = 0
                     var length = 0
                     var chars = [UniChar](repeating: 0, count: 4)
-                    let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), state, kbd,
-                                                OptionBits(1 << kUCKeyTranslateNoDeadKeysBit), &dead, 4, &length, &chars)
-                    return status == noErr && length == 1 ? chars[0] : nil
+                    let status = UCKeyTranslate(layout, UInt16(code), UInt16(kUCKeyActionDown), state, kbd, 0, &dead, 4, &length, &chars)
+                    return status == noErr && dead == 0 && length == 1 ? chars[0] : nil
                 }
             }
         }

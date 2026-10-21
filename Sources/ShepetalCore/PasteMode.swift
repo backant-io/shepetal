@@ -22,10 +22,13 @@ public enum PasteMode: String, CaseIterable, Sendable {
     /// viewer that fetches late cannot paste it.
     public static let remoteGrace: TimeInterval = 1.0
 
-    /// Viewers whose clipboard syncs to another machine. Checked on this Mac's apps: Windows App (it kept
-    /// Microsoft Remote Desktop's id) and Screen Sharing. RealVNC and TigerVNC are Wispr's own list
-    /// (docs/re/insertion-context.md). The rest are the vendors' ids, unchecked until hand step M-INS-9; a wrong
-    /// one never matches, and `pasteModes` fixes it per app.
+    /// Viewers whose clipboard syncs to another machine. Ids checked on this Mac's apps: Windows App (it kept
+    /// Microsoft Remote Desktop's id) and Screen Sharing. RealVNC and TigerVNC are the ids in Wispr's
+    /// remote-viewer paste, which bounces focus through Finder to reactivate the viewer before the chord (helper
+    /// strings `no_bounce_target`, `viewer_not_reactivated`): they may sync the clipboard only when reactivated,
+    /// which shepetal never does (rule 8), and the far side then pastes its old clipboard. The rest are the
+    /// vendors' ids. All but the first two are unchecked until the hand step; a wrong id never matches, and
+    /// `pasteModes` fixes it per app.
     public static let remoteViewers: Set<String> = [
         "com.microsoft.rdc.macos",            // Windows App, Microsoft Remote Desktop
         "com.apple.ScreenSharing",
@@ -60,7 +63,9 @@ public enum PasteMode: String, CaseIterable, Sendable {
 
     /// `requestedAt` is the first read since the clipboard write. Local: only a read after the chord counts.
     /// Remote: any read counts, since an eager viewer syncs during the delay and the far side pastes its copy.
-    /// ponytail: a clipboard manager that ignores the Concealed marker and reads during the delay also counts.
+    /// ponytail: any read counts, so it does not prove the far side pasted (a viewer that syncs but does not map ⌘
+    /// to Ctrl, or a clipboard manager that ignores the Concealed marker and reads during the delay); with "press
+    /// enter" on, Return still goes to the same viewer window. A viewer that shows it gets `local` in `pasteModes`.
     public static func verdict(_ mode: PasteMode, postedAt: TimeInterval, requestedAt: TimeInterval?,
                                now: TimeInterval) -> PasteCheck.Verdict {
         if mode.syncsClipboard, requestedAt != nil { return .landed }
