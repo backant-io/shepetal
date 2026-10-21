@@ -4,13 +4,11 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const NAV = [
-  ['Every app', '/#apps'],
-  ['Privacy', '/#privacy'],
   ['Meetings', '/#meetings'],
-  ['Price', '/#price'],
+  ['Pricing', '/#price'],
 ];
 
-/** The site header. The trial button shows on the home page only; signed-in pages have the account. */
+/** The site header. The home page has the trial button; the other pages have the account. */
 export function SiteHeader({ cta }: { cta: React.ReactNode }) {
   const home = usePathname() === '/';
   return (
@@ -30,10 +28,13 @@ export function SiteHeader({ cta }: { cta: React.ReactNode }) {
           ))}
         </nav>
         <div className="head-end">
-          <Link href="/account" className="head-link">
-            Account
-          </Link>
-          {home && cta}
+          {home ? (
+            cta
+          ) : (
+            <Link href="/account" className="head-link">
+              Account
+            </Link>
+          )}
         </div>
       </div>
     </header>

@@ -1,14 +1,13 @@
 import type { Metadata } from 'next';
 import { Fragment } from 'react';
-import { HeroDemo } from '@/components/HeroDemo';
 import { Cycle, InView } from '@/components/landing/Cycle';
+import { Hero, TRY } from '@/components/landing/Hero';
 import { Icons, Ind, Shush, Win, Words } from '@/components/landing/Mac';
 import { SendToMac, ShareBar } from '@/components/landing/ShareBar';
 import { SignInButton } from '@/components/SignInButton';
 
 export const metadata: Metadata = { alternates: { canonical: '/' } };
 
-const TRY = 'Try 30 days free';
 const NCVS = 'https://ncvs.org/archive/ncvs/tutorials/voiceprod/tutorial/quality.html';
 // Dhakal et al., CHI 2018 (a large online typing test): the faster typists, next to whom speaking is about 3x.
 // Which typing studies 4x may cite is in brand/strategy.md, Evidence notes.
@@ -448,67 +447,7 @@ const FAQ: [string, React.ReactNode][] = [
 export default function Home() {
   return (
     <main className="lp">
-      {/* Hero */}
-      <section className="hero grain" aria-labelledby="hero-title">
-        <div className="wrap">
-          <div className="hero-top">
-            <h1 id="hero-title" className="t-display hero-title">
-              <Words text="Effortless voice-to-text that transforms the way you work." />
-              <Ref n={1} first />
-            </h1>
-            <div className="hero-copy">
-              <p className="t-lead">
-                Press one key. Your words appear wherever you speak. The text is there about 0.1 s after you finish, and your voice stays
-                on your Mac.
-              </p>
-              <div className="cta-row" id="hero-cta">
-                <SignInButton redirectTo="/account" className="btn btn-lg">
-                  {TRY}
-                </SignInButton>
-                <SendToMac />
-                <a href="#price" className="btn btn-quiet btn-lg">
-                  $4.99 once
-                </a>
-              </div>
-              <p className="hero-meta">
-                Google sign-in, only for the license · no card
-                <br />
-                For Mac with Apple silicon, macOS 14.4 or later
-              </p>
-            </div>
-          </div>
-          <HeroDemo
-            wallpaper={
-              <Photo
-                name="last-light"
-                webp
-                night="dusk-air"
-                widths={[800, 1600, 2400]}
-                alt=""
-                w={2400}
-                h={1357}
-                eager
-                className="wallpaper"
-                sizes="(min-width: 1280px) 1200px, 100vw"
-              />
-            }
-          />
-          <ul className="legend" aria-label="What the ring around the indicator means">
-            <li>
-              <Ind state="rec" className="static" />
-              Recording
-            </li>
-            <li>
-              <Ind state="free" className="static" />
-              Hands-free
-            </li>
-            <li>
-              <Ind state="write" className="static" />
-              Writing
-            </li>
-          </ul>
-        </div>
-      </section>
+      <Hero />
 
       {/* Facts that anyone can check, in the place other pages put logos */}
       <div className="wrap">
@@ -903,7 +842,7 @@ export default function Home() {
             <li id="note-1">
               The one key is fn, and a double-tap of fn starts hands-free until you tap it again. The text lands in any app that accepts a
               paste (in password fields and secure input, the text waits on the clipboard for Command-V), after a one-time setup: the permissions, a
-              Google sign-in and one download. <a href="#ref-1">Back</a>
+              Google sign-in and one download.
             </li>
             <li id="note-2">
               “100% private” means your voice and your text: speech recognition runs on your Mac, and shepetal never sends your audio or your

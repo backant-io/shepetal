@@ -24,12 +24,12 @@
 @font-face {
   font-family: 'shepetal Serif fallback';
   src: local('Iowan Old Style Roman'), local('IowanOldStyle-Roman');
-  /* Iowan is 3.1% wider than shepetal Serif at the title's weight 340 (1.8% at 380), measured in Chrome. */
-  size-adjust: 97%;
+  /* Iowan is 1.8% wider than shepetal Serif at the title's weight 380 (3.1% at 340), measured in Chrome. */
+  size-adjust: 98.2%;
   /* shepetal Serif's own ascent and descent (1470 and 530 of 2000 units), divided by size-adjust,
      so the text also sits at the same height when the font swaps in */
-  ascent-override: 75.8%;
-  descent-override: 27.3%;
+  ascent-override: 74.8%;
+  descent-override: 27%;
   line-gap-override: 0%;
 }
 @font-face {

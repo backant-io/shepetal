@@ -51,7 +51,7 @@ export default function SiteLayout({ children }: { children: React.ReactNode }) 
       </a>
       <SiteHeader
         cta={
-          <SignInButton redirectTo="/account" className="btn">
+          <SignInButton redirectTo="/account" className="btn btn-line">
             Try 30 days free
           </SignInButton>
         }

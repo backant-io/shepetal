@@ -7,18 +7,25 @@ import { describe, expect, it } from 'vitest';
 const SRC = join(__dirname, '..', '..');
 const read = (f: string) => readFileSync(f, 'utf8');
 const page = read(join(__dirname, 'page.tsx'));
+const hero = read(join(SRC, 'components', 'landing', 'Hero.tsx'));
 const files = [
   join(__dirname, 'page.tsx'),
   join(__dirname, 'layout.tsx'),
-  join(SRC, 'components', 'HeroDemo.tsx'),
   ...readdirSync(join(SRC, 'components', 'landing')).map((f) => join(SRC, 'components', 'landing', f)),
 ];
 const text = files.map(read).join('\n');
 // What a reader sees: the source without comments, alt text and aria labels.
-const visible = text
-  .replace(/\/\*[\s\S]*?\*\//g, '')
-  .replace(/^\s*\/\/.*$/gm, '')
-  .replace(/\b(?:aria-label|alt)=(?:"[^"]*"|\{`[^`]*`\})/g, '');
+const strip = (src: string) =>
+  src
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/^\s*\/\/.*$/gm, '')
+    .replace(/\b(?:aria-label|alt)=(?:"[^"]*"|\{`[^`]*`\})/g, '');
+const visible = strip(text);
+// The hero's own words: its JSX text, without the code around it.
+const heroText = strip(hero)
+  .split('export function Hero')[1]
+  .replace(/<[^>]*>|\{[^{}\n]*\}/g, ' ')
+  .replace(/\s+/g, ' ');
 
 describe('landing page', () => {
   it('names no speech recognition or AI model, so the privacy story is about the Mac and not a vendor', () => {
@@ -33,19 +40,19 @@ describe('landing page', () => {
   });
 
   it('starts the trial with the Google sign-in form, never a plain link, so the button works without JavaScript', () => {
-    expect(page).toContain("const TRY = 'Try 30 days free'");
-    const signIns = page.match(/<SignInButton redirectTo="\/account"/g)?.length ?? 0;
+    expect(hero).toContain("export const TRY = 'Try 30 days free'");
+    const both = page + hero;
+    const signIns = both.match(/<SignInButton redirectTo="\/account"/g)?.length ?? 0;
     expect(signIns).toBeGreaterThanOrEqual(4);
     // Google refuses sign-in inside in-app browsers such as X's, so on a phone each trial button has a
     // Send to my Mac next to it (CSS swaps them under 760 px).
-    expect(page.match(/<SendToMac \/>/g)?.length).toBe(signIns);
+    expect(both.match(/<SendToMac \/>/g)?.length).toBe(signIns);
     expect(page).toContain('$4.99 once');
     expect(page).toContain('no card');
   });
 
   it('carries every approved line with its proof footnote, as the brand requires', () => {
     for (const [line, n] of [
-      ['Effortless voice-to-text that transforms the way you work.', 1],
       ['100% private. Your data is yours.', 2],
       ['Instant, real-time, 4x faster.', 4],
     ] as const) {
@@ -72,7 +79,18 @@ describe('landing page', () => {
 
   it('says what happens, never the steps: the instruction line is banned from brand copy (voice.md, Oct 21)', () => {
     expect(visible).not.toMatch(/hold fn,? (?:speak|talk)|speak, let go|hold fn and say|hold fn\. speak/i);
-    expect(page).toContain('Press one key. Your words appear wherever you speak.');
+    expect(hero).toMatch(/>\s*Press one key\.\s*<\/h1>/);
+    expect(hero).toContain('<span>Your words appear wherever you speak.</span>');
+  });
+
+  it('keeps the hero bold and clean: no footnotes, no fine print, no instructions (Pavel, Oct 21)', () => {
+    for (const banned of ['Hold fn', 'keeps quiet', 'macOS 14.4', 'Google sign-in', '0.1 s', 'Effortless', '<Ref'])
+      expect(hero, banned).not.toContain(banned);
+  });
+
+  it('makes each claim in the hero once, since a claim said twice reads as filler', () => {
+    const claims = ['Instant.', 'Works offline.', '100% private.', 'For Mac.', '30 days free.', '$4.99.', 'Yours forever.'];
+    for (const claim of claims) expect(heroText.split(claim).length - 1, claim).toBe(1);
   });
 
   it('keeps the brand voice: no em dashes, no hype words, no invented proof', () => {
@@ -93,12 +111,11 @@ describe('landing page', () => {
   });
 
   it('names each indicator state in words next to its color, since color is never the only cue', () => {
-    for (const [state, word] of [
-      ['rec', 'Recording'],
-      ['free', 'Hands-free'],
-      ['write', 'Writing'],
-    ])
-      expect(page).toMatch(new RegExp(`<Ind state="${state}"[^>]*/>\\s*${word}`));
+    // The hero's ring: the pill next to it says Recording while it is red and Writing while it is blue.
+    expect(hero).toContain('<span className="hd-pill-rec">Recording</span>');
+    expect(hero).toContain('<span className="hd-pill-write">Writing</span>');
+    // Orange appears only in the hands-free scene, whose caption names it.
+    expect(page).toContain('to speak hands-free: the ring stays orange');
   });
 
   it('states the real system requirement and keeps the other platforms undated', () => {

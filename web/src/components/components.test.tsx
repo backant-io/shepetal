@@ -1,7 +1,6 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { startCheckout } from './BuyButton';
-import { gesture } from './HeroDemo';
 import { daysLeft, LicenseSummary } from './LicenseSummary';
 
 const json = (status: number, body: unknown) =>
@@ -57,22 +56,5 @@ describe('/account license summary', () => {
     );
     expect(html).toContain('Your trial ended');
     expect(html).toContain('$4.99');
-  });
-});
-
-describe('Hero demo fn gesture', () => {
-  // The demo must teach the gesture the Mac app really has (FnGesture.swift), or the first real press surprises.
-  it('records from the press, writes after a hold of 0.5 s or more, and treats a shorter press as a possible double-tap', () => {
-    expect(gesture('rest', 'down')).toBe('talk');
-    expect(gesture('talk', 'up', 500)).toBe('write');
-    expect(gesture('talk', 'up', 499)).toBe('wait');
-  });
-
-  it('locks hands-free on the second press, writes on the next one, and drops a lone short press', () => {
-    expect(gesture('wait', 'down')).toBe('free');
-    expect(gesture('free', 'up')).toBe('free');
-    expect(gesture('free', 'down')).toBe('write');
-    expect(gesture('wait', 'settle')).toBe('rest');
-    expect(gesture('write', 'down')).toBe('write');
   });
 });

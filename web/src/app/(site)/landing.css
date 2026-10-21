@@ -84,14 +84,6 @@ html {
 }
 
 /* ---------- Type, on the brand scale ---------- */
-.t-display {
-  font-family: var(--sh-font-display);
-  font-weight: 340;
-  font-size: clamp(42px, 6.4vw, 92px);
-  line-height: 1.02;
-  letter-spacing: -0.016em;
-  text-wrap: balance;
-}
 .t-h1 {
   font-family: var(--sh-font-display);
   font-weight: 360;
@@ -198,12 +190,6 @@ html {
   padding: 0 0.2em;
   color: var(--sh-accent);
 }
-/* The hero's marker lands with the last word, so it never shows before the headline. */
-.hero-title .ref {
-  font-size: 0.26em;
-  margin-left: 0.04em;
-  animation: word-in 240ms var(--sh-ease-settle) 600ms both;
-}
 .link {
   color: var(--sh-accent);
   text-decoration: underline;
@@ -252,6 +238,7 @@ html {
 }
 .site-nav {
   display: none;
+  margin-left: auto;
   gap: 28px;
   font-size: 14px;
   font-weight: 500;
@@ -278,9 +265,18 @@ html {
   font-size: 14px;
   border-radius: 10px;
 }
-@media (min-width: 900px) {
+/* The links sit right, next to the trial button; phones show the wordmark only (the share bar comes later). */
+@media (min-width: 760px) {
   .site-nav {
     display: flex;
+  }
+  .site-nav + .head-end {
+    margin-left: 0;
+  }
+}
+@media (max-width: 759px) {
+  .site-head-in {
+    height: 56px;
   }
 }
 @media (max-width: 420px) {
@@ -311,6 +307,15 @@ html {
 .lp .btn-quiet:hover {
   background: color-mix(in srgb, var(--sh-text) 6%, transparent);
 }
+/* The header's trial button is a hairline, so the hero's button is the one filled button in view. */
+.site-head .btn-line {
+  background: transparent;
+  color: var(--sh-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--sh-text) 20%, transparent);
+}
+.site-head .btn-line:hover {
+  background: color-mix(in srgb, var(--sh-text) 6%, transparent);
+}
 .btn-lg {
   padding: 1.05rem 1.5rem;
   font-size: 16px;
@@ -322,14 +327,7 @@ html {
   gap: 12px 20px;
 }
 
-/* ---------- Hero ---------- */
-.hero {
-  position: relative;
-  padding-top: clamp(36px, 6vw, 96px);
-  padding-bottom: clamp(56px, 7vw, 104px);
-  background: linear-gradient(180deg, var(--sh-neutral-0) 0%, var(--sh-bg) 70%);
-  isolation: isolate;
-}
+/* ---------- Grain ---------- */
 .grain {
   position: relative;
   isolation: isolate;
@@ -344,37 +342,7 @@ html {
   opacity: var(--sh-grain-opacity);
   pointer-events: none;
 }
-.hero-top {
-  display: grid;
-  gap: 28px;
-  align-items: end;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme='light']) .hero {
-    background: radial-gradient(120% 70% at 50% -10%, var(--sh-neutral-800) 0%, var(--sh-bg) 70%);
-  }
-}
-@media (min-width: 980px) {
-  .hero-top {
-    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
-    gap: 64px;
-  }
-}
-.hero-title {
-  max-width: 13.5em;
-}
-.hero-copy {
-  display: grid;
-  gap: 24px;
-  justify-items: start;
-}
-.hero-meta {
-  font-size: 14px;
-  line-height: 1.6;
-  color: var(--sh-text-muted);
-}
-
-/* The word reveal: how dictated text lands. On the hero line once, and where text lands in a mock. */
+/* The word reveal: how dictated text lands in a mock. */
 .w {
   display: inline-block;
   white-space: pre;
@@ -388,96 +356,6 @@ html {
     transform: translateY(2px);
   }
 }
-.hero-title .w {
-  animation-delay: calc(120ms + var(--t, 0ms));
-}
-
-/* Desktop: the title in three lines, so more of the Mac shows above the fold. */
-@media (min-width: 980px) {
-  .hero-title {
-    max-width: 16em;
-    font-size: clamp(56px, 5vw, 72px);
-    /* balance picks other breaks with the fallback font than with shepetal Serif, and the title jumps on swap */
-    text-wrap: wrap;
-  }
-}
-
-/* The demo: a Mac screen at the last light, with a new email open. */
-.demo {
-  margin-top: clamp(40px, 6vw, 80px);
-}
-@media (min-width: 980px) {
-  .demo {
-    margin-top: clamp(32px, 4vw, 56px);
-  }
-}
-.screen {
-  position: relative;
-  border-radius: clamp(14px, 1.6vw, 20px);
-  overflow: hidden;
-  aspect-ratio: 16 / 10;
-  box-shadow: var(--m-shadow);
-  background: var(--sh-mulberry-700);
-  font-family: var(--m-font);
-  color: var(--m-text);
-  contain: layout paint;
-}
-.wallpaper img,
-.screen > picture img {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.menubar {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 26px;
-  padding-inline: 14px;
-  font-size: 12.5px;
-  color: #fff;
-  background: rgb(28 10 19 / 0.18);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-}
-.menubar b {
-  font-weight: 700;
-}
-.menubar .mb-end {
-  margin-left: auto;
-  display: flex;
-  gap: 14px;
-  align-items: center;
-}
-.mb-shush {
-  display: block;
-  width: 14px;
-  height: 14px;
-}
-.screen > .illus {
-  top: auto;
-  bottom: 10px;
-}
-@media (max-width: 640px) {
-  .menubar .mb-hide {
-    display: none;
-  }
-  /* A Mac stays 16:10 on a phone: the screen runs off the right edge, anchored left so the 🤫 stays in view. */
-  .demo {
-    overflow: hidden;
-    margin-right: calc(-1 * var(--gutter));
-  }
-  .demo .screen {
-    width: 170%;
-    max-width: none;
-    border-radius: 14px 0 0 14px;
-  }
-}
-
 /* A Mac window */
 .win {
   position: relative;
@@ -531,51 +409,6 @@ html {
 .field span:last-child {
   color: var(--m-text);
 }
-.mail-win {
-  position: absolute;
-  z-index: 1;
-  left: 50%;
-  top: 14%;
-  width: min(620px, 74%);
-  transform: translateX(-50%);
-}
-.mail-body {
-  padding: 16px 18px 20px;
-  height: clamp(156px, 18vw, 224px);
-  overflow: hidden;
-  font-size: clamp(13px, 1.15vw, 15px);
-}
-.mail-body p + p {
-  margin-top: 0.7em;
-}
-@media (max-width: 640px) {
-  .mail-win {
-    left: 4%;
-    top: 12%;
-    width: min(calc(100vw - 2 * var(--gutter) - 8px), 520px);
-    transform: none;
-  }
-  .mail-body {
-    height: auto;
-    max-height: 210px;
-    min-height: 150px;
-  }
-}
-.caret {
-  display: inline-block;
-  width: 1.5px;
-  height: 1.15em;
-  margin-left: 1px;
-  vertical-align: -0.2em;
-  background: var(--m-text);
-  animation: caret 1.06s steps(1) infinite;
-}
-@keyframes caret {
-  50% {
-    opacity: 0;
-  }
-}
-
 /* The indicator: an 18 px circle, the 2 px ring drawn inside it, 8 px from the screen corner, no glow. */
 .ind {
   position: absolute;
@@ -641,115 +474,611 @@ html {
   }
 }
 
-/* The keyboard row under the screen: you hold fn here. */
-.keys {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 18px 28px;
-  margin-top: 28px;
+/* ---------- Hero ---------- */
+/* One centred axis: the claim, one button, then the demo stage, whole above the fold from 390x664 up.
+   The copy never moves. The stage is a Mac screen at dusk in both themes; its windows follow the theme.
+   Base styles are the finished email (reduced motion, no JavaScript); the inline script sets the rest frame
+   and plays the pass with WAAPI (Hero.tsx, hero-timeline.ts). Only opacity and transform animate. */
+.hero {
+  position: relative;
+  padding-block: 20px clamp(56px, 7vw, 104px);
+  background: linear-gradient(180deg, var(--sh-neutral-0) 0%, var(--sh-bg) 70%);
+  isolation: isolate;
+  --hero-sub: var(--sh-neutral-700);
+  --hero-btn-hover: var(--sh-neutral-800);
 }
-.keycaps {
-  display: flex;
-  gap: 8px;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .hero {
+    background: radial-gradient(120% 70% at 50% -10%, var(--sh-neutral-800) 0%, var(--sh-bg) 70%);
+    --hero-sub: var(--sh-neutral-300);
+    --hero-btn-hover: var(--sh-neutral-0);
+  }
 }
-.key {
+.hero-copy {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  width: 72px;
-  height: 64px;
-  padding: 8px 9px;
-  border-radius: 10px;
-  background: var(--sh-bg-raised);
-  box-shadow: 0 2px 0 var(--sh-border), 0 0 0 1px var(--sh-border), 0 10px 22px -12px rgb(38 20 28 / 0.35);
-  font-family: var(--m-font);
-  font-size: 12px;
-  color: var(--sh-text-muted);
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-touch-callout: none;
-  touch-action: none;
-  transition: transform 70ms ease, box-shadow 70ms ease, background 70ms ease;
+  align-items: center;
+  text-align: center;
 }
-.key-top {
-  align-self: flex-end;
-  font-size: 13px;
+.hero-title {
+  font-family: var(--sh-font-display);
+  font-weight: 380;
+  font-size: clamp(52px, 6.67vw, 96px);
+  line-height: 0.95;
+  letter-spacing: -0.025em;
+  /* One line in any font, so a fallback can never wrap it and move the page when the font swaps in. */
+  white-space: nowrap;
 }
-.key-fn {
+.hero-sub {
+  margin-top: 17px;
+  font-size: 17px;
+  line-height: 24px;
+}
+.hero-sub span,
+.hero-sub strong {
+  display: block;
+  text-wrap: balance;
+}
+.hero-sub span {
+  font-weight: 450;
+  color: var(--hero-sub);
+}
+.hero-sub strong {
+  font-weight: 550;
   color: var(--sh-text);
-  cursor: pointer;
 }
-.key-fn[aria-pressed='true'] {
-  transform: translateY(2px);
-  box-shadow: 0 0 0 var(--sh-border), 0 0 0 1px var(--sh-border);
-  background: var(--sh-bg-sunken);
+.hero-cta {
+  width: 100%;
+  margin-top: 20px;
+  justify-content: center;
 }
-.key-ghost {
-  opacity: 0.45;
+.hero-cta .cta-mac p {
+  display: none;
 }
-@media (max-width: 400px) {
-  .key-hide {
+.lp .hero-cta .btn {
+  height: 52px;
+  padding: 0 28px;
+  border-radius: 12px;
+  font-size: 17px;
+  box-shadow: 0 1px 0 rgb(38 20 28 / 0.2), 0 8px 24px -12px rgb(38 20 28 / 0.5);
+}
+.lp .hero-cta .btn:hover {
+  background: var(--hero-btn-hover);
+}
+.hero-quiet {
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--sh-text-muted);
+}
+@media (max-width: 759px) {
+  .lp .hero-cta .btn {
+    width: 100%;
+  }
+}
+@media (min-width: 760px) {
+  .hero {
+    padding-top: 40px;
+  }
+  .hero-sub {
+    margin-top: 24px;
+    font-size: 21px;
+    line-height: 30px;
+  }
+  .hero-cta {
+    margin-top: 28px;
+  }
+  .hero-quiet {
+    margin-top: 14px;
+    font-size: 14px;
+    line-height: 21px;
+  }
+  .hero-phone {
     display: none;
   }
 }
-.said {
-  flex: 1 1 280px;
-  min-height: 3.2em;
-  display: grid;
-  gap: 4px;
-  align-content: center;
+
+/* The stage */
+.hero-demo {
+  position: relative;
+  width: min(1120px, 100% - 32px);
+  margin: 24px auto 0;
 }
-.said-hint,
-.said-text {
-  font-family: var(--sh-font-display);
-  font-size: 19px;
-  line-height: 1.45;
-  color: var(--sh-text-muted);
+.hero-stage {
+  --hd-win: var(--sh-bg-raised);
+  --hd-bar: var(--sh-bg);
+  --hd-chip: var(--sh-bg-sunken);
+  --hd-line: var(--sh-border);
+  --hd-muted: var(--sh-text-muted);
+  --hd-edge: rgb(28 10 19 / 0.5);
+  position: relative;
+  height: clamp(300px, 100svh - 344px, 360px);
+  border-radius: 16px;
+  overflow: hidden;
+  contain: layout paint;
+  background: var(--sh-gradient-afterglow);
+  box-shadow: 0 0 0 1px rgb(38 20 28 / 0.1), 0 2px 4px rgb(38 20 28 / 0.06), 0 24px 48px -16px rgb(38 20 28 / 0.35),
+    0 60px 120px -40px rgb(122 36 75 / 0.4);
+  color: var(--sh-blush);
+  text-align: left;
+  user-select: none;
+  -webkit-user-select: none;
+  animation: hd-stage-in var(--sh-dur-slow) var(--sh-ease-settle) both;
 }
-.said-text {
-  color: var(--sh-text);
+.hero-stage::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: url('/brand/grain.svg') 0 0 / 256px;
+  opacity: 0.05;
+  pointer-events: none;
 }
-.said-word {
-  animation: said-in var(--sh-dur-base) var(--sh-ease-settle) both;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .hero-stage {
+    --hd-bar: var(--sh-neutral-850);
+    --hd-chip: var(--sh-neutral-800);
+    --hd-edge: rgb(250 238 232 / 0.1);
+  }
+  :root:not([data-theme='light']) .hero-stage::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--sh-blush) 8%, transparent);
+    pointer-events: none;
+  }
 }
-@keyframes said-in {
+@keyframes hd-stage-in {
   from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
+@keyframes hd-win-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* The menu bar: Wi-Fi off and the 🤫 say offline and Mac without a word. */
+.hd-menu {
+  position: absolute;
+  inset: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  height: 24px;
+  padding-inline: 14px;
+  background: rgb(28 10 19 / 0.6);
+  font: 520 12px/1 var(--sh-font-text);
+  color: rgb(250 238 232 / 0.8);
+}
+.hd-menu-apps {
+  display: none;
+  gap: 18px;
+}
+.hd-menu-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hd-menu svg {
+  width: 15px;
+  height: 15px;
+}
+.hd-menu img {
+  width: 14px;
+  height: 14px;
+}
+
+/* The app windows: one at a time, in the same place, so the apps change and the key stays. */
+.hd-win {
+  position: absolute;
+  top: 34px;
+  bottom: 116px;
+  left: 0;
+  right: 0;
+  width: calc(100% - 32px);
+  max-width: 680px;
+  margin-inline: auto;
+  display: flex;
+  flex-direction: column;
+  background: var(--hd-win);
+  color: var(--sh-text);
+  font-family: -apple-system, BlinkMacSystemFont, var(--sh-font-text);
+  font-size: 15px;
+  line-height: 22px;
+  box-shadow: 0 0 0 1px var(--hd-edge), 0 24px 60px -20px rgb(0 0 0 / 0.55), 0 2px 6px rgb(0 0 0 / 0.2);
+}
+.hd-mail {
+  animation: hd-win-in var(--sh-dur-slow) var(--sh-ease-settle) 60ms both;
+}
+.hd-chat,
+.hd-note {
+  opacity: 0;
+}
+.hd-win .win-bar {
+  flex: none;
+  height: 40px;
+  background: var(--hd-bar);
+  border-color: var(--hd-line);
+}
+.hd-win .win-title {
+  color: var(--sh-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.hd-row {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 38px;
+  padding-inline: 16px;
+  border-bottom: 1px solid var(--hd-line);
+  font-size: 14px;
+}
+.hd-row > span:first-child {
+  width: 30px;
+  color: var(--hd-muted);
+}
+.hd-chip {
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--hd-chip);
+  font-size: 13.5px;
+}
+.hd-subject,
+.hd-msg:first-child {
+  display: none;
+}
+.hd-body {
+  padding: 12px 16px;
+}
+.hd-note-title {
+  font-weight: 700;
+}
+.hd-thread {
+  margin-top: auto;
+  padding: 12px 16px 0;
+}
+.hd-msg {
+  display: flex;
+  gap: 12px;
+  font-size: 14px;
+  line-height: 20px;
+}
+.hd-msg + .hd-msg {
+  margin-top: 12px;
+}
+.hd-msg b {
+  font-weight: 600;
+}
+.hd-msg small {
+  margin-left: 4px;
+  font-size: 12px;
+  color: var(--hd-muted);
+}
+.hd-av {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--hd-chip);
+  color: var(--hd-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+/* The box you were typing in has the focus: an accent edge and a soft ring. */
+.hd-composer {
+  margin: 12px 16px 14px;
+  padding: 9px 14px;
+  border: 1px solid color-mix(in oklab, var(--sh-accent) 60%, var(--hd-line));
+  border-radius: 10px;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--sh-accent) 14%, transparent);
+}
+
+/* Where the words land. The caret is 0 wide, so showing or hiding it never moves a word.
+   The caret at the insertion point blinks while it waits; the one after landed text is solid, as after typing. */
+.hd-word {
+  display: inline-block;
+}
+.hd-caret {
+  position: relative;
+  display: inline-block;
+  width: 0;
+  height: 1.15em;
+  margin-left: 1px;
+  vertical-align: -0.2em;
+}
+.hd-caret:first-child {
+  margin-left: 0;
+  opacity: 0;
+}
+.hd-caret::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  border-radius: 1px;
+  background: currentColor;
+}
+.hd-caret:first-child::after {
+  animation: hd-blink 1.1s steps(1) 380ms infinite;
+}
+@keyframes hd-blink {
+  50% {
     opacity: 0;
   }
 }
-.said-state {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 520;
-  color: var(--sh-text-muted);
+
+/* What is said: the key, and each app's line in the same slot. Spoken words are serif, written words sans. */
+.hd-said {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 56px;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
 }
-.said-state i {
-  width: 10px;
-  height: 10px;
+.hd-key {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  margin-top: -4px;
+  border: 1px solid var(--sh-neutral-300);
+  border-radius: 6px;
+  font: 520 12px/1 var(--sh-font-text);
+  opacity: 0;
+}
+.hd-key i {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 2px 0 rgb(200 186 182 / 0.45);
+}
+.hd-lines {
+  display: grid;
+  min-width: 0;
+}
+.hd-line {
+  grid-area: 1 / 1;
+  font-family: var(--sh-font-display);
+  font-size: 17px;
+  line-height: 24px;
+  text-wrap: balance;
+}
+.hd-line span {
+  display: inline-block;
+  opacity: 0;
+}
+
+/* The indicator, drawn as the app draws it, larger: red while it records, a blue pulse while it writes. */
+.hd-ind {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  border: 2px solid var(--sh-recording);
+  background: rgb(28 10 19 / 0.55);
 }
-.said-state[data-state='free'] i {
-  border-color: var(--sh-hands-free);
+.hd-ind img {
+  width: 26px;
+  height: 26px;
 }
-.said-state[data-state='write'] i {
-  border-color: var(--sh-writing);
+.hd-ring {
+  position: absolute;
+  inset: 0;
+  border: 3px solid #ff453a;
+  border-radius: 50%;
+  opacity: 0;
 }
-.legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px 26px;
-  margin-top: 22px;
-  font-size: 14px;
-  color: var(--sh-text-muted);
+.hd-write {
+  border-color: #0a84ff;
 }
-.legend li {
-  display: flex;
-  align-items: center;
-  gap: 9px;
+.hd-pill {
+  position: absolute;
+  left: 58px;
+  bottom: 17px;
+  display: grid;
+  min-width: 96px;
+  height: 26px;
+  border-radius: 13px;
+  background: rgb(28 10 19 / 0.55);
+  font: 520 12px/26px var(--sh-font-text);
+  text-align: center;
+  opacity: 0;
+}
+.hd-pill span {
+  grid-area: 1 / 1;
+  padding-inline: 12px;
+}
+.hd-pill-write {
+  opacity: 0;
+}
+
+/* Replay: a click or a tap anywhere on the stage plays the pass again. */
+.hero-replay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  border-radius: 16px;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.hero-replay:focus-visible {
+  outline: 2px solid var(--sh-accent);
+  outline-offset: 2px;
+  border-radius: 18px;
+}
+@media (scripting: none), (prefers-reduced-motion: reduce) {
+  .hero-replay {
+    display: none;
+  }
+}
+
+@media (min-width: 760px) {
+  .hero-demo {
+    width: min(1120px, 100% - 48px);
+    margin-top: 36px;
+  }
+  .hero-stage {
+    height: clamp(320px, 100svh - 456px, 420px);
+    border-radius: 20px;
+  }
+  .hero-replay {
+    border-radius: 20px;
+  }
+  .hero-replay:focus-visible {
+    border-radius: 22px;
+  }
+  .hd-menu {
+    justify-content: space-between;
+    height: 28px;
+    padding-inline: 16px;
+  }
+  .hd-menu-apps {
+    display: flex;
+  }
+  .hd-win {
+    top: 44px;
+    bottom: 114px;
+    width: calc(100% - 40px);
+    font-size: 17px;
+    line-height: 26px;
+  }
+  .hd-row,
+  .hd-body,
+  .hd-thread {
+    padding-inline: 20px;
+  }
+  .hd-row > span:first-child {
+    width: 58px;
+  }
+  .hd-body {
+    padding-block: 16px;
+  }
+  .hd-thread {
+    padding-top: 14px;
+  }
+  .hd-msg {
+    font-size: 15px;
+    line-height: 21px;
+  }
+  .hd-msg:first-child {
+    display: flex;
+  }
+  .hd-composer {
+    margin: 14px 20px 18px;
+    padding: 11px 14px;
+    font-size: 16px;
+    line-height: 24px;
+  }
+  .hd-said {
+    left: 24px;
+    right: 24px;
+    bottom: 72px;
+    gap: 12px;
+  }
+  .hd-key {
+    margin-top: -1px;
+  }
+  .hd-line {
+    font-size: 22px;
+    line-height: 30px;
+  }
+  .hd-ind {
+    left: 24px;
+    bottom: 20px;
+    width: 44px;
+    height: 44px;
+  }
+  .hd-ind img {
+    width: 32px;
+    height: 32px;
+  }
+  .hd-ring {
+    border-width: 4px;
+  }
+  .hd-pill {
+    left: 80px;
+    bottom: 28px;
+    height: 28px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 28px;
+  }
+}
+/* Wide: the line sits in the indicator row, centred, like a film subtitle. */
+@media (min-width: 960px) {
+  .hd-win {
+    bottom: 80px;
+  }
+  .hd-said {
+    left: 0;
+    right: 0;
+    bottom: 20px;
+    height: 44px;
+    align-items: center;
+  }
+  .hd-key {
+    margin-top: 0;
+  }
+  /* The first line sets the slot, so the key and the first line are centred; the longer lines run on to the right. */
+  .hd-lines {
+    position: relative;
+  }
+  .hd-line {
+    white-space: nowrap;
+  }
+  .hd-line + .hd-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+}
+/* Short screens: the Subject row and the earlier chat message only where the window has the room. */
+@media (min-width: 760px) and (min-height: 836px) {
+  .hd-subject {
+    display: flex;
+  }
+}
+@media (min-width: 760px) and (max-height: 835px) {
+  .hd-msg:first-child {
+    display: none;
+  }
+}
+/* Short laptop screens (1280x720): tighter copy, so the whole stage still fits above the fold. */
+@media (min-width: 760px) and (max-height: 760px) {
+  .hero {
+    padding-top: 28px;
+  }
+  .hero-sub {
+    margin-top: 18px;
+  }
+  .hero-cta {
+    margin-top: 22px;
+  }
+  .hero-quiet {
+    margin-top: 10px;
+  }
+  .hero-demo {
+    margin-top: 24px;
+  }
+  .hero-stage {
+    height: clamp(300px, 100svh - 392px, 420px);
+  }
 }
 
 /* ---------- Facts strip: checkable facts in the place of logos ---------- */
