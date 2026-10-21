@@ -44,9 +44,14 @@ public struct MyVoice: Codable, Equatable, Sendable {
     }
 
     /// Trimmed, without the model's control markers ("<|im_end|>", "<think>"), and cut at a word within `limit`.
+    /// Removed until none is left: "<|im_<|x|>end|>" is "<|im_end|>" after one pass.
     static func cut(_ s: String) -> String {
-        let t = s.replacingOccurrences(of: #"<\|[^|>]*\|>|</?think>"#, with: "", options: .regularExpression)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var t = s, before = ""
+        while t != before {
+            before = t
+            t = t.replacingOccurrences(of: #"<\|[^|>]*\|>|</?think>"#, with: "", options: .regularExpression)
+        }
+        t = t.trimmingCharacters(in: .whitespacesAndNewlines)
         guard t.count > limit else { return t }
         let head = t.prefix(limit)
         if t[head.endIndex].isWhitespace { return String(head) }
@@ -70,6 +75,8 @@ public struct MyVoice: Codable, Equatable, Sendable {
     }
 
     static let irregular = ["can't": "can not", "cannot": "can not", "won't": "will not", "shan't": "shall not", "let's": "let us"]
+    // ponytail: "'d" is always "would" and "'s" always "is", so a model writing "We would left" for "We'd left" passes;
+    // telling "had" and "has" apart needs grammar. Add it if a model is seen writing that.
     static let suffixes = [("n't", " not"), ("'re", " are"), ("'ve", " have"), ("'ll", " will"), ("'m", " am"), ("'d", " would")]
     static let isTakers: Set<String> = ["it", "that", "what", "where", "who", "how", "here", "there", "he", "she"]
 

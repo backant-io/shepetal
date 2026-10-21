@@ -141,9 +141,15 @@ public enum SmartCleanup {
     /// what it took back, answers a question, or drops a clause elsewhere is rejected and the rules' text is used.
     /// `list` is the list number on the line above the cursor (`CleanupContext.listNumber`): numbering may go on from it.
     /// With `contractions` (My voice, F38), both texts are compared with their contractions spelled out, so "do not"
-    /// may become "don't" and back.
+    /// may become "don't" and back. "I mean it's" keeps a comma when spelled out ("I mean, it is"), so it stays a
+    /// cue, as above, and "I mean it is" stays emphasis.
     public static func accepts(_ out: String, for input: String, list: Int = 0, contractions: Bool = false) -> Bool {
-        if contractions { return accepts(MyVoice.spellOut(out), for: MyVoice.spellOut(input), list: list) }
+        if contractions {
+            let spell = { (s: String) in
+                MyVoice.spellOut(s.replacingOccurrences(of: #"(?i)\b(i mean) (?=it['’])"#, with: "$1, ", options: .regularExpression))
+            }
+            return accepts(spell(out), for: spell(input), list: list)
+        }
         guard out.contains(where: \.isLetter) else { return false }
         let said = tokens(input)
         let written = tokens(replace(listNumber, in: out)).map(\.word)
