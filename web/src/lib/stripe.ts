@@ -4,6 +4,8 @@ import {
   applySubscription,
   liveSubscription,
   renewingSubscription,
+  revokeLifetime,
+  TERMINAL,
   setCustomer,
   userByCustomer,
   userById,
@@ -74,30 +76,70 @@ export async function customerFor(user: User): Promise<string> {
   return (await userById(user.id))?.stripe_customer_id ?? c.id;
 }
 
+/** A code the buyer typed that cannot be used: the reason, for the API's 400. */
+export class CodeError extends Error {
+  constructor(
+    readonly code: 'code_lifetime_only' | 'invalid_code' | 'code_not_applicable',
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * The promotion code for `code`, if it is shepetal's: its coupon carries metadata app=shepetal (stripe-setup.mjs
+ * makes PRODUCTHUNT so). The Stripe account is shared with backant.io, whose codes (some 100% off, none limited to
+ * a product) must never reach shepetal, so Checkout never shows Stripe's own code field (allow_promotion_codes).
+ */
+async function shepetalPromotionCode(code: string): Promise<string> {
+  const { data } = await getStripe().promotionCodes.list({ code: code.trim(), active: true, limit: 10 });
+  const ours = data.find((p) => p.coupon.metadata?.app === APP);
+  if (!ours) throw new CodeError('invalid_code', 'This code is not valid.');
+  return ours.id;
+}
+
+/** Open Checkout sessions of this customer are expired before a new one opens, so a second tab cannot pay twice. */
+async function expireOpenSessions(customer: string): Promise<void> {
+  for await (const old of getStripe().checkout.sessions.list({ customer, status: 'open', limit: 100 })) {
+    if (old.metadata?.app === APP) await getStripe().checkout.sessions.expire(old.id).catch(() => {});
+  }
+}
+
 /**
  * POST /api/checkout: a Checkout session for the plan. `base` is the site origin.
  * lifetime: mode payment, $23.99 once. monthly: mode subscription, $0.99 a month.
- * Both accept promotion codes; the PRODUCTHUNT coupon applies to the lifetime product only, so Stripe refuses it on the monthly plan.
+ * `code` (the PRODUCTHUNT code) applies to the lifetime plan only, and only a shepetal code is accepted. Stripe then
+ * checks its own rules (the lifetime product only, first transaction, expiry) when the session is created.
  */
-export async function checkoutUrl(user: User, base: string, plan: CheckoutPlan = 'lifetime'): Promise<string> {
+export async function checkoutUrl(user: User, base: string, plan: CheckoutPlan = 'lifetime', code?: string): Promise<string> {
+  if (code && plan !== 'lifetime') throw new CodeError('code_lifetime_only', 'The code works on the one-time price only.');
+  const promotion = code ? await shepetalPromotionCode(code) : null;
   const price = await priceFor(plan);
   const customer = await customerFor(user);
+  await expireOpenSessions(customer);
   const tag = { app: APP, user_id: String(user.id) };
   const common = {
     line_items: [{ price, quantity: 1 }],
     customer,
-    allow_promotion_codes: true,
+    ...(promotion && { discounts: [{ promotion_code: promotion }] }),
     metadata: { ...tag, plan },
     success_url: `${base}/account?purchased=1`,
     cancel_url: `${base}/account`,
   };
-  const session = await getStripe().checkout.sessions.create(
-    plan === 'lifetime'
-      ? { ...common, mode: 'payment', client_reference_id: String(user.id), payment_intent_data: { metadata: tag } }
-      : // No client_reference_id: backant.io's webhook (same Stripe account) acts on every subscription checkout
-        // that has one, as its own client id. The user id travels in metadata instead.
-        { ...common, mode: 'subscription', subscription_data: { metadata: tag } },
-  );
+  let session: Stripe.Checkout.Session;
+  try {
+    session = await getStripe().checkout.sessions.create(
+      plan === 'lifetime'
+        ? { ...common, mode: 'payment', client_reference_id: String(user.id), payment_intent_data: { metadata: tag } }
+        : // No client_reference_id: backant.io's webhook (same Stripe account) acts on every subscription checkout
+          // that has one, as its own client id. The user id travels in metadata instead.
+          { ...common, mode: 'subscription', subscription_data: { metadata: tag } },
+    );
+  } catch (e) {
+    // Stripe refuses a code that has expired, was used, or meets a customer who has paid before.
+    if (promotion && e instanceof Stripe.errors.StripeInvalidRequestError) throw new CodeError('code_not_applicable', e.message);
+    throw e;
+  }
   if (!session.url) throw new Error('Stripe returned a checkout session without a url');
   return session.url;
 }
@@ -155,17 +197,40 @@ export async function setCancelAtPeriodEnd(user: User, cancel: boolean): Promise
  * proration, no final invoice, and an unpaid renewal invoice is voided. Safe to run twice (Stripe retries the webhook).
  */
 async function endSubscriptionForLifetime(subId: string): Promise<void> {
+  const ended = await endSubscription(subId, false);
+  const userId = Number(ended.metadata?.user_id);
+  if (userId) await applySubscription(userId, snapshot(ended));
+}
+
+/**
+ * Ends a subscription now: no proration, no final invoice, open invoices voided. `refund`: it should never have
+ * existed (a second subscription, or one for an owner of the lifetime license), so what it was paid is refunded too.
+ * Safe to run twice. Returns the subscription as it is after.
+ */
+async function endSubscription(subId: string, refund: boolean): Promise<Stripe.Subscription> {
   const stripe = getStripe();
   const s = await stripe.subscriptions.retrieve(subId);
   if (s.status !== 'canceled' && s.status !== 'incomplete_expired') {
-    await stripe.subscriptions.cancel(subId, { invoice_now: false, prorate: false }, { idempotencyKey: `shepetal-lifetime-${subId}` });
+    await stripe.subscriptions.cancel(subId, { invoice_now: false, prorate: false }, { idempotencyKey: `shepetal-end-${subId}` });
   }
   for await (const inv of stripe.invoices.list({ subscription: subId, status: 'open', limit: 100 })) {
     await stripe.invoices.voidInvoice(inv.id);
   }
-  const ended = await stripe.subscriptions.retrieve(subId);
-  const userId = Number(ended.metadata?.user_id);
-  if (userId) await applySubscription(userId, snapshot(ended));
+  if (refund) {
+    for await (const inv of stripe.invoices.list({ subscription: subId, status: 'paid', limit: 100 })) {
+      const pi = idOf((inv as unknown as { payment_intent?: string | { id: string } | null }).payment_intent);
+      if (pi && inv.amount_paid > 0) await refundOnce(pi, 'duplicate_subscription');
+    }
+  }
+  return stripe.subscriptions.retrieve(subId);
+}
+
+/** Refunds a payment in full, once (the idempotency key), tagged so the charge.refunded handler leaves the license alone. */
+async function refundOnce(paymentIntent: string, why: string): Promise<void> {
+  await getStripe().refunds.create(
+    { payment_intent: paymentIntent, metadata: { app: APP, reason: why } },
+    { idempotencyKey: `shepetal-refund-${paymentIntent}` },
+  );
 }
 
 /** The subscription fields the account stores. Reads the item's period on API versions that moved it there. */
@@ -198,9 +263,30 @@ async function syncSubscription(id: string, unpaidInvoice = false): Promise<void
   const customer = idOf(s.customer);
   const userId = Number(s.metadata.user_id) || (customer && (await userByCustomer(customer))?.id);
   if (!userId) return console.error(`stripe webhook: no user for subscription ${s.id}`);
+  if (customer) await setCustomer(userId, customer);
+  const user = await userById(userId);
+  if (!user) return console.error(`stripe webhook: no user ${userId} for subscription ${s.id}`);
+  if (!TERMINAL.has(s.status)) {
+    // A subscription that should not exist is ended and refunded: one for an owner of the lifetime license (a
+    // monthly checkout paid in another tab), or a second one beside a live subscription (the later one goes).
+    if (user.status === 'active') {
+      console.error(`stripe webhook: ${s.id} for lifetime user ${userId}: ended and refunded`);
+      await applySubscription(userId, snapshot(await endSubscription(s.id, true)));
+      return;
+    }
+    if (user.sub_id && user.sub_id !== s.id) {
+      const other = await getStripe().subscriptions.retrieve(user.sub_id);
+      if (!TERMINAL.has(other.status)) {
+        const [keep, extra] = other.created <= s.created ? [other, s] : [s, other];
+        console.error(`stripe webhook: two subscriptions for user ${userId}: ${extra.id} ended and refunded, ${keep.id} kept`);
+        await endSubscription(extra.id, true);
+        await applySubscription(userId, snapshot(keep));
+        return;
+      }
+    }
+  }
   const snap = snapshot(s);
   if (unpaidInvoice && snap.status === 'active') snap.status = 'past_due';
-  if (customer) await setCustomer(userId, customer);
   if (!(await applySubscription(userId, snap))) console.error(`stripe webhook: subscription ${s.id} not stored for user ${userId}`);
 }
 
@@ -229,7 +315,15 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       }
       // no_payment_required: a code that takes the whole price off.
       if (s.payment_status !== 'paid' && s.payment_status !== 'no_payment_required') return;
-      if (!(await activate(userId))) return console.error(`stripe webhook: no user ${s.client_reference_id} for paid session ${s.id}`);
+      const pi = idOf(s.payment_intent);
+      const before = await userById(userId);
+      if (!before) return console.error(`stripe webhook: no user ${s.client_reference_id} for paid session ${s.id}`);
+      // Bought twice (two tabs): the license is the first payment's; this one is refunded.
+      if (before.status === 'active' && pi && before.lifetime_payment_intent !== pi) {
+        console.error(`stripe webhook: second lifetime payment ${pi} for user ${userId}: refunded`);
+        return refundOnce(pi, 'duplicate_lifetime');
+      }
+      await activate(userId, pi);
       // Switched to lifetime while subscribed: the subscription ends now, with no further charge.
       const user = await userById(userId);
       const live = user && liveSubscription(user);
@@ -242,6 +336,14 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       const s = event.data.object;
       if (s.metadata?.app !== APP) return;
       return syncSubscription(s.id);
+    }
+    // A refund of the lifetime payment (in full) ends the license. Refunds this code made itself are of other payments.
+    case 'charge.refunded': {
+      const c = event.data.object;
+      const pi = idOf(c.payment_intent);
+      if (!pi || !c.refunded) return;
+      if (await revokeLifetime(pi)) console.error(`stripe webhook: lifetime payment ${pi} refunded: license ended`);
+      return;
     }
     case 'invoice.paid':
     case 'invoice.payment_failed': {
@@ -263,13 +365,17 @@ export const WEBHOOK_EVENTS = [
   'customer.subscription.deleted',
   'invoice.paid',
   'invoice.payment_failed',
+  'charge.refunded',
 ] as const;
 const HANDLED = new Set<string>([...WEBHOOK_EVENTS, 'customer.subscription.created']);
+/** A claim older than this that never finished is taken again by Stripe's next retry. */
+const CLAIM_MS = 120_000;
 
 /**
  * POST /api/stripe/webhook. 400 unless the Stripe-Signature matches STRIPE_WEBHOOK_SECRET.
- * Each event id is handled once: it is claimed in stripe_events before it runs, and released again
- * if it fails (500), so Stripe's retry runs it then.
+ * Each event id is handled once: it is claimed in stripe_events before it runs and marked done after. A failure
+ * releases it (500); a delivery while it runs gets 409; a claim that never finished (the Worker was cut off) is
+ * taken again after 2 minutes. Stripe retries all of these, and every handler is safe to run again.
  */
 export async function handleWebhook(body: string, signature: string | null): Promise<Response> {
   const secret = process.env.STRIPE_WEBHOOK_SECRET;
@@ -287,11 +393,21 @@ export async function handleWebhook(body: string, signature: string | null): Pro
     return Response.json({ error: 'invalid signature' }, { status: 400 });
   }
   if (!HANDLED.has(event.type)) return Response.json({ received: true });
+  // Claim the id: a new row, or an old claim that never finished (the Worker was cut off). A finished event, or one
+  // running right now, is not claimed.
+  const now = Date.now();
   const claim = await db()
-    .prepare('INSERT INTO stripe_events (id, type) VALUES (?1, ?2) ON CONFLICT (id) DO NOTHING')
-    .bind(event.id, event.type)
+    .prepare(
+      `INSERT INTO stripe_events (id, type, received_at) VALUES (?1, ?2, ?3)
+       ON CONFLICT (id) DO UPDATE SET received_at = excluded.received_at WHERE stripe_events.done = 0 AND stripe_events.received_at < ?4`,
+    )
+    .bind(event.id, event.type, new Date(now).toISOString(), new Date(now - CLAIM_MS).toISOString())
     .run();
-  if (claim.meta.changes !== 1) return Response.json({ received: true, duplicate: true });
+  if (claim.meta.changes !== 1) {
+    const row = await db().prepare('SELECT done FROM stripe_events WHERE id = ?1').bind(event.id).first<{ done: number }>();
+    if (row?.done) return Response.json({ received: true, duplicate: true });
+    return Response.json({ error: 'in progress, retry' }, { status: 409 });
+  }
   try {
     await handleEvent(event);
   } catch (e) {
@@ -299,6 +415,7 @@ export async function handleWebhook(body: string, signature: string | null): Pro
     console.error(`stripe webhook: ${event.type} ${event.id} failed: ${e instanceof Error ? e.message : e}`);
     return Response.json({ error: 'failed, retry' }, { status: 500 });
   }
+  await db().prepare('UPDATE stripe_events SET done = 1 WHERE id = ?1').bind(event.id).run();
   // Stripe stops retrying an event after 3 days, so older ids are never needed again.
   await db()
     .prepare('DELETE FROM stripe_events WHERE received_at < ?1')

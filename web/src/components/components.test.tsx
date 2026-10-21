@@ -26,6 +26,14 @@ describe('Buy button', () => {
     expect(await startCheckout('monthly', json(409, { error: 'already_subscribed' }))).toEqual({ error: expect.stringMatching(/subscription is active/) });
   });
 
+  it('sends a code with the lifetime plan, and says why a code was refused', async () => {
+    const f = json(200, { url: 'https://checkout.stripe.com/c/pay/cs_test_2' });
+    await startCheckout('lifetime', f, 'PRODUCTHUNT');
+    expect(f).toHaveBeenCalledWith('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'lifetime', code: 'PRODUCTHUNT' }) });
+    expect(await startCheckout('lifetime', json(400, { error: 'invalid_code' }), 'NOPE')).toEqual({ error: 'This code is not valid.' });
+    expect(await startCheckout('lifetime', json(400, { error: 'code_not_applicable' }), 'PRODUCTHUNT')).toEqual({ error: expect.stringMatching(/used it/) });
+  });
+
   it('never navigates on a server error, a missing url or a network failure', async () => {
     for (const f of [json(500, { url: 'https://checkout.stripe.com/x' }), json(200, {}), vi.fn<typeof fetch>(async () => Promise.reject(new Error('offline')))]) {
       expect(await startCheckout('lifetime', f)).toEqual({ error: expect.stringMatching(/did not open/) });
@@ -45,6 +53,7 @@ describe('Buy button', () => {
     expect(html).toContain('$23.99 once');
     expect(html).toContain('$0.99 a month');
     expect(html).toContain('Cancel anytime.');
+    expect(html).toContain('name="code"');
     expect(html).not.toContain('4.99');
   });
 });

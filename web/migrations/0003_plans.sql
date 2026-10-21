@@ -18,15 +18,20 @@ ALTER TABLE users ADD COLUMN paid_through TEXT;
 -- What each renewal charges, in the smallest unit of sub_currency (99 and 'usd' for $0.99), for the plan settings.
 ALTER TABLE users ADD COLUMN sub_amount INTEGER;
 ALTER TABLE users ADD COLUMN sub_currency TEXT;
+-- The PaymentIntent that paid for the lifetime license. A second lifetime payment is refunded; a refund of this one ends the license.
+ALTER TABLE users ADD COLUMN lifetime_payment_intent TEXT;
 
 UPDATE users SET plan = 'lifetime' WHERE status = 'active';
 
 CREATE UNIQUE INDEX users_stripe_customer ON users (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
 CREATE INDEX users_sub ON users (sub_id) WHERE sub_id IS NOT NULL;
 
--- Stripe event ids already handled: each event changes the account at most once, even when Stripe retries it.
+-- Stripe event ids: each event changes the account at most once, even when Stripe retries it.
+-- A row is claimed (done 0) before the event runs and marked done 1 after. A claim older than 2 minutes that never
+-- finished (the Worker was cut off) is taken again by Stripe's next retry, so no event is lost.
 CREATE TABLE stripe_events (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
-  received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  received_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+  done INTEGER NOT NULL DEFAULT 0
 );

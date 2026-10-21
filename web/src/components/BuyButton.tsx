@@ -4,18 +4,33 @@ import { useState } from 'react';
 
 export type CheckoutPlan = 'lifetime' | 'monthly';
 
-/** POST /api/checkout (API.md) with the web session and the plan. The url to open, or what to tell the user. */
+const CODE_ERRORS: Record<string, string> = {
+  invalid_code: 'This code is not valid.',
+  code_not_applicable: 'This code has ended, or this account has used it.',
+  code_lifetime_only: 'The code works on the one-time price.',
+};
+
+/**
+ * POST /api/checkout (API.md) with the web session, the plan and an optional code (lifetime only). The url to open,
+ * or what to tell the user.
+ */
 export async function startCheckout(
   plan: CheckoutPlan,
   fetchImpl: typeof fetch = fetch,
+  code?: string,
 ): Promise<{ url: string } | { error: string }> {
   try {
     const res = await fetchImpl('/api/checkout', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ plan }),
+      body: JSON.stringify(code ? { plan, code } : { plan }),
     });
     if (res.status === 401) return { error: 'You were signed out. Reload the page and sign in again.' };
+    if (res.status === 400) {
+      const body = (await res.json().catch(() => ({}))) as { error?: string };
+      const known = body.error && CODE_ERRORS[body.error];
+      if (known) return { error: known };
+    }
     if (res.status === 409) {
       const body = (await res.json().catch(() => ({}))) as { error?: unknown };
       return body.error === 'already_subscribed'
@@ -75,8 +90,30 @@ function StripeButton({ label, busyLabel, quiet, go }: { label: string; busyLabe
   );
 }
 
-export function BuyButton({ plan = 'lifetime', quiet = false }: { plan?: CheckoutPlan; quiet?: boolean }) {
-  return <StripeButton label={PRICE_LABEL[plan]} busyLabel="Opening checkout…" quiet={quiet} go={() => startCheckout(plan)} />;
+export function BuyButton({ plan = 'lifetime', quiet = false, code }: { plan?: CheckoutPlan; quiet?: boolean; code?: string }) {
+  return <StripeButton label={PRICE_LABEL[plan]} busyLabel="Opening checkout…" quiet={quiet} go={() => startCheckout(plan, fetch, code)} />;
+}
+
+/** The one-time price with a field for a code (PRODUCTHUNT takes it to $4.99). The code never goes with the monthly plan. */
+function LifetimeWithCode({ quiet }: { quiet: boolean }) {
+  const [code, setCode] = useState('');
+  return (
+    <div>
+      <label className="mb-3 block text-sm">
+        <span className="text-[var(--hush)]">Code</span>
+        <input
+          type="text"
+          name="code"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          autoComplete="off"
+          spellCheck={false}
+          className="mt-1 block w-full rounded-lg border border-[var(--line)] bg-transparent px-3 py-2 uppercase"
+        />
+      </label>
+      <BuyButton plan="lifetime" quiet={quiet} code={code.trim() || undefined} />
+    </div>
+  );
 }
 
 /** Subscribers: cancel, resume or change the card in the Stripe Billing Portal. */
@@ -86,7 +123,8 @@ export function ManageButton({ quiet = true }: { quiet?: boolean }) {
 
 /**
  * The plan choice (/account#plans, where the apps' Buy button lands): $23.99 once or $0.99 a month.
- * A Product Hunt code goes in on the Stripe page and takes the one-time price to $4.99.
+ * A Product Hunt code goes in the lifetime card's Code field and takes the one-time price to $4.99. Stripe's own
+ * code field stays off: backant.io's codes on the same Stripe account must never reach shepetal.
  */
 export function PlanPicker({ quiet = false }: { quiet?: boolean }) {
   return (
@@ -94,7 +132,7 @@ export function PlanPicker({ quiet = false }: { quiet?: boolean }) {
       <div className="rounded-xl border border-[var(--line)] p-5">
         <p className="font-semibold">Yours forever.</p>
         <p className="mb-4 mt-1 text-sm text-[var(--hush)]">One payment. Updates included.</p>
-        <BuyButton plan="lifetime" quiet={quiet} />
+        <LifetimeWithCode quiet={quiet} />
       </div>
       <div className="rounded-xl border border-[var(--line)] p-5">
         <p className="font-semibold">Month to month.</p>
