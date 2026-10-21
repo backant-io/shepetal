@@ -22,4 +22,6 @@ Shepetal pastes through the clipboard and then puts back what you had copied bef
 
 ## Finding text later
 
-Every dictation is listed under **Recent** in the 🤫 menu. Click one to copy it. The Shepetal window (**Open Shepetal…** in the 🤫 menu) has the full history with search and **Copy**.
+- **⌃⌘V** pastes your last dictation again. **Paste last transcript** in the 🤫 menu does the same.
+- **Recent** in the 🤫 menu lists your latest dictations. Click one to copy it.
+- **Open shepetal > History** has every dictation, with search and **Copy**.
