@@ -16,6 +16,9 @@ final class E2E: NSObject, NSApplicationDelegate {
     private let pasteboard = NSPasteboard(name: NSPasteboard.Name("io.backant.shepetal.e2e.\(UUID().uuidString)"))
 
     private let dropPaste: Bool
+    /// The Languages menu's choice for this run (F12): E2E_LANGUAGES=en,ja. Unset is Automatic.
+    private let languages = ProcessInfo.processInfo.environment["E2E_LANGUAGES"]?
+        .split(separator: ",").map(String.init) ?? []
 
     /// `dropPaste` swallows the Cmd+V, as when the target lost focus, to check the clipboard hand-off.
     init(wavs: [String], fallback: Bool, dropPaste: Bool = false) {
@@ -48,7 +51,7 @@ final class E2E: NSObject, NSApplicationDelegate {
         let engine: SpeechEngine
         let pipeline: Pipeline
         do {
-            engine = try await Speech.load(prefer: prefer)
+            engine = try await Speech.load(prefer: prefer, languages: languages)
             pipeline = try Pipeline(pasteboard: pasteboard)
         } catch {
             print(json(["error": error.localizedDescription]))
@@ -122,6 +125,8 @@ final class E2E: NSObject, NSApplicationDelegate {
             out["retranscribed_row_kept"] = again != nil && again?.createdAt == stored?.createdAt
                 && again?.outcome == stored?.outcome && again?.audioPath == stored?.audioPath
             out["error"] = run.error ?? ""
+            out["wrong_language_hint"] = Speech.wrongLanguageHint(run.entry.rawText, languages: languages) ?? ""
+            out["language"] = (engine as? WhisperEngine)?.lastLanguage ?? ""
             out["pasteboard"] = pipeline.inserter.pasteboard.name.rawValue
             out["pasteboard_text"] = pasteboard.string(forType: .string) ?? ""
             out["window_visible"] = window.isVisible

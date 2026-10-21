@@ -64,7 +64,7 @@ public struct SpeechRoute: Equatable {
 /// Parakeet when it covers every selected language (and the tier has it), else whisper large-v3-turbo,
 /// told the language when there is exactly one.
 public func speechRoute(languages selected: [String], tier: ModelTier) -> SpeechRoute {
-    let codes = Set(selected.map { $0.split(separator: "-").first.map { $0.lowercased() } ?? "" })
+    let codes = Set(languageCodes(selected))
     if tier.primary == .parakeetV3, codes.isSubset(of: parakeetLanguages) {
         return SpeechRoute(model: .parakeetV3, language: nil)
     }
@@ -74,13 +74,43 @@ public func speechRoute(languages selected: [String], tier: ModelTier) -> Speech
     return SpeechRoute(model: .whisperLargeV3Turbo, language: language)
 }
 
-/// whisper-cli's arguments for one recording. The dictionary hint goes in `--prompt`:
+/// The language codes of BCP-47 tags ("pt-BR" is "pt"), in the order chosen, each once.
+public func languageCodes(_ selected: [String]) -> [String] {
+    var seen = Set<String>()
+    return selected.compactMap { $0.split(separator: "-").first.map { $0.lowercased() } }.filter { seen.insert($0).inserted }
+}
+
+/// The language whisper is told when several are chosen: the most likely of the chosen ones, even when a language
+/// outside them ranks first. whisper alone keeps only its top guess, which may be none of them (#31). A tie goes to
+/// the one chosen first. nil when none is chosen: whisper then detects the language itself.
+public func pickLanguage(probs: [String: Float], allowed: [String]) -> String? {
+    var best: String?
+    for code in allowed where best == nil || probs[code, default: 0] > probs[best!, default: 0] { best = code }
+    return best
+}
+
+/// Languages Apple's text language recognizer cannot tell: it read Estonian as Finnish (0.98), Maltese as
+/// Norwegian (0.94), Slovenian as Croatian (0.88), Latvian and Lithuanian as Finnish and Slovak.
+/// With one of them chosen, a dictation in it would look like the wrong language, so there is no check.
+public let languagesTextCannotTell: Set<String> = ["et", "lv", "lt", "mt", "sl"]
+
+/// The language a dictation came out in when it is not one of the chosen ones, for the hint next to 🤫 (F12).
+/// Only for Parakeet, which takes no language and writes whatever it heard; whisper is told one of them.
+/// `hypotheses` are the text recognizer's, by BCP-47 tag. nil when nothing is chosen, when the text is too short
+/// to tell (it read "Redis." as French), when the recognizer is not sure, or when it cannot tell a chosen language.
+public func wrongLanguage(hypotheses: [String: Double], words: Int, chosen: [String]) -> String? {
+    let chosen = Set(languageCodes(chosen))
+    guard !chosen.isEmpty, chosen.isDisjoint(with: languagesTextCannotTell), words >= 3,
+          let (tag, p) = hypotheses.max(by: { $0.value < $1.value }), p >= 0.9,
+          let code = languageCodes([tag]).first, !chosen.contains(code) else { return nil }
+    return code
+}
+
+/// The dictionary hint whisper gets as its prompt, nil for an empty dictionary:
 /// - in reverse priority order, because whisper.cpp keeps only the last ~224 prompt tokens, so starred entries sit at the end;
 /// - shaped like a sentence, because whisper copies the prompt's style: a bare lowercase word list made it
 ///   drop casing and punctuation on an e2e clip.
-public func whisperArguments(model: String, wav: String, language: String, vocabulary: Vocabulary) -> [String] {
-    var args = ["-m", model, "-f", wav, "-l", language, "-nt", "-np"]
+public func whisperPrompt(_ vocabulary: Vocabulary) -> String? {
     let terms = vocabulary.promptTerms
-    if !terms.isEmpty { args += ["--prompt", "Glossary: " + terms.reversed().joined(separator: ", ") + "."] }
-    return args
+    return terms.isEmpty ? nil : "Glossary: " + terms.reversed().joined(separator: ", ") + "."
 }
