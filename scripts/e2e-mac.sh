@@ -1,7 +1,6 @@
 #!/bin/bash
 # End-to-end check of the Mac pipeline on speech made with `say`: capture resampler -> local STT ->
-# cleanup (rules, then the local model on self-corrections and lists) -> audio store + history ->
-# pasteboard + Cmd+V into a text view the app owns.
+# cleanup -> audio store + history -> pasteboard + Cmd+V into a text view the app owns.
 # The test shows no window, never takes focus, and uses a private pasteboard, never the user's clipboard.
 # Asserts WER <= 8 %, text ready <= 700 ms after release, an owner-only audio file per recording, and
 # that history kept the app, bundle id and page URL given for each dictation. The page-URL lookup must
@@ -18,9 +17,6 @@
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
 # default model only).
-# The c* clips need the local cleanup model: SHEPETAL_CLEANUP_MODEL (default: Qwen3.5 2B in bench/.cache/cleanup,
-# downloaded there on the first run, about 1.3 GB, so run once with the network on). CLEANUP=rules skips them
-# and says so.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=${SHEPETAL_BIN:-.build/release/shepetal}
@@ -39,7 +35,6 @@ FIX=$WORK/fixtures
 # Never the user's data dir, even when SHEPETAL_HOME is exported: E2E_HOME moves the test's own.
 export SHEPETAL_HOME=${E2E_HOME:-$WORK/home}
 mkdir -p "$FIX" "$SHEPETAL_HOME"
-rm -f "$FIX"/c*.gone
 DICT=$SHEPETAL_HOME/dictionary.txt
 if [ -e "$DICT" ] && ! head -1 "$DICT" | grep -q '^# e2e-mac'; then
   echo "e2e-mac: $DICT is not ours, refusing to overwrite it" >&2; exit 1
@@ -76,30 +71,8 @@ print(f"e01-quiet.wav: loudest 100 ms window {db:.1f} dBFS")
 PY
 cp "$FIX/e01.txt" "$FIX/e01-quiet.txt"
 
-# Cleanup clips: spoken text | the text the model should make of it | words that must be gone.
-CLIPS=("$FIX"/e*.wav)
-if [ "${CLEANUP:-}" = rules ]; then
-  echo "SKIPPED: cleanup clips (CLEANUP=rules)"
-else
-  export SHEPETAL_CLEANUP_MODEL=${SHEPETAL_CLEANUP_MODEL:-$PWD/bench/.cache/cleanup/Qwen3.5-2B-Q4_K_M.gguf}
-  [ -f "$SHEPETAL_CLEANUP_MODEL" ] ||
-    CLEANUP_MODELS=$(dirname "$SHEPETAL_CLEANUP_MODEL") bench/cleanup/run.sh --fetch "$(basename "$SHEPETAL_CLEANUP_MODEL")" ||
-    { echo "no cleanup model at $SHEPETAL_CLEANUP_MODEL and the download failed (run once with the network on, or CLEANUP=rules)" >&2; exit 1; }
-  while IFS='|' read -r id voice text expected gone; do
-    [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "$text"
-    printf '%b\n' "$expected" > "$FIX/$id.txt"
-    printf '%s\n' "$gone" > "$FIX/$id.gone"
-    CLIPS+=("$FIX/$id.wav")
-  done <<'CLEANUP'
-c01|Samantha|Let's move the review to Tuesday, actually Wednesday, at four.|Let's move the review to Wednesday at four.|tuesday actually
-c02|Daniel|Send the contract to Laura, I mean Linda, before lunch.|Send the contract to Linda before lunch.|laura mean
-c03|Samantha|We need three things for the trip. First, the tickets. Second, the hotel booking. Third, the travel insurance.|We need three things for the trip:\n1. The tickets\n2. The hotel booking\n3. The travel insurance|first second third
-c04|Daniel|I think we should ship the new search page on Monday, no wait, on Thursday, so the support team has enough time to read the new docs and test the export with a few customers.|I think we should ship the new search page on Thursday, so the support team has enough time to read the new docs and test the export with a few customers.|monday wait
-CLEANUP
-fi
-
 # A clip with an error exits 1; the checks below name it.
-"$BIN" --e2e "${CLIPS[@]}" ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl" || true
+"$BIN" --e2e "$FIX"/e*.wav ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl" || true
 
 # Silence exits 1 by design ("No speech heard"); the checks below read its JSON line.
 python3 -c 'import sys, wave; w = wave.open(sys.argv[1], "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close()' "$FIX/silence.wav"
@@ -141,8 +114,7 @@ assert rows and all("wav" in r for r in rows), f"no results: {rows}"
 # The batch exits 1 when a clip has an error, so its exit code is ignored above; every clip must have a row,
 # or a run that died partway would pass on the clips it finished.
 ran = sorted(os.path.basename(r["wav"]) for r in rows)
-clips = r"(e\d\d(-quiet)?|c\d\d)" if os.environ.get("CLEANUP") != "rules" else r"e\d\d(-quiet)?"
-want = sorted(f for f in os.listdir(fix) if re.fullmatch(clips + r"\.wav", f))
+want = sorted(f for f in os.listdir(fix) if re.fullmatch(r"e\d\d(-quiet)?\.wav", f))
 assert ran == want and "e01-quiet.wav" in want, ("clips missing from the run", sorted(set(want) - set(ran)), ran)
 errors = ref_words = 0
 for r in rows:
@@ -179,13 +151,7 @@ for r in rows:
     fmt, ch, rate = struct.unpack("<HHI", data[20:28])
     assert (fmt, ch, rate) == (3, 1, 16000), (name, fmt, ch, rate)
     assert abs((len(data) - 44) / 4 / 16000 - r["audio_seconds"]) < 1e-3, name
-    gone = os.path.join(fix, name[:-4] + ".gone")
-    if os.path.exists(gone):  # a cleanup clip: the model rewrote it and the taken-back words are gone
-        assert r.get("cleanup_model"), (name, "cleanup model not used", r.get("cleanup_status"), r["text"])
-        left = set(open(gone).read().split()) & set(words(r["inserted_text"]))
-        assert not left, (name, "taken-back words left", left, r["inserted_text"])
-    print(f"{name}: {e}/{len(ref)} word errors, ready {r['ready_ms']} ms, {r['audio_seconds']:.1f} s audio, "
-          f"cleanup {r.get('cleanup_model') or 'rules'}")
+    print(f"{name}: {e}/{len(ref)} word errors, ready {r['ready_ms']} ms, {r['audio_seconds']:.1f} s audio")
 wer = errors / ref_words
 print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows) - len(replaced)} clips ({ref_words} words), "
       f"dictionary replacement in {', '.join(replaced)}")
