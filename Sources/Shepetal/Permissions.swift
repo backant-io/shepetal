@@ -68,6 +68,11 @@ final class Onboarding: NSWindowController {
         super.init(window: window)
         model.close = { [weak window] in window?.close() }
         window.contentView = NSHostingView(rootView: OnboardingView(model: model))
+        // Closed is seen: it opens again at launch only while a required permission is missing, never at every
+        // login. Start at login still waits for Done.
+        NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { _ in
+            UserDefaults.standard.set(true, forKey: OnboardingFlow.doneKey)
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }

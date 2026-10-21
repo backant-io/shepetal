@@ -36,7 +36,7 @@ final class MenuModelTests: XCTestCase {
     }
 
     func testTheMenuIsShortAndGroupedByIntent() {
-        XCTAssertEqual(titles(MenuModel.groups(MenuState())), [
+        XCTAssertEqual(titles(MenuModel.groups(MenuState(canCheckForUpdates: true))), [
             ["Record meeting", "Open Meetings"],
             ["Open shepetal"],
             ["Check for Updates…"],
@@ -45,7 +45,7 @@ final class MenuModelTests: XCTestCase {
             ["Help center", "Send feedback…"],
             ["Quit shepetal"],
         ], "on a normal day nothing comes before the meetings, and there are no grey status lines")
-        XCTAssertEqual(MenuModel.groups(MenuState()).joined().count, 12, "it had 22 items")
+        XCTAssertEqual(MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count, 12, "it had 22 items")
     }
 
     func testWhatNeedsDoingShowsOnlyThenAndAtTheTop() throws {
@@ -108,7 +108,7 @@ final class MenuModelTests: XCTestCase {
     /// F39 (#30): the keyword model's download is with what needs doing, only while SpeechMenu offers it (speech
     /// recognition there, words in the dictionary, keyword model missing), and greyed out while it runs.
     func testDictionarySupportShowsOnlyWhenOfferedAndGreysOutWhileItDownloads() throws {
-        XCTAssertEqual(MenuModel.groups(MenuState()).joined().count, 12, "a normal day keeps the 12 items")
+        XCTAssertEqual(MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count, 12, "a normal day keeps the 12 items")
 
         let offered = MenuModel.contextual(MenuState(dictionarySupport: .offered))
         XCTAssertEqual(offered, [MenuEntry(title: "Download dictionary support (about 100 MB)", action: .downloadDictionarySupport)])
@@ -261,8 +261,10 @@ final class MenuModelTests: XCTestCase {
             return m.items.first { $0.title == "Check for Updates…" }
         }
         XCTAssertEqual(updates(true)?.isEnabled, true)
-        XCTAssertEqual(updates(false)?.isEnabled, false, "greyed out until an updater can check")
+        XCTAssertNil(updates(false), "hidden until the updater exists, never greyed out (Pavel, 21.10.26)")
         XCTAssertFalse(NoUpdateChecker().canCheckForUpdates)
+        // With Sparkle the item is always there and enabled: a click while Sparkle downloads says so instead.
+        XCTAssertTrue(try AppSource.code("Install.swift").contains("var canCheckForUpdates: Bool { true }"))
 
         // A scheduled check that found an update while automatic install is off renames the item instead of opening a
         // window at a random moment; the menu keeps its length.

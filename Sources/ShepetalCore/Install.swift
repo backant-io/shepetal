@@ -108,12 +108,17 @@ public enum UninstallPlan {
     }
 
     /// The order matters: the login item needs the bundle in place, and the 🌐 key's old value lives in the settings,
-    /// so both come before anything moves. `apps` are this bundle and every other Shepetal.app with our bundle ID.
-    public static func steps(fnKeyRestorable: Bool, deleteData: Bool, model: URL, caches: URL, data: URL,
+    /// so both come before anything moves. `models` are every model Shepetal downloaded (some live inside `data`,
+    /// and they go even when the recordings stay). `apps` are this bundle and every other Shepetal.app with our
+    /// bundle ID.
+    public static func steps(fnKeyRestorable: Bool, deleteData: Bool, models: [URL], caches: URL, data: URL,
                              apps: [URL]) -> [UninstallStep] {
         var s: [UninstallStep] = [.unregisterLoginItem]
         if fnKeyRestorable { s.append(.restoreFnKey) }
-        s += [.signOut, .resetPrivacy, .cancelPendingUpdate, .stopWatchdog, .trash(model), .trash(caches)]
+        s += [.signOut, .resetPrivacy, .cancelPendingUpdate, .stopWatchdog]
+        // With the data folder going too, a model inside it goes with it (one Trash call cannot move both).
+        s += models.filter { !deleteData || !$0.path.hasPrefix(data.path + "/") }.map(UninstallStep.trash)
+        s.append(.trash(caches))
         if deleteData { s += [.trash(data), .deleteSettings] }
         return s + apps.map(UninstallStep.trash) + [.quit]
     }

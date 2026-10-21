@@ -36,9 +36,14 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, @preco
         }
     }
 
-    var canCheckForUpdates: Bool { controller.updater.canCheckForUpdates }
+    /// Always: the item is never greyed out. A click while Sparkle cannot check says why instead.
+    var canCheckForUpdates: Bool { true }
     var menuTitle: String { found ?? "Check for Updates…" }
-    func checkForUpdates() { controller.checkForUpdates(nil) }
+    func checkForUpdates() {
+        // Sparkle's own canCheckForUpdates is false only while it downloads the feed or an update in the background.
+        guard controller.updater.canCheckForUpdates else { return hint("Shepetal is downloading an update") }
+        controller.checkForUpdates(nil)
+    }
 
     /// Settings › Install updates automatically.
     var automaticallyInstalls: Bool {
@@ -173,7 +178,8 @@ enum Uninstaller {
             if !apps.contains(u) { apps.append(u) }
         }
         return UninstallPlan.steps(fnKeyRestorable: FnKeySystem.enabled && FnKeySetting.restorable(FnKeySystem.io) != nil,
-                                   deleteData: deleteData, model: ParakeetEngine.directory,
+                                   deleteData: deleteData,
+                                   models: [ParakeetEngine.directory, KeywordBooster.directory, Paths.models],
                                    caches: home.appendingPathComponent("Library/Caches/\(UninstallPlan.bundleID)"),
                                    data: Paths.root, apps: apps)
     }
@@ -247,7 +253,7 @@ private struct UninstallSheet: View {
                     Text("• put back your 🌐 key setting (\(FnKeySetting.describe(previous)))")
                 }
                 Text("• sign out on this Mac")
-                Text("• move Shepetal and its speech model (about 1 GB) to the Trash")
+                Text("• move Shepetal and the models it downloaded (1 GB or more) to the Trash")
                 Text("• quit")
             }
             Text(deleteData ? "Your recordings, transcripts and history also go to the Trash."

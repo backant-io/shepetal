@@ -86,16 +86,28 @@ final class UninstallPlanTests: XCTestCase {
     let model = URL(fileURLWithPath: "/u/Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3")
     let caches = URL(fileURLWithPath: "/u/Library/Caches/io.backant.shepetal")
     let data = URL(fileURLWithPath: "/u/Library/Application Support/Shepetal")
+    /// The cleanup model (about 1.3 GB) lives inside the data folder.
+    let cleanup = URL(fileURLWithPath: "/u/Library/Application Support/Shepetal/models")
     let app = URL(fileURLWithPath: "/Applications/Shepetal.app")
 
     func plan(fn: Bool = true, deleteData: Bool) -> [UninstallStep] {
-        UninstallPlan.steps(fnKeyRestorable: fn, deleteData: deleteData, model: model, caches: caches, data: data, apps: [app])
+        UninstallPlan.steps(fnKeyRestorable: fn, deleteData: deleteData, models: [model, cleanup], caches: caches,
+                            data: data, apps: [app])
     }
 
     func testRecordingsStayUnlessTicked() {
         XCTAssertFalse(plan(deleteData: false).contains(.trash(data)))
         XCTAssertFalse(plan(deleteData: false).contains(.deleteSettings))
         XCTAssertTrue(plan(deleteData: true).contains(.trash(data)))
+    }
+
+    /// Keeping the recordings must not keep gigabytes of models: they go either way, but a model inside the data
+    /// folder is not trashed on its own when the whole folder goes.
+    func testModelsGoEitherWay() {
+        XCTAssertTrue(plan(deleteData: false).contains(.trash(model)))
+        XCTAssertTrue(plan(deleteData: false).contains(.trash(cleanup)), "the cleanup model would stay behind")
+        XCTAssertTrue(plan(deleteData: true).contains(.trash(model)))
+        XCTAssertFalse(plan(deleteData: true).contains(.trash(cleanup)), "it goes with the data folder")
     }
 
     func testOrder() {

@@ -66,7 +66,7 @@ enum MenuModel {
         [contextual(s),
          meetings(s),
          [MenuEntry(title: "Open shepetal", action: .openApp)],
-         [MenuEntry(title: s.checkForUpdatesTitle, action: .checkForUpdates, enabled: s.canCheckForUpdates)],
+         s.canCheckForUpdates ? [MenuEntry(title: s.checkForUpdatesTitle, action: .checkForUpdates)] : [],
          [paste(s.pasteLast), MenuEntry(title: "Recent", submenu: recent(s.recent))],
          [MenuEntry(title: "Shortcuts…", action: .shortcuts), MenuEntry(title: "Microphone", action: .microphone),
           MenuEntry(title: "Languages", action: .languages)],
@@ -178,13 +178,14 @@ enum MenuModel {
 /// Check for Updates…: `SparkleUpdater` in release builds (Install.swift).
 @MainActor
 protocol UpdateChecking {
+    /// The item shows, enabled, only when this is true: never a grey item (Pavel, 21.10.26).
     var canCheckForUpdates: Bool { get }
     /// "Update to 0.2.1…" once a scheduled check found one that waits for the user.
     var menuTitle: String { get }
     func checkForUpdates()
 }
 
-/// Builds without a feed (from source, test builds): the item is greyed out.
+/// Builds without a feed (from source, test builds): the item is hidden.
 struct NoUpdateChecker: UpdateChecking {
     var canCheckForUpdates: Bool { false }
     var menuTitle: String { "Check for Updates…" }
