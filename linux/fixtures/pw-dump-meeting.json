@@ -73,7 +73,49 @@
     "id": 130, "type": "PipeWire:Interface:Node", "version": 3,
     "info": { "state": "running", "props": {
       "media.class": "Stream/Input/Audio", "media.name": "pw-record",
-      "application.name": "shepetal", "application.process.binary": "pw-record" } }
+      "application.name": "shepetal", "client.id": 131 } }
+  },
+  {
+    "id": 131, "type": "PipeWire:Interface:Client", "version": 3,
+    "info": { "props": { "application.name": "pw-cat", "application.process.binary": "pw-cat", "application.process.id": 9001, "pipewire.sec.pid": 9001 } }
+  },
+  {
+    "id": 150, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "media.class": "Video/Source", "media.role": "Camera", "device.api": "v4l2",
+      "node.name": "v4l2_input.pci-0000_00_14.0-usb-0_6_1.0", "node.description": "Integrated Camera (V4L2)" } }
+  },
+  {
+    "id": 151, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "media.class": "Stream/Input/Video", "media.name": "Weekly sync - Google Meet",
+      "application.name": "Firefox", "application.process.binary": "firefox", "application.process.id": 3120 } }
+  },
+  {
+    "id": 155, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "suspended", "props": {
+      "media.class": "Video/Source", "media.role": "Camera", "device.api": "libcamera",
+      "node.name": "libcamera_input._SB_.PCI0.I2C2", "node.description": "Front camera" } }
+  },
+  {
+    "id": 160, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "media.class": "Stream/Output/Video", "media.name": "gnome-shell-screencast",
+      "application.name": "gnome-shell", "application.process.binary": "gnome-shell" } }
+  },
+  {
+    "id": 161, "type": "PipeWire:Interface:Node", "version": 3,
+    "info": { "state": "running", "props": {
+      "media.class": "Stream/Input/Video", "media.name": "Screen Capture",
+      "application.name": "OBS Studio", "application.process.binary": "obs" } }
+  },
+  {
+    "id": 152, "type": "PipeWire:Interface:Link", "version": 3,
+    "info": { "output-node-id": 150, "input-node-id": 151, "state": "active", "props": {} }
+  },
+  {
+    "id": 162, "type": "PipeWire:Interface:Link", "version": 3,
+    "info": { "output-node-id": 160, "input-node-id": 161, "state": "active", "props": {} }
   },
   {
     "id": 140, "type": "PipeWire:Interface:Link", "version": 3,

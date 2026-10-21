@@ -1202,36 +1202,36 @@ The dictionary and snippets live in `~/.config/shepetal/` and are read again at 
 
 ### L-MEET-1: a Zoom call in probe
 1. Install the Zoom `.deb` from zoom.us and join a call (zoom.us/test, or a call with a second device). Unmute.
-2. `shepetal probe`. Expected: a `mic user:` line with `meeting=Some("Zoom")`. Write down the full line (the app and binary names Zoom uses).
+2. `shepetal probe`. Expected: a `mic user:` line naming Zoom, with a pid. Write down the full line (the app name Zoom gives PipeWire). Turn your video on and run `probe` again. Expected: a `cam user:` line for Zoom too.
 3. Mute in Zoom and run `probe` again. Write down whether the line stays (Zoom may keep the stream running).
 4. Leave the call and run `probe` again. Expected: no Zoom line.
-(Automated: `finds_meeting_apps_on_the_mic`, `ignores_idle_streams_monitors_playback_and_itself`, `garbage_dump_is_empty_not_a_panic`.)
+(Automated: `any_app_on_the_mic_counts_but_idle_streams_monitors_and_playback_do_not`, `video_device_holders_are_the_camera_fallback`, `garbage_dump_is_empty_not_a_panic`.)
 
 ### L-MEET-2: a Google Meet call in a browser
 1. In Firefox open meet.google.com, start a new meeting and allow the microphone.
-2. `shepetal probe`. Expected: a `mic user:` line with `meeting=Some("Browser (Firefox)")`, and `system audio: Some("<pactl get-default-sink>.monitor")`.
+2. `shepetal probe`. Expected: a `mic user:` line naming Firefox, and `system audio: Some("<pactl get-default-sink>.monitor")`. No line shows the meeting's tab title.
 3. Close the tab and run `probe` again. Expected: the line is gone.
-4. Repeat in Chrome or Chromium. Expected: `meeting=Some("Browser (Chrome/Chromium)")`.
+4. Repeat in Chrome or Chromium. Expected: a `mic user:` line naming Chrome or Chromium.
 5. Keep the Zoom call from L-MEET-1 open at the same time as a Meet tab. Expected: both lines are listed.
-(Automated: `finds_meeting_apps_on_the_mic`, `system_audio_is_default_sink_monitor`.)
+(Automated: `any_app_on_the_mic_counts_but_idle_streams_monitors_and_playback_do_not`, `a_camera_counts_only_while_an_app_has_it_running`, `system_audio_is_default_sink_monitor`.)
 
 ### L-MEET-3: shepetal's own recording is not a meeting
 1. Start the daemon, double-tap fn and keep speaking. In another terminal run `shepetal probe`.
-2. Expected: no `mic user:` line for shepetal or `pw-record`. If one shows (for example `pw-record (pw-record)`), `pw-record -P '{ application.name = shepetal }'` did not rename the stream: write down the line (docs/linux.md, known gaps).
+2. Expected: one `mic user:  "shepetal"` line, whose pid is the one `pgrep -a pw-record` shows. `probe` is not the daemon, so to it the daemon's recorder is another process. The daemon itself never counts its own recorders: it matches them by pid (the daemon and its children), never by name.
 3. Tap fn to end the dictation.
-(Automated: `ignores_idle_streams_monitors_playback_and_itself`.)
+(Automated: `ours_is_by_pid_never_by_name`, `shepetal_own_streams_never_start_or_hold_a_meeting`.)
 
 In the L-MEET-4 to L-MEET-11 steps `shepetal daemon` records meetings (docs/linux-meetings.md). Before them: `sudo apt install cmake g++ libnotify-bin`, then `git clone https://github.com/ggml-org/whisper.cpp && cd whisper.cpp && cmake -B build && cmake --build build -j` (on a Vulkan machine build it as in docs/linux.md, "Manual test steps", step 2), `ln -s "$PWD/build/bin/whisper-cli" ~/.local/bin/`, and `./models/download-ggml-model.sh large-v3-turbo-q5_0 && cp models/ggml-large-v3-turbo-q5_0.bin ~/.local/share/shepetal/` (on a Vulkan machine it is already there: it is the dictation model). Check that `command -v whisper-cli` and `command -v notify-send` print a path. Turn Do Not Disturb off, wear headphones (without them the other side is recorded in Me.wav too), and have a second device in the call to play the other side. Remove `~/.config/shepetal/config.json` unless a step says otherwise.
 
 ### L-MEET-4: a Zoom call, offered, recorded after Record and transcribed
 1. `shepetal daemon`. Expected, after the `hold fn to talk` line: `shepetal: meeting detection on, asking before each recording, Thresholds { poll: 2000, start_after: 5000, min_session: 15000, end_with_evidence: 3000, reacquire: 4000, device_change: 10000, prompt: 20000 } ms (SHEPETAL_MEETING_THRESHOLDS)`, and no `meetings are recorded but not transcribed` line.
-2. Join a Zoom call (zoom.us/test, or a call with the second device) and unmute. Expected within about 8 s: a notification "Record this meeting?" with "Zoom is using the microphone. Nothing is recorded unless you click Record." and a Record button, and `shepetal: meeting (Zoom) detected, asking: Record this meeting?` on stderr. `ls ~/.local/share/shepetal/meetings/` shows no new folder, and `pgrep -a pw-record` prints nothing.
-3. Click Record. Expected within about 2 s: `shepetal: meeting (Zoom) recording to /home/<you>/.local/share/shepetal/meetings/<unix-ms>, system audio Some("<sink>.monitor")`, where `<sink>` is what `pactl get-default-sink` prints. `pgrep -a pw-record` shows two recorders: one ending in `Me.wav`, and one with `stream.capture.sink = true` ending in `Others.wav`.
-4. While it records, run `shepetal probe`. Expected: a `mic user:` line for Zoom, and none for shepetal or `pw-record`. If one shows, write it down (docs/linux.md, known gaps).
+2. Join a Zoom call (zoom.us/test, or a call with the second device) and unmute. Expected within about 8 s: a notification "Record this meeting?" with "<app> is using the microphone. Nothing is recorded unless you click Record." and a Record button, where `<app>` is Zoom's name from L-MEET-1, and `shepetal: meeting detected (<app> on the microphone), asking: Record this meeting?` on stderr. With video on, both say `microphone and camera`. No permission is asked for. `ls ~/.local/share/shepetal/meetings/` shows no new folder, and `pgrep -a pw-record` prints nothing.
+3. Click Record. Expected within about 2 s: `shepetal: meeting (<app> on the microphone) recording to /home/<you>/.local/share/shepetal/meetings/<unix-ms>, system audio Some("<sink>.monitor")`, where `<sink>` is what `pactl get-default-sink` prints. `pgrep -a pw-record` shows two recorders: one ending in `Me.wav`, and one with `stream.capture.sink = true` ending in `Others.wav`.
+4. While it records, run `shepetal probe`. Expected: a `mic user:` line for Zoom, and `"shepetal"` lines for the two recorders (to `probe` they are another process's), with the pids `pgrep -a pw-record` shows.
 5. Talk for about a minute while the other side talks too. Mute yourself in Zoom for 20 s, then unmute. Expected: no `meeting ended` line. If the recording ends, write down that Zoom closes its mic stream while muted (docs/linux-meetings.md, known gaps).
 6. Leave the call. Expected about 4 to 6 s later: `shepetal: meeting ended, transcribing /home/<you>/.local/share/shepetal/meetings/<unix-ms>`, then `shepetal: meeting transcript /home/<you>/.local/share/shepetal/meetings/<unix-ms>/transcript.md`, and `pgrep -a pw-record` prints nothing. Write down how long the transcript took.
-7. `transcript.md` opens by itself (L-MEET-11). Expected: `# Meeting`, `- Apps: Zoom`, `- Started: DD.MM.YY HH:MM` (the local time you clicked Record), `- Duration: N min` and `- Audio: Me.wav (microphone), Others.wav (system audio)`, then turns in time order: `[hh:mm:ss] Me: ...` with what you said and `[hh:mm:ss] Others: ...` with what the other side said, the times counted from the start of the recording.
-(Automated: `starts_once_a_meeting_app_held_the_mic_for_the_grace`, `the_committed_pw_dump_fixture_is_a_meeting`, `the_prompt_has_one_record_button_and_expires_with_the_threshold`, `a_meeting_records_only_after_record_is_clicked`, `shepetal_own_streams_never_start_or_hold_a_meeting`, `flapping_restarts_the_grace_and_does_not_end_a_call`, `ends_after_reacquire_and_never_in_the_first_15_s`, `recorders_take_the_mic_and_the_default_sink_monitor`, `whisper_keeps_timestamps_and_drops_markers`, `transcript_interleaves_me_and_others_by_time`.)
+7. `transcript.md` opens by itself (L-MEET-11). Expected: `# Meeting`, `- Apps: <app>`, `- Started: DD.MM.YY HH:MM` (the local time you clicked Record), `- Duration: N min` and `- Audio: Me.wav (microphone), Others.wav (system audio)`, then turns in time order: `[hh:mm:ss] Me: ...` with what you said and `[hh:mm:ss] Others: ...` with what the other side said, the times counted from the start of the recording.
+(Automated: `starts_once_another_app_used_the_mic_or_the_camera_for_the_grace`, `the_committed_pw_dump_fixture_is_a_meeting`, `the_prompt_has_one_record_button_and_expires_with_the_threshold`, `a_meeting_records_only_after_record_is_clicked`, `shepetal_own_streams_never_start_or_hold_a_meeting`, `flapping_restarts_the_grace_and_does_not_end_a_call`, `ends_after_reacquire_and_never_in_the_first_15_s`, `recorders_take_the_mic_and_the_default_sink_monitor`, `whisper_keeps_timestamps_and_drops_markers`, `transcript_interleaves_me_and_others_by_time`.)
 
 ### L-MEET-5: meeting audio is kept, owner-only
 1. After L-MEET-4, `stat -c '%a %n' ~/.local/share/shepetal/meetings ~/.local/share/shepetal/meetings/<unix-ms> ~/.local/share/shepetal/meetings/<unix-ms>/*`. Expected: both folders are `700`, and `Me.wav`, `Others.wav` and `transcript.md` are `600`.
@@ -1246,10 +1246,13 @@ In the L-MEET-4 to L-MEET-11 steps `shepetal daemon` records meetings (docs/linu
 3. Join a call, wait for the notification, and leave the call at once, without clicking. Expected about 15 s after the notification showed (before its 20 s are up): `shepetal: meeting ended before Record was clicked, nothing recorded`, and the notification goes away. Nothing is recorded.
 (Automated: `a_dismissed_prompt_records_nothing_for_that_meeting`, `an_unanswered_prompt_is_withdrawn_and_records_nothing`, `the_prompt_is_withdrawn_when_the_call_ends_first`.)
 
-### L-MEET-7: a headset switch and two meeting apps
+### L-MEET-7: a headset switch, two apps, and the mic or the camera
 1. Join a call, click Record, and switch to a Bluetooth headset (or plug one in) during it. Expected: no `meeting ended` line. After the call, `pw-play` `Others.wav`: the other side is there after the switch too.
-2. Join a Zoom call and, in Firefox, a Google Meet call, and click Record once. Leave Zoom. Expected: no `meeting ended` line until you leave Meet too. One new meeting folder, and its `transcript.md` has an `- Apps:` line that names both `Zoom` and `Browser (Firefox)`.
-(Automated: `a_device_change_holds_off_the_end_for_10_s`, `two_apps_are_one_meeting_until_both_let_go`.)
+2. Join a Zoom call and, in Firefox, a Google Meet call, and click Record once. Leave Zoom. Expected: no `meeting ended` line until you leave Meet too. One new meeting folder, and its `transcript.md` has an `- Apps:` line that names both Zoom and Firefox.
+3. Join a Zoom call with video on and click Record. In Zoom choose Leave Computer Audio (Zoom then lets go of the mic) and keep the video on for 30 s. Expected: no `meeting ended` line while the camera is on. Leave the call: the end comes as in L-MEET-4 step 6.
+4. With nothing on the mic, run `ffplay -f v4l2 /dev/video0` (package ffmpeg), which opens the camera itself, past PipeWire. Expected: `probe` lists `cam user:  "ffplay"` with its pid, and within about 8 s a notification says `ffplay is using the camera.` Close the notification and ffplay. Do the same with GNOME Snapshot (Camera), which goes through PipeWire. No step asks for a permission.
+5. Close the notification of step 4 without clicking, and keep ffplay open. Expected: no second notification. Close ffplay, wait 10 s and open it again. Expected: a new notification.
+(Automated: `a_device_change_holds_off_the_end_for_10_s`, `mic_and_camera_are_one_meeting_until_both_are_free`, `a_camera_alone_is_offered_and_records_after_the_click`, `ends_after_reacquire_and_never_in_the_first_15_s`.)
 
 ### L-MEET-8: the daemon killed mid-meeting
 1. Join a call, click Record and talk for about 20 s. In another terminal run `pkill -9 -f 'shepetal daemon'`.
@@ -1258,7 +1261,7 @@ In the L-MEET-4 to L-MEET-11 steps `shepetal daemon` records meetings (docs/linu
 
 ### L-MEET-9: always record, and bad meeting settings
 1. Put `{"meetings": {"auto_record": true}}` in `~/.config/shepetal/config.json` and start the daemon. Expected: `shepetal: meeting detection on, recording every meeting (meetings.auto_record), Thresholds { ... } ms (SHEPETAL_MEETING_THRESHOLDS)`.
-2. Join a call. Expected within about 8 s: no notification, and the `meeting (Zoom) recording to` line. Leave the call. Expected: the `meeting ended` and `meeting transcript` lines as in L-MEET-4 step 6.
+2. Join a call. Expected within about 8 s: no notification, and the `meeting (<app> on the microphone) recording to` line. Leave the call. Expected: the `meeting ended` and `meeting transcript` lines as in L-MEET-4 step 6.
 3. With `{"meetings": {"auto_record": "yes"}}`, run `shepetal daemon; echo $?`. Expected: `shepetal: /home/<you>/.config/shepetal/config.json: meetings.auto_record: expected true or false` and `1`.
 4. Remove `~/.config/shepetal/config.json` and run `SHEPETAL_MEETING_THRESHOLDS=reacquire=soon shepetal daemon; echo $?`. Expected: `shepetal: SHEPETAL_MEETING_THRESHOLDS: "reacquire=soon": not a number of seconds` and `1`.
 (Automated: `auto_record_is_opt_in`, `auto_record_records_without_asking`, `thresholds_are_tunable_in_seconds`.)
@@ -1272,7 +1275,7 @@ On a machine where `shepetal probe` names a Parakeet model (CPU or CUDA):
 
 ### L-MEET-11: the transcript window after a meeting
 Before: `sudo apt install xdg-utils wl-clipboard xclip`, sound on, and a text editor (gedit or Text Editor) open with an empty document. Run it in "Ubuntu" (GNOME Wayland) and again in "Ubuntu on Xorg".
-1. Join a call, click Record, talk with the other side for about a minute, then click into the empty document and keep typing while you leave the call with the mouse (or end it from the second device). Expected, when the daemon prints `meeting transcript .../transcript.md`: the transcript opens in your default text app, and a notification "Meeting transcript ready" shows `Zoom, DD.MM.YY HH:MM, N min` with the buttons Copy transcript and Open folder. No sound plays. Write down whether your typing kept going into the document or went to the transcript window (known gap in docs/linux-meetings.md); it must not go to the transcript window.
+1. Join a call, click Record, talk with the other side for about a minute, then click into the empty document and keep typing while you leave the call with the mouse (or end it from the second device). Expected, when the daemon prints `meeting transcript .../transcript.md`: the transcript opens in your default text app, and a notification "Meeting transcript ready" shows `<app>, DD.MM.YY HH:MM, N min` (`<app>` as in L-MEET-4) with the buttons Copy transcript and Open folder. No sound plays. Write down whether your typing kept going into the document or went to the transcript window (known gap in docs/linux-meetings.md); it must not go to the transcript window.
 2. Before clicking anything, `wl-paste` (Wayland) or `xclip -o -selection clipboard` (X11). Expected: what was on the clipboard before, not the transcript.
 3. Click Copy transcript. Expected: a short "Transcript copied" notification, with no sound. Paste into the document: one `[hh:mm:ss] Me: ...` or `[hh:mm:ss] Others: ...` line per turn, the same turns as in the window, without the `# Meeting` header.
 4. In the transcript window, select a few words and press Ctrl+C, then paste. Expected: just those words.

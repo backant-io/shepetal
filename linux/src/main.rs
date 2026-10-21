@@ -190,8 +190,13 @@ fn probe(dump_file: Option<&String>) -> Res {
         },
     };
     let dump: serde_json::Value = serde_json::from_str(&json).map_err(|e| format!("pw-dump json: {e}"))?;
-    for s in meeting::mic_streams(&dump) {
-        println!("mic user:  {} ({}) meeting={:?}", s.app, s.binary, s.meeting);
+    let proc = Path::new("/proc");
+    let own = meeting::own_pids(proc, std::process::id());
+    for s in meeting::mic_streams(&dump, &own) {
+        println!("mic user:  {:?} (pid {:?})", s.app, s.pid);
+    }
+    for s in meeting::camera_users(&dump, proc, &own) {
+        println!("cam user:  {:?} (pid {:?})", s.app, s.pid);
     }
     println!("system audio: {:?}", meeting::system_audio_source(&dump));
     Ok(())
