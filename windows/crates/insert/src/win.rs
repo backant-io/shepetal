@@ -79,7 +79,7 @@ pub fn insert(text: &str, start: Option<Focus>) -> io::Result<Outcome> {
     }
 }
 
-/// Puts `text` on the clipboard as plain text, kept in clipboard history (the tray's Recent).
+/// Puts `text` on the clipboard as plain text, for a Copy button. It stays there after this returns.
 pub fn copy(text: &str) -> io::Result<()> {
     Owner::new()?.leave(text)
 }
