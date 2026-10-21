@@ -2,7 +2,7 @@
 
 Pavel's rule (2026-10-21): a spoken date is written as numbers, `DD.MM.YY`, in every language. "Sechsundzwanzigster Juni sechsundzwanzig" becomes `26.06.26`, and "Twenty sixth of July twenty twenty-six" becomes `26.07.26`. This is not the US month/day order.
 
-Feature: F32 (formatting) in docs/parity.md. Test vectors: `Tests/fixtures/text-rules/dates.json`. Mac, Linux and Windows must all pass every case. Follow-ups: #150.
+Feature: F32 (formatting) in docs/parity.md. Test vectors: `Tests/fixtures/text-rules/dates.json`. Mac, Linux and Windows must all pass every case. The Mac's email layout (F36, below) has its own: `Tests/fixtures/text-rules/email.json`. Follow-ups: #150.
 
 ## What the text rules do today
 
@@ -165,3 +165,20 @@ Reading the file from each suite:
 - **Mac**: `URL(fileURLWithPath: #filePath)` up to the repo root, as `ShepetalSummaryTests` reads `python_golden.json`. Decode it with `JSONDecoder`.
 - **Linux**: `include_str!("../../Tests/fixtures/text-rules/dates.json")` from `linux/src`, with `serde_json` (already a dependency). The Linux Docker commands (`scripts/ci/run-checks.sh`, `linux/README.md`, `linux/indicator/check.sh`) mount the repo root and work in `linux/`, so the file is in the container.
 - **Windows**: `include_str!("../../../../Tests/fixtures/text-rules/dates.json")` from `windows/crates/core/src`. The core crate has no dependencies, so add `serde_json` as a dev-dependency.
+
+## Email layout (F36)
+
+Feature: F36 in docs/parity.md. Code: `Sources/ShepetalCore/EmailFormat.swift` (Mac). Test vectors: `Tests/fixtures/text-rules/email.json`. Rules, no model.
+
+Where it runs: last in `Pipeline.finishText`, after `AppFormat.finish` (cleanup, dates, dictionary and styles) and before `InsertionRules.fit`. It runs only when the app is Formatted (Raw skips it) and the app is in Styles' Email category: Mail, Outlook, Superhuman, Spark, Mimestream, Thunderbird and Airmail, and in a browser mail.google.com, outlook.live.com, outlook.office.com, outlook.office365.com, outlook.cloud.microsoft, mail.superhuman.com, mail.proton.me and app.fastmail.com. Re-transcription uses the row's app and URL.
+
+- Greeting: a greeting word at the start of the text. English: Hi, Hello, Hey, Dear, Good morning, afternoon or evening. German: Hallo, Liebe, Lieber or Liebes, Sehr geehrte or Sehr geehrter, Guten Morgen, Tag or Abend, Moin, Servus. Then up to four capitalized names, titles (Mr., Mrs., Ms., Dr., Prof.) or group words (team, all, everyone, there, zusammen, alle, and, und), then `,`, `.` or `!`. The greeting goes on its own line, followed by a blank line. A `.` becomes `,`, and `!` stays. In English the body goes on with a capital. In German it goes on as said ("Liebe Anna,\n\ndanke …"). A first word with a capital inside it, a digit or a mark ("iPhone", a URL) keeps its case. A greeting with nothing after it is left alone.
+- Sign-off: one of these phrases opening the last sentence. English: Thanks, Thank you, Many thanks, Best, Best regards, Kind regards, Warm regards, Regards, Cheers, Sincerely, All the best. German: Viele, Liebe, Beste, Herzliche or Schöne Grüße, Mit freundlichen Grüßen. Up to three capitalized words may follow as the name, and nothing else. The sign-off goes into its own paragraph, with the name on the next line. An English sign-off gets a comma, a German one none (DIN 5008), and `!` stays.
+- Signature: Settings > Email > Signature (`emailSignature` in shepetal's defaults), empty by default. It goes under a sign-off said without a name, and a spoken name wins over it. A multi-line signature keeps its lines. Nothing else is ever added, and never a shepetal line.
+- Left unchanged: a sentence that starts with "Thanks for …", a sign-off phrase in the middle of a sentence ("I wish you all the best."), and lowercase words after a greeting or sign-off ("Hello world.", "Best regards, the shepetal team").
+- Known limits:
+  - The body is not split into paragraphs.
+  - It runs on every Formatted dictation into an email app, whatever field has focus: "Thanks." becomes "Thanks," and the signature, even in a subject line or the Gmail search box. "My favourite hotel? Best Western." becomes "My favourite hotel?", a blank line, "Best,", then "Western". Set the app to Raw for plain text.
+  - A sign-off dictated on its own, after the body was dictated separately, gets no blank line before it, since only that dictation is seen.
+
+`email.json` is a JSON array, UTF-8. Each case has the string fields `input`, `expected`, `lang` and `note`, and an optional `signature` (empty when missing). `EmailFormatTests.testSharedVectors` also checks that laying out the result a second time changes nothing.

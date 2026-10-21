@@ -5,7 +5,7 @@ import ShepetalCore
 enum MenuAction: Equatable {
     case permissions, download, downloadCleanup, downloadDictionarySupport, signIn, cancelSignIn, buy
     case meeting, showMeeting(String), openMeetings
-    case openApp, checkForUpdates
+    case openApp, notes, checkForUpdates
     case pasteLast, copy(String)
     /// Filled in by the app, which owns these choices (`MenuModel.build`'s `provide`).
     case microphone, languages
@@ -61,7 +61,7 @@ enum MenuModel {
     static func groups(_ s: MenuState) -> [[MenuEntry]] {
         [contextual(s),
          meetings(s),
-         [MenuEntry(title: "Open shepetal", action: .openApp)],
+         [MenuEntry(title: "Open shepetal", action: .openApp), MenuEntry(title: "Notes…", action: .notes)],
          s.canCheckForUpdates ? [MenuEntry(title: s.checkForUpdatesTitle, action: .checkForUpdates)] : [],
          [paste(s.pasteLast)] + (recent(s.recent).isEmpty ? [] : [MenuEntry(title: "Recent", submenu: recent(s.recent))]),
          [MenuEntry(title: "Shortcuts…", action: .shortcuts), MenuEntry(title: "Microphone", action: .microphone),

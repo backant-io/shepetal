@@ -14,6 +14,9 @@
 # clip that short must never end as "Transcription failed" (a quick hold used to).
 # e01-quiet is e01 at -40 dB (loudest 100 ms about -52 dBFS): it must still be inserted word for word,
 # so a speech floor set too high fails here.
+# F13: every clip runs with live text on, fed a second at a time, with one more partial still running on the model
+# at release; the default engine must show words for each clip and have that partial running, the 700 and 800 ms bars
+# hold with it, and the partial at release is dropped.
 # Run it offline to prove transcription makes no network call:
 #   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
@@ -184,6 +187,10 @@ for r in rows:
     field = os.path.join(fix, name[:-4] + ".field")
     if not os.environ.get("ENGINE"):  # F24's field costs time: Pavel set its bar to 800 ms (2026-10-21)
         assert r["ready_ms"] <= (800 if os.path.exists(field) else 700), (name, "slow", r["ready_ms"])
+        assert r["partials"] > 0, (name, "no live words while it recorded", r["partials"])  # F13: Parakeet only
+        assert r["release_partial_running"], (name, "no partial running at the release: the bar missed the worst case")
+    assert not r["late_partial_shown"], (name, "a partial came back after the release and was shown", r["last_partial"])
+    assert len(r["last_partial"]) <= 41, (name, "the live words are a short tail", r["last_partial"])
     p = r["audio_path"]
     st = os.stat(p)
     assert stat.S_IMODE(st.st_mode) == 0o600, (name, oct(st.st_mode))
@@ -210,7 +217,7 @@ for r in rows:
         left = set(open(gone).read().split()) & set(words(r["inserted_text"]))
         assert not left, (name, "taken-back words left", left, r["inserted_text"])
     print(f"{name}: {e}/{len(ref)} word errors, ready {r['ready_ms']} ms, {r['audio_seconds']:.1f} s audio, "
-          f"cleanup {r.get('cleanup_model') or 'rules'}")
+          f"cleanup {r.get('cleanup_model') or 'rules'}, partials={r['partials']}")
 wer = errors / ref_words
 print(f"model {rows[0]['model']}: WER {wer:.1%} over {len(rows) - len(replaced)} clips ({ref_words} words), "
       f"dictionary replacement in {', '.join(replaced)}")

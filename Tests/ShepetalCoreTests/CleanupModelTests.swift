@@ -7,11 +7,14 @@ final class FakeCleanupModel: CleanupModel, @unchecked Sendable {
     var answer: (String) throws -> String
     var calls: [String] = []
     var contexts: [CleanupContext] = []
+    var voices: [MyVoice] = []
     init(_ answer: @escaping (String) throws -> String) { self.answer = answer }
     func rewrite(_ text: String) throws -> String { try rewrite(text, context: .none) }
-    func rewrite(_ text: String, context: CleanupContext) throws -> String {
+    func rewrite(_ text: String, context: CleanupContext) throws -> String { try rewrite(text, context: context, voice: .none) }
+    func rewrite(_ text: String, context: CleanupContext, voice: MyVoice) throws -> String {
         calls.append(text)
         contexts.append(context)
+        voices.append(voice)
         return try answer(text)
     }
 }

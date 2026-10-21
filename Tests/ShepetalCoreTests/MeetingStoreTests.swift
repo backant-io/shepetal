@@ -249,4 +249,250 @@ final class MeetingStoreTests: XCTestCase {
         let store = try MeetingStore(path: dbURL)
         XCTAssertEqual(try store.applyRetention(.delete24h, dir: root.appendingPathComponent("meetings"), recording: nil), [])
     }
+
+    // MARK: - F81 transcript retention
+
+    /// Rows left in the search index for the meeting, by kind.
+    func indexed(_ id: String, kind: String) throws -> Int32 {
+        var db: OpaquePointer?, stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        defer { sqlite3_finalize(stmt); sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_prepare_v2(db, "SELECT count(*) FROM meeting_text WHERE meeting_id = '\(id)' AND kind = '\(kind)'", -1, &stmt, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        return sqlite3_column_int(stmt, 0)
+    }
+
+    // "Delete after N days" removes what was said in meetings that ended more than N days ago, and nothing else:
+    // the summary, the notes, the folders and the audio paths stay (rule 4 keeps the audio on its own setting),
+    // search stops finding the words, and the pane can say when it happened. A meeting still recording (no end), the
+    // one the app says is recording, a newer one and one where nothing was said are left as they are. Keep deletes
+    // nothing, and a second sweep changes nothing, so the hourly timer is safe.
+    func testTranscriptRetentionDeletesOnlyTheTranscriptsOfMeetingsEndedBeforeTheCutoff() throws {
+        let store = try MeetingStore(path: dbURL)
+        let now = Date(timeIntervalSince1970: 10_000_000)
+        let day = 86_400.0
+        func add(_ id: String, endedAgo: Double?, said: Bool = true) throws {
+            try store.save(Meeting(id: id, app: "Zoom", startedAt: now.addingTimeInterval(-(endedAgo ?? 0) - 3_600),
+                                   endedAt: endedAgo.map { now.addingTimeInterval(-$0) },
+                                   meAudioPath: "/m/\(id)/Me.wav", othersAudioPath: "/m/\(id)/Others.wav"))
+            if said { try store.append([Segment(speaker: .me, start: 0, end: 1, text: "budget talk \(id)")], to: id) }
+            try store.setSummary(Summary(overview: "summary \(id)"), for: id)
+            try store.setNotes("note \(id)", for: id)
+        }
+        try add("old", endedAgo: 2 * day)
+        try add("fresh", endedAgo: day - 60)
+        try add("running", endedAgo: nil)
+        try add("guarded", endedAgo: 3 * day)
+        try add("silent", endedAgo: 5 * day, said: false)
+        let work = try store.createFolder("Work")
+        try store.setFolders([work.id], for: "old")
+        let before = try XCTUnwrap(try store.get("old"))
+
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 0, recording: nil, now: now.addingTimeInterval(400 * day)), [], "keep")
+        XCTAssertEqual(try store.get("old")?.segments.count, 1)
+
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: "guarded", now: now), ["old"])
+        let old = try XCTUnwrap(try MeetingStore(path: dbURL).get("old"))  // on disk
+        XCTAssertEqual(old.segments, [], "the transcript is gone")
+        XCTAssertEqual(old.transcriptDeletedAt, now)
+        XCTAssertEqual(old.meeting, before.meeting, "the row and its audio paths stay")
+        XCTAssertEqual(old.summary, before.summary)
+        XCTAssertEqual(old.notes, "note old")
+        XCTAssertEqual(try store.folders().first?.meetingIDs, ["old"], "it stays in its folder")
+        XCTAssertEqual(try store.search("budget talk old", limit: 10).map(\.id), [], "search no longer finds the words")
+        XCTAssertEqual(try indexed("old", kind: "segment"), 0, "nothing of the transcript is left in the index")
+        XCTAssertEqual(try store.search("summary old", limit: 10).map(\.id), ["old"], "the summary is still found")
+        XCTAssertEqual(try store.search("note old", limit: 10).map(\.id), ["old"])
+        for kept in ["fresh", "running", "guarded"] {
+            XCTAssertEqual(try store.get(kept)?.segments.map(\.text), ["budget talk \(kept)"], kept)
+            XCTAssertNil(try store.get(kept)?.transcriptDeletedAt, kept)
+        }
+        XCTAssertNil(try store.get("silent")?.transcriptDeletedAt, "nothing was said, so nothing was deleted")
+
+        // The next sweep, before "fresh" is a day old: nothing new to delete, and the deletion keeps its first date.
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: "guarded", now: now.addingTimeInterval(30)), [])
+        XCTAssertEqual(try store.get("old")?.transcriptDeletedAt, now)
+        // Once it is no longer the recording one, the guarded meeting follows the setting too; the running one never does.
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: nil, now: now.addingTimeInterval(61)), ["fresh", "guarded"])
+        XCTAssertEqual(try store.get("running")?.segments.count, 1)
+        XCTAssertEqual(try store.list(limit: 10).count, 5, "no meeting is deleted")
+    }
+
+    // A meetings.sqlite from the notes build (user_version 2, no folders, no transcript column) opens with its rows,
+    // gets folders and the transcript retention, and opens again without migrating twice.
+    func testFileFromTheNotesBuildUpgradesToFoldersAndTranscriptRetention() throws {
+        var db: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        for step in MeetingStore.migrations.prefix(2) { XCTAssertEqual(sqlite3_exec(db, step, nil, nil, nil), SQLITE_OK) }
+        XCTAssertEqual(sqlite3_exec(db, """
+            PRAGMA user_version = 2;
+            INSERT INTO meetings(id, app, started_at, ended_at, me_audio, others_audio, summary, notes)
+              VALUES ('a', 'Zoom', 1000, 2000, '/m/a/Me.wav', '/m/a/Others.wav', NULL, 'ask about Q3');
+            INSERT INTO segments VALUES ('a', 'Me', 1, 2, 'the budget is fine');
+            INSERT INTO meeting_text VALUES ('a', 'app', 'Zoom'), ('a', 'segment', 'the budget is fine'), ('a', 'notes', 'ask about Q3');
+            """, nil, nil, nil), SQLITE_OK)
+        sqlite3_close(db)
+
+        let store = try MeetingStore(path: dbURL)
+        let r = try XCTUnwrap(try store.get("a"))
+        XCTAssertEqual(r.segments.map(\.text), ["the budget is fine"])
+        XCTAssertEqual(r.notes, "ask about Q3")
+        XCTAssertNil(r.transcriptDeletedAt)
+        XCTAssertEqual(try store.folders(), [])
+        let f = try store.createFolder("Budget")
+        try store.setFolders([f.id], for: "a")
+        XCTAssertEqual(try MeetingStore(path: dbURL).list(inFolder: f.id, limit: 10).map(\.id), ["a"], "second open keeps the folder")
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: nil, now: Date(timeIntervalSince1970: 2000 + 86_401)), ["a"])
+        XCTAssertEqual(try store.search("budget", limit: 10).map(\.id), [], "the folder name is not searched, the transcript is gone")
+    }
+
+    // MARK: - F78 folders
+
+    // Folders are a join table, as in Wispr Flow: one meeting can be in two folders, and deleting a folder or a
+    // meeting removes only the link, never the other side. Names are trimmed and never empty.
+    func testFoldersHoldMeetingsWithoutOwningThem() throws {
+        let store = try MeetingStore(path: dbURL)
+        for (id, t) in [("a", 1.0), ("b", 2.0), ("c", 3.0)] { try store.save(meeting(id, at: t)) }
+        try store.append([Segment(speaker: .others, start: 0, end: 1, text: "quarterly budget")], to: "a")
+        let work = try store.createFolder("  Work ")
+        let clients = try store.createFolder("clients")
+        XCTAssertEqual(work.name, "Work")
+        XCTAssertThrowsError(try store.createFolder("   "))
+        XCTAssertEqual(try store.folders().map(\.name), ["clients", "Work"], "by name, in any case")
+
+        try store.setFolders([work.id, clients.id], for: "a")
+        try store.setFolders([work.id], for: "c")
+        XCTAssertEqual(try store.list(inFolder: work.id, limit: 10).map(\.id), ["c", "a"], "newest first")
+        XCTAssertEqual(try store.list(inFolder: work.id, limit: 1).map(\.id), ["c"])
+        XCTAssertEqual(try store.list(inFolder: clients.id, limit: 10).map(\.id), ["a"], "a is in two folders")
+        XCTAssertEqual(try store.folders().first { $0.id == work.id }?.meetingIDs, ["a", "c"])
+        XCTAssertThrowsError(try store.setFolders([work.id, "nope"], for: "b"))
+        XCTAssertEqual(try store.list(inFolder: work.id, limit: 10).map(\.id), ["c", "a"], "a failed change changes nothing")
+        XCTAssertThrowsError(try store.setFolders([work.id], for: "nope"))
+        try store.setFolders([clients.id], for: "a")  // Add to folder > Work, unchecked
+        XCTAssertEqual(try store.list(inFolder: work.id, limit: 10).map(\.id), ["c"], "taken out of Work")
+        XCTAssertEqual(try store.list(inFolder: clients.id, limit: 10).map(\.id), ["a"], "and only out of Work")
+
+        try store.renameFolder(clients.id, to: "Acme")
+        XCTAssertEqual(try MeetingStore(path: dbURL).folders().map(\.name), ["Acme", "Work"])
+        XCTAssertThrowsError(try store.renameFolder(clients.id, to: ""))
+        XCTAssertThrowsError(try store.renameFolder("nope", to: "x"))
+
+        try store.deleteFolder(work.id)
+        XCTAssertEqual(try store.list(limit: 10).map(\.id), ["c", "b", "a"], "its meetings stay")
+        XCTAssertEqual(try store.search("budget", limit: 10).map(\.id), ["a"], "and so do their search entries")
+        XCTAssertEqual(try store.folders().map(\.meetingIDs), [["a"]], "and their other folders")
+        XCTAssertEqual(try store.list(inFolder: work.id, limit: 10), [])
+
+        try store.delete("a")
+        XCTAssertEqual(try store.folders().map(\.meetingIDs), [[]])
+        var db: OpaquePointer?, stmt: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbURL.path, &db), SQLITE_OK)
+        defer { sqlite3_finalize(stmt); sqlite3_close(db) }
+        XCTAssertEqual(sqlite3_prepare_v2(db, "SELECT count(*) FROM folder_meetings", -1, &stmt, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int(stmt, 0), 0, "a deleted meeting leaves no folder rows")
+    }
+
+    // MARK: - F120 search results
+
+    // The Meetings tab's poll searches again only when this count moved, so every write a meeting makes while it
+    // records, or the tab makes, has to move it; otherwise a search would never show the new words.
+    func testEveryWriteMovesTheChangeCount() throws {
+        let store = try MeetingStore(path: dbURL)
+        var last = store.changes
+        func moved(_ what: String) {
+            XCTAssertGreaterThan(store.changes, last, what)
+            last = store.changes
+        }
+        try store.save(meeting("a")); moved("save")
+        try store.append([Segment(speaker: .me, start: 0, end: 1, text: "budget")], to: "a"); moved("append")
+        try store.setSummary(Summary(overview: "x"), for: "a"); moved("summary")
+        try store.setNotes("n", for: "a"); moved("notes")
+        let work = try store.createFolder("Work"); moved("folder")
+        try store.setFolders([work.id], for: "a"); moved("folders")
+        try store.delete("a"); moved("delete")
+        _ = try store.folders()
+        _ = try store.search("budget", folder: nil, limit: 10)
+        XCTAssertEqual(store.changes, last, "a read is not a write")
+    }
+
+    // A result shows where it matched: the words around the match, cut at word edges with "…", on one line. The
+    // app name is the row's title already, so a match on it alone shows no snippet.
+    func testSearchSnippetHoldsTheMatchWithItsContext() throws {
+        let store = try MeetingStore(path: dbURL)
+        try store.save(meeting("a"))
+        try store.append([Segment(speaker: .others, start: 0, end: 1, text: """
+            We talked for a long time about many unrelated things and then the quarterly budget for marketing came up, \
+            which nobody liked at all, really.
+            """)], to: "a")
+        try store.save(meeting("z", at: 2, app: "Budgetly"))
+        let hits = try store.search("BUDGET", folder: nil, limit: 10)
+        XCTAssertEqual(Set(hits.map(\.meeting.id)), ["a", "z"])
+        let snippet = try XCTUnwrap(hits.first { $0.meeting.id == "a" }?.snippet)
+        XCTAssertTrue(snippet.contains("the quarterly budget for marketing"), snippet)
+        XCTAssertTrue(snippet.hasPrefix("…") && snippet.hasSuffix("…"), snippet)
+        XCTAssertLessThanOrEqual(snippet.count, 66, snippet)
+        let words = snippet.trimmingCharacters(in: CharacterSet(charactersIn: "…")).split(separator: " ")
+        let all = Set("We talked for a long time about many unrelated things and then the quarterly budget for marketing came up, which nobody liked at all, really.".split(separator: " "))
+        XCTAssertTrue(words.allSatisfy(all.contains), "no half words: \(snippet)")
+        XCTAssertEqual(hits.first { $0.meeting.id == "z" }?.snippet, "", "the app name alone")
+
+        try store.setNotes("first line\nask Kate about the budget\nlast", for: "z")
+        XCTAssertEqual(try store.search("kate", folder: nil, limit: 10).map(\.snippet), ["first line ask Kate about the budget last"])
+        XCTAssertEqual(try store.search("", folder: nil, limit: 10).map(\.snippet), ["", ""], "no query, no snippet")
+    }
+
+    // Best match first (bm25), then the newest: a meeting whose summary is about the budget beats a newer one that
+    // mentioned it once in a long sentence, and equal matches are newest first.
+    func testSearchRanksBestMatchFirstThenNewest() throws {
+        let store = try MeetingStore(path: dbURL)
+        for (id, t) in [("summary", 1.0), ("passing", 5.0), ("twin-old", 2.0), ("twin-new", 3.0)] { try store.save(meeting(id, at: t, app: "Call")) }
+        try store.setSummary(Summary(overview: "Budget review"), for: "summary")
+        try store.append([Segment(speaker: .me, start: 0, end: 1, text: """
+            After lunch we went through the roadmap, hiring, the office move and then briefly the budget before we stopped.
+            """)], to: "passing")
+        for id in ["twin-old", "twin-new"] {
+            try store.append([Segment(speaker: .me, start: 0, end: 1, text: "We discussed a budget for the launch party and the venue")], to: id)
+        }
+        XCTAssertEqual(try store.search("budget", limit: 10).map(\.id), ["summary", "twin-new", "twin-old", "passing"])
+        XCTAssertEqual(try store.search("budget", limit: 2).map(\.id), ["summary", "twin-new"])
+    }
+
+    // In the Folders tab the search looks only in the open folder; with no query it lists that folder.
+    func testSearchInsideAFolder() throws {
+        let store = try MeetingStore(path: dbURL)
+        for (id, t) in [("in", 1.0), ("out", 2.0), ("in-too", 3.0)] {
+            try store.save(meeting(id, at: t))
+            try store.append([Segment(speaker: .me, start: 0, end: 1, text: "budget talk")], to: id)
+        }
+        try store.setNotes("only said outside", for: "out")
+        let f = try store.createFolder("Budget")
+        try store.setFolders([f.id], for: "in")
+        try store.setFolders([f.id], for: "in-too")
+        XCTAssertEqual(try store.search("budget", folder: f.id, limit: 10).map(\.meeting.id), ["in-too", "in"], "same text, newest first")
+        XCTAssertEqual(try store.search("said outside", folder: f.id, limit: 10), [])
+        XCTAssertEqual(try store.search("said outside", folder: nil, limit: 10).map(\.meeting.id), ["out"], "found in All")
+        XCTAssertEqual(try store.search("", folder: f.id, limit: 10).map(\.meeting.id), ["in-too", "in"])
+        XCTAssertEqual(try store.search("ta", folder: f.id, limit: 10).map(\.meeting.id), ["in-too", "in"], "short query")
+        XCTAssertEqual(try store.search("budget", folder: "nope", limit: 10), [])
+        XCTAssertEqual(try store.search("budget", folder: nil, limit: 10).count, 3)
+    }
+
+    // Under 3 characters the trigram index cannot match: the LIKE scan stays, newest first, and its snippet is
+    // the text around the first match, taken from what was said or written before the app name.
+    func testShortQueryKeepsTheSubstringPathWithASnippet() throws {
+        let store = try MeetingStore(path: dbURL)
+        try store.save(meeting("old", at: 1, app: "Q3 sync"))
+        try store.save(meeting("new", at: 2, app: "Zoom"))
+        try store.setSummary(Summary(overview: "Plans for Q3 and the hiring that has to happen before the end of the year, if the budget allows it"), for: "new")
+        let hits = try store.search("q3", folder: nil, limit: 10)
+        XCTAssertEqual(hits.map(\.meeting.id), ["new", "old"])
+        XCTAssertEqual(hits.map(\.snippet), ["Plans for Q3 and the hiring that has to happen before the end of…", ""])
+        // A cut inside a word moves back to the space before it.
+        XCTAssertEqual(MeetingHit.snippet("so the budgeting of Q3 went fine", around: "q3", width: 14), "…of Q3 went…")
+        try store.setNotes("Q3", for: "old")
+        XCTAssertEqual(try store.search("q3", folder: nil, limit: 10).map(\.snippet).last, "Q3", "the notes before the app name")
+        XCTAssertEqual(try store.search("q3", folder: nil, limit: 1).map(\.meeting.id), ["new"])
+    }
 }
