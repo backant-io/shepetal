@@ -1,11 +1,14 @@
 import Foundation
+import NaturalLanguage
 
 /// Fits dictated text to the text around the cursor (docs/re/insertion-context.md 2.2 and 2.5):
 /// spacing, first-letter case and trailing punctuation. Only the cursor's line counts: the last line
 /// of `before` and the first line of `after`. `selected` is the text the paste replaces.
 public enum InsertionRules {
-    static let sentenceEnd: Set<Character> = [".", "!", "?"]
+    static let sentenceEnd: Set<Character> = [".", "!", "?", "…"]
     static let opening: Set<Character> = ["(", "[", "{", "\"", "'", "“", "‘", "/", "@", "#"]
+    /// A quote or bracket that closes after a sentence's end: `(See above.) |` is a sentence start.
+    static let closing: Set<Character> = [")", "]", "}", "\"", "'", "”", "’", "»"]
     /// The space before a following word is non-breaking, so apps that trim trailing ASCII spaces keep it.
     public static let nbsp = "\u{00A0}"
 
@@ -18,22 +21,24 @@ public enum InsertionRules {
         let lead = String(selected.prefix(while: \.isWhitespace))
         let trail = sel.isEmpty ? "" : String(selected.reversed().prefix(while: \.isWhitespace).reversed())
 
-        let prev = before.last(where: { !$0.isWhitespace })
+        let prev = before.last(where: { !$0.isWhitespace && !closing.contains($0) })
         let midSentence = prev.map { !sentenceEnd.contains($0) } ?? false
 
         // Case: the selection's first letter when it has one that says something (not "I" or an acronym),
-        // else lowercase mid-sentence. Our own "I" and acronyms are never lowercased.
+        // else lowercase mid-sentence. Our own "I", acronyms and names are never lowercased.
+        let lowers = { keepsLowercase(firstWord(text)) && !isName(text, after: before) }
         if let f = sel.first(where: \.isLetter), keepsLowercase(firstWord(sel)) {
             if f.isUppercase { text = text.prefix(1).uppercased() + text.dropFirst() }
-            else if keepsLowercase(firstWord(text)) { text = text.prefix(1).lowercased() + text.dropFirst() }
-        } else if midSentence, keepsLowercase(firstWord(text)) {
+            else if lowers() { text = text.prefix(1).lowercased() + text.dropFirst() }
+        } else if midSentence, lowers() {
             text = text.prefix(1).lowercased() + text.dropFirst()
         }
 
         // Sentence end: match the selection's, else drop ours when the sentence goes on after the cursor: the next
         // character is lowercase, a comma-like mark or the sentence's own end, or any word follows mid-sentence.
-        let continues = after.first(where: { !$0.isWhitespace }).map {
-            $0.isLowercase || ",;:".contains($0) || sentenceEnd.contains($0) || (midSentence && ($0.isLetter || $0.isNumber))
+        let next = after.drop(while: \.isWhitespace)
+        let continues = next.first.map {
+            $0.isLowercase || ",;:".contains($0) || sentenceEnd.contains($0) || (midSentence && startsWord(next))
         } ?? false
         if let end = sel.last, sentenceEnd.contains(end) {
             if let last = text.last, !sentenceEnd.contains(last) { text.append(end) }
@@ -46,10 +51,40 @@ public enum InsertionRules {
         }
 
         if !lead.isEmpty { text = lead + text }
-        else if let c = before.last, !c.isWhitespace, !opening.contains(c) { text = " " + text }
+        else if let c = before.last, !c.isWhitespace, !opens(before) { text = " " + text }
         if !trail.isEmpty { text += trail }
-        else if let c = after.first, c.isLetter || c.isNumber { text += nbsp }
+        else if startsWord(after) { text += nbsp }
         return text
+    }
+
+    /// A word, or a bracket or quote that opens one: `|"hello" to me` and `|(briefly) John` as much as `|John`.
+    static func startsWord(_ s: Substring) -> Bool {
+        guard let c = s.first else { return false }
+        if c.isLetter || c.isNumber || "([{“‘«".contains(c) { return true }
+        return "\"'".contains(c) && (s.dropFirst().first.map { $0.isLetter || $0.isNumber } ?? false)
+    }
+
+    /// The cursor is right after an opening mark. A straight quote right after a word closes it: `"Stop."|`.
+    static func opens(_ before: Substring) -> Bool {
+        guard let c = before.last, opening.contains(c) else { return false }
+        return !"\"'".contains(c) || (before.dropLast().last?.isWhitespace ?? true)
+    }
+
+    /// A name the model capitalised at the start ("I think |John will…"), as the tagger reads it in the cursor's
+    /// sentence. A word that is a verb, adjective and so on once lowercased ("Wait", "Quick") is not one. On 2,800
+    /// made-up fragments this kept 78% of names, and the capital of 0.6% of common words; words that are also
+    /// names ("Bill the client") keep it more often. ponytail: the personal dictionary (Vocabulary, F39) could
+    /// settle those.
+    static func isName(_ text: String, after before: Substring) -> Bool {
+        let tagger = NLTagger(tagSchemes: [.nameType, .lexicalClass])
+        func tag(_ t: String, _ scheme: NLTagScheme) -> NLTag? {
+            let s = before + " " + t
+            tagger.string = s
+            return tagger.tag(at: s.index(s.endIndex, offsetBy: -t.count), unit: .word, scheme: scheme).0
+        }
+        guard let name = tag(text, .nameType), [.personalName, .placeName, .organizationName].contains(name) else { return false }
+        let lower = tag(text.prefix(1).lowercased() + text.dropFirst(), .lexicalClass)
+        return lower == nil || lower == .noun || lower == .otherWord
     }
 
     static func firstWord(_ s: String) -> Substring {
@@ -57,8 +92,6 @@ public enum InsertionRules {
     }
 
     /// False for "I", "I'm" and acronyms like "API".
-    /// ponytail: a name that opens a mid-sentence dictation ("John will…") is lowercased. NLTagger's name tags
-    /// were wrong on 10 of 44 short fragments ("Quick brown", "Mark it done"); a user dictionary would cover names.
     static func keepsLowercase(_ word: Substring) -> Bool {
         if word == "I" || word.hasPrefix("I'") || word.hasPrefix("I’") { return false }
         let letters = word.filter(\.isLetter)

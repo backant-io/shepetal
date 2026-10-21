@@ -179,6 +179,12 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 1. With AirPods connected and preferred, dictate once. Expected: "Tip: the built-in mic records clearer than Bluetooth" shows once. Dictate again: it does not show again, not even after a relaunch.
 2. On the built-in mic, hold fn and say a sentence very quietly from about an arm's length away. Expected: after the text lands, "Speak closer or use a wired mic". A normal sentence at normal distance does not show it. If it shows too often or never, tune it with `defaults write io.backant.shepetal micQuietFloor -float 0.002` (RMS, default 0.003) and relaunch.
 
+### M-MIC-6: Voice Isolation in a loud room (#75)
+1. With music or a TV playing loudly near the Mac, or in a café, hold fn and dictate two sentences at a normal voice. Expected: the text has the sentences and none of the background speech or lyrics.
+2. During any dictation, open Control Center > Mic Mode. Expected: Shepetal is not listed there, and Shepetal never opens that menu itself.
+3. Open the dictation in the hub and play it. Expected: the recording plays back raw, with the background noise still in it. Only the text was made from the isolated voice.
+4. If words go missing in a quiet room, lower the effect with `defaults write io.backant.shepetal voiceIsolationMix -float 50` (percent, default 100; 0 turns it off) and relaunch.
+
 ### M-LANG-1: languages
 1. Open 🤫 > Languages. Expected: Automatic is checked; the list holds whisper's languages with their names.
 2. Check Deutsch and Français. Expected: the menu's model line stays "Model: parakeet-tdt-0.6b-v3" (no reload). Say a German sentence. Expected: German text.
@@ -207,6 +213,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. On a new line type "I went home." and put the cursor right before its period. Hold fn and say "Today." Expected: "I went home today." with one period.
 4. On a new line type "Hello. World." and put the cursor right before "World". Hold fn and say "Big news." Expected: "Hello. Big news. World." Between two sentences the dictation keeps its capital and its period.
 5. On a new line type "Please" and leave the cursor after it. Hold fn and say "Send it to John at NASA." Expected: "Please send it to John at NASA." Only the first letter is lowercased.
+
+### M-INS-8: mid-sentence in an Electron app (F109)
+1. In VS Code (or Slack, or Obsidian) type "leave the cursor right after it", then click right before "the cursor". Hold fn, say "The cursor.", then release.
+2. Expected: "leave the cursor the cursor right after it", with a lowercase "the cursor" and no period. Shepetal asks the app for its accessibility tree when the dictation starts. Note if VS Code then asks whether you use a screen reader, or turns on screen reader mode.
+3. If any dictation in M-INS-1 to M-INS-8 went in as dictated (capital and period), run `log show --last 10m --predicate 'eventMessage CONTAINS "shepetal: context"'` in Terminal and add the lines to the report. Each dictation logs one line: the field's role, its length and the selection, or which attribute could not be read and the AX error code. The text itself is never logged.
 
 ### M-DATE-1: spoken dates become numbers (F32, docs/text-rules.md)
 1. In an empty TextEdit document, hold fn and say "Twenty sixth of July twenty twenty-six." Expected: "26.07.26."

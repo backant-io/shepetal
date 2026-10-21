@@ -131,6 +131,39 @@ final class InsertionRulesTests: XCTestCase {
     func testOnlyTheFirstLetterChanges() {
         XCTAssertEqual(fit("Send it to John at NASA.", "Please", ""), " send it to John at NASA.")
     }
+
+    // A closing bracket or quote after a sentence's end, or an ellipsis, ends the sentence too: the dictation is a
+    // sentence of its own there, and keeps its capital and period instead of joining the next one.
+    func testSentenceEndInsideBracketsQuotesOrEllipsisIsASentenceStart() {
+        XCTAssertEqual(fit("Another point.", "(See above.) ", "Next one."), "Another point." + nbsp)
+        XCTAssertEqual(fit("Another point.", "He said \"Stop.\" ", "Then he left."), "Another point." + nbsp)
+        XCTAssertEqual(fit("Another point.", "He said “Stop.” ", "Then he left."), "Another point." + nbsp)
+        XCTAssertEqual(fit("Wait.", "Hmm… ", "Okay."), "Wait." + nbsp)
+        XCTAssertEqual(fit("Then he left.", "He said \"Stop.\"", ""), " Then he left.")
+        // A bracket or quote that closes mid-sentence does not.
+        XCTAssertEqual(fit("Yesterday.", "I met them (briefly) ", "and left."), "yesterday" + nbsp)
+    }
+
+    // A quote or bracket that opens the next word is that word: a space goes before it, and our period would split
+    // the sentence there.
+    func testOpeningQuoteOrBracketIsAFollowingWord() {
+        XCTAssertEqual(fit("Quietly.", "He said ", "\"hello\" to me."), "quietly" + nbsp)
+        XCTAssertEqual(fit("Quietly.", "He said ", "“hello” to me."), "quietly" + nbsp)
+        XCTAssertEqual(fit("Yesterday.", "I met ", "(briefly) John."), "yesterday" + nbsp)
+        // A straight quote followed by a space closes the quote the cursor is in: no space before it.
+        XCTAssertEqual(fit("Stop.", "He said \"", "\" to me."), "stop.")
+    }
+
+    // The model capitalises every utterance, so a name at the start looks like any other first word. Read in the
+    // cursor's sentence, a name keeps its capital mid-sentence; an ordinary first word is still lowercased.
+    func testNameAtTheStartOfAMidSentenceDictationKeepsItsCapital() {
+        XCTAssertEqual(fit("John will send it.", "I think ", ""), "John will send it.")
+        XCTAssertEqual(fit("Paris last week.", "We flew to ", ""), "Paris last week.")
+        XCTAssertEqual(fit("Maria about it.", "Ask", ""), " Maria about it.")
+        XCTAssertEqual(fit("Quick brown fox.", "The ", ""), "quick brown fox.")
+        XCTAssertEqual(fit("Wait for it.", "Please ", ""), "wait for it.")
+        XCTAssertEqual(fit("The cursor.", "leave ", "the cursor"), "the cursor" + nbsp)
+    }
 }
 
 final class PasteCheckTests: XCTestCase {
