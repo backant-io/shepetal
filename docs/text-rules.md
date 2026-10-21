@@ -41,7 +41,7 @@ The rule is one function, the text in and the text out. It runs on the cleaned t
 
 The history keeps the transcript before any rule in `rawText`, so nothing the rule changes is lost.
 
-`fit` interaction (Mac): `fit` removes the dictation's final `.` when the text after the cursor continues the sentence. When the dictation ends in a `DD.MM.` date, that dot belongs to the date and stays: "on 26.07." pasted before "and then" must stay "on 26.07.", not become "on 26.07".
+`fit` interaction (Mac): `fit` removes the dictation's final `.` when the text after the cursor continues the sentence. When the dictation ends in a `DD.MM.` date, that dot belongs to the date and stays: "on 26.07." pasted before "and then" must stay "on 26.07.", not become "on 26.07". Only a real day (01 to 31) and month (01 to 12) count: "It costs 19.99." and "um 10.30." before "plus tax" lose the sentence's dot.
 
 ## Output
 
@@ -65,7 +65,7 @@ Words match in any case, with exceptions for "May" and "march" (below). A hyphen
 | English ordinal words | first ... nineteenth, twentieth, twenty first ... twenty ninth, thirtieth, thirty first |
 | German ordinal words, one word, ending in -e, -er, -en, -es or -em | erste, zweiter, dritten, vierten, fünften, sechsten, siebten or siebenten, achten, neunten, zehnten, elften, zwölften, dreizehnten ... neunzehnten, zwanzigsten, einundzwanzigsten ... neunundzwanzigsten, dreißigsten, einunddreißigsten |
 
-A spelled day is the whole number: in "twenty ninth" the day is 29, and "ninth" alone never matches inside it. That holds with a comma between the two words too, because cleanup turns "twenty, uh, ninth" into "twenty, ninth": it stays in words, never day 9. It holds after any tens word: "forty first of March" stays, it is no day 1. A German day split into words is not a day either: "am sechs und zwanzigsten Juni" stays, never day 20. English and German cardinal words ("twenty six", "sechsundzwanzig") are never a day.
+A spelled day is the whole number: in "twenty ninth" the day is 29, and "ninth" alone never matches inside it. That holds with a comma between the two words too, because cleanup turns "twenty, uh, ninth" into "twenty, ninth": it stays in words, never day 9. It holds after any tens word: "forty first of March" stays, it is no day 1. It holds after "hundred" and "thousand" too, with or without "and": "the hundred and first of May" stays. Only there is "and" part of a number: "on the thirtieth of April and first of May" → "on 30.04. and 01.05.". A German day split into words is not a day either: "am sechs und zwanzigsten Juni" stays, never day 20. English and German cardinal words ("twenty six", "sechsundzwanzig") are never a day.
 
 Digits are a day only when a space, the end of the text, or `,` `.` `;` `:` `!` `?` `)` or a quote follows them, with no digit right after that punctuation. So digits that run on into another number or a sign are not a day: "June 26.07.2026", "July 10:30", "May 5,000", "In March 3.5 million", "March 3-5", "July 26/27" and "In July 26% of users" stay unchanged.
 
@@ -73,7 +73,7 @@ Digits are a day only when a space, the end of the text, or `,` `.` `;` `:` `!` 
 
 | Form | Examples | YY |
 |---|---|---|
-| Four digits | `2026`, `1999` | `26`, `99` |
+| Four digits from 1900 to 2099, the range of the spelled years. Other four-digit numbers are counts: "On May 5th 1350 visitors came." → "On 05.05. 1350 visitors came.", "the 14th of July 1789" → "14.07. 1789" | `2026`, `1999` | `26`, `99` |
 | English: twenty or nineteen, then a number from 10 to 99, or "oh" and a digit | twenty twenty-six, nineteen ninety nine, twenty oh nine | `26`, `99`, `09` |
 | English: two thousand, optionally "and" and a number from 1 to 99 | two thousand, two thousand five, two thousand and twenty six | `00`, `05`, `26` |
 | English: nineteen hundred | nineteen hundred | `00` |
@@ -92,8 +92,10 @@ The short year needs the punctuation because "On July fourth twenty six people c
 
 - Day first: `[the] DAY [of[,]] MONTH [,] [YEAR]`. Examples: "the twenty sixth of July twenty twenty-six", "26 July 2026", "26th July", "sechsundzwanzigster Juni sechsundzwanzig", "26. Juni 2026", "erster März". A comma after "of" is allowed: "of" never ends a phrase, so the comma is what cleanup leaves of a filler ("the the first of, um, March" → "the first of, March" → `01.03.`). A month joined to the next word by a hyphen is a compound, not a date: "die erste Juli-Woche" stays.
   - An English spelled day needs "of": "the third of September" → `03.09.`, but "This is my third September at the company." and "My first April in Berlin was cold." stay. Digit days do not need it ("26th July", "26 July 2026").
+  - Bare digits do not take "of": "in week 2 of March we ship" and "Chapter 3 of May's report" count something and stay. The date is "the 2nd of March".
+  - A day-first phrase that is invalid ("the thirtieth of February") or the holiday ("the 4th of July") stays as a whole: its month starts no month-first date, so "the thirtieth of February 15 people" and "the 4th of July 26 people" stay. A month after "of" with no day before it still starts one: "the week of June 5th" → "the week of 05.06.".
   - The German digit day with a dot ("26.") needs a German month name (April, August, September and November are the same in both languages): "am 1. April" → "am 01.04.", but "We shipped version 2. March is next." and "We need 5. May I ask why?" stay.
-- Month first: `MONTH [the] DAY [,] [YEAR]`, with an English month and an English or digit day. Examples: "July twenty sixth, twenty twenty six", "July 26th 2026", "July 26, 2026", "March 1st", "July the fourth". German puts the day first, so a German month name never starts a date: "I met Mai 2 weeks ago." and "Mai 26.06.2026" stay.
+- Month first: `MONTH [the] DAY [,] [YEAR]`, with an English month and an English or digit day. Examples: "July twenty sixth, twenty twenty six", "July 26th 2026", "July 26, 2026", "March 1st", "July the fourth". German puts the day first, so a German month name never starts a date: "I met Mai 2 weeks ago." and "Mai 26.06.2026" stay. "May the DAY be" is a wish, not a date: "May the fourth be with you." stays. A spelled day never stops inside a hyphenated word, as with years: "In March second-quarter numbers dropped" stays.
 
 **"May" and "march"**: before a day (month first), only "May" with a capital M is the month, in capitals too ("MAY 5th" → `05.05.`). "You may first want to check" stays. After a digit day without "of", "may" and "march" also need a capital M: "Option 2 may work." stays, "26th May" → `26.05.` (an English spelled day needs "of" anyway, so "The second may be better." and "The first march was long." stay). After "of", any case is the month: "the fifth of may" → `05.05.`. German "Mai" and "März" are not verbs, so they match in any case.
 
@@ -110,7 +112,7 @@ The short year needs the punctuation because "On July fourth twenty six people c
 - **Dates that are already numbers**: "26.07.26", "26.07.2026", "2026-07-26", "07/26/2026", also after a month word ("Juli 26.07.2026", "Ask June 26.07.26 works."). Running the rule twice changes nothing, also when a month word stands before a date the first run wrote: "Tell June May 5th works" → "Tell June 05.05. works", and a second run leaves it.
 - **Numbers after a month**: "Im Juni 1.000 Besucher.", "In June 1,000 people came.", "In July 26% of users churned.", "June 5-7".
 - **No day, or no month**: "in July", "July 2026", "Juli 2026", "the 26th was busy", "the first of many", "first of all", "the second time", "one second", "wait a second", "a quarter past three", "twenty six people", "sechsundzwanzig Leute", "der erste Versuch", "zum dritten Mal".
-- **Verbs that are month names**: "May I ask", "I march on", "we march forward", "the second may be better", "Option 2 may work".
+- **Verbs that are month names**: "May I ask", "I march on", "we march forward", "the second may be better", "Option 2 may work", "May the 4th be with you".
 
 ## Decision for Pavel: "Fourth of July"
 
@@ -129,10 +131,11 @@ The other choice is to convert it like any date. That is one rule less. If Pavel
 These follow from the rules above. They are accepted because the alternative breaks the most common real form ("March 15").
 
 - A bare number right after a month name is a day: "in July 26 people came" → "in 26.07. people came". Engines usually write a comma there ("In July, 26 people").
+- A spelled year is a year, also before a noun: "by March 1st twenty twenty people" → "by 01.03.20 people". Nobody counts "twenty twenty"; only a year ending in 00 ("two thousand people") is also a count.
 - Lowercase "march" before a day is the month: "we march 2 miles" → "we 02.03. miles". Parakeet writes the month in lowercase ("march fifteenth"), so lowercase must count.
 - A short spoken year in the middle of a sentence stays in words, before a comma too: "am sechsundzwanzigsten Juni sechsundzwanzig haben wir" → "am 26.06. sechsundzwanzig haben wir", "am sechsundzwanzigsten Juni sechsundzwanzig, also bald" → "am 26.06. sechsundzwanzig, also bald".
 - A comma after the month ends a month-first date, so "July, um, fourth" (cleanup leaves "July, fourth") stays in words. Reading through the comma would turn "In July, fourth place went to Anna." into a date.
-- Idioms, compounds without a hyphen and names convert: "May the fourth be with you" → "04.05. be with you", "the 1st March meeting" → "01.03. meeting", "I have 3 June meetings." → "I have 03.06. meetings.", "Ask June first, then Bob." → "Ask 01.06., then Bob.", "Order 3 Mai Tais." → "Order 03.05. Tais.". Telling them from "on May the fourth", "26th March", "on 3 June", "June first" and "am 5 Juni" needs grammar.
+- Compounds without a hyphen and names convert: "the 1st March meeting" → "01.03. meeting", "I have 3 June meetings." → "I have 03.06. meetings.", "Ask June first, then Bob." → "Ask 01.06., then Bob.", "Order 3 Mai Tais." → "Order 03.05. Tais.". Telling them from "26th March", "on 3 June", "June first" and "am 5 Juni" needs grammar.
 - Cleanup drops the German word "um" (#127), so "Treffen am 3. März, um 10." reaches the rule as "Treffen am 3. März, 10." and becomes "Treffen am 03.03.10.". The fix belongs in cleanup.
 
 ## Not covered yet (#150)
