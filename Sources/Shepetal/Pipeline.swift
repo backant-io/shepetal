@@ -24,31 +24,41 @@ final class Pipeline {
     let history: History
     let inserter: Inserter
     let dictionary: URL  // dictionary.txt in this pipeline's data dir
+    /// Writes a recording's WAV. Runs off the main thread: on Pavel's nearly full disk, while macOS purged
+    /// space, one such write took 86 s, and fn, the menu and rule 8 froze with it (M-NS-1). Tests stall it.
+    var writeAudio: @Sendable (_ samples: [Float], _ id: String) throws -> URL
 
     /// No pasteboard default: a forgotten argument must not fall back to the user's clipboard.
     /// Tests pass a temp `root` and a private named pasteboard.
     init(root: URL = Paths.root, pasteboard: NSPasteboard) throws {
         inserter = Inserter(pasteboard: pasteboard)
         try AudioStore.makeOwnerOnlyDirectory(root)
-        store = try AudioStore(dir: root.appendingPathComponent("audio"))
+        let store = try AudioStore(dir: root.appendingPathComponent("audio"))
+        self.store = store
+        writeAudio = { try store.save($0, id: $1) }
         history = try History(path: root.appendingPathComponent("history.sqlite"))
         dictionary = root.appendingPathComponent("dictionary.txt")
     }
 
-    /// `app` is the frontmost app at dictation start (history only). `selection` is the text the paste replaces.
+    /// `app` is the frontmost app at dictation start (history only). `context` is the text around the cursor and
+    /// the selection the paste replaces.
     /// `focusKept` says whether the window focused when the dictation started is still focused (nil: unknown),
     /// and `secureInput` names the app holding secure input. When focus moved or secure input is on, nothing is
     /// pasted and the text is left on the clipboard (rule 8). Focus is never moved back. The defaults skip them.
+    /// `decided` gets the outcome (an error message, or nil when the text landed) as soon as it is known; the
+    /// WAV and the history row can still be waiting on the disk then. `process` returns once both are written.
     func process(_ samples: [Float], engine: SpeechEngine?, app: AppContext = AppContext(),
-                 context: () -> (before: String, after: String),
-                 selection: () -> String = { "" }, focusKept: () -> Bool? = { nil }, secureInput: () -> String? = { nil },
-                 sendPaste: (CGEvent) -> Void) async -> Run {
+                 context: () -> FocusedText.Context,
+                 focusKept: () -> Bool? = { nil }, secureInput: () -> String? = { nil },
+                 sendPaste: (CGEvent) -> Void, decided: (String?) -> Void = { _ in }) async -> Run {
         let t0 = ProcessInfo.processInfo.systemUptime
         var run = Run(entry: HistoryEntry(id: UUID().uuidString, createdAt: Date(), outcome: .failed, audioPath: "",
                                           durationMs: Self.ms(samples), app: app.name, bundleId: app.bundleId, url: app.url))
-        save(samples, &run)  // first, so the audio survives anything below
-        let saveError = run.error
-        let error = await transcribeAndInsert(samples, engine, t0, context, selection, focusKept, secureInput, sendPaste, &run)
+        let id = run.entry.id, write = writeAudio
+        let saving = Task.detached { try write(samples, id) }  // first, so the audio survives anything below
+        let error = await transcribeAndInsert(samples, engine, t0, saving, context, focusKept, secureInput, sendPaste, &run)
+        decided(error)
+        let saveError = await saved(saving, &run)
         run.error = saveError ?? error
         record(&run)
         return run
@@ -56,7 +66,8 @@ final class Pipeline {
 
     /// Returns an error message, or nil when the text landed.
     private func transcribeAndInsert(_ samples: [Float], _ engine: SpeechEngine?, _ t0: TimeInterval,
-                                     _ context: () -> (before: String, after: String), _ selection: () -> String,
+                                     _ saving: Task<URL, Error>,
+                                     _ context: () -> FocusedText.Context,
                                      _ focusKept: () -> Bool?, _ secureInput: () -> String?,
                                      _ sendPaste: (CGEvent) -> Void, _ run: inout Run) async -> String? {
         guard let engine else { return "Speech model is not loaded" }
@@ -66,7 +77,10 @@ final class Pipeline {
         }
         run.entry.model = engine.name
         do {
-            run.entry.rawText = try await engine.transcribe(samples, wav: URL(fileURLWithPath: run.entry.audioPath))
+            let heard = await Task.detached { VoiceIsolation.apply(samples) }.value  // the kept WAV stays raw
+            // Only an engine that reads the file waits for the disk; the others start on the samples at once.
+            let wav = engine.readsWav ? try await saving.value : store.url(run.entry.id)
+            run.entry.rawText = try await engine.transcribe(heard, wav: wav)
         } catch {
             if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing
             return "Transcription failed: \(error.localizedDescription)"
@@ -75,20 +89,26 @@ final class Pipeline {
         run.readyMs = (ProcessInfo.processInfo.systemUptime - t0) * 1000
         if Task.isCancelled { run.entry.outcome = .cancelled; return nil }  // Esc while transcribing: keep the text, insert nothing
         guard !run.entry.text.isEmpty else { return noSpeech(&run) }
-        // Rule 8 first: when the text is not pasted, the field that has focus now is not read. Its AX reads
-        // run on the main thread and a busy app holds them until AX times out (M-NS-1).
-        if let message = PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) {
-            run.inserted = InsertionRules.fit(run.entry.text, before: "", after: "")
-            inserter.leaveOnClipboard(run.inserted)
-            run.entry.outcome = .pasteFailed
-            return message
-        }
-        let (before, after) = context()
-        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selection())
+        // Rule 8 before the field is read: when the text is not pasted, the field that has focus now is not
+        // where it goes. And again right before the paste: focus or secure input can change during the read.
+        if let message = blocked(focusKept, secureInput, &run) { return message }
+        let (before, after, selected) = context()
+        run.inserted = InsertionRules.fit(run.entry.text, before: before, after: after, selected: selected)
+        if let message = blocked(focusKept, secureInput, &run) { return message }
         let paste = await inserter.insert(run.inserted, sendPaste: sendPaste)
         run.paste = paste
         run.entry.outcome = paste.landed ? .inserted : .pasteFailed
         return paste.landed ? nil : PasteGate.notLanded
+    }
+
+    /// Rule 8: nothing is pasted when focus moved or secure input is on. The text waits on the clipboard as
+    /// dictated, since the user pastes it somewhere else.
+    private func blocked(_ focusKept: () -> Bool?, _ secureInput: () -> String?, _ run: inout Run) -> String? {
+        guard let message = PasteGate.blocked(focusKept: focusKept(), secureInputApp: secureInput()) else { return nil }
+        run.inserted = InsertionRules.fit(run.entry.text, before: "", after: "")
+        inserter.leaveOnClipboard(run.inserted)
+        run.entry.outcome = .pasteFailed
+        return message
     }
 
     /// Silence, non-speech tags or fillers only: nothing is pasted and the clipboard is not touched.
@@ -103,12 +123,15 @@ final class Pipeline {
         Vocabulary.load(dictionary).apply(Cleanup.apply(SpeechGuard.stripTags(raw)))
     }
 
-    private func save(_ samples: [Float], _ run: inout Run) {
-        do { run.entry.audioPath = try store.save(samples, id: run.entry.id).path } catch {
-            run.error = "Could not save audio: \(error.localizedDescription)"
+    private func saved(_ saving: Task<URL, Error>, _ run: inout Run) async -> String? {
+        do { run.entry.audioPath = try await saving.value.path } catch {
+            return "Could not save audio: \(error.localizedDescription)"
         }
+        return nil
     }
 
+    /// After the WAV, so the disk has answered once already. ponytail: still on the main thread; a disk that
+    /// stalls again here holds it (Dictation's too-short and cancelled rows too).
     private func record(_ run: inout Run) {
         do { try history.add(run.entry) } catch { run.error = "Could not write history: \(error.localizedDescription)" }
     }
