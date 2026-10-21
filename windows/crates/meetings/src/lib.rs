@@ -1,11 +1,15 @@
 //! Meeting detection and recording for shepetal on Windows.
 //!
-//! [`Detector`] is a pure state machine over [`Snapshot`]s (which processes hold the mic, which
-//! windows are open), ported from the Mac `MeetingCore` detector with the docs/re/meetings.md
-//! thresholds as [`Config`]. It also decides when to offer "Record?" and when the recording
-//! starts (only after the user accepts) and stops, so all of that is tested on any OS. The Win32 probe and the WASAPI capture are in `win` (Windows only).
+//! A possible meeting is any other app using the mic or the camera (Pavel, 2026-10-21): no app
+//! lists and no window titles. [`in_use`] reads who uses them from the CapabilityAccessManager
+//! ConsentStore, the records behind Windows' own mic and camera indicators, so detection needs no
+//! permission. [`Detector`] is a pure state machine over those [`Snapshot`]s. It also decides when
+//! to offer "Record?" and when the recording starts (only after the user accepts) and stops, so
+//! all of that is tested on any OS. The registry reads and the WASAPI capture are in `win`
+//! (Windows only).
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::io;
+use std::path::Path;
 
 mod wav;
 #[cfg(windows)]
@@ -13,66 +17,41 @@ mod win;
 #[cfg(windows)]
 pub use win::{snapshot, watch, Notice, Recording};
 
-/// A process with an active audio session on a capture device (it is using the mic).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct MicClient {
-    /// Executable file name, e.g. `zoom.exe`. Matched case-insensitively.
-    pub exe: String,
-    pub pid: u32,
-}
-
-/// A visible top-level window.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Window {
-    pub exe: String,
-    pub title: String,
-}
-
 /// One observation of the system, taken about once a second.
 #[derive(Debug, Clone, Default)]
 pub struct Snapshot {
-    pub mic: Vec<MicClient>,
-    /// Visible titled windows (Slack's huddle window need not be in front).
-    pub windows: Vec<Window>,
-    /// The window in focus. A browser counts only when this is its meeting tab.
-    pub foreground: Option<Window>,
+    /// Other apps using the mic or the camera now, by name ([`in_use`]).
+    pub apps: Vec<String>,
     /// Default capture and render device IDs. A change starts the device-change grace.
     pub devices: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
-    Started(String),
-    Ended(String),
-    /// The first meeting started: show the one-click "Record?" offer. Nothing records until
-    /// the user clicks it ([`Detector::accept`]).
-    OfferRecording,
-    /// The last meeting ended before the offer was clicked: hide it.
+    /// Another app has used the mic or the camera for `start_after`: show the one-click
+    /// "Record?" naming that app. Nothing records until the user clicks it ([`Detector::accept`]).
+    OfferRecording(String),
+    /// Hide the offer: nobody answered it in `offer_for`, or the mic and camera were released.
     WithdrawOffer,
     /// The user accepted the offer: record Me.wav and Others.wav.
     StartRecording,
-    /// The last meeting of a recording ended: close the files.
+    /// The meeting of a recording ended: close the files.
     StopRecording,
 }
 
-/// Thresholds in seconds, defaults from docs/re/meetings.md.
+/// Thresholds in seconds.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// A meeting app must hold the mic this long before a meeting starts.
+    /// Another app must use the mic or the camera this long before the offer.
     pub start_after: f64,
     /// No end in the first seconds of a meeting.
     pub min_session: f64,
-    /// Wait after the mic is released when nothing proves the meeting still runs (a native app
-    /// let go, or the browser tab / huddle window is gone too)...
-    pub end_with_evidence: f64,
-    /// ...and when that proof is still there.
-    pub end_without_evidence: f64,
-    /// The mic coming back within this window is the same meeting.
-    pub reacquire: f64,
+    /// The meeting ends once no other app has used the mic or the camera this long.
+    pub end_after: f64,
     /// A default-device change suppresses ends for this long.
     pub device_change_grace: f64,
-    /// shepetal's own process: its mic use (dictation, this recorder) never counts.
-    pub self_pid: u32,
+    /// An unanswered offer goes away after this long.
+    pub offer_for: f64,
 }
 
 impl Default for Config {
@@ -80,137 +59,90 @@ impl Default for Config {
         Config {
             start_after: 5.0,
             min_session: 15.0,
-            end_with_evidence: 3.0,
-            end_without_evidence: 30.0,
-            reacquire: 4.0,
+            end_after: 4.0,
             device_change_grace: 10.0,
-            self_pid: std::process::id(),
+            offer_for: 20.0,
         }
     }
 }
 
-/// Native apps that only hold the mic during a call: trusted alone.
-const NATIVE: &[(&str, &str)] = &[
-    ("zoom.exe", "Zoom"),
-    ("ms-teams.exe", "Microsoft Teams"),
-    ("teams.exe", "Microsoft Teams"),
-    ("webex.exe", "Webex"),
-    ("ciscocollabhost.exe", "Webex"),
-    ("atmgr.exe", "Webex"),
-    ("discord.exe", "Discord"),
-];
+/// The part of HKCU's CapabilityAccessManager ConsentStore that [`in_use`] reads, by key path
+/// relative to the ConsentStore. `win` reads the real one; the tests use fixtures.
+pub trait Registry {
+    /// The names of the subkeys of `path`, none when the key does not exist.
+    fn subkeys(&self, path: &str) -> io::Result<Vec<String>>;
+    /// A REG_QWORD value, None when it is missing.
+    fn qword(&self, path: &str, name: &str) -> Option<u64>;
+}
 
-/// Browsers count only while their focused tab is a web meeting.
-const BROWSERS: &[(&str, &str)] = &[
-    ("chrome.exe", "Chrome"),
-    ("msedge.exe", "Edge"),
-    ("firefox.exe", "Firefox"),
-    ("brave.exe", "Brave"),
-    ("arc.exe", "Arc"),
-];
+/// The apps using the mic or the camera now, by name, shepetal itself (`own_exe`) left out.
+/// Windows keeps a key per app under `microphone` and `webcam`: a packaged app's is its package
+/// family name, and a desktop app's, under `NonPackaged`, is its exe path with `#` for `\`.
+/// LastUsedTimeStop is 0 while the app uses the device, after a LastUsedTimeStart.
+pub fn in_use(reg: &impl Registry, own_exe: &Path) -> io::Result<Vec<String>> {
+    let using = |key: &str| {
+        reg.qword(key, "LastUsedTimeStop") == Some(0)
+            && reg.qword(key, "LastUsedTimeStart").is_some_and(|t| t > 0)
+    };
+    let own = own_exe.to_string_lossy();
+    let mut apps = vec![];
+    for device in ["microphone", "webcam"] {
+        for key in reg.subkeys(device)? {
+            if key != "NonPackaged" {
+                // e.g. MSTeams_8wekyb3d8bbwe or Microsoft.WindowsCamera_8wekyb3d8bbwe
+                if using(&format!(r"{device}\{key}")) {
+                    let family = key.split('_').next().unwrap_or_default();
+                    apps.push(family.rsplit('.').next().unwrap_or_default().to_string());
+                }
+                continue;
+            }
+            for exe in reg.subkeys(&format!(r"{device}\NonPackaged"))? {
+                let path = exe.replace('#', r"\");
+                // The exact path, never the name: shepetal keeps its mic open the whole time it
+                // runs (the dictation pre-roll), and records meetings itself.
+                if path.eq_ignore_ascii_case(&own)
+                    || !using(&format!(r"{device}\NonPackaged\{exe}"))
+                {
+                    continue;
+                }
+                let file = path.rsplit('\\').next().unwrap_or_default();
+                let exe = file.to_ascii_lowercase().ends_with(".exe");
+                apps.push(file[..file.len() - if exe { 4 } else { 0 }].to_string());
+            }
+        }
+    }
+    Ok(apps)
+}
 
-/// Web meetings recognised by the browser window title (= its active tab's title).
-const WEB_TITLES: &[(&str, &str)] = &[
-    ("Meet - ", "Google Meet"),
-    ("Meet – ", "Google Meet"),
-    ("Google Meet", "Google Meet"),
-    ("meet.google.com", "Google Meet"),
-    ("Microsoft Teams", "Microsoft Teams"),
-    ("Zoom Meeting", "Zoom"),
-    ("app.zoom.us", "Zoom"),
-];
-
-/// Turns snapshots into debounced meeting and recording events. The caller supplies the clock.
+/// Turns snapshots into debounced offer and recording events. The caller supplies the clock.
 pub struct Detector {
     pub cfg: Config,
-    pending_since: BTreeMap<String, f64>,
-    lost_since: BTreeMap<String, f64>,
-    started_at: BTreeMap<String, f64>,
-    /// Mic holders seen for each active meeting.
-    holders: BTreeMap<String, BTreeSet<MicClient>>,
+    /// Since when other apps use the mic or the camera, before a meeting started.
+    pending_since: Option<f64>,
+    /// When the current meeting started.
+    started_at: Option<f64>,
+    /// Since when no other app uses the mic or the camera, during a meeting.
+    released_since: Option<f64>,
+    /// When the offer of the current meeting showed, while it still shows.
+    offered_at: Option<f64>,
+    /// The user accepted "Record?" for the current meeting.
+    recording: bool,
     device_grace_until: f64,
     last_devices: Option<Vec<String>>,
-    active: BTreeSet<String>,
-    /// The user accepted "Record?" for the current run of meetings.
-    recording: bool,
 }
 
 impl Detector {
     pub fn new(cfg: Config) -> Self {
         Detector {
             cfg,
-            pending_since: BTreeMap::new(),
-            lost_since: BTreeMap::new(),
-            started_at: BTreeMap::new(),
-            holders: BTreeMap::new(),
+            pending_since: None,
+            started_at: None,
+            released_since: None,
+            offered_at: None,
+            recording: false,
             device_grace_until: f64::NEG_INFINITY,
             last_devices: None,
-            active: BTreeSet::new(),
-            recording: false,
         }
-    }
-
-    /// Meetings running now, e.g. "Zoom" or "Google Meet (Chrome)".
-    pub fn active(&self) -> &BTreeSet<String> {
-        &self.active
-    }
-
-    /// The meeting apps visible in one snapshot, ignoring debounce.
-    pub fn meeting_apps(&self, s: &Snapshot) -> BTreeSet<String> {
-        self.matches(s).into_keys().collect()
-    }
-
-    /// Meeting apps in one snapshot with the mic clients that make each one.
-    fn matches(&self, s: &Snapshot) -> BTreeMap<String, BTreeSet<MicClient>> {
-        let mut apps: BTreeMap<String, BTreeSet<MicClient>> = BTreeMap::new();
-        for c in s.mic.iter().filter(|c| c.pid != self.cfg.self_pid) {
-            let exe = c.exe.to_lowercase();
-            let app = if let Some((_, name)) = NATIVE.iter().find(|(e, _)| *e == exe) {
-                Some(name.to_string())
-            } else if exe == "slack.exe" {
-                // Slack holds the mic for clips too: only a huddle window counts.
-                let huddle = s.windows.iter().chain(&s.foreground).any(|w| {
-                    w.exe.eq_ignore_ascii_case("slack.exe")
-                        && w.title.to_lowercase().contains("huddle")
-                });
-                huddle.then(|| "Slack".to_string())
-            } else if let Some((_, browser)) = BROWSERS.iter().find(|(e, _)| *e == exe) {
-                s.foreground
-                    .as_ref()
-                    .filter(|w| w.exe.eq_ignore_ascii_case(&exe))
-                    .and_then(|w| {
-                        WEB_TITLES
-                            .iter()
-                            .find(|(needle, _)| w.title.contains(needle))
-                    })
-                    .map(|(_, web)| format!("{web} ({browser})"))
-            } else {
-                None
-            };
-            if let Some(app) = app {
-                apps.entry(app).or_default().insert(c.clone());
-            }
-        }
-        apps
-    }
-
-    /// A released meeting ends on the short wait when nothing still proves it: a native app's
-    /// release is trusted, a browser or Slack meeting once its tab or huddle window is gone too.
-    fn is_bound(&self, app: &str, s: &Snapshot) -> bool {
-        if NATIVE.iter().any(|(_, name)| *name == app) {
-            return true;
-        }
-        let proof = Snapshot {
-            mic: self
-                .holders
-                .get(app)
-                .into_iter()
-                .flatten()
-                .cloned()
-                .collect(),
-            ..s.clone()
-        };
-        !self.matches(&proof).contains_key(app)
     }
 
     pub fn update(&mut self, s: &Snapshot, now: f64) -> Vec<Event> {
@@ -219,80 +151,60 @@ impl Detector {
         }
         self.last_devices = Some(s.devices.clone());
 
-        let was_idle = self.active.is_empty();
-        let found = self.matches(s);
-        let mut events = vec![];
-        for (app, clients) in &found {
-            if !self.active.contains(app) {
-                let since = *self.pending_since.entry(app.clone()).or_insert(now);
-                if now - since < self.cfg.start_after {
-                    continue;
-                }
-                self.pending_since.remove(app);
-                self.started_at.insert(app.clone(), now);
-                self.active.insert(app.clone());
-                events.push(Event::Started(app.clone()));
-            }
-            self.holders
-                .entry(app.clone())
-                .or_default()
-                .extend(clients.iter().cloned());
-        }
-        // A candidate that drops out before start_after starts over (flapping).
-        self.pending_since.retain(|app, _| found.contains_key(app));
-
-        for app in self.active.clone() {
-            // A running call stays on while its holder keeps the mic, even when its tab is not
-            // in front any more.
-            let held = self
-                .holders
-                .get(&app)
-                .is_some_and(|h| s.mic.iter().any(|c| h.contains(c)));
-            if found.contains_key(&app) || held {
-                self.lost_since.remove(&app);
-                continue;
-            }
-            let since = *self.lost_since.entry(app.clone()).or_insert(now);
-            let wait = if self.is_bound(&app, s) {
-                self.cfg.end_with_evidence
-            } else {
-                self.cfg.end_without_evidence
+        let Some(started) = self.started_at else {
+            let Some(app) = s.apps.first() else {
+                self.pending_since = None; // a use that stops before start_after starts over
+                return vec![];
             };
-            if now - since >= wait.max(self.cfg.reacquire)
-                && now - self.started_at[&app] >= self.cfg.min_session
+            let since = *self.pending_since.get_or_insert(now);
+            if now - since < self.cfg.start_after {
+                return vec![];
+            }
+            self.pending_since = None;
+            self.started_at = Some(now);
+            self.offered_at = Some(now);
+            return vec![Event::OfferRecording(app.clone())];
+        };
+
+        if !s.apps.is_empty() {
+            self.released_since = None;
+        } else {
+            let since = *self.released_since.get_or_insert(now);
+            if now - since >= self.cfg.end_after
+                && now - started >= self.cfg.min_session
                 && now >= self.device_grace_until
             {
-                self.lost_since.remove(&app);
-                self.started_at.remove(&app);
-                self.holders.remove(&app);
-                self.active.remove(&app);
-                events.push(Event::Ended(app));
+                let (offered, recording) = (self.offered_at.is_some(), self.recording);
+                self.started_at = None;
+                self.released_since = None;
+                self.offered_at = None;
+                self.recording = false;
+                return match (recording, offered) {
+                    (true, _) => vec![Event::StopRecording],
+                    (false, true) => vec![Event::WithdrawOffer],
+                    (false, false) => vec![],
+                };
             }
         }
-
-        // One offer, and one recording, covers overlapping meetings: it captures the whole mic
-        // and system mix.
-        if was_idle && !self.active.is_empty() {
-            events.push(Event::OfferRecording);
+        // Like Not now: no new offer until the mic and camera are released and used again.
+        if self
+            .offered_at
+            .is_some_and(|at| now - at >= self.cfg.offer_for)
+        {
+            self.offered_at = None;
+            return vec![Event::WithdrawOffer];
         }
-        if !was_idle && self.active.is_empty() {
-            events.push(if self.recording {
-                Event::StopRecording
-            } else {
-                Event::WithdrawOffer
-            });
-            self.recording = false;
-        }
-        events
+        vec![]
     }
 
-    /// The user clicked "Record?": starts the recording while the offer stands. A click after
-    /// the meetings ended, or a second click, does nothing.
+    /// The user clicked "Record?": starts the recording while the meeting runs. A click after
+    /// the meeting ended, or a second click, does nothing.
     pub fn accept(&mut self) -> Vec<Event> {
-        if self.active.is_empty() || self.recording {
+        if self.started_at.is_none() || self.recording {
             return vec![];
         }
         self.recording = true;
+        self.offered_at = None;
         vec![Event::StartRecording]
     }
 }
@@ -323,44 +235,11 @@ fn owner_only_sddl(user_sid: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
-    const SELF: u32 = 4000;
-
-    fn mic(exe: &str, pid: u32) -> MicClient {
-        MicClient {
-            exe: exe.into(),
-            pid,
-        }
-    }
-    fn win(exe: &str, title: &str) -> Window {
-        Window {
-            exe: exe.into(),
-            title: title.into(),
-        }
-    }
-    fn zoom() -> MicClient {
-        mic("Zoom.exe", 10)
-    }
-    fn teams() -> MicClient {
-        mic("ms-teams.exe", 20)
-    }
-    fn chrome() -> MicClient {
-        mic("chrome.exe", 30)
-    }
-    fn holding(clients: &[MicClient]) -> Snapshot {
+    fn using(apps: &[&str]) -> Snapshot {
         Snapshot {
-            mic: clients.to_vec(),
-            ..Default::default()
-        }
-    }
-    fn meet_tab() -> Window {
-        win("chrome.exe", "Meet - abc-defg-hij - Google Chrome")
-    }
-    /// Chrome holds the mic and its Meet tab is the focused window.
-    fn meet_call() -> Snapshot {
-        Snapshot {
-            mic: vec![chrome()],
-            foreground: Some(meet_tab()),
+            apps: apps.iter().map(|a| a.to_string()).collect(),
             ..Default::default()
         }
     }
@@ -368,16 +247,10 @@ mod tests {
         Snapshot::default()
     }
     fn detector() -> Detector {
-        Detector::new(Config {
-            self_pid: SELF,
-            ..Default::default()
-        })
+        Detector::new(Config::default())
     }
-    fn started(app: &str) -> Event {
-        Event::Started(app.into())
-    }
-    fn ended(app: &str) -> Event {
-        Event::Ended(app.into())
+    fn offer(app: &str) -> Event {
+        Event::OfferRecording(app.into())
     }
     /// Feeds the same snapshot once per second over [from, to] and collects the events.
     fn run(d: &mut Detector, s: &Snapshot, from: u32, to: u32) -> Vec<Event> {
@@ -385,19 +258,20 @@ mod tests {
     }
 
     #[test]
-    fn starts_and_offers_to_record_after_five_second_grace() {
-        let mut d = detector();
-        let s = holding(&[zoom()]);
-        assert_eq!(run(&mut d, &s, 0, 4), vec![]);
-        assert_eq!(
-            d.update(&s, 5.0),
-            vec![started("Zoom"), Event::OfferRecording]
-        );
-        assert_eq!(
-            run(&mut d, &s, 6, 20),
-            vec![],
-            "no second start or offer while the call runs"
-        );
+    fn offers_to_record_once_another_app_used_the_mic_or_camera_for_five_seconds() {
+        // Pavel's rule: the mic or the camera in use by another app means a meeting, whatever
+        // the app is.
+        for app in ["Zoom", "chrome", "WindowsCamera", "obscure-voip"] {
+            let mut d = detector();
+            let s = using(&[app]);
+            assert_eq!(run(&mut d, &s, 0, 4), vec![], "{app}");
+            assert_eq!(
+                d.update(&s, 5.0),
+                vec![offer(app)],
+                "the card names the app"
+            );
+            assert_eq!(run(&mut d, &s, 6, 19), vec![], "one offer per meeting");
+        }
     }
 
     #[test]
@@ -405,122 +279,79 @@ mod tests {
         // Pavel's rule: a detected meeting is never recorded on its own, only after one click
         // on "Record?".
         let mut d = detector();
-        let call = holding(&[zoom()]);
-        let events = run(&mut d, &call, 0, 60);
-        assert!(!events.contains(&Event::StartRecording), "{events:?}");
+        let call = using(&["Zoom"]);
+        assert_eq!(run(&mut d, &call, 0, 10), vec![offer("Zoom")]);
         assert_eq!(d.accept(), vec![Event::StartRecording]);
         assert_eq!(d.accept(), vec![], "a second click starts nothing");
-        assert_eq!(run(&mut d, &call, 61, 90), vec![]);
         assert_eq!(
-            run(&mut d, &released(), 91, 95),
-            vec![ended("Zoom"), Event::StopRecording]
+            run(&mut d, &call, 11, 90),
+            vec![],
+            "a recording offer never times out"
         );
+        assert_eq!(run(&mut d, &released(), 91, 95), vec![Event::StopRecording]);
         // The next meeting asks again, and its click records again.
-        assert_eq!(
-            run(&mut d, &call, 100, 105),
-            vec![started("Zoom"), Event::OfferRecording]
-        );
+        assert_eq!(run(&mut d, &call, 100, 105), vec![offer("Zoom")]);
         assert_eq!(d.accept(), vec![Event::StartRecording]);
     }
 
     #[test]
-    fn an_unanswered_offer_records_nothing() {
+    fn an_unanswered_offer_goes_away_after_twenty_seconds_and_records_nothing() {
         let mut d = detector();
         assert_eq!(d.accept(), vec![], "no meeting, nothing to accept");
-        run(&mut d, &holding(&[zoom()]), 0, 30);
-        assert_eq!(
-            run(&mut d, &released(), 31, 35),
-            vec![ended("Zoom"), Event::WithdrawOffer],
-            "the offer goes away, there is no recording to stop"
-        );
+        let call = using(&["Zoom"]);
+        assert_eq!(run(&mut d, &call, 0, 24), vec![offer("Zoom")]);
+        assert_eq!(d.update(&call, 25.0), vec![Event::WithdrawOffer]);
+        // Like Not now: no new card while the call goes on, and nothing to hide at its end.
+        assert_eq!(run(&mut d, &call, 26, 300), vec![]);
+        assert_eq!(run(&mut d, &released(), 301, 310), vec![]);
         assert_eq!(
             d.accept(),
             vec![],
             "a late click after the meeting starts nothing"
         );
-        // The next meeting asks again.
-        assert_eq!(
-            run(&mut d, &holding(&[zoom()]), 40, 45),
-            vec![started("Zoom"), Event::OfferRecording]
-        );
+        // Released and used again: a new meeting, a new card.
+        assert_eq!(run(&mut d, &call, 311, 316), vec![offer("Zoom")]);
     }
 
     #[test]
-    fn native_release_ends_after_reacquire_window() {
-        // A native app letting go of the mic is trusted (bound): 3 s, clamped to the 4 s
-        // reacquire window, not the 30 s unbound wait.
+    fn a_meeting_ends_four_seconds_after_the_mic_and_camera_are_released() {
         let mut d = detector();
-        run(&mut d, &holding(&[zoom()]), 0, 30);
+        run(&mut d, &using(&["Zoom"]), 0, 30);
+        d.accept();
         assert_eq!(run(&mut d, &released(), 31, 34), vec![]);
-        assert_eq!(
-            d.update(&released(), 35.0),
-            vec![ended("Zoom"), Event::WithdrawOffer]
-        );
+        assert_eq!(d.update(&released(), 35.0), vec![Event::StopRecording]);
     }
 
     #[test]
-    fn mic_back_within_four_seconds_is_the_same_meeting() {
+    fn use_back_within_four_seconds_is_the_same_meeting() {
         let mut d = detector();
-        run(&mut d, &holding(&[zoom()]), 0, 30);
+        run(&mut d, &using(&["Zoom"]), 0, 30);
+        d.accept();
         let mut events = run(&mut d, &released(), 31, 33);
-        events.extend(run(&mut d, &holding(&[zoom()]), 34, 49));
-        assert_eq!(events, vec![], "no end, no new start, no new recording");
+        events.extend(run(&mut d, &using(&["Zoom"]), 34, 49));
+        assert_eq!(events, vec![], "no end and no new offer");
         // The next real release gets the full wait again, not the stale time from 31 s.
         assert_eq!(run(&mut d, &released(), 50, 53), vec![]);
-        assert_eq!(
-            d.update(&released(), 54.0),
-            vec![ended("Zoom"), Event::WithdrawOffer]
-        );
+        assert_eq!(d.update(&released(), 54.0), vec![Event::StopRecording]);
     }
 
     #[test]
     fn no_end_in_first_fifteen_seconds() {
         let mut d = detector();
-        assert_eq!(
-            run(&mut d, &holding(&[zoom()]), 0, 5),
-            vec![started("Zoom"), Event::OfferRecording]
-        );
+        assert_eq!(run(&mut d, &using(&["Zoom"]), 0, 5), vec![offer("Zoom")]);
         assert_eq!(
             run(&mut d, &released(), 6, 19),
             vec![],
-            "session only 14 s old"
+            "meeting only 14 s old"
         );
-        assert_eq!(
-            d.update(&released(), 20.0),
-            vec![ended("Zoom"), Event::WithdrawOffer]
-        );
+        assert_eq!(d.update(&released(), 20.0), vec![Event::WithdrawOffer]);
     }
 
     #[test]
-    fn browser_drop_with_tab_still_open_waits_thirty_seconds() {
-        // Chrome let go of the mic but the Meet tab is still in front (unbound): 30 s.
+    fn flapping_use_does_not_start() {
+        // The mic toggles every 2 s: never in use 5 s in a row.
         let mut d = detector();
-        run(&mut d, &meet_call(), 0, 30);
-        let tab_open = Snapshot {
-            foreground: Some(meet_tab()),
-            ..Default::default()
-        };
-        assert_eq!(run(&mut d, &tab_open, 31, 60), vec![]);
-        assert_eq!(
-            d.update(&tab_open, 61.0),
-            vec![ended("Google Meet (Chrome)"), Event::WithdrawOffer]
-        );
-
-        // Tab gone too (bound): the short wait.
-        let mut d = detector();
-        run(&mut d, &meet_call(), 0, 30);
-        assert_eq!(run(&mut d, &released(), 31, 34), vec![]);
-        assert_eq!(
-            d.update(&released(), 35.0),
-            vec![ended("Google Meet (Chrome)"), Event::WithdrawOffer]
-        );
-    }
-
-    #[test]
-    fn flapping_mic_does_not_start() {
-        // The mic toggles every 2 s: never held 5 s in a row.
-        let mut d = detector();
-        let (on, off) = (holding(&[zoom()]), released());
+        let (on, off) = (using(&["Zoom"]), released());
         let events: Vec<_> = (0..40)
             .flat_map(|t| d.update(if t % 4 < 2 { &on } else { &off }, t as f64))
             .collect();
@@ -532,11 +363,11 @@ mod tests {
         // Plugging in a headset changes the default devices and can drop the mic for a moment.
         let mut d = detector();
         let call = Snapshot {
-            mic: vec![zoom()],
+            apps: vec!["Zoom".into()],
             devices: vec!["mic".into(), "speakers".into()],
-            ..Default::default()
         };
         run(&mut d, &call, 0, 30);
+        assert_eq!(d.accept(), vec![Event::StartRecording]);
         let headset = Snapshot {
             devices: vec!["headset".into(), "headset".into()],
             ..Default::default()
@@ -546,191 +377,145 @@ mod tests {
             vec![],
             "would end at 35 without the change"
         );
-        assert_eq!(
-            d.update(&headset, 41.0),
-            vec![ended("Zoom"), Event::WithdrawOffer]
-        );
+        assert_eq!(d.update(&headset, 41.0), vec![Event::StopRecording]);
     }
 
     #[test]
-    fn two_apps_at_once_share_one_recording() {
+    fn mic_and_camera_users_overlapping_are_one_meeting() {
+        // Zoom on the mic, then the camera app too, then only the camera app: one card, one
+        // recording, until nothing uses either.
         let mut d = detector();
-        assert_eq!(
-            run(&mut d, &holding(&[zoom()]), 0, 5),
-            vec![started("Zoom"), Event::OfferRecording]
-        );
+        assert_eq!(run(&mut d, &using(&["Zoom"]), 0, 5), vec![offer("Zoom")]);
         assert_eq!(d.accept(), vec![Event::StartRecording]);
         assert_eq!(
-            run(&mut d, &holding(&[zoom(), teams()]), 6, 30),
-            vec![started("Microsoft Teams")],
-            "no second offer, no second recording"
-        );
-        assert_eq!(
-            run(&mut d, &holding(&[teams()]), 31, 35),
-            vec![ended("Zoom")],
-            "Teams still records"
-        );
-        assert_eq!(d.active().iter().collect::<Vec<_>>(), ["Microsoft Teams"]);
-        assert_eq!(
-            run(&mut d, &released(), 36, 40),
-            vec![ended("Microsoft Teams"), Event::StopRecording]
-        );
-    }
-
-    #[test]
-    fn end_evidence_is_per_app() {
-        // Zoom's release ends Zoom fast, while the Meet tab still in front keeps Meet on the 30 s wait.
-        let mut d = detector();
-        let both = Snapshot {
-            mic: vec![zoom(), chrome()],
-            foreground: Some(meet_tab()),
-            ..Default::default()
-        };
-        assert_eq!(
-            run(&mut d, &both, 0, 30),
-            vec![
-                started("Google Meet (Chrome)"),
-                started("Zoom"),
-                Event::OfferRecording
-            ]
-        );
-        let tab_open = Snapshot {
-            foreground: Some(meet_tab()),
-            ..Default::default()
-        };
-        assert_eq!(run(&mut d, &tab_open, 31, 35), vec![ended("Zoom")]);
-        assert_eq!(
-            run(&mut d, &tab_open, 36, 61),
-            vec![ended("Google Meet (Chrome)"), Event::WithdrawOffer]
-        );
-    }
-
-    #[test]
-    fn browser_counts_only_with_a_meeting_title_in_front() {
-        let apps = |s: Snapshot| detector().meeting_apps(&s).into_iter().collect::<Vec<_>>();
-        let browser = |m: MicClient, front: Window| Snapshot {
-            mic: vec![m],
-            foreground: Some(front),
-            ..Default::default()
-        };
-
-        assert_eq!(apps(meet_call()), ["Google Meet (Chrome)"]);
-        assert_eq!(
-            apps(browser(
-                mic("msedge.exe", 31),
-                win(
-                    "msedge.exe",
-                    "Weekly sync | Microsoft Teams - Microsoft Edge"
-                )
-            )),
-            ["Microsoft Teams (Edge)"]
-        );
-        assert_eq!(
-            apps(browser(
-                mic("firefox.exe", 32),
-                win("firefox.exe", "Zoom Meeting — Mozilla Firefox")
-            )),
-            ["Zoom (Firefox)"]
-        );
-        // A browser on the mic with any other page in front is not a meeting.
-        assert_eq!(
-            apps(browser(
-                chrome(),
-                win("chrome.exe", "Inbox - Gmail - Google Chrome")
-            )),
-            [] as [&str; 0]
-        );
-        // The Meet tab exists but another app is in focus.
-        let behind = Snapshot {
-            mic: vec![chrome()],
-            windows: vec![meet_tab()],
-            foreground: Some(win("notepad.exe", "notes")),
-            ..Default::default()
-        };
-        assert_eq!(apps(behind), [] as [&str; 0]);
-        // Edge holds the mic, but the Meet title in front belongs to Chrome.
-        assert_eq!(
-            apps(browser(mic("msedge.exe", 31), meet_tab())),
-            [] as [&str; 0]
-        );
-    }
-
-    #[test]
-    fn switching_away_from_the_meet_tab_does_not_end_it() {
-        // Only the focused window is read. While Chrome keeps the mic the call goes on.
-        let mut d = detector();
-        assert_eq!(
-            run(&mut d, &meet_call(), 0, 30),
-            vec![started("Google Meet (Chrome)"), Event::OfferRecording]
-        );
-        let docs = Snapshot {
-            mic: vec![chrome()],
-            foreground: Some(win("winword.exe", "Q3 plan - Word")),
-            ..Default::default()
-        };
-        assert_eq!(run(&mut d, &docs, 31, 70), vec![]);
-        assert_eq!(
-            d.active().iter().collect::<Vec<_>>(),
-            ["Google Meet (Chrome)"]
-        );
-    }
-
-    #[test]
-    fn slack_needs_a_huddle_window() {
-        let mut d = detector();
-        let slack = mic("slack.exe", 40);
-        assert_eq!(
-            run(&mut d, &holding(std::slice::from_ref(&slack)), 0, 30),
-            vec![],
-            "e.g. recording a clip"
-        );
-        let channel = Snapshot {
-            mic: vec![slack.clone()],
-            windows: vec![win("slack.exe", "general (Channel) - Acme - Slack")],
-            ..Default::default()
-        };
-        assert_eq!(run(&mut d, &channel, 31, 60), vec![]);
-        // The huddle window does not need focus.
-        let huddle = Snapshot {
-            mic: vec![slack],
-            windows: vec![win("slack.exe", "Huddle: #general - Acme - Slack")],
-            foreground: Some(win("notepad.exe", "notes")),
-            ..Default::default()
-        };
-        assert_eq!(
-            run(&mut d, &huddle, 61, 66),
-            vec![started("Slack"), Event::OfferRecording]
-        );
-    }
-
-    #[test]
-    fn shepetal_own_mic_use_never_counts() {
-        // Our own dictation or recorder stream, whatever the binary is called.
-        let mut d = detector();
-        assert_eq!(
-            run(&mut d, &holding(&[mic("zoom.exe", SELF)]), 0, 60),
+            run(&mut d, &using(&["Zoom", "WindowsCamera"]), 6, 30),
             vec![]
         );
         assert_eq!(
-            run(&mut d, &holding(&[mic("zoom.exe", SELF), zoom()]), 61, 66),
-            vec![started("Zoom"), Event::OfferRecording]
+            run(&mut d, &using(&["WindowsCamera"]), 31, 60),
+            vec![],
+            "still in a meeting"
+        );
+        assert_eq!(run(&mut d, &released(), 61, 65), vec![Event::StopRecording]);
+    }
+
+    /// A ConsentStore fixture: key path -> (LastUsedTimeStart, LastUsedTimeStop).
+    struct Fixture(BTreeMap<String, (Option<u64>, Option<u64>)>);
+
+    impl Fixture {
+        fn new(keys: &[(&str, Option<u64>, Option<u64>)]) -> Fixture {
+            let keys = keys
+                .iter()
+                .map(|(k, start, stop)| (k.to_string(), (*start, *stop)));
+            Fixture(keys.collect())
+        }
+    }
+
+    impl Registry for Fixture {
+        fn subkeys(&self, path: &str) -> io::Result<Vec<String>> {
+            let prefix = format!(r"{path}\");
+            let mut names: Vec<String> = self
+                .0
+                .keys()
+                .filter_map(|k| k.strip_prefix(&prefix))
+                .map(|rest| rest.split('\\').next().unwrap().to_string())
+                .collect();
+            names.dedup();
+            Ok(names)
+        }
+        fn qword(&self, path: &str, name: &str) -> Option<u64> {
+            let (start, stop) = self.0.get(path)?;
+            match name {
+                "LastUsedTimeStart" => *start,
+                "LastUsedTimeStop" => *stop,
+                _ => None,
+            }
+        }
+    }
+
+    const SHEPETAL: &str = r"C:\Users\pavel\AppData\Local\Programs\Shepetal\shepetal.exe";
+    /// A FILETIME, in 100 ns units since 1601.
+    const T: Option<u64> = Some(134_000_000_000_000_000);
+
+    #[test]
+    fn finds_desktop_and_packaged_apps_using_the_mic_or_camera_now() {
+        let reg = Fixture::new(&[
+            // In use now: started, stop 0.
+            (
+                r"microphone\NonPackaged\C:#Users#pavel#AppData#Roaming#Zoom#bin#Zoom.exe",
+                T,
+                Some(0),
+            ),
+            (r"webcam\Microsoft.WindowsCamera_8wekyb3d8bbwe", T, Some(0)),
+            (r"microphone\MSTeams_8wekyb3d8bbwe", T, Some(0)),
+            // Used before, stopped since.
+            (
+                r"microphone\NonPackaged\C:#Program Files#Google#Chrome#Application#chrome.exe",
+                T,
+                T,
+            ),
+            (
+                r"webcam\NonPackaged\C:#Program Files#Mozilla Firefox#firefox.exe",
+                T,
+                T,
+            ),
+            // Never used, or the values are missing.
+            (
+                r"microphone\NonPackaged\C:#Users#pavel#AppData#Local#Discord#app-1.0.9#Discord.exe",
+                Some(0),
+                Some(0),
+            ),
+            (
+                r"microphone\Microsoft.WindowsSoundRecorder_8wekyb3d8bbwe",
+                None,
+                None,
+            ),
+            (r"webcam\NonPackaged\C:#Tools#cam.exe", T, None),
+        ]);
+        let apps = in_use(&reg, Path::new(SHEPETAL)).unwrap();
+        assert_eq!(
+            apps,
+            ["MSTeams", "Zoom", "WindowsCamera"],
+            "mic first, then camera"
         );
     }
 
     #[test]
-    fn native_apps_match_exe_names_case_insensitively() {
-        let d = detector();
-        let app = |exe: &str| {
-            d.meeting_apps(&holding(&[mic(exe, 50)]))
-                .into_iter()
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(app("ZOOM.EXE"), ["Zoom"]);
-        assert_eq!(app("Teams.exe"), ["Microsoft Teams"]);
-        assert_eq!(app("ms-teams.exe"), ["Microsoft Teams"]);
-        assert_eq!(app("CiscoCollabHost.exe"), ["Webex"]);
-        assert_eq!(app("Discord.exe"), ["Discord"]);
-        assert_eq!(app("spotify.exe"), [] as [&str; 0]);
+    fn shepetal_never_counts_by_its_exact_exe_path_only() {
+        let reg = Fixture::new(&[
+            // Its own always-open mic, whatever the case of the path.
+            (
+                r"microphone\NonPackaged\c:#users#pavel#appdata#local#programs#shepetal#SHEPETAL.EXE",
+                T,
+                Some(0),
+            ),
+            (
+                r"webcam\NonPackaged\C:#Users#pavel#AppData#Local#Programs#Shepetal#shepetal.exe",
+                T,
+                Some(0),
+            ),
+        ]);
+        assert_eq!(in_use(&reg, Path::new(SHEPETAL)).unwrap(), [] as [&str; 0]);
+        // Not by name: another app called shepetal.exe, or one whose name holds it, counts.
+        let reg = Fixture::new(&[
+            (r"microphone\NonPackaged\D:#Other#shepetal.exe", T, Some(0)),
+            (
+                r"microphone\NonPackaged\C:#Apps#shepetal-notes.exe",
+                T,
+                Some(0),
+            ),
+        ]);
+        assert_eq!(
+            in_use(&reg, Path::new(SHEPETAL)).unwrap(),
+            ["shepetal-notes", "shepetal"]
+        );
+    }
+
+    #[test]
+    fn no_consent_store_keys_means_no_app() {
+        // A PC where no app ever used the camera has no webcam key.
+        let reg = Fixture::new(&[]);
+        assert_eq!(in_use(&reg, Path::new(SHEPETAL)).unwrap(), [] as [&str; 0]);
     }
 
     #[test]
