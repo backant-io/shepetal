@@ -54,7 +54,7 @@ final class MeetingFlow {
         // No model yet (it loads at launch): the final pass transcribes the whole meeting instead.
         transcriber = makeTranscriber(m)
         // ponytail: no model, no live pass, so no silence end; read the audio level without the model if that matters.
-        transcriber?.onHeard = { [weak self] in self?.recorder?.heard(m.id, $0, seconds: $1, speech: $2) }
+        transcriber?.onHeard = { [weak self] in self?.recorder?.heard(m.id, $0) }
         transcriber?.startLive(every: liveEvery)
     }
 

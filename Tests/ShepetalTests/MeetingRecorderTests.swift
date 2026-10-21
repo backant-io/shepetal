@@ -248,13 +248,10 @@ final class MeetingRecorderTests: XCTestCase {
 
     // MARK: F67, the end on silence
 
-    /// Live blocks of `block` seconds on both channels, `seconds` in all, as the transcriber reports them.
+    /// Live passes of `block` seconds on both channels, `seconds` in all, as the transcriber reports them.
     private func hear(_ seconds: Double, block: Double = 30, me: Bool = false, others: Bool = false) {
         let id = recorder.current?.id ?? ""
-        for _ in 0..<Int(seconds / block) {
-            recorder.heard(id, .me, seconds: block, speech: me)
-            recorder.heard(id, .others, seconds: block, speech: others)
-        }
+        for _ in 0..<Int(seconds / block) { recorder.heard(id, [(.me, block, me), (.others, block, others)]) }
     }
 
     func testTwoMinutesWithNoOneSpeakingEndsADetectedRecordingAndKeepsItsAudio() throws {
@@ -290,21 +287,38 @@ final class MeetingRecorderTests: XCTestCase {
         XCTAssertNil(recorder.current, "2 min after the last speech on either channel")
     }
 
-    /// A live pass reads Me before Others: Me's quiet alone must not end the meeting before Others is read.
+    /// A pass that found nothing new on Others (its file not written yet): Me's quiet alone must not end it.
     func testAChannelNotReadYetHoldsTheEnd() throws {
         recorder.start()
         let id = try XCTUnwrap(recorder.current?.id)
-        recorder.heard(id, .me, seconds: 300, speech: false)
+        recorder.heard(id, [(.me, 300, false)])
         XCTAssertNotNil(recorder.current)
-        recorder.heard(id, .others, seconds: 300, speech: false)
+        recorder.heard(id, [(.others, 300, false)])
         XCTAssertNil(recorder.current)
+    }
+
+    /// A live pass reads Me's block before Others'. Me's 2 min of quiet must be weighed against Others' block of
+    /// the same pass, not against Others' quiet from the pass before: here the other side is talking.
+    func testOthersSpeechInTheSamePassAsMesLongQuietKeepsItGoing() throws {
+        recorder.start()
+        let id = try XCTUnwrap(recorder.current?.id)
+        hear(30, me: true)
+        hear(90)  // Me quiet for 90 s, Others for 120 s
+        XCTAssertNotNil(recorder.current)
+        hear(30, others: true)  // Me reaches 2 min in the very pass Others speaks in
+        XCTAssertNotNil(recorder.current, "Others spoke in the last 30 s")
+        recorder.heard(id, [(.me, 30, false), (.others, 30, false)])
+        XCTAssertNotNil(recorder.current, "Others spoke 30 s ago")
+        hear(90)
+        XCTAssertNil(recorder.current, "2 min after Others' line")
+        XCTAssertEqual(ended.map(\.id), [id])
     }
 
     func testMicOnlyRecordingEndsOnTheMicsSilence() throws {
         capture.systemAudio = false
         recorder.start()
         let id = try XCTUnwrap(recorder.current?.id)
-        recorder.heard(id, .me, seconds: 120, speech: false)
+        recorder.heard(id, [(.me, 120, false)])
         XCTAssertNil(recorder.current, "no Others channel to wait for")
     }
 
@@ -312,13 +326,9 @@ final class MeetingRecorderTests: XCTestCase {
         make(silenceEnd: 5)
         recorder.start()
         let id = try XCTUnwrap(recorder.current?.id)
-        for _ in 0..<14 {
-            recorder.heard(id, .me, seconds: 1, speech: false)
-            recorder.heard(id, .others, seconds: 1, speech: false)
-        }
+        for _ in 0..<14 { recorder.heard(id, [(.me, 1, false), (.others, 1, false)]) }
         XCTAssertNotNil(recorder.current, "a meeting is never ended in its first 15 s")
-        recorder.heard(id, .me, seconds: 1, speech: false)
-        recorder.heard(id, .others, seconds: 1, speech: false)
+        recorder.heard(id, [(.me, 1, false), (.others, 1, false)])
         XCTAssertNil(recorder.current)
         XCTAssertEqual(hints.last, "Meeting ended · no one spoke for 15 s", "the hint says how long it really waited")
     }
@@ -336,8 +346,7 @@ final class MeetingRecorderTests: XCTestCase {
         let old = try XCTUnwrap(recorder.current?.id)
         recorder.stop()
         recorder.start()
-        recorder.heard(old, .me, seconds: 300, speech: false)
-        recorder.heard(old, .others, seconds: 300, speech: false)
+        recorder.heard(old, [(.me, 300, false), (.others, 300, false)])
         XCTAssertNotNil(recorder.current)
     }
 

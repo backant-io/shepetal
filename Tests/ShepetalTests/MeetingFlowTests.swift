@@ -210,6 +210,23 @@ final class MeetingFlowTests: XCTestCase {
         XCTAssertEqual(hints.dropFirst().first, "Meeting ended · no one spoke for 20 s")
     }
 
+    // The pass that brings Me to 20 s of quiet also reads Others' new line: the other side is talking, so it
+    // goes on. Me's quiet must not be weighed against Others' quiet from the pass before.
+    func testOthersSpeakingInTheBlockThatEndsMesQuietKeepsTheRecordingGoing() async throws {
+        recorder.start()
+        try capture.append(me: audio(5, on: 1...2), others: audio(5))
+        try await until("a live pass transcribes Me's line") { engine.calls.count == 1 }
+        try await Task.sleep(for: .milliseconds(250))  // the pass reports its blocks: 5 passes on
+        try capture.append(me: audio(16), others: audio(16))
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNotNil(recorder.current, "Me quiet for 16 s, Others for 21 s")
+        try capture.append(me: audio(5), others: audio(5, on: 1...2))
+        try await until("the live pass transcribes Others' line") { engine.calls.count == 2 }
+        try await Task.sleep(for: .milliseconds(250))
+        XCTAssertNotNil(recorder.current, "Others spoke 3 s ago")
+        XCTAssertEqual(hints, ["Recording meeting"])
+    }
+
     // A key or a cough is loud, but no one spoke: the model hears no words (or only prints a tag for it), so the
     // sound does not keep a silent meeting going. A level floor would hear it as speech, and on a real mic the
     // room is always above that floor, so the meeting would never end.

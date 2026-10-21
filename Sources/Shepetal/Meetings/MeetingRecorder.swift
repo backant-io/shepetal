@@ -52,7 +52,7 @@ struct MeetingOffer {
 /// F67: a recording nobody speaks in ends by itself, detected or started by hand, so a forgotten one does not run
 /// forever. It is clocked in recorded audio, per channel, and ends once every channel has been quiet for `seconds`
 /// (`defaults write io.backant.shepetal meeting.silenceEnd <seconds>`, 0 turns it off), never in the first
-/// `minSession`. Pure, so tests feed it blocks of audio.
+/// `minSession`. Pure, so tests feed it passes of audio.
 /// ponytail: speech is a block the model heard words in, and a block with speech resets its channel's clock, so the
 /// end can come one block (30 s live) late; a line still running at a block's end counts only once it ends, so a
 /// line started just before the end and never paused for 0.5 s can be cut off; and no model loaded means no
@@ -72,10 +72,13 @@ struct SilenceEnd {
         after = max(seconds, minSession)
     }
 
-    /// A block of newly recorded audio on one channel. True once the recording should end.
-    mutating func heard(_ speaker: Speaker, seconds: Double, speech: Bool) -> Bool {
-        guard let q = quiet[speaker] else { return false }
-        quiet[speaker] = speech ? 0 : q + seconds
+    /// A block of newly recorded audio on one channel, and whether the model heard words in it.
+    typealias Block = (speaker: Speaker, seconds: Double, speech: Bool)
+
+    /// The blocks one live pass read, every channel's. True once the recording should end. It is decided only
+    /// after the whole pass, so Me's quiet is never weighed against Others' quiet from the pass before.
+    mutating func heard(_ pass: [Block]) -> Bool {
+        for b in pass { if let q = quiet[b.speaker] { quiet[b.speaker] = b.speech ? 0 : q + b.seconds } }
         return on && quiet.values.allSatisfy { $0 >= after }
     }
 
@@ -215,10 +218,10 @@ final class MeetingRecorder: NSObject {
         }
     }
 
-    /// A block of newly recorded audio from the live transcriber. Only the meeting recording now counts, not the
+    /// The blocks of newly recorded audio one live pass read. Only the meeting recording now counts, not the
     /// last pass of one that already ended.
-    func heard(_ id: String, _ speaker: Speaker, seconds: Double, speech: Bool) {
-        guard current?.id == id, silence.heard(speaker, seconds: seconds, speech: speech) else { return }
+    func heard(_ id: String, _ pass: [SilenceEnd.Block]) {
+        guard current?.id == id, silence.heard(pass) else { return }
         stop(saved: "Meeting ended · no one spoke for \(silence.said)")
     }
 
