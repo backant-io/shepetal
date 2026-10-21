@@ -95,6 +95,10 @@ final class IndicatorTests: XCTestCase {
         indicator.show(Hint.shortPress, seconds: Hint.seconds)
         indicator.show(PasteGate.focusMoved, seconds: 4)
         XCTAssertEqual(indicator.notices.newestFirst.map(\.text), [PasteGate.focusMoved, Hint.shortPress])
+        // SecureInput clears its note with a 0 s show: the notice must keep the time it showed, not when it cleared.
+        let kept = indicator.notices.newestFirst
+        indicator.show(PasteGate.focusMoved, seconds: 0)
+        XCTAssertEqual(indicator.notices.newestFirst, kept)
     }
 
     /// F100: Recent notices must never hold dictated text. The clipboard hint is checked through the real

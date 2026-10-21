@@ -83,9 +83,10 @@ final class Indicator {
     /// Everything `show` put next to 🤫, for the Hub's Recent notices (F100).
     private(set) var notices = NoticeLog()
 
-    /// Text next to the indicator for `seconds`, e.g. the short-press hint. It is also kept in `notices`.
+    /// Text next to the indicator for `seconds`, e.g. the short-press hint. It is also kept in `notices`, except
+    /// a 0 s show, which only clears the label (SecureInput does this), so the notice keeps the time it showed.
     func show(_ text: String, seconds: TimeInterval) {
-        notices.append(text)
+        if seconds > 0 { notices.append(text) }
         labelUntil?.cancel()
         label.stringValue = " \(text) "
         label.isHidden = false
