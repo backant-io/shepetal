@@ -6,6 +6,7 @@
 
 use input::{Key, KeyEvent, Mode};
 use shepetal_core::gesture::{short_press_hint, Action, Gesture, HINT_MS, VK_ESCAPE};
+use shepetal_core::text;
 
 /// The dictation hotkey. Windows keyboards don't report fn, so it is Ctrl+Win, the default of
 /// Wispr's Windows app. `win.rs` parses it for the hook, and the short-press hint names it.
@@ -44,6 +45,12 @@ pub trait Show {
     fn mode(&mut self, mode: Mode);
     /// Text next to the 🤫 for `HINT_MS`.
     fn hint(&mut self, text: &str);
+}
+
+/// The text rules a transcript goes through before insertion: the cleanup, then spoken dates become
+/// numbers (docs/text-rules.md: the date rule runs on the cleaned text).
+pub fn rules(raw: &str) -> String {
+    text::dates(&text::cleanup(raw))
 }
 
 /// Feeds one key event from the input hook into the core gesture.
@@ -232,7 +239,7 @@ mod tests {
             FakeStore(log.clone(), store),
             FakeInsert(log.clone(), clipboard),
             FakeShow(log.clone()),
-            shepetal_core::text::cleanup,
+            rules,
         );
         (f, log)
     }
@@ -287,6 +294,17 @@ mod tests {
         assert_eq!(take(&log), ["mic stop", "keep 16 Dictation", "mode Processing"]);
         f.transcribed(Ok("  um hello world ".into()), 1100);
         assert_eq!(take(&log), ["insert hello world", "mode Idle"], "the core cleanup runs before insert");
+    }
+
+    // The date rule runs after the cleanup: before it, "the the" would leave a "the" in front of the date.
+    #[test]
+    fn spoken_dates_are_inserted_as_numbers() {
+        let (mut f, log) = flow(Ok(()), Ok(()), None);
+        f.action(Action::Start, 0);
+        f.action(Action::Stop, 900);
+        take(&log);
+        f.transcribed(Ok("Um, see you on the the twenty sixth of July twenty twenty-six.".into()), 1100);
+        assert_eq!(take(&log), ["insert See you on 26.07.26.", "mode Idle"]);
     }
 
     #[test]

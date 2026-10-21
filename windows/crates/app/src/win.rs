@@ -233,7 +233,7 @@ pub fn run() {
         AppStore(store),
         AppInsert(None),
         ui,
-        shepetal_core::text::cleanup,
+        flow::rules,
     );
     let mut gesture = Gesture::default();
     let t0 = Instant::now();
