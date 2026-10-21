@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Terms of Use',
-  description: 'The terms for using shepetal, its free trial and the one-time purchase.',
+  description: 'The terms for using shepetal, its free trial, the lifetime license and the monthly subscription.',
   alternates: { canonical: '/terms' },
 };
 
@@ -11,7 +11,7 @@ export default function TermsOfUse() {
   return (
     <main className="mx-auto max-w-3xl px-4 pt-16 sm:px-8">
       <h1 className="display text-[clamp(2.75rem,8vw,4.5rem)] leading-none">Terms of Use</h1>
-      <p className="mt-4 text-sm text-[var(--hush)]">Version 1.0. Last revised on October 20, 2026</p>
+      <p className="mt-4 text-sm text-[var(--hush)]">Version 1.1. Last revised on October 21, 2026</p>
 
       <div className="prose-legal mt-12">
         <p>
@@ -42,24 +42,44 @@ export default function TermsOfUse() {
           unauthorized use. You may ask us to delete your Account at any time.
         </p>
 
-        <h2>2. Free trial and purchase</h2>
+        <h2>2. Free trial, purchase and subscription</h2>
         <p>
           Your free trial starts the first time you sign in to the Service and lasts 30 days. The trial needs no payment
           method, and it ends on its own without any charge.
         </p>
         <p>
-          After the trial you can buy shepetal with a one-time payment of $4.99 USD. A purchase gives you a perpetual
-          license to use shepetal, including the future updates we release, and there is no subscription or recurring
-          charge. Payments are processed by Stripe under Stripe&apos;s own terms. If we change the price, the change
-          applies only to purchases made afterwards.
+          You can keep using shepetal in one of two ways. Prices are in US dollars, and Stripe processes every payment
+          under Stripe&apos;s own terms. If we change a price, the change applies only to purchases made afterwards, and
+          to a subscription only after we tell you by email at least 30 days before its next renewal.
+        </p>
+        <p>
+          <strong>Lifetime license.</strong> A one-time payment of $23.99 gives you a perpetual license to use shepetal,
+          including the future updates we release. There is no recurring charge.
+        </p>
+        <p>
+          <strong>Monthly subscription.</strong> $0.99 a month. Your subscription renews automatically every month, on
+          the day of the month you subscribed, and we charge the payment method you gave until you cancel. You can
+          cancel anytime from your account page, under Manage subscription. When you cancel, shepetal keeps working
+          until the end of the month you have paid for, and there is no further charge. If a renewal payment fails,
+          shepetal stops working until the payment goes through; you can update your card under Manage subscription.
+        </p>
+        <p>
+          <strong>Promotion codes.</strong> A promotion code applies only to the purchase it names, until the date it
+          ends, once per account. A code never applies to the subscription unless it says so.
+        </p>
+        <p>
+          <strong>Refunds.</strong> The free trial lets you try shepetal before you pay. If shepetal does not work for
+          you, write to <a href="mailto:founder@backant.io">founder@backant.io</a> within 14 days of a lifetime purchase
+          for a full refund. Monthly payments are not refunded for the part of a month you have already started, and
+          cancelling stops every later charge. This does not limit any refund right the law where you live gives you.
         </p>
 
         <h2>3. License</h2>
         <p>
           Subject to these Terms, Company grants you a non-transferable, non-exclusive, revocable, limited license to
-          use the Service for your own personal or internal business use, during your trial and, after a purchase,
-          without time limit. The shepetal source code is published under the MIT License, and nothing in these Terms
-          limits the rights that license gives you to the source code.
+          use the Service for your own personal or internal business use, during your trial, after a lifetime purchase
+          without time limit, and with a subscription for as long as it is paid. The shepetal source code is published
+          under the MIT License, and nothing in these Terms limits the rights that license gives you to the source code.
         </p>
         <p>
           You shall not (a) resell, sublicense or share your Account or license with others; (b) interfere with or

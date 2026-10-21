@@ -40,12 +40,14 @@ export default function PrivacyPolicy() {
         <h3>1. Your account</h3>
         <p>
           You sign in with your Google account. Google tells us your email address, and we store it together with the
-          date your free trial started and whether you bought shepetal.
+          date your free trial started and your plan: the lifetime license, or a subscription with its status and the
+          date it is paid through.
         </p>
         <h3>2. Purchases</h3>
         <p>
-          Payments are handled by Stripe. Your card details go straight to Stripe, and we receive the confirmation that
-          you paid and the date of the payment.
+          Payments are handled by Stripe. Your card details go straight to Stripe. We keep your Stripe customer ID and
+          receive the confirmation that you paid, the date of the payment and, for a subscription, its renewal date and
+          whether a renewal payment failed.
         </p>
         <h3>3. The app sign-in</h3>
         <p>
