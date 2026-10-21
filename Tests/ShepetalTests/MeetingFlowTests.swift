@@ -203,6 +203,7 @@ final class MeetingFlowTests: XCTestCase {
         recorder.start()
         try capture.append(me: audio(25), others: audio(25, on: 20...21))
         try await until("the live pass reads both channels and transcribes Others' line") { engine.calls.count == 1 }
+        try await Task.sleep(for: .milliseconds(250))  // the model answers before the pass reports the block: 5 passes on
         XCTAssertNotNil(recorder.current, "Others spoke 4 s ago")
         try capture.append(me: audio(21), others: audio(21))
         try await until("then 20 s of quiet on both ends it") { recorder.current == nil }
