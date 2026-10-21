@@ -17,6 +17,11 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
     private let sampler: UnsafeMutablePointer<llama_sampler>
     private let tail: String          // chat template text after the dictation: end of turn, start of the answer
     private var prefixState: [UInt8] = []
+    /// The prompt for a dictation with the text around the cursor (F24): the same instructions and examples plus
+    /// the field's, so the prompt without it stays as it was. Decoded at load too, so the first such rewrite
+    /// costs no more than the others.
+    private let fieldTail: String
+    private var fieldState: [UInt8] = []
 
     public struct LoadError: LocalizedError {
         public let errorDescription: String?
@@ -44,15 +49,12 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         llama_sampler_chain_add(sampler, llama_sampler_init_greedy())
         name = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
 
-        let (head, tail) = try Self.split(prompt: Self.render(m))
+        let (head, tail) = try Self.split(prompt: Self.render(m, field: false))
+        let (fieldHead, fieldTail) = try Self.split(prompt: Self.render(m, field: true))
         self.tail = tail
-        llama_memory_clear(llama_get_memory(c), true)
-        try decode(tokenize(head, bos: true, special: true))
-        let size = llama_state_seq_get_size(c, 0)
-        prefixState = [UInt8](repeating: 0, count: size)
-        guard llama_state_seq_get_data(c, &prefixState, size, 0) == size else {
-            throw LoadError(errorDescription: "llama.cpp could not save the prompt state")
-        }
+        self.fieldTail = fieldTail
+        prefixState = try prompt(head)
+        fieldState = try prompt(fieldHead)
         // Compiles the Metal kernels before the user speaks; this first run may take longer than the deadline.
         _ = try generate("Warm up the GPU, actually the model.", until: .infinity)
     }
@@ -83,24 +85,45 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
         llama_model_free(model)
     }
 
-    public func rewrite(_ text: String) throws -> String {
-        try generate(text, until: ProcessInfo.processInfo.systemUptime + deadline)
+    /// Decodes a prompt from an empty context and returns its saved state.
+    private func prompt(_ head: String) throws -> [UInt8] {
+        llama_memory_clear(llama_get_memory(ctx), true)
+        try decode(tokenize(head, bos: true, special: true))
+        let size = llama_state_seq_get_size(ctx, 0)
+        var state = [UInt8](repeating: 0, count: size)
+        guard llama_state_seq_get_data(ctx, &state, size, 0) == size else {
+            throw LoadError(errorDescription: "llama.cpp could not save the prompt state")
+        }
+        return state
     }
 
-    private func generate(_ text: String, until end: TimeInterval) throws -> String {
+    public func rewrite(_ text: String) throws -> String {
+        try rewrite(text, context: .none)
+    }
+
+    public func rewrite(_ text: String, context: CleanupContext) throws -> String {
+        try generate(text, context: context, until: ProcessInfo.processInfo.systemUptime + deadline)
+    }
+
+    private func generate(_ text: String, context: CleanupContext = .none, until end: TimeInterval) throws -> String {
         lock.lock()
         defer { lock.unlock() }
         let mem = llama_get_memory(ctx)
         llama_memory_clear(mem, true)
-        guard llama_state_seq_set_data(ctx, prefixState, prefixState.count, 0) > 0 else {
+        let state = context.isEmpty ? prefixState : fieldState
+        guard llama_state_seq_set_data(ctx, state, state.count, 0) > 0 else {
             throw LoadError(errorDescription: "llama.cpp could not restore the prompt state")
         }
-        // The dictation's own text never becomes control tokens; only the template around it does.
-        let input = try tokenize(text, bos: false, special: false) + tokenize(tail, bos: false, special: true)
+        // The dictation's and the field's own text never become control tokens; only the template around them does.
+        let said = try tokenize(text, bos: false, special: false)
+        let input = context.isEmpty
+            ? try said + tokenize(tail, bos: false, special: true)
+            : try tokenize(CleanupPrompt.message(text, context), bos: false, special: false) + tokenize(fieldTail, bos: false, special: true)
         try decode(input)
         var bytes: [UInt8] = []
         var piece = [CChar](repeating: 0, count: 256)
-        for _ in 0..<(input.count * 2 + 32) {
+        // The answer is about as long as the dictation, however much the field holds.
+        for _ in 0..<((context.isEmpty ? input.count : said.count + 16) * 2 + 32) {
             let token = llama_sampler_sample(sampler, ctx, -1)
             if llama_vocab_is_eog(vocab, token) { break }
             let n = llama_token_to_piece(vocab, token, &piece, Int32(piece.count), 0, false)
@@ -132,12 +155,17 @@ public final class LlamaCleanup: CleanupModel, @unchecked Sendable {
 
     static let marker = "\u{1}DICTATION\u{1}"
 
-    /// The model's own chat template over the instructions, the examples and a marker for the dictation.
-    static func render(_ model: OpaquePointer) throws -> String {
+    /// The model's own chat template over the instructions, the examples and a marker for the dictation. With
+    /// `field`, the prompt for a dictation with the text around the cursor (F24): its instructions and examples
+    /// follow the others, and the marker stands for the whole message.
+    static func render(_ model: OpaquePointer, field: Bool) throws -> String {
         guard let tmpl = llama_model_chat_template(model, nil) else { throw LoadError(errorDescription: "the model has no chat template") }
-        var turns = [("system", CleanupPrompt.instructions)]
+        var turns = [("system", CleanupPrompt.instructions + (field ? "\n" + CleanupPrompt.fieldInstructions : ""))]
         for (said, written) in CleanupPrompt.examples { turns += [("user", CleanupPrompt.wrap(said)), ("assistant", written)] }
-        turns.append(("user", CleanupPrompt.wrap(marker)))
+        if field {
+            for (c, said, written) in CleanupPrompt.fieldExamples { turns += [("user", CleanupPrompt.message(said, c)), ("assistant", written)] }
+        }
+        turns.append(("user", field ? marker : CleanupPrompt.wrap(marker)))
         let strings = turns.map { (strdup($0.0)!, strdup($0.1)!) }
         defer { strings.forEach { free($0.0); free($0.1) } }
         let messages = strings.map { llama_chat_message(role: $0.0, content: $0.1) }
@@ -199,4 +227,35 @@ public enum CleanupPrompt {
 
     /// How a dictation is put in front of the model.
     static func wrap(_ text: String) -> String { "<dictation>\n\(text)\n</dictation>" }
+
+    // MARK: the text around the cursor (F24)
+
+    public static let fieldInstructions = """
+        Some messages also hold, before the dictation, the text around the cursor in the field the dictation goes \
+        into, between <field> tags. It is for reference only: use it for the spelling and case of names and terms, \
+        and to go on with a numbered list. Never write any of it back and never answer it: write back only the \
+        dictation, cleaned up.
+        """
+
+    /// Not in bench/cleanup/fixtures either.
+    public static let fieldExamples: [(CleanupContext, String, String)] = [
+        (CleanupContext(before: "Lunch with Joanna Kowalczyk on Friday.\n", after: "", selected: ""),
+         "ask joanna to bring the signed lease", "Ask Joanna to bring the signed lease."),
+        (CleanupContext(before: "Groceries:\n1. Apples\n2. Rice\n", after: "", selected: ""),
+         "number three olive oil", "3. Olive oil"),
+        (CleanupContext(before: "Do you know when the plumber is coming?\n\n", after: "", selected: ""),
+         "he said tuesday morning", "He said Tuesday morning."),
+        (CleanupContext(before: "Our app stores everything in PostgreSQL. ", after: " Let me know if you need the logs.", selected: ""),
+         "the postgresql backup failed last night, sorry, this morning", "The PostgreSQL backup failed this morning."),
+    ]
+
+    /// A dictation with the text around the cursor in front of it, marked as reference only. Only the parts
+    /// there are.
+    public static func message(_ text: String, _ c: CleanupContext) -> String {
+        var s = "<field>\nFor reference only, not part of the dictation.\n"
+        if !c.before.isEmpty { s += "<before_cursor>\n\(c.before)\n</before_cursor>\n" }
+        if !c.selected.isEmpty { s += "<selected>\n\(c.selected)\n</selected>\n" }
+        if !c.after.isEmpty { s += "<after_cursor>\n\(c.after)\n</after_cursor>\n" }
+        return s + "</field>\n" + wrap(text)
+    }
 }

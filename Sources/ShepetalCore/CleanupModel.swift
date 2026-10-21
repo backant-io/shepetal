@@ -8,6 +8,62 @@ public protocol CleanupModel: AnyObject, Sendable {
     var name: String { get }
     /// Text that already went through `Cleanup.apply` in, rewritten text out.
     func rewrite(_ text: String) throws -> String
+    /// The same, with the text around the cursor for reference (F24). A model that cannot use it gets the
+    /// default, which ignores it.
+    func rewrite(_ text: String, context: CleanupContext) throws -> String
+}
+
+extension CleanupModel {
+    public func rewrite(_ text: String, context: CleanupContext) throws -> String { try rewrite(text) }
+}
+
+/// The text around the cursor that the model may look at, when Settings' "Use the text around the cursor to clean
+/// up dictation" is on (F24, off by default; Wispr's `useAxContext`): the last 500 characters before the cursor,
+/// the first 500 after it and the selection, each cut at a word boundary. Reference only: the word guard still
+/// rejects any word the user did not say. Never logged or stored, so `description` gives only the lengths.
+public struct CleanupContext: Equatable, Sendable, CustomStringConvertible {
+    public static let settingKey = "cleanup.textAroundCursor"
+    public static let limit = 500
+    public static let none = CleanupContext(before: "", after: "", selected: "")
+
+    public let before: String
+    public let after: String
+    public let selected: String
+
+    public init(before: String, after: String, selected: String) {
+        self.before = Self.last(before)
+        self.after = Self.first(after)
+        self.selected = Self.first(selected)
+    }
+
+    public var isEmpty: Bool { before.isEmpty && after.isEmpty && selected.isEmpty }
+    public var description: String { "CleanupContext(\(before.count) + \(selected.count) + \(after.count) characters)" }
+
+    /// The number of the list item on the line above the cursor, when the cursor starts a new line after it
+    /// ("1. Milk\n2. Eggs\n"): the model's "3. Bread" goes on with that list. 0 otherwise.
+    public var listNumber: Int {
+        let lines = before.components(separatedBy: "\n")
+        guard lines.count > 1, lines[lines.count - 1].allSatisfy(\.isWhitespace) else { return 0 }
+        let line = lines[lines.count - 2] as NSString
+        guard let m = SmartCleanup.listNumber.firstMatch(in: line as String, range: NSRange(location: 0, length: line.length)) else { return 0 }
+        return Int(line.substring(with: m.range).filter(\.isNumber)) ?? 0
+    }
+
+    /// The last `limit` characters, from the first word that starts inside them.
+    static func last(_ s: String) -> String {
+        guard s.count > limit else { return s }
+        let cut = s.suffix(limit)
+        if s[s.index(before: cut.startIndex)].isWhitespace { return String(cut) }
+        return cut.firstIndex(where: \.isWhitespace).map { String(cut[$0...]) } ?? ""
+    }
+
+    /// The first `limit` characters, up to the last word that ends inside them.
+    static func first(_ s: String) -> String {
+        guard s.count > limit else { return s }
+        let cut = s.prefix(limit)
+        if s[cut.endIndex].isWhitespace { return String(cut) }
+        return cut.lastIndex(where: \.isWhitespace).map { String(cut[..<$0]) } ?? ""
+    }
 }
 
 /// The rules first (fillers, stutters, spacing), then the model when one is loaded and the text has a cue
@@ -23,10 +79,11 @@ public enum SmartCleanup {
     /// text would overrun the model's context.
     public static let maxModelWords = 150
 
-    public static func apply(_ raw: String, model: CleanupModel?) -> Result {
-        let ruled = Cleanup.apply(raw)
-        guard let model, needsModel(ruled), words(ruled).count <= maxModelWords,
-              let out = try? model.rewrite(ruled), accepts(out, for: ruled) else {
+    /// `context` is the text around the cursor (F24); `.none` unless the user turned it on.
+    public static func apply(_ raw: String, model: CleanupModel?, context: CleanupContext = .none) -> Result {
+        let ruled = Cleanup.apply(raw), list = context.listNumber
+        guard let model, needsModel(ruled) || (list > 0 && has(nextItem, ruled)), words(ruled).count <= maxModelWords,
+              let out = try? model.rewrite(ruled, context: context), accepts(out, for: ruled, list: list) else {
             return Result(text: ruled, usedModel: false)
         }
         return Result(text: out, usedModel: true)
@@ -49,6 +106,8 @@ public enum SmartCleanup {
           | new\ line | new\ paragraph | first | second | third | fourth | fifth | finally
           | one | two | three | four | five | six | seven | eight | nine | ten )\b
         """#)
+    /// "Number three, ..." opening a dictation under a list (F24): a cue only with that list above the cursor.
+    static let nextItem = try! NSRegularExpression(pattern: #"(?i)^(?:and\ )?(?:number|step)\ (?:three|four|five|six|seven|eight|nine|ten|\d+)\b"#)
     /// "1. " or "2) " at the start of a line: the model's list numbers.
     static let listNumber = try! NSRegularExpression(pattern: #"(?m)^\s*\d+[.)]\s"#)
 
@@ -69,7 +128,8 @@ public enum SmartCleanup {
     /// Only list numbers at the start of a line may be added; punctuation, case and line breaks may change.
     /// So a rewrite that keeps the taken-back words ("Send it to John"), swaps the halves, drops a cue but keeps
     /// what it took back, answers a question, or drops a clause elsewhere is rejected and the rules' text is used.
-    public static func accepts(_ out: String, for input: String) -> Bool {
+    /// `list` is the list number on the line above the cursor (`CleanupContext.listNumber`): numbering may go on from it.
+    public static func accepts(_ out: String, for input: String, list: Int = 0) -> Bool {
         guard out.contains(where: \.isLetter) else { return false }
         let said = tokens(input)
         let written = tokens(replace(listNumber, in: out)).map(\.word)
@@ -154,12 +214,13 @@ public enum SmartCleanup {
                let from = words.lastIndex(where: { said[$0].word == said[r].word }),
                gone != Array(words[from...]) { return false }
         }
-        return listNumbersCount(out)
+        return listNumbersCount(out, from: list)
     }
 
-    /// The model's list numbers go 1, 2, 3 within each list; any other number at a line start is a new word.
-    static func listNumbersCount(_ out: String) -> Bool {
-        var previous = 0
+    /// The model's list numbers go 1, 2, 3 within each list, or on from `from` (the list above the cursor); any
+    /// other number at a line start is a new word.
+    static func listNumbersCount(_ out: String, from: Int = 0) -> Bool {
+        var previous = from
         for m in listNumber.matches(in: out, range: NSRange(location: 0, length: (out as NSString).length)) {
             let n = Int((out as NSString).substring(with: m.range).filter(\.isNumber)) ?? 0
             guard n == 1 || n == previous + 1 else { return false }

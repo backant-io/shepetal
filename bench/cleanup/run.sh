@@ -43,12 +43,18 @@ swift build -c release --product cleanup-bench
 BIN=$(swift build -c release --show-bin-path)/cleanup-bench
 FIX=bench/cleanup/fixtures/dictation.jsonl
 
+CTX=bench/cleanup/fixtures/context.jsonl  # the text around the cursor (F24), off and on
+mkdir -p "$OUT/context"
+
 if [ $# -eq 0 ]; then
   "$BIN" rules "$FIX" > "$OUT/rules.jsonl"
+  "$BIN" rules "$CTX" > "$OUT/context/rules.jsonl"
   set -- $(awk '{ print $1 }' <<<"$CATALOG")
 fi
 for file in "$@"; do
   fetch "$file"
   "$BIN" "$MODELS/$file" "$FIX" > "$OUT/${file%.gguf}.jsonl"
+  "$BIN" "$MODELS/$file" "$CTX" > "$OUT/context/${file%.gguf}.jsonl"
 done
 python3 bench/cleanup/score.py
+python3 bench/cleanup/score.py --context
