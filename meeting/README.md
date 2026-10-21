@@ -68,6 +68,8 @@ docker run --rm -v "$PWD":/w -w /w swift:6.2 swift test
 
 - Any mic or camera use counts, so a voice memo, a dictation app or a camera check is offered as a
   meeting too. Nothing records until Record is clicked.
-- The card names the first app that used the mic; it is not renamed when another app takes over.
+- With several apps on the mic, the card names the first one with an app name in Core Audio's
+  process list at the moment the meeting starts, which is not always the one that took the mic
+  first. It is not renamed when another app takes over.
 - `record` writes files from the real-time audio thread (sketch). It assumes the aggregate
   device delivers the mic buffer first and the tap buffer last.

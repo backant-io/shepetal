@@ -7,7 +7,7 @@ What is on main after iteration 1 (60cc333). On each platform, shepetal is a thi
 | Path | What | Language, build | Tests |
 |---|---|---|---|
 | `Package.swift`, `Sources/`, `Tests/` | Mac app: `ShepetalCore` (logic) and `Shepetal` (AppKit shell) | Swift 6 / SwiftPM, macOS 14+ | `swift build && swift test`, `scripts/e2e-mac.sh` |
-| `meeting/` | Meeting detection and capture: `MeetingCore` (portable), `MeetingMac` (Core Audio, EventKit), CLI `shepetal-meeting` | Swift / SwiftPM, macOS 14.4+; MeetingCore also builds on Linux | `cd meeting && swift test`, plus MeetingCore in `swift:6.2` on Linux |
+| `meeting/` | Meeting detection and capture: `MeetingCore` (portable), `MeetingMac` (Core Audio, CoreMediaIO), CLI `shepetal-meeting` | Swift / SwiftPM, macOS 14.4+; MeetingCore also builds on Linux | `cd meeting && swift test`, plus MeetingCore in `swift:6.2` on Linux |
 | `ios/` | iPhone: `ShepetalSessionCore` (framework), `Shepetal` (app), `ShepetalKeyboard` (keyboard extension) | Swift, XcodeGen `project.yml`, iOS 17+ | `xcodegen generate && xcodebuild ... test` on the iOS simulator |
 | `summarize/` | Meeting summarizer: extractive TextRank plus rules (not an LLM), and the QMSum/AMI eval | Python, numpy only on the default path | `python -m unittest` |
 | `bench/` | STT benchmark harness, plus `bench/fluid`, a FluidAudio CLI | Python with uv, SwiftPM | `bench/test_bench.py` |
