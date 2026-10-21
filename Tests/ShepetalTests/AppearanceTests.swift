@@ -5,7 +5,8 @@ import ShepetalCore
 
 /// F93: there is no theme picker. Every shepetal window follows System Settings › Appearance (Light, Dark, Auto)
 /// live, because none of them pins an appearance or paints a fixed background. Only 🤫 and the meeting card are
-/// dark on purpose, so they stay readable on any wallpaper (goal rule 3).
+/// dark on purpose, so they stay readable on any wallpaper (goal rule 3), and so is the share card (F118), an
+/// image that must look the same wherever it is pasted.
 /// NSApp.appearance stands in for the system setting and changes this test process only. Nothing is put on
 /// screen, takes focus or touches the clipboard; the Hub gets a temp data dir and a private pasteboard.
 @MainActor
@@ -70,7 +71,7 @@ final class AppearanceTests: XCTestCase {
         XCTAssertTrue(files.contains("Hub.swift"), dir.path)
         let forced = #"preferredColorScheme|colorScheme\(|\\.colorScheme,|NSAppearance\(named|\.appearance\s*="#
         let fixed = #"(background|foreground|textcolor)[^\n]*(\.white\b|\.black\b|Color\((\.s?rgb|\.displayp3|red|white|hue)|NSColor\((red|white|calibrated|device|srgb|displayp3))"#
-        for f in files where !["Indicator.swift", "Meetings/MeetingCard.swift"].contains(f) {
+        for f in files where !["Indicator.swift", "Meetings/MeetingCard.swift", "ShareCard.swift"].contains(f) {
             let code = try String(contentsOf: dir.appendingPathComponent(f), encoding: .utf8)
                 .components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
                 .joined(separator: "\n")
