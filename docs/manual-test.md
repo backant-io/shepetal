@@ -139,7 +139,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 
 ### M-KEY-3: Shortcuts window
 1. In the 🤫 menu choose Shortcuts…. Expected: hold to talk fn, hands-free fn Space, cancel Esc, paste last ⌃ ⌘ V, copy last ⌃ ⌘ C.
-2. Click Change… next to Paste last text and press ⌘Tab. Expected: "⌘ Tab: macOS or most apps already use these keys." and the chord stays ⌃ ⌘ V.
+2. Click Change… next to Paste last transcript and press ⌘Tab. Expected: "⌘ Tab: macOS or most apps already use these keys." and the chord stays ⌃ ⌘ V.
 3. Click Change… again and press A alone, then ⌘ with both Command keys plus A, then fn. Expected, in turn: "Add fn, ⌃, ⌥, ⇧, ⌘ or a mouse button.", "Use one side of a modifier, not both.", "Another action already uses these keys."
 4. Click Change… and press ⌃⌥P. Expected: the row shows ⌃ ⌥ P. Quit and reopen Shepetal. Expected: still ⌃ ⌥ P, and ⌃⌥P now pastes the last text.
 5. With a mouse that has side buttons: Change… for Hold to talk, press mouse button 4. Expected: "Mouse 4". Holding it records, releasing inserts, and the browser does not go back a page.
@@ -158,7 +158,7 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 3. Copy some other text with ⌘C, then press ⌃⌘C and paste with ⌘V. Expected: the sentence again.
 4. Tap fn once briefly (too short) and wait for the hint to go away, then press ⌃⌘V. Expected: still the same sentence, because entries without text are skipped.
 5. Open the 🤫 menu. Expected: "Paste last transcript" with ⌃⌘V right-aligned, the way macOS shows shortcuts, and no Copy last text item. Choose it: the sentence is inserted. ⌃⌘C still copies (step 3).
-6. Rebind Paste last text to ⌃⌥P (M-KEY-3 step 4). Expected: the menu shows ⌃⌥P next to Paste last transcript. Rebind it to a mouse button: the shortcut moves into the title, "Paste last transcript (Mouse 4)". Reset to defaults.
+6. Rebind Paste last transcript to ⌃⌥P (M-KEY-3 step 4). Expected: the menu shows ⌃⌥P next to Paste last transcript. Rebind it to a mouse button: the shortcut moves into the title, "Paste last transcript (Mouse 4)". Reset to defaults.
 
 ### M-MIC-1: choosing the mic
 1. Plug in a USB or Bluetooth mic you have never used with Shepetal. Expected: "New mic: <its name>" shows next to 🤫. Unplug and plug it in again: nothing shows.
@@ -266,10 +266,11 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 Setup: all three permissions granted, speech recognition loaded, signed in with a trial of more than 7 days (or a build from source that does not require sign-in, signed in), and at least one meeting recorded.
 1. Click 🤫 in the menu bar. Expected, top to bottom with a separator between each group: Record meeting, Past meetings › | Open shepetal | Check for Updates… (greyed out) | Paste last transcript with ⌃⌘V right-aligned, Recent › | Shortcuts…, Microphone ›, Languages › | Help center, Send feedback… | Quit shepetal with ⌘Q right-aligned. Nothing above Record meeting, no grey status lines, no emoji besides 🤫 in the menu bar, and "shepetal" in lowercase.
 2. Hover Recent. Expected: "Click to copy" above the last dictations. Click one, then ⌘V in TextEdit: its text.
-3. Choose Help center. Expected: https://shepetal.backant.io/help opens in the browser. Choose Send feedback…. Expected: a new mail to founder@backant.io with the subject "shepetal feedback".
+3. Choose Help center. Expected: https://shepetal.backant.io/help opens in the browser. Until the help pages from #84 are merged and deployed, that URL is a 404 page: the item works, the page does not exist yet. Choose Send feedback…. Expected: a new mail to founder@backant.io with the subject "shepetal feedback".
 4. In System Settings > Privacy & Security > Accessibility, turn Shepetal off. Open the menu. Expected: "Permissions needed…" at the very top with a yellow mark; choosing it opens the Permissions window. Turn Shepetal back on: the line is gone the next time the menu opens.
 5. Signed out (Home > Sign out): the top of the menu has "Sign in to start your free trial…". With a test account 7 days or less from the end of its trial, or after it: "Get shepetal for $4.99…" instead. With more than 7 days left, or Yours forever, neither.
 6. Open shepetal and check that nothing left the app: Home has the account line with Sign out, the speech recognition line and the Donate links (each opens its page); Settings has Recordings, Open recordings folder, Start at login, Dictionary… and Permissions….
+7. Without the speech model (move `~/Library/Application Support/FluidAudio/Models` aside and restart): the top of the menu has "Download on-device speech recognition (about 470 MB)" with a yellow mark. Choose it, then open the menu again while it downloads. Expected: no download item, only the grey line "Downloading on-device speech recognition…", so a second download cannot start. Turn Wi-Fi off during a download: "Download failed: …" shows and the download item is back. Move the folder back.
 
 ### M-HUB-1: open the Shepetal window
 1. Before you install this build, run `sqlite3 ~/Library/Application\ Support/Shepetal/history.sqlite 'select count(*) from history'` and note the number. Install and open the new build. Run the command again. Expected: the same number. (`HistoryTests.testOldDatabaseUpgradesWithoutLosingRows` checks this on a copy of the old schema.)
