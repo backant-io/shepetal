@@ -17,8 +17,10 @@
 //!   removed between dictations is picked up without a restart. During a dictation the source is
 //!   never swapped (the clip would change mic mid-sentence); if it disappears the recorder is
 //!   stopped, what was said so far is kept and transcribed, and a "mic disconnected" alert shows.
-//! - Alerts (no audio, mic disconnected, no PipeWire/PulseAudio) go to `notify-send` and as an
-//!   `error <text>` line to the 🤫 hint sink, at most once per kind per [`ALERT_EVERY`].
+//! - Alerts (no audio, mic disconnected, mic unreadable, no PipeWire/PulseAudio) go to
+//!   `notify-send` and as an `error <text>` line to the 🤫 hint sink, at most once per kind per
+//!   [`ALERT_EVERY`]. Advice (a Bluetooth headset mic, the lid closed on the only mic) goes the
+//!   same way as a `hint <text>` line, once per daemon run.
 
 use serde_json::Value;
 use std::collections::HashMap;
@@ -31,6 +33,8 @@ pub const RATE: u32 = 16_000;
 /// "no audio" fires once the samples have been exactly zero for longer than this. Quiet speech
 /// is never all zero; a run of pure zeros is a dead mic, a hardware mute or a driver bug.
 pub const NO_AUDIO_AFTER: Duration = Duration::from_secs(5);
+/// "mic unreadable" fires, and the recorder is stopped, once no samples arrived for this long.
+pub const NO_FRAMES_AFTER: Duration = Duration::from_secs(5);
 /// The same alert kind is shown at most once per this window.
 pub const ALERT_EVERY: Duration = Duration::from_secs(60);
 
@@ -246,7 +250,14 @@ impl ZeroRun {
 pub enum Alert {
     NoAudio(String),
     Disconnected(String),
+    /// The recorder runs but no samples came for [`NO_FRAMES_AFTER`]: the device stopped
+    /// delivering, or the file cannot be read.
+    Unreadable(String),
     NoAudioServer,
+    /// Advice: a Bluetooth headset mic records in the headset's call mode.
+    Bluetooth(String),
+    /// Advice: the lid is closed and the built-in mic is the only one.
+    Clamshell,
 }
 
 impl Alert {
@@ -254,7 +265,10 @@ impl Alert {
         match self {
             Alert::NoAudio(m) => format!("No sound from {m}: it sends only silence. Check that it is not muted, or rank another one (shepetal mics)."),
             Alert::Disconnected(m) => format!("Mic disconnected: {m}. Dictation stopped; what you said before is kept."),
+            Alert::Unreadable(m) => format!("Cannot read {m}: no sound arrived for 5 s. Dictation stopped; what you said before is kept. Replug the mic or rank another one (shepetal mics)."),
             Alert::NoAudioServer => "No PipeWire or PulseAudio found, so shepetal cannot record. Install pipewire-bin (or pulseaudio-utils) and start the sound server.".into(),
+            Alert::Bluetooth(m) => format!("{m} is a Bluetooth headset: while it records, it switches to its low-quality call mode, so words get lost and its sound gets worse. A built-in or wired mic transcribes better: rank one first (shepetal mics)."),
+            Alert::Clamshell => "The lid is closed and the built-in mic is the only one, so it may sound muffled. Open the lid or plug in a mic.".into(),
         }
     }
 
@@ -263,8 +277,16 @@ impl Alert {
         match self {
             Alert::NoAudio(_) => "No sound from the mic",
             Alert::Disconnected(_) => "Mic disconnected",
+            Alert::Unreadable(_) => "Cannot read the mic",
             Alert::NoAudioServer => "No PipeWire or PulseAudio",
+            Alert::Bluetooth(_) => "Bluetooth mic: lower quality",
+            Alert::Clamshell => "Lid closed: mic muffled",
         }
+    }
+
+    /// Advice shows as a hint next to 🤫, not as an error.
+    pub fn advice(&self) -> bool {
+        matches!(self, Alert::Bluetooth(_) | Alert::Clamshell)
     }
 
     fn kind(&self) -> u8 {
@@ -272,6 +294,9 @@ impl Alert {
             Alert::NoAudio(_) => 0,
             Alert::Disconnected(_) => 1,
             Alert::NoAudioServer => 2,
+            Alert::Unreadable(_) => 3,
+            Alert::Bluetooth(_) => 4,
+            Alert::Clamshell => 5,
         }
     }
 }
@@ -306,6 +331,32 @@ type Sink = Box<dyn Fn(&str) + Send>;
 static HINTS: Mutex<Option<Sink>> = Mutex::new(None);
 static LIMIT: Mutex<Option<RateLimit>> = Mutex::new(None);
 static PICKER: Mutex<Picker> = Mutex::new(Picker { last: None });
+static NOTICES: Mutex<Notices> = Mutex::new(Notices { bluetooth: false, clamshell: false });
+
+/// Advice about the mic a dictation opens, each kind once per daemon run.
+#[derive(Debug, Default)]
+pub struct Notices {
+    bluetooth: bool,
+    clamshell: bool,
+}
+
+impl Notices {
+    /// `src` was picked from `sources`. A Bluetooth mic is worth a word only when another mic
+    /// could take its place (as the Mac's `MicNotices`); the built-in mic with the lid closed
+    /// only when it is the one recording, so nothing else is plugged in.
+    pub fn opening(&mut self, src: &Source, sources: &[Source], lid_closed: bool) -> Option<Alert> {
+        let usable = |x: &&Source| x.name != src.name && x.bus != "bluetooth" && !(lid_closed && x.builtin);
+        if src.bus == "bluetooth" && !self.bluetooth && sources.iter().any(|x| usable(&x)) {
+            self.bluetooth = true;
+            return Some(Alert::Bluetooth(src.description.clone()));
+        }
+        if lid_closed && src.builtin && !self.clamshell {
+            self.clamshell = true;
+            return Some(Alert::Clamshell);
+        }
+        None
+    }
+}
 
 /// Send the overlay lines somewhere else (the indicator socket).
 pub fn set_hint_sink(f: impl Fn(&str) + Send + 'static) {
@@ -322,15 +373,21 @@ fn hint_line(line: &str) {
 /// Show `a` as a desktop notification and next to 🤫, unless the same kind was shown less than
 /// [`ALERT_EVERY`] ago. Returns whether it was shown.
 pub fn alert(a: Alert) -> bool {
+    // Our own fixed wording plus a device description, not dictated text.
+    show(a, |text| {
+        let _ = Command::new("notify-send").args(["-a", "shepetal", "-i", "audio-input-microphone", "shepetal", text]).status();
+    })
+}
+
+fn show(a: Alert, notify: impl Fn(&str)) -> bool {
     let shown = LIMIT.lock().unwrap().get_or_insert_with(|| RateLimit::new(ALERT_EVERY)).allow(&a, Instant::now());
     if shown {
         let text = a.text();
         eprintln!("shepetal: {text}");
         if let Some(f) = HINTS.lock().unwrap().as_ref() {
-            f(&format!("error {}", a.short()));
+            f(&format!("{} {}", if a.advice() { "hint" } else { "error" }, a.short()));
         }
-        // Our own fixed wording plus a device description, not dictated text.
-        let _ = Command::new("notify-send").args(["-a", "shepetal", "-i", "audio-input-microphone", "shepetal", &text]).status();
+        notify(&text);
     }
     shown
 }
@@ -365,10 +422,14 @@ pub const ACPI_LID: &str = "/proc/acpi/button/lid";
 /// (no sources listed). Shows the no-server alert and a hint when the mic changed.
 pub fn pick_for_recording() -> Option<Source> {
     let sources = list().map_err(alert).ok()?;
-    let (src, reason) = PICKER.lock().unwrap().pick(&sources, &prefs(), lid_closed(Path::new(ACPI_LID)))?;
+    let lid = lid_closed(Path::new(ACPI_LID));
+    let (src, reason) = PICKER.lock().unwrap().pick(&sources, &prefs(), lid)?;
     if let Some(r) = reason {
         let why = if r == Reason::Disconnect { "the last one is gone" } else { "ranked higher" };
         hint_line(&format!("hint Mic: {} ({why})", src.description));
+    }
+    if let Some(a) = NOTICES.lock().unwrap().opening(&src, &sources, lid) {
+        alert(a);
     }
     Some(src)
 }
@@ -396,6 +457,8 @@ pub struct Health {
     read: usize,
     odd: Option<u8>,
     zeros: ZeroRun,
+    /// Steps in a row without a new sample.
+    stalled: u32,
 }
 
 #[derive(Debug, PartialEq)]
@@ -408,15 +471,21 @@ pub enum Verdict {
 
 impl Health {
     pub fn new(mic: Option<Source>) -> Health {
-        Health { mic, read: 0, odd: None, zeros: ZeroRun::default() }
+        Health { mic, read: 0, odd: None, zeros: ZeroRun::default(), stalled: 0 }
     }
 
-    /// `wav` is the whole file so far; `sources` the current list (None: not polled this time).
+    /// One [`WATCH_EVERY`] step. `wav` is the whole file so far (empty when it cannot be read);
+    /// `sources` the current list (None: not polled this time).
     pub fn step(&mut self, wav: &[u8], sources: Option<&[Source]>) -> Verdict {
         if let (Some(mic), Some(now)) = (&self.mic, sources) {
             if !now.iter().any(|x| x.name == mic.name) {
                 return Verdict::Stop(Alert::Disconnected(mic.description.clone()));
             }
+        }
+        let grew = data_offset(wav).is_some_and(|start| wav.len() - start > self.read);
+        self.stalled = if grew { 0 } else { self.stalled + 1 };
+        if self.stalled as u128 * WATCH_EVERY.as_millis() >= NO_FRAMES_AFTER.as_millis() {
+            return Verdict::Stop(Alert::Unreadable(self.name()));
         }
         let Some(start) = data_offset(wav) else { return Verdict::Ok };
         let mut bytes: Vec<u8> = self.odd.take().into_iter().collect();
@@ -427,10 +496,13 @@ impl Health {
         }
         let samples: Vec<i16> = bytes.chunks_exact(2).map(|c| i16::from_le_bytes([c[0], c[1]])).collect();
         if self.zeros.feed(&samples) {
-            let m = self.mic.as_ref().map_or("the mic".to_string(), |m| m.description.clone());
-            return Verdict::Alert(Alert::NoAudio(m));
+            return Verdict::Alert(Alert::NoAudio(self.name()));
         }
         Verdict::Ok
+    }
+
+    fn name(&self) -> String {
+        self.mic.as_ref().map_or("the mic".to_string(), |m| m.description.clone())
     }
 }
 
@@ -445,7 +517,7 @@ fn alive(pid: u32, comm: &str) -> bool {
 
 /// Watch a running recorder (`pid`, process name `comm`) writing `wav` from `mic`, until it
 /// exits: alert on an all-zero signal, and stop it with SIGINT (so the WAV stays valid) when
-/// the mic disappears.
+/// the mic disappears or sends nothing for [`NO_FRAMES_AFTER`].
 pub fn watch(pid: u32, comm: &'static str, wav: PathBuf, mic: Option<Source>) {
     std::thread::spawn(move || {
         let mut h = Health::new(mic);
@@ -717,9 +789,112 @@ mod tests {
     fn the_indicator_gets_a_few_words_and_no_device_name() {
         // Goal rule 3: 🤫 stays tiny. A long device name or advice belongs in the notification.
         let long = "Yeti Stereo Microphone Analog Stereo".to_string();
-        for a in [Alert::NoAudio(long.clone()), Alert::Disconnected(long.clone()), Alert::NoAudioServer] {
+        for a in [Alert::NoAudio(long.clone()), Alert::Disconnected(long.clone()), Alert::Unreadable(long.clone()),
+                  Alert::NoAudioServer, Alert::Bluetooth(long.clone()), Alert::Clamshell] {
             assert!(a.short().len() <= 30 && !a.short().contains("Yeti"), "{:?}", a.short());
             assert!(a.text().len() > a.short().len());
+        }
+    }
+
+    #[test]
+    fn real_audio_resets_the_silence_count() {
+        // As the Mac's MicTests.testRealAudioResetsTheSilenceCount: 4.9 s of zeros, one real
+        // sample, 4.9 s of zeros again is no alert; the run only counts from the reset.
+        let ms = |n: usize| n * RATE as usize / 1000;
+        let mut s = vec![0i16; ms(4900)];
+        s.push(300);
+        s.extend(vec![0; ms(4900)]);
+        let mut h = Health::new(None);
+        assert_eq!(h.step(&wav(&s), None), Verdict::Ok);
+        s.extend(vec![0; ms(200)]);
+        assert_eq!(h.step(&wav(&s), None), Verdict::Alert(Alert::NoAudio("the mic".into())), "5.1 s since the reset");
+        s.extend(vec![0; ms(5000)]);
+        assert_eq!(h.step(&wav(&s), None), Verdict::Ok, "warned once");
+    }
+
+    #[test]
+    fn no_samples_for_5_s_stops_with_mic_unreadable() {
+        let mic = from_pw_dump(&fixture("pw-dump-mics.json"))[1].clone();
+        let steps = (NO_FRAMES_AFTER.as_millis() / WATCH_EVERY.as_millis()) as usize;
+        assert_eq!(steps, 10);
+        let mut h = Health::new(Some(mic.clone()));
+        let mut w = wav(&[5; 800]);
+        assert_eq!(h.step(&w, None), Verdict::Ok);
+        // The file stops growing: 4.5 s is fine, 5 s stops the recorder.
+        for _ in 1..steps {
+            assert_eq!(h.step(&w, None), Verdict::Ok);
+        }
+        // New samples before the 5 s are up start the count again.
+        w.extend_from_slice(&[9, 0]);
+        assert_eq!(h.step(&w, None), Verdict::Ok);
+        for _ in 1..steps {
+            assert_eq!(h.step(&w, None), Verdict::Ok);
+        }
+        assert_eq!(h.step(&w, None), Verdict::Stop(Alert::Unreadable(YETI.into())));
+
+        // A file that cannot be read (read as empty), or a header and no samples ever: the same.
+        let mut never = Health::new(None);
+        let header = wav(&[]);
+        let verdicts: Vec<_> = (0..steps).map(|i| never.step(if i % 2 == 0 { &[] } else { &header }, None)).collect();
+        assert_eq!(verdicts.last(), Some(&Verdict::Stop(Alert::Unreadable("the mic".into()))));
+        assert!(verdicts[..steps - 1].iter().all(|v| *v == Verdict::Ok));
+
+        // A mic sending zeros does send frames: that is "no sound", not "unreadable".
+        let mut zeros = Health::new(None);
+        let mut s = vec![];
+        let got: Vec<_> = (0..2 * steps).map(|_| {
+            s.extend(vec![0i16; RATE as usize / 2]);
+            zeros.step(&wav(&s), None)
+        }).collect();
+        assert!(got.iter().all(|v| !matches!(v, Verdict::Stop(_))), "{got:?}");
+        assert!(got.contains(&Verdict::Alert(Alert::NoAudio("the mic".into()))));
+    }
+
+    #[test]
+    fn a_bluetooth_headset_mic_is_advised_once() {
+        let src = from_pw_dump(&fixture("pw-dump-mics.json"));
+        let jabra = src.iter().find(|x| x.bus == "bluetooth").unwrap().clone();
+        let mut n = Notices::default();
+        assert_eq!(n.opening(&src[1], &src, false), None, "a USB mic");
+        assert_eq!(n.opening(&jabra, &src, false), Some(Alert::Bluetooth(JABRA.into())));
+        assert_eq!(n.opening(&jabra, &src, false), None, "once per run");
+        // Nothing better to suggest: only the headset, or only the built-in mic under a closed lid.
+        let mut alone = Notices::default();
+        assert_eq!(alone.opening(&jabra, &[jabra.clone()], false), None);
+        assert_eq!(alone.opening(&jabra, &[jabra.clone(), src[0].clone()], true), None);
+        assert_eq!(alone.opening(&jabra, &[jabra.clone(), src[0].clone()], false), Some(Alert::Bluetooth(JABRA.into())));
+    }
+
+    #[test]
+    fn the_lid_closed_on_the_only_mic_is_advised_once() {
+        let builtin = from_pw_dump(&fixture("pw-dump-mics.json"))[0].clone();
+        assert!(builtin.builtin);
+        let mut n = Notices::default();
+        assert_eq!(n.opening(&builtin, &[builtin.clone()], false), None, "lid open");
+        assert_eq!(n.opening(&builtin, &[builtin.clone()], true), Some(Alert::Clamshell));
+        assert_eq!(n.opening(&builtin, &[builtin.clone()], true), None, "once per run");
+    }
+
+    #[test]
+    fn advice_is_a_hint_and_problems_are_errors() {
+        // Goal rule 3: everything shows at 🤫. Advice must not turn it yellow as an error does.
+        let lines = std::sync::Arc::new(Mutex::new(vec![]));
+        let l = lines.clone();
+        set_hint_sink(move |line| l.lock().unwrap().push(line.to_string()));
+        let notes = std::sync::Arc::new(Mutex::new(vec![]));
+        let notify = |t: &str| notes.lock().unwrap().push(t.to_string());
+        assert!(show(Alert::Bluetooth(JABRA.into()), notify));
+        assert!(show(Alert::Unreadable(YETI.into()), notify));
+        assert!(show(Alert::Clamshell, notify));
+        assert_eq!(*lines.lock().unwrap(), ["hint Bluetooth mic: lower quality", "error Cannot read the mic", "hint Lid closed: mic muffled"]);
+        let notes = notes.lock().unwrap().clone();
+        assert!(notes[0].starts_with("Jabra Evolve2 65 is a Bluetooth headset") && notes[1].starts_with("Cannot read Yeti"), "{notes:?}");
+        assert!(!show(Alert::Unreadable(YETI.into()), |_| panic!("shown twice")), "rate-limited per kind");
+        for a in [Alert::Bluetooth(JABRA.into()), Alert::Clamshell] {
+            assert!(a.advice());
+        }
+        for a in [Alert::NoAudio(YETI.into()), Alert::Disconnected(YETI.into()), Alert::Unreadable(YETI.into()), Alert::NoAudioServer] {
+            assert!(!a.advice());
         }
     }
 
