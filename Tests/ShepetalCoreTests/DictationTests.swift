@@ -52,6 +52,27 @@ final class DictationTests: XCTestCase {
         XCTAssertEqual(transcribed, [], "fn+Down must not paste anything")
     }
 
+    // Esc (F03): the recording is thrown away, but its audio is kept and marked cancelled (goal rule 4).
+    func testEscKeepsAudioAsCancelled() throws {
+        try dictation.run { $0.fnDown(at: 0) }
+        XCTAssertEqual(try dictation.run { $0.handle(.dismiss, at: 2) }, [.cancel])
+        try dictation.run { $0.fnUp(at: 3) }
+        XCTAssertEqual(try keptRow().outcome, .cancelled)
+        XCTAssertEqual(transcribed, [], "Esc must not transcribe or paste")
+    }
+
+    // F10: the warning keeps recording; the cap hands the recording to the transcriber like a release.
+    func testForcedStopTranscribesTheSamples() throws {
+        try dictation.run { $0.fnDown(at: 0) }
+        XCTAssertEqual(try dictation.run { $0.tick(at: 19 * 60) }, [.warnDuration])
+        XCTAssertEqual(transcribed, [], "the warning does not stop the recording")
+        XCTAssertEqual(try dictation.run { $0.tick(at: 20 * 60) }, [.stop])
+        XCTAssertEqual(transcribed, [mic])
+        try dictation.run { $0.fnUp(at: 20 * 60 + 2) }
+        XCTAssertEqual(transcribed, [mic], "the late release does not transcribe again")
+        XCTAssertEqual(try history.recent(), [], "nothing is kept as cancelled or too short")
+    }
+
     // A hold goes to the transcriber, which saves the audio first (Pipeline.process, checked by scripts/e2e-mac.sh).
     func testHoldHandsTheSamplesToTheTranscriber() throws {
         try dictation.run { $0.fnDown(at: 0) }
