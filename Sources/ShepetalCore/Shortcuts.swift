@@ -10,8 +10,8 @@ public enum ShortcutAction: String, CaseIterable {
         case .ptt: "Hold to talk"
         case .handsFree: "Hands-free on or off"
         case .dismiss: "Cancel dictation"
-        case .pasteLast: "Paste last text"
-        case .copyLast: "Copy last text"
+        case .pasteLast: "Paste last transcript"
+        case .copyLast: "Copy last transcript"
         }
     }
 }

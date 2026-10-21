@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var pipeline: Pipeline?
     private var engine: SpeechEngine?
     private var engineStatus = "Loading on-device speech recognition…"
+    private var downloading = false  // the speech recognition download is under way: the menu hides its item
     private var busy = false { didSet { syncTap() } }
     private var pasting = false  // paste last is under way
     private var tick: DispatchWorkItem?
@@ -299,7 +300,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Paste last / copy last: the newest history text, a paste that did not land included.
     private func lastHistoryText() -> String? {
-        let text = lastText(in: (try? pipeline?.history.recent(limit: 50)) ?? [])
+        let text = pipeline?.lastText
         if text == nil { indicator.show(Hint.nothingToPaste, seconds: Hint.seconds) }
         return text
     }
@@ -321,9 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func copyLast() {
-        guard let text = lastHistoryText() else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        guard pipeline?.copyLast() != nil else { return indicator.show(Hint.nothingToPaste, seconds: Hint.seconds) }
         indicator.show("Copied", seconds: 1.5)
     }
 
@@ -390,7 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         Account.shared.refresh()
         let state = MenuState(permissionsMissing: !Permission.missing.isEmpty,
                               engineProblem: engine == nil ? engineStatus : nil,
-                              canDownloadEngine: engine == nil && !ParakeetEngine.isInstalled,
+                              canDownloadEngine: engine == nil && !downloading && !ParakeetEngine.isInstalled,
                               cleanupDownloadMB: pipeline?.cleanupToDownload?.megabytes,
                               downloadingCleanup: pipeline?.downloadingCleanup == true,
                               cleanupDownloadFailed: pipeline?.cleanupDownloadFailed == true,
@@ -429,9 +428,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .openApp: openHub()
         case .checkForUpdates: updater.checkForUpdates()
         case .pasteLast: pasteLast()
-        case .copy(let text):
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
+        case .copy(let text): pipeline?.copy(text)
         case .shortcuts: openShortcuts()
         case .helpCenter: NSWorkspace.shared.open(MenuModel.helpCenter)
         case .feedback: NSWorkspace.shared.open(MenuModel.feedback)
@@ -483,9 +480,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         indicator.show("🌐 key back to \(FnKeySetting.describe(previous)) until Shepetal starts again", seconds: 6)
     }
 
+    /// One download at a time; after a failed one the item is back for a retry.
     private func downloadModel() {
+        guard !downloading else { return }
+        downloading = true
         engineStatus = "Downloading on-device speech recognition…"
         Task {
+            defer { downloading = false }
             do { try await ParakeetEngine.download() } catch { engineStatus = "Download failed: " + (SpeechError(plain: error, "check the internet connection and try again").errorDescription ?? ""); return }
             await loadEngine()
         }
