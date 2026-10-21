@@ -4,6 +4,14 @@
 
 Six sessions (release, merge-a, merge-b, quality, linux, ios) work from one shared clone. Each one keeps its own subsection here, newest merge first. Pavel's priority for tonight is a usable Mac build: install it once, it runs from the menu bar with no Dock icon, 🤫 always shows bottom-left, and fn dictates into any app.
 
+### mac80 wave 3 (integration PR #INTPR)
+
+- **Merged:** #246 (F13), #249 (F55), #245 (F40), #247 (F67), #248 (F81, F78, F120), #252 (F41), #258 (F38), #250 (F28, F36) and #251 (F124, F118, F18). Their hot-file wiring, wiring tests, manual steps and ledger rows came in #INTPR.
+- **Mac column:** 69 of 124 cells counted before, 83 after. All 14 new cells are `hand-test`, waiting on M-LIVE-1, M-NOTE-1, M-SNIP-1, M-MTG-1 step 13, M-RET-2, M-MTG-12, M-TRN-1, M-VOICE-1, M-LINK-1, M-EMAIL-1, M-SLOW-1, M-SHARE-1 and M-MOVE-2.
+- F67 Mac: `todo` to `hand-test` (#247): a meeting recording ends once no one has spoken for `meeting.silenceEnd` seconds (default 2 min) on every channel, decided once per live pass.
+- **Composed in the wiring:** `finishText` runs a whole-dictation snippet first (F40), then the text step with My voice (F38), then the email layout (F36). In `process` a snippet is neither translated (F41) nor searched for "insert link" (F28), and translation runs before the link goes in, so a link never reaches the translator. Re-transcribe does the same.
+- **For Pavel:** #259 (F28 and the pasteboard-privacy alert once macOS enforces it), #256 (notes are not in Export my data yet), F120's attendees wait on F70, F81 keeps the summary (Wispr's purge scope is unknown), and F38 sends every dictation through the cleanup model once a voice is set (its 700 ms bar with a voice is not measured).
+
 ### F24 on by default (Pavel, 2026-10-21)
 
 - **Decision:** F24's latency bar is 800 ms instead of 700 ms, and "Use the text around the cursor to clean up dictation" is on by default with 500 characters on each side; Settings can still switch it off. Every other latency target stays at 700 ms.
@@ -44,7 +52,7 @@ Seven cells moved from `todo` to `hand-test`. Each has its tests on main and a s
 New steps: M-INS-7 (#148), M-MTG-6 and M-MTG-7 (#113, #135, #146), and on Linux L-SETUP-5, L-SC-1 to L-SC-6, L-MIC-1 to L-MIC-6, L-VOC-1 to L-VOC-3, L-FOC-1 and L-FOC-2, L-IND-1 to L-IND-6 and L-MEET-4 to L-MEET-10, ported from `docs/linux*.md`. Stale step text was fixed in M-SETUP-1, M-INS-1, M-HUB-1, M-MTG-1, the Meetings intro, the Linux setup paragraph, L-FN-1, L-FN-4, L-INS-1, L-INS-2 and L-INS-5.
 
 Merged but still `todo`, with the reason in the row:
-- Mac meetings: F66 (#145 Screen Recording is never requested; #62 no Core Audio process-list fixture test), F67 (no end on silence), F68 (30 s passes with the dictation model, not a streaming model), F69 (no refined pass), F70 (no diarization or names), F71 (no notepad), F72 (cross-validation 54.5% with role labels, #8), F81 (no transcript retention), F82, F120, F121.
+- Mac meetings: F66 (#145 Screen Recording is never requested; #62 no Core Audio process-list fixture test), F68 (30 s passes with the dictation model, not a streaming model), F69 (no refined pass), F70 (no diarization or names), F71 (no notepad), F72 (cross-validation 54.5% with role labels, #8), F81 (no transcript retention), F82, F120, F121.
 - Linux: F04 (no combo for the dictation key, no mouse buttons), F08 (no alert for a mic that sends no frames, no clamshell warning), F10 (the 20 min cap is not a setting), F32 (no local-model cleanup), F39 (Parakeet gets no word hint), F40 (no rich text), F109 (fit is never called, #81), F66 (the mic holder is the only evidence), F67 (no end on silence), F69 (no test of the final-pass model), F70, F71, F72, F81 (#141).
 
 Checks: every backticked test name in the ledger exists on main inside the class it names (Swift `func`, Rust `fn`), each one added here was traced to its PR with `git log -S`, and every cited step id has a heading in `docs/manual-test.md`. Renamed tests were fixed: `FnTapTests.testGlobeKeyIsFn` is `testGlobeKeyEventsAreIgnored` (#139), and `evdev_key_values_become_gesture_events` is `evdev_key_events_reach_the_shortcut_layer_as_is` (#96).

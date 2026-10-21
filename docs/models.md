@@ -178,6 +178,14 @@ The 🤫 menu's Languages setting picks the model (`speechRoute` in `Sources/She
   keeps the end of a long prompt). With a bare lowercase word list as the prompt, base.en dropped casing and
   punctuation on one e2e clip; the sentence form fixed it. Parakeet gets the dictionary through the keyword model's rescoring once the user downloads it from the 🤫 menu, in English dictations only (F39, see the Parakeet notes above).
 
+### Translation (F41)
+
+- **What translates:** Apple's Translation framework on macOS 15 and later (`TranslationSession`, reached through SwiftUI's `.translationTask` in a hidden host; the session's own initializer needs macOS 26). There is no other route: Whisper large-v3-turbo was not trained for translation, base.en is English-only, and a local-LLM route would wait on the cleanup model (#44).
+- **Downloads:** a language pair has to be downloaded once (Apple's download, approved by the user from 🤫 > Languages > "Download <Language> for translation…"). shepetal never starts it during a dictation. `LanguageAvailability` checks each pair before a session opens. On this Mac (21.10.26), de, fr, es, ru and uk to English were `supported` (not yet downloaded), and Latin was `unsupported`.
+- **Privacy (rule 1):** shepetal's step has no network code, and the translation itself runs in Apple's process, so the no-network claim rests on hand step M-TRN-1 step 4 (translated with Wi-Fi off). Record the result here once it has run.
+- **Which language:** a sure guess by Apple's text recognizer (0.9 or more, on 3 or more words counted by its tokenizer, so Chinese, Japanese and Thai count), the same bar as F12's hint. Else the chosen Languages pin the source (whisper's "zh" and "no" are the recognizer's zh-Hans/zh-Hant and nb). With Automatic and no sure guess, the text is inserted as said.
+- **Latency:** each dictation opens one hidden window for its session. The timeout is 10 s, and then the original is inserted. Esc lets it go at once. Not measured yet: M-TRN-1 step 4 times it; record the time here.
+
 ### Streaming model for live meeting transcripts
 
 - **Apple:** Nemotron Speech Streaming EN 0.6B through FluidAudio (has punctuation and casing, 560 to 1120 ms
@@ -388,4 +396,20 @@ There are 8 fixtures in `bench/cleanup/fixtures/context.jsonl`: names and terms 
 - The scores are optimistic. The prompt was tuned against these fixtures: with the field after the dictation, both models wrote the field back, and with the field in front but no examples, they did no cleanup. Five of the eight fixtures are lowercase text with no punctuation, which Parakeet v3 seldom produces.
 - End to end, `scripts/e2e-mac.sh` clip c05 is c04 dictated into a field with 596 characters on each side of the cursor, with the setting on. In seven runs on the M4 Pro (load average 4 to 20 from other work), c05 was ready 726 to 800 ms after the end of the audio, against 548 to 577 ms for c04 in the same runs. A 10 s dictation under a full field missed the 700 ms bar on this Mac, so Pavel set F24's bar to 800 ms (2026-10-21), which all seven runs meet, and turned the setting on by default. The correction was made in every run. With the setting off, or an empty field, the 700 ms bar holds as above.
 - The second prompt is decoded at load: Qwen3.5 2B loaded in 1.8 to 3.6 s over three runs.
+
+### My voice (F38)
+
+Settings › My voice keeps free-text preferences and up to three writing samples (400 characters each) in `voice.json` in the data dir (owner-only). `Pipeline.finishText` reads the file on every dictation and re-transcribe. When a voice is set, `SmartCleanup.apply` sends every non-empty dictation to the model, not only those with a cue. `LlamaCleanup` adds a voice paragraph and the preferences to the system turn, and adds each sample as a last example: first as dictation would give it (contractions spelled out, no emoji, "!" as "."), then as written. It decodes both cached prompts again when the voice changes; Save does this ahead of time. With no voice, the prompt is unchanged. The word guard compares both texts with their contractions spelled out, so tone may change and words may not. Control markers such as `<|im_end|>` are removed from the voice. A voice that does not fit the 4096-token context is dropped for the prompt without it (stderr says so). The context went from 2048 to 4096 tokens for this. In one debug build of cleanup-bench on the 2B model, that raised the peak footprint with no voice from 373 to 404 MB; with the voice fixtures it was 432 MB.
+
+The 12 fixtures in `bench/cleanup/fixtures/voice.jsonl` (`python3 bench/cleanup/score.py --voice`):
+
+| Model | Exact, off | Exact, on | CER, off | CER, on | Model text used, on | Mean / max ms per model call, on |
+|---|---|---|---|---|---|---|
+| Qwen3.5-0.8B-Q4_K_M | 17% | 25% | 19.2% | 16.4% | 9 of 12 | 125 / 204 |
+| Qwen3.5-2B-Q4_K_M | 17% | 42% | 7.9% | 5.1% | 12 of 12 | 236 / 323 |
+| rules | 17% | 17% | 19.2% | 19.2% | 0 of 12 | - |
+
+- Qwen3.5 2B drops "!" in 4 of 5 fixtures, but makes the contractions in only 2 of 6 and the lowercase in 1 of 4. On 0.8B the voice mostly does not land. The guard rejected 0.8B's German translation and its dropped words.
+- With a neutral voice set, the 63 dictation fixtures lose 6 exact matches on 2B (55 to 49; two of them are Oxford commas) and 1 on 0.8B.
+- The scores are optimistic: the prompt was tuned against these fixtures. Not yet measured: the 700 ms end-to-end bar with a voice set.
 
