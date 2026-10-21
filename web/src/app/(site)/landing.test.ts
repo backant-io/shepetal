@@ -54,6 +54,13 @@ describe('landing page', () => {
     expect(page).toMatch(/measured on an M4 Pro\.\s*<Ref n=\{3\} first \/>/);
   });
 
+  it('keeps the price and the steps off the link preview, as the brand asks, so a shared link sells the outcome', () => {
+    const preview = [read(join(__dirname, 'layout.tsx')), read(join(SRC, 'app', 'layout.tsx'))]
+      .flatMap((f) => [...f.matchAll(/\b(?:description|alt)\s*[:=]\s*'([^']*)'/g)].map((m) => m[1]));
+    expect(preview.length).toBeGreaterThanOrEqual(3);
+    for (const line of preview) expect(line).not.toMatch(/\$|\bonce\b|\bfree\b|hold fn|let go/i);
+  });
+
   it('keeps the brand voice: no em dashes, no hype words, no invented proof', () => {
     expect(text).not.toContain('—');
     expect(visible).not.toMatch(/\b(seamless|magic|magical|revolutionary|blazing|lightning|supercharge|unlock|lifetime deal|cheap|fastest|best)\b/i);

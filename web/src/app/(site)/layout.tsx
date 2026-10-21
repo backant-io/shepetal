@@ -10,14 +10,15 @@ import './landing.css';
 
 const title = 'shepetal: dictation that stays on your Mac';
 const description =
-  'Dictation for Mac. Hold fn, speak, let go: your words land in any app, and speech recognition runs on your Mac, so your voice stays on it. 30 days free, then $4.99 once.';
+  'Quiet dictation for the Mac. Press one key. Your words appear wherever you speak, and your voice stays on your Mac.';
+// brand/assets/og/og-dark.png as a JPEG; the brand keeps the price and the steps off link previews.
 // A static file, so link previews (X, iMessage, Slack) get it from the edge without waking the Worker.
 const ogImage = {
   url: '/og.jpg',
   width: 1200,
   height: 630,
   type: 'image/jpeg',
-  alt: 'shepetal. Dictation for Mac. Hold fn, speak, let go. Your voice stays on your Mac. 30 days free, then $4.99 once.',
+  alt: 'shepetal. Quiet dictation for the Mac. Instant dictation that stays on your Mac. Press one key. Your words appear wherever you speak.',
 };
 
 export const metadata: Metadata = {
