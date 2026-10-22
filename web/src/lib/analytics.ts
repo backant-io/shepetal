@@ -2,14 +2,18 @@
  * Product analytics, cookieless, in backant's shared PostHog project (US cloud). Every event carries app=shepetal.
  * Off unless POSTHOG_KEY is set (a Worker secret, set at GO). POSTHOG_HOST is in wrangler.toml [vars].
  *
- * Server-side events go from the Worker to PostHog's capture API: download_served, appcast_check (= active),
- * license_first_call (= install) and checkout_completed (= paid). Visitors are a hash of IP + user agent + the UTC
- * day, salted with AUTH_SECRET: nothing raw is stored or sent, and the id changes every day. Signed-in users are a
- * salted hash of their email. Nothing about dictation is ever sent: the app has no analytics at all.
+ * Every event goes from the Worker to PostHog's capture API; no analytics code runs in the browser. $pageview,
+ * app_login_opened and app_login_consented (src/lib/server-analytics.ts), download_served, appcast_check (= active),
+ * license_first_call (= install) and checkout_completed (= paid). Visitors are an HMAC of IP + user agent under a
+ * random salt per UTC day (src/lib/visitor-salt.ts, deleted after 48 h): nothing raw is stored or sent, and the id
+ * changes every day. Signed-in users are a salted hash of their email. Nothing about dictation is ever sent: the app
+ * has no analytics at all.
  */
 export type Props = Record<string, string | number | boolean | null | undefined>;
 
 import { analyticsConfig } from './analytics-config';
+import { db } from './db';
+import { dailyKey, utcDay } from './visitor-salt';
 
 export { analyticsConfig };
 
@@ -18,12 +22,17 @@ async function sha256(s: string): Promise<string> {
   return hex(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(s)));
 }
 
-/** A visitor for one UTC day: sha256(day, IP, user agent, salt). Never the IP or the user agent themselves. */
-export async function visitorId(req: Request, now = Date.now(), salt = process.env.AUTH_SECRET ?? ''): Promise<string> {
+/**
+ * A visitor for one UTC day: HMAC-SHA256(that day's random salt, day + IP + user agent). Never the IP or the user agent
+ * themselves, and once the salt is deleted (48 h) not even we can tell whose it was. The same request on the same day
+ * gives the same id on every route, so a page view, a download and an app sign-in join up within the day.
+ */
+export async function visitorId(req: Request, now = Date.now(), d1: D1Database = db()): Promise<string> {
+  const key = await dailyKey(d1, now);
   const ip = req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? '';
   const ua = req.headers.get('user-agent') ?? '';
-  const day = new Date(now).toISOString().slice(0, 10);
-  return `v_${(await sha256(`${day}\n${ip}\n${ua}\n${salt}`)).slice(0, 32)}`;
+  const mac = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(`${utcDay(now)}\n${ip}\n${ua}`));
+  return `v_${hex(mac).slice(0, 32)}`;
 }
 
 /** A signed-in user: a salted hash of the email, the same every day, so installs and payments join up. */
@@ -58,7 +67,7 @@ export async function capture(
   event: string,
   distinctId: string,
   props: Props = {},
-  env: Record<string, string | undefined> = process.env,
+  env: { POSTHOG_KEY?: string; POSTHOG_HOST?: string } = process.env,
   fetchImpl: typeof fetch = fetch,
 ): Promise<boolean> {
   const { key, host } = analyticsConfig(env);
@@ -90,10 +99,13 @@ export async function capture(
   }
 }
 
-/** capture() after the answer has gone (the Worker's waitUntil), or right away where there is no Worker context. */
-export async function track(event: string, distinctId: string | Promise<string>, props: Props = {}): Promise<void> {
+/**
+ * capture() after the answer has gone (the Worker's waitUntil), or right away where there is no Worker context. A
+ * function for the id is called only when analytics are on; an id that fails (D1 down) drops the event, not the answer.
+ */
+export async function track(event: string, distinctId: string | Promise<string> | (() => Promise<string>), props: Props = {}): Promise<void> {
   if (!analyticsConfig().key) return;
-  const job = (async () => capture(event, await distinctId, props))();
+  const job = (async () => capture(event, await (typeof distinctId === 'function' ? distinctId() : distinctId), props))().catch(() => false);
   try {
     const { getCloudflareContext } = await import('@opennextjs/cloudflare');
     getCloudflareContext().ctx.waitUntil(job);

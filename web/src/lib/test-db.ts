@@ -26,6 +26,6 @@ export function useTestDb() {
   });
   afterAll(() => dispose());
   beforeEach(async () => {
-    await DB.batch(['DELETE FROM tokens', 'DELETE FROM app_codes', 'DELETE FROM users', 'DELETE FROM stripe_events'].map((s) => DB.prepare(s)));
+    await DB.batch(['DELETE FROM tokens', 'DELETE FROM app_codes', 'DELETE FROM users', 'DELETE FROM stripe_events', 'DELETE FROM visitor_salts'].map((s) => DB.prepare(s)));
   });
 }
