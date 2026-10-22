@@ -121,10 +121,44 @@ final class UpdatePromptTests: XCTestCase {
 
     // MARK: the wiring, by its source
 
+    /// One `SparkleUpdater` method, line for line. Sparkle drives these and a test cannot: `SPUUserUpdateState` has
+    /// no initializer. So, like `menuNeedsUpdate` in MenuModelTests, a changed, added or removed line fails.
+    private func lines(of method: String) throws -> [String] {
+        let body = try AppSource.body(of: "final class SparkleUpdater", in: AppSource.code("Install.swift"))
+        let start = try XCTUnwrap(body.range(of: method), method)
+        let rest = body[start.upperBound...]
+        return rest[..<(rest.range(of: "\n    }\n")?.lowerBound ?? rest.endIndex)]
+            .components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
     func testSparkleNeverInstallsWithoutAYes() throws {
         let body = try AppSource.body(of: "final class SparkleUpdater", in: AppSource.code("Install.swift"))
-        XCTAssertTrue(body.contains("onInstall: { [weak self] in self?.answer(.install) }"))
+        // The only yes: Install Now, and Sparkle's last question, which comes only after Install Now.
+        XCTAssertEqual(body.components(separatedBy: .newlines).filter { $0.contains(".install") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }, [
+            "private lazy var card = MeetingCard.update(onInstall: { [weak self] in self?.answer(.install) },",
+            "func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { reply(.install) }",
+        ])
         XCTAssertTrue(body.contains("onLater: { [weak self] in self?.answer(.dismiss) }"), "Later only dismisses")
+        // A found update only waits for the card: no answer here. A scheduled find stays scheduled, so it waits for
+        // fn's 20 quiet minutes.
+        XCTAssertEqual(try lines(of: "func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState,"), [
+            "reply: @escaping (SPUUserUpdateChoice) -> Void) {",
+            "guard !appcastItem.isInformationOnlyUpdate else { return reply(.dismiss) }",
+            "prompt.version = appcastItem.displayVersionString",
+            "prompt.found = Date()",
+            "prompt.manual = state.userInitiated",
+            "self.reply = reply",
+            "tick()",
+        ])
+        // The card's choice goes to Sparkle once, and the card is down before it does.
+        XCTAssertEqual(try lines(of: "private func answer(_ choice: SPUUserUpdateChoice) {"), [
+            "prompt = UpdatePrompt()",
+            "card.show(nil)",
+            "let r = reply",
+            "reply = nil",
+            "r?(choice)",
+        ])
         for never in [".skip", "SPUStandardUpdaterController", "runModal", "activate(", "willInstallUpdateOnQuit"] {
             XCTAssertFalse(body.contains(never), "SparkleUpdater uses \(never)")
         }
@@ -137,5 +171,21 @@ final class UpdatePromptTests: XCTestCase {
 
         let settings = try AppSource.body(of: "private struct SettingsTab", in: AppSource.code("Hub.swift"))
         XCTAssertFalse(settings.contains("Install updates automatically"))
+    }
+
+    /// The card is exactly what `UpdatePrompt` says, every second: down during any work, back only when the gate
+    /// allows it, and a day-old find answered Later. The relaunch after Install Now waits for the work to end.
+    func testTheCardFollowsUpdatePromptEverySecond() throws {
+        XCTAssertEqual(try lines(of: "private func tick() {"), [
+            "let now = Date(), a = activity()",
+            "if prompt.expired(now: now) { answer(.dismiss) }",
+            "let was = prompt.showing",
+            "if prompt.update(a, now: now) != was { card.show(prompt.showing ? prompt.version : nil) }",
+            "if let go = relaunch, UpdateGate.allows(a, now: now, manual: true) { relaunch = nil; go() }",
+        ])
+        // Check for Updates… while a find waits makes it manual: the card as soon as the work ends.
+        XCTAssertEqual(try lines(of: "func showUpdateInFocus() {"), ["prompt.manual = true", "tick()"])
+        // Sparkle ended the session: nothing waits, so no card and no answer left to give.
+        XCTAssertEqual(try lines(of: "func dismissUpdateInstallation() {"), ["prompt = UpdatePrompt()", "reply = nil", "card.show(nil)"])
     }
 }

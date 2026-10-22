@@ -521,7 +521,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                          meetingStore: meetingFlow?.store ?? InMemoryMeetingStore(),
                          input: HubInput(microphone: mic.menuItem, languages: speech.languagesItem,
                                          openShortcuts: { [weak self] in self?.openShortcuts() }),
-                         updater: updater as? SparkleUpdater,
                          uninstallBlocker: { [weak self] in UninstallPlan.blocker(self?.activity ?? Activity()) },
                          openWhatsNew: { [weak self] in self?.openWhatsNew() },
                          notices: { [weak self] in self?.indicator.notices.newestFirst ?? [] })

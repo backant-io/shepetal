@@ -56,12 +56,13 @@ final class MeetingCard: NSObject {
         panel.contentView = stack
     }
 
-    /// "A new version of shepetal is ready. Install now?" for `SparkleUpdater`, one row above the meeting card.
+    /// "A new version of shepetal is ready. Install now?" for `SparkleUpdater`, one row above the meeting card. No
+    /// `present` is `orderFrontRegardless()`, here on the main actor, where a default value would not be.
     static func update(screen: @escaping () -> NSRect = { NSScreen.screens.first?.frame ?? .zero },
-                       present: @escaping (NSPanel) -> Void = { $0.orderFrontRegardless() },
+                       present: ((NSPanel) -> Void)? = nil,
                        onInstall: @escaping () -> Void, onLater: @escaping () -> Void) -> MeetingCard {
-        MeetingCard(screen: screen, present: present, yes: "Install Now", no: "Later", text: { _ in UpdatePrompt.text },
-                    row: 1, onRecord: onInstall, onNotNow: onLater)
+        MeetingCard(screen: screen, present: present ?? { $0.orderFrontRegardless() }, yes: "Install Now", no: "Later",
+                    text: { _ in UpdatePrompt.text }, row: 1, onRecord: onInstall, onNotNow: onLater)
     }
 
     /// Shows the card for `app`, or hides it for nil.
