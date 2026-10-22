@@ -347,6 +347,10 @@ async function main() {
   assert.equal(subSent.mode, 'subscription');
   assert.equal(subSent['line_items[0][price]'], 'price_e2e_shepetal_monthly');
   assert.equal(subSent.allow_promotion_codes, undefined, "Stripe's code field stays off");
+  assert.equal(subSent['automatic_tax[enabled]'], 'true', 'Stripe Tax');
+  assert.equal(subSent['consent_collection[terms_of_service]'], 'required', 'the EU consent to delivery right away');
+  assert.match(subSent['custom_text[terms_of_service_acceptance][message]'] ?? '', /14-day right of withdrawal/);
+  assert.equal(subSent.success_url, `${BASE}/account?purchased=1`, 'Stripe URLs follow the site address');
   assert.equal(subSent.customer, 'cus_e2e');
   assert.equal(subSent.client_reference_id, undefined, "no client_reference_id on a subscription: backant's handler would take it");
   assert.equal(subSent['subscription_data[metadata][app]'], 'shepetal');

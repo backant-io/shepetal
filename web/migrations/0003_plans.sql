@@ -20,6 +20,8 @@ ALTER TABLE users ADD COLUMN sub_amount INTEGER;
 ALTER TABLE users ADD COLUMN sub_currency TEXT;
 -- The PaymentIntent that paid for the lifetime license. A second lifetime payment is refunded; a refund of this one ends the license.
 ALTER TABLE users ADD COLUMN lifetime_payment_intent TEXT;
+-- The last checkout consent to delivery right away, acknowledging the end of the 14-day withdrawal right (EU law).
+ALTER TABLE users ADD COLUMN withdrawal_waived_at TEXT;
 
 UPDATE users SET plan = 'lifetime' WHERE status = 'active';
 

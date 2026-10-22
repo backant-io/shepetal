@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
-import { checkoutUrl, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
+import { checkoutUrl, CONFIRMATION, consentText, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -31,7 +31,7 @@ afterEach(() => vi.restoreAllMocks());
 /** An empty Stripe list (auto-pagination), or one with these items. */
 const none = (...items: object[]) => ({ async *[Symbol.asyncIterator]() { yield* items; } });
 const event = (object: object, type = 'checkout.session.completed', id = `evt_${++evtN}`) =>
-  JSON.stringify({ id, object: 'event', type, data: { object } });
+  JSON.stringify({ id, object: 'event', type, created: Math.floor(Date.now() / 1000), data: { object } });
 const session = (over: object = {}) => ({
   id: 'cs_1',
   object: 'checkout.session',
@@ -90,6 +90,11 @@ describe('lifetime ($23.99 once)', () => {
     expect((await fresh()).status).toBe('trial');
   });
 
+  it('keeps when the buyer consented to delivery right away', async () => {
+    await send(event(session({ consent: { terms_of_service: 'accepted' } })));
+    expect((await fresh()).withdrawal_waived_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+  });
+
   it('waits for a delayed payment to succeed before activating', async () => {
     await send(event(session({ payment_status: 'unpaid' })));
     expect((await fresh()).status).toBe('trial');
@@ -99,7 +104,7 @@ describe('lifetime ($23.99 once)', () => {
 
   it('creates a payment-mode session for the one-time price that accepts codes and that the webhook turns into a license', async () => {
     const create = vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/cs_1' } as never);
-    expect(await checkoutUrl(user, 'https://shepetal.backant.io', 'lifetime')).toBe('https://checkout.stripe.com/c/pay/cs_1');
+    expect(await checkoutUrl(user, 'https://shepetal.app', 'lifetime')).toBe('https://checkout.stripe.com/c/pay/cs_1');
     const params = create.mock.calls[0][0] as Stripe.Checkout.SessionCreateParams;
     expect(params).toMatchObject({
       mode: 'payment',
@@ -112,6 +117,16 @@ describe('lifetime ($23.99 once)', () => {
     // Stripe's own code field stays off: backant.io's codes on the shared account (some 100% off) must not apply.
     expect(params.allow_promotion_codes).toBeUndefined();
     expect(params.discounts).toBeUndefined();
+    // Stripe Tax, and the EU consent to delivery right away (which ends the 14-day withdrawal right).
+    expect(params).toMatchObject({
+      automatic_tax: { enabled: true },
+      customer_update: { address: 'auto', name: 'auto' },
+      tax_id_collection: { enabled: true },
+      consent_collection: { terms_of_service: 'required' },
+      custom_text: { terms_of_service_acceptance: { message: consentText('lifetime', 'https://shepetal.app') } },
+    });
+    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/delivered right away.*ends my 14-day right of withdrawal/);
+    expect(params.payment_intent_data?.description).toContain('ends the 14-day right of withdrawal');
     await send(event(session({ client_reference_id: params.client_reference_id, metadata: params.metadata })));
     expect((await fresh()).status).toBe('active');
   });
@@ -122,7 +137,7 @@ describe('lifetime ($23.99 once)', () => {
     await checkoutUrl(await fresh(), 'https://s', 'monthly');
     expect(getStripe().customers.create).toHaveBeenCalledTimes(1);
     expect(getStripe().customers.create).toHaveBeenCalledWith(
-      { email: 'a@example.com', metadata: { app: 'shepetal', user_id: String(user.id) } },
+      { email: 'a@example.com', metadata: { app: 'shepetal', user_id: String(user.id) }, invoice_settings: { footer: CONFIRMATION } },
       { idempotencyKey: `shepetal-customer-${user.id}-${user.trial_started_at}` },
     );
     expect(create.mock.calls.map((c) => (c[0] as Stripe.Checkout.SessionCreateParams).customer)).toEqual(['cus_1', 'cus_1']);
@@ -356,7 +371,7 @@ describe('never charged twice', () => {
 describe('subscription ($0.99 a month)', () => {
   it('creates a subscription-mode session for the monthly price, tagged so its subscription events are found', async () => {
     const create = vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/cs_2' } as never);
-    await checkoutUrl(user, 'https://shepetal.backant.io', 'monthly');
+    await checkoutUrl(user, 'https://shepetal.app', 'monthly');
     const params = create.mock.calls[0][0] as Stripe.Checkout.SessionCreateParams;
     expect(params).toMatchObject({
       mode: 'subscription',
@@ -366,6 +381,8 @@ describe('subscription ($0.99 a month)', () => {
       subscription_data: { metadata: { app: 'shepetal', user_id: String(user.id) } },
     });
     expect(params.payment_intent_data).toBeUndefined();
+    expect(params).toMatchObject({ automatic_tax: { enabled: true }, consent_collection: { terms_of_service: 'required' } });
+    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/subscription to start right away.*cancel anytime/i);
     // backant.io's handler on the same account takes any subscription checkout's client_reference_id as its own client.
     expect(params.client_reference_id).toBeUndefined();
   });
@@ -443,8 +460,8 @@ describe('subscription ($0.99 a month)', () => {
   it("opens the Billing Portal for the user's customer with shepetal's configuration", async () => {
     expect(await portalUrl(user, 'https://s')).toBeNull();
     const create = vi.spyOn(getStripe().billingPortal.sessions, 'create').mockResolvedValue({ url: 'https://billing.stripe.com/p/session/1' } as never);
-    expect(await portalUrl({ ...user, stripe_customer_id: 'cus_1' }, 'https://shepetal.backant.io')).toBe('https://billing.stripe.com/p/session/1');
-    expect(create).toHaveBeenCalledWith({ customer: 'cus_1', configuration: 'bpc_test', return_url: 'https://shepetal.backant.io/account' });
+    expect(await portalUrl({ ...user, stripe_customer_id: 'cus_1' }, 'https://shepetal.app')).toBe('https://billing.stripe.com/p/session/1');
+    expect(create).toHaveBeenCalledWith({ customer: 'cus_1', configuration: 'bpc_test', return_url: 'https://shepetal.app/account' });
   });
 });
 

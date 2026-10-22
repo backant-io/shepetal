@@ -3,10 +3,10 @@ compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
 
-# workers.dev only for now. The shepetal.backant.io custom domain is added at launch.
 workers_dev = true
-# Go-live: uncomment the next line, then npm run deploy.
-routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]
+# The Custom Domain. Its pattern must equal SHEPETAL_DOMAIN below (src/lib/site.test.ts checks it). The first
+# `npm run deploy` with this line attaches the domain: a GO step (GO-LIVE.md).
+routes = [{ pattern = "shepetal.app", custom_domain = true }]
 
 [assets]
 directory = ".open-next/assets"
@@ -19,8 +19,9 @@ database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
 migrations_dir = "migrations"
 
 [vars]
-NEXTAUTH_URL = "https://shepetal.backant.io"
-AUTH_URL = "https://shepetal.backant.io"
+# shepetal's own domain: the ONE place it is set (src/lib/site.ts). Auth callbacks (AUTH_URL is derived from it),
+# Stripe success, cancel, portal and webhook URLs, OG, sitemap, canonical and /appcast.xml all follow it.
+SHEPETAL_DOMAIN = "shepetal.app"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
 # and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
 # scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and

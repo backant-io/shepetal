@@ -45,7 +45,8 @@ export default function PrivacyPolicy() {
         </p>
         <h3>2. Purchases</h3>
         <p>
-          Payments are handled by Stripe. Your card details go straight to Stripe. We keep your Stripe customer ID and
+          Payments are handled by Stripe. Your card details go straight to Stripe, and so does the billing address (and a
+          VAT ID, if you give one) that Stripe uses to work out the sales tax or VAT. We keep your Stripe customer ID and
           receive the confirmation that you paid, the date of the payment and, for a subscription, its renewal date and
           whether a renewal payment failed.
         </p>
@@ -75,8 +76,8 @@ export default function PrivacyPolicy() {
         </p>
         <p>
           We share information with the vendors that run parts of the Service for us, and only as far as they need it:
-          Google for sign-in, Stripe for payments, Cloudflare for hosting and GitHub, which serves the installer
-          downloads. They use it only at our direction.
+          Google for sign-in, Stripe for payments and tax, and Cloudflare for hosting and the downloads. They use it only
+          at our direction.
         </p>
         <p>
           We may share information with outside parties if we have a good-faith belief that access, use, preservation

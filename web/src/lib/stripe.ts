@@ -2,6 +2,7 @@ import Stripe from 'stripe';
 import {
   activate,
   applySubscription,
+  recordConsent,
   liveSubscription,
   renewingSubscription,
   revokeLifetime,
@@ -68,13 +69,32 @@ export async function priceFor(plan: CheckoutPlan): Promise<string> {
 export async function customerFor(user: User): Promise<string> {
   if (user.stripe_customer_id) return user.stripe_customer_id;
   const c = await getStripe().customers.create(
-    { email: user.email, metadata: { app: APP, user_id: String(user.id) } },
+    // The footer goes on every invoice of this customer (each subscription month): the confirmation, on a durable
+    // medium, of the consent given at checkout (EU digital-content rules).
+    { email: user.email, metadata: { app: APP, user_id: String(user.id) }, invoice_settings: { footer: CONFIRMATION } },
     // Two clicks at once make one customer. The trial start makes the key unique to this row, even across databases.
     { idempotencyKey: `shepetal-customer-${user.id}-${user.trial_started_at}` },
   );
   await setCustomer(user.id, c.id);
   return (await userById(user.id))?.stripe_customer_id ?? c.id;
 }
+
+/**
+ * EU consumer law for digital content: the buyer asks for delivery right away and acknowledges that this ends the
+ * 14-day right of withdrawal. Stripe's required consent checkbox (consent_collection.terms_of_service) carries this
+ * text instead of its default, so the purchase cannot complete without it; the session records the consent, and the
+ * webhook stores when it was given.
+ */
+export const consentText = (plan: CheckoutPlan, origin: string) =>
+  plan === 'lifetime'
+    ? `I want shepetal delivered right away, and I understand that this ends my 14-day right of withdrawal. I accept the [Terms](${origin}/terms) and the [Refund policy](${origin}/refunds).`
+    : `I want my subscription to start right away, and I understand that this ends my 14-day right of withdrawal. I can cancel anytime. I accept the [Terms](${origin}/terms) and the [Refund policy](${origin}/refunds).`;
+
+/** On receipts and invoices: the confirmation of that consent, on a durable medium. */
+export const CONFIRMATION = 'Delivered right away at your request. You acknowledged that this ends the 14-day right of withdrawal.';
+
+/** Stripe Tax codes: downloadable software (the lifetime license) and SaaS delivered by download (the subscription). */
+export const TAX_CODES: Record<CheckoutPlan, string> = { lifetime: 'txcd_10202000', monthly: 'txcd_10103100' };
 
 /** A code the buyer typed that cannot be used: the reason, for the API's 400. */
 export class CodeError extends Error {
@@ -125,12 +145,28 @@ export async function checkoutUrl(user: User, base: string, plan: CheckoutPlan =
     metadata: { ...tag, plan },
     success_url: `${base}/account?purchased=1`,
     cancel_url: `${base}/account`,
+    // Stripe Tax: the price includes VAT for EU consumers (tax_behavior inclusive, stripe-setup.mjs); Stripe works
+    // out the tax from the billing address, and a business can give its VAT ID (reverse charge).
+    automatic_tax: { enabled: true },
+    customer_update: { address: 'auto' as const, name: 'auto' as const },
+    tax_id_collection: { enabled: true },
+    consent_collection: { terms_of_service: 'required' as const },
+    custom_text: {
+      terms_of_service_acceptance: { message: consentText(plan, base) },
+      submit: { message: plan === 'lifetime' ? 'shepetal is yours right after you pay.' : 'Your subscription starts right after you pay.' },
+    },
   };
   let session: Stripe.Checkout.Session;
   try {
     session = await getStripe().checkout.sessions.create(
       plan === 'lifetime'
-        ? { ...common, mode: 'payment', client_reference_id: String(user.id), payment_intent_data: { metadata: tag } }
+        ? {
+            ...common,
+            mode: 'payment',
+            client_reference_id: String(user.id),
+            // The description is on the receipt email: the purchase and the consent, on a durable medium.
+            payment_intent_data: { metadata: tag, description: `shepetal lifetime license. ${CONFIRMATION}` },
+          }
         : // No client_reference_id: backant.io's webhook (same Stripe account) acts on every subscription checkout
           // that has one, as its own client id. The user id travels in metadata instead.
           { ...common, mode: 'subscription', subscription_data: { metadata: tag } },
@@ -338,6 +374,8 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       const userId = Number(s.client_reference_id ?? s.metadata.user_id);
       const customer = idOf(s.customer);
       if (customer && userId) await setCustomer(userId, customer);
+      // The consent to delivery right away (and so the end of the withdrawal right), kept with the account.
+      if (userId && s.consent?.terms_of_service === 'accepted') await recordConsent(userId, event.created);
       if (s.mode === 'subscription') {
         const sub = idOf(s.subscription);
         if (sub) await syncSubscription(sub);

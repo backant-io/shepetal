@@ -11,7 +11,7 @@ export default function TermsOfUse() {
   return (
     <main className="mx-auto max-w-3xl px-4 pt-16 sm:px-8">
       <h1 className="display text-[clamp(2.75rem,8vw,4.5rem)] leading-none">Terms of Use</h1>
-      <p className="mt-4 text-sm text-[var(--hush)]">Version 1.1. Last revised on October 21, 2026</p>
+      <p className="mt-4 text-sm text-[var(--hush)]">Version 1.2. Last revised on October 22, 2026</p>
 
       <div className="prose-legal mt-12">
         <p>
@@ -48,8 +48,9 @@ export default function TermsOfUse() {
           method, and it ends on its own without any charge.
         </p>
         <p>
-          You can keep using shepetal in one of two ways. Prices are in US dollars, and Stripe processes every payment
-          under Stripe&apos;s own terms. If we change a price, the change applies only to purchases made afterwards, and
+          You can keep using shepetal in one of two ways. Prices include the sales tax or VAT that applies where you
+          live; checkout shows the tax and the total before you pay, in your currency where we offer it (US dollars or
+          euros). Stripe processes every payment under Stripe&apos;s own terms. If we change a price, the change applies only to purchases made afterwards, and
           to a subscription only after we tell you by email at least 30 days before its next renewal.
         </p>
         <p>
@@ -68,10 +69,19 @@ export default function TermsOfUse() {
           ends, once per account. A code never applies to the subscription unless it says so.
         </p>
         <p>
-          <strong>Refunds.</strong> The free trial lets you try shepetal before you pay. If shepetal does not work for
-          you, write to <a href="mailto:founder@backant.io">founder@backant.io</a> within 14 days of a lifetime purchase
-          for a full refund. Monthly payments are not refunded for the part of a month you have already started, and
-          cancelling stops every later charge. This does not limit any refund right the law where you live gives you.
+          <strong>Delivery right away and your right of withdrawal.</strong> shepetal is digital content, delivered as
+          soon as you pay. If you are a consumer in the European Union, the United Kingdom or another country with a
+          right of withdrawal, you would normally have 14 days to withdraw from the purchase. At checkout you ask us to
+          deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. Your
+          receipt confirms this.
+        </p>
+        <p>
+          <strong>Refunds.</strong> The free trial lets you try shepetal before you pay. Even so, if shepetal does not
+          work for you, write to <a href="mailto:founder@backant.io">founder@backant.io</a> within 14 days of a lifetime
+          purchase for a full refund; a refund ends the license. Monthly payments are not refunded for the part of a
+          month you have already started, and cancelling stops every later charge. The full policy is on our{' '}
+          <Link href="/refunds">refund policy</Link> page. This does not limit any right the law where you live gives
+          you, including your rights if shepetal is faulty.
         </p>
 
         <h2>3. License</h2>
@@ -102,7 +112,7 @@ export default function TermsOfUse() {
 
         <h2>6. Third-party links</h2>
         <p>
-          The Service may contain links to third-party websites and services, such as Stripe and GitHub. They are not
+          The Service may contain links to third-party websites and services, such as Stripe. They are not
           under the control of Company, and Company is not responsible for them.
         </p>
 

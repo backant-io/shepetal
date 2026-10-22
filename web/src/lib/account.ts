@@ -23,6 +23,7 @@ export type User = {
   sub_amount?: number | null;
   sub_currency?: string | null;
   lifetime_payment_intent?: string | null;
+  withdrawal_waived_at?: string | null;
 };
 
 /** Body of GET /api/license (see API.md). */
@@ -121,6 +122,17 @@ export async function activate(userId: number, paymentIntent: string | null = nu
     .bind(userId, new Date(now).toISOString(), paymentIntent)
     .run();
   return r.meta.changes === 1;
+}
+
+/**
+ * When the buyer last consented at checkout to delivery right away, acknowledging the end of the 14-day withdrawal
+ * right (EU digital-content rules). `at` is the Stripe event time, in Unix seconds.
+ */
+export async function recordConsent(userId: number, at: number): Promise<void> {
+  await db()
+    .prepare('UPDATE users SET withdrawal_waived_at = ?2 WHERE id = ?1 AND (withdrawal_waived_at IS NULL OR withdrawal_waived_at < ?2)')
+    .bind(userId, new Date(at * 1000).toISOString())
+    .run();
 }
 
 /** The lifetime payment was refunded: the license ends (back to the trial dates, or a running subscription). */
