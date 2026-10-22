@@ -62,8 +62,8 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
             <p className="s-mono s-section-label">Account</p>
             <LicenseSummary license={license} now={now} amount={settings.subscription?.amount_display} />
             <div className="s-actions">
-              {/* A plain link: /download answers with a redirect to the installer. */}
-              <a href="/download" className="s-btn">
+              {/* /install starts the download and shows how to install the app macOS cannot verify. */}
+              <a href="/install" className="s-btn">
                 Download for Mac
               </a>
               <span className="s-mono">macOS 14.4 or later, Apple silicon</span>

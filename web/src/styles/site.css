@@ -99,6 +99,17 @@
 .s-prose strong { font-weight: 600; }
 .s-shush { display: inline-block; width: 1.1em; height: 1.1em; vertical-align: -.2em; }
 
+/* install help: four numbered steps, the number as big ink, the one thing to click in orange */
+.s-install .s-mono a { color: var(--ink); }
+.s-steps { list-style: none; margin: 3rem 0 0; padding: 0; counter-reset: step; border-top: 1px solid var(--rule); }
+.s-steps > li { counter-increment: step; display: grid; grid-template-columns: 3.5rem minmax(0, 1fr); column-gap: 1.25rem; padding: 1.6rem 0; border-bottom: 1px solid var(--rule); }
+.s-steps > li::before { content: counter(step); grid-row: 1 / span 3; font-weight: 520; font-size: 2.75rem; line-height: .9; letter-spacing: -.04em; color: var(--ink); }
+.s-step-title { margin: 0; font-weight: 520; font-size: clamp(1.3rem, calc(2 * var(--u)), 2rem); line-height: 1.15; letter-spacing: -.02em; }
+.s-steps p { margin: .5rem 0 0; font-size: 1.0625rem; line-height: 1.55; color: #2a2824; }
+.s-settings-row { margin-top: 1rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; padding: .85rem 1rem; border: 1px solid rgba(22,21,18,.25); border-radius: 10px; background: var(--ground-raised); font: 500 .9375rem/1.3 -apple-system, BlinkMacSystemFont, var(--sans); color: #2a2824; }
+.s-settings-btn { flex: none; padding: .3rem .8rem; border-radius: 6px; background: #fff; box-shadow: 0 0 0 1px rgba(22,21,18,.18), 0 1px 1px rgba(22,21,18,.08); color: var(--ink); outline: 2px solid var(--signal); outline-offset: 3px; }
+.s-install .s-small { margin-top: 2rem; }
+
 @media (max-width: 760px) {
   .s-hero, .s-acct { grid-template-columns: minmax(0, 1fr); padding-top: 3rem; }
   .s-h1 { font-size: clamp(2.2rem, calc(10.4 * var(--u)), 6.0rem); }
@@ -108,6 +119,8 @@
   .s-plan .s-btn { padding: 1rem 1.2rem; }
   .s-plan .s-btn-line { padding: .8rem 1rem; }
   .s-legal { padding-top: 3rem; }
+  .s-steps > li { grid-template-columns: 2.25rem minmax(0, 1fr); column-gap: 1rem; }
+  .s-steps > li::before { font-size: 2.1rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   .s-page *, .s-page *::before, .s-page *::after { transition: none !important; }

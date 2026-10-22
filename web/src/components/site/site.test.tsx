@@ -41,6 +41,29 @@ describe('where a sign-in returns to', () => {
   });
 });
 
+describe('install help (the app is not notarized)', () => {
+  it('gives the four steps in order: drag to Applications, Done, Open Anyway in Privacy & Security, once', async () => {
+    const { InstallSteps } = await import('./InstallSteps');
+    const text = renderToStaticMarkup(<InstallSteps />).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
+    let at = 0;
+    for (const s of ['Drag shepetal into Applications.', 'click Done', 'System Settings, then Privacy & Security', 'Open Anyway', 'confirm with your password', 'You do this once.']) {
+      const i = text.indexOf(s, at);
+      expect(i, s).toBeGreaterThan(-1);
+      at = i;
+    }
+    expect(renderToStaticMarkup(<InstallSteps />).match(/<li>/g)).toHaveLength(4);
+  });
+
+  it('is where the account’s Download button lands, and that page starts the download', () => {
+    const read = (p: string) => readFileSync(join(__dirname, '..', '..', 'app', '(site)', p, 'page.tsx'), 'utf8');
+    expect(read('account')).toContain('href="/install"');
+    const install = read('install');
+    expect(install).toContain('<meta httpEquiv="refresh" content="1;url=/download" />');
+    expect(install).toContain('<InstallSteps />');
+    expect(install).toContain('href="/download"');
+  });
+});
+
 describe('footer', () => {
   it('reads Privacy · Terms · Refunds · Legal, on the landing page and on every other page', async () => {
     const { SiteFooter } = await import('./Shell');
