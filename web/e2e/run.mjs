@@ -259,13 +259,13 @@ async function main() {
   }
   ok(`wrangler dev answers on ${BASE}`);
 
-  // ---- 0. The landing page renders on the Worker, starts the trial with the sign-in form and
+  // ---- 0. The landing page renders on the Worker, starts the trial with a link to /install (no sign-in) and
   // loads every script, style, font and image from the site itself (no trackers, no font CDN).
-  await check('landing page: sign-in form, nothing loaded from another server, fonts only from self', async () => {
+  await check('landing page: the trial button links to /install (no sign-in form), nothing loaded from another server, fonts only from self', async () => {
     const res = await fetch(`${BASE}/`);
     const html = await res.text();
     assert.equal(res.status, 200);
-    assert.ok(html.includes('Try 30 days free') && /<form[^>]*action=/.test(html), 'the trial button is a sign-in form');
+    assert.ok(html.includes('>Try 30 days free</a>') && !/<form\b/.test(html), 'the trial button is a link, not a sign-in form');
     // Assets (src, srcset, stylesheets, preloads) and visible links; the canonical <link> names the site's own domain.
     const outside = [
       ...html.matchAll(/\b(?:src|srcset)="(https?:\/\/[^"]+)"/g),
@@ -279,6 +279,7 @@ async function main() {
     const og = await fetch(`${BASE}/og/home.jpg`);
     assert.equal(og.status, 200);
     assert.match(og.headers.get('content-type') ?? '', /^image\/jpeg/);
+    await og.arrayBuffer(); // an unread body leaves the socket behind, and the next request on it fails with EPIPE
     // The footer's Legal link carries the attribution and trademark notices the page no longer prints.
     assert.ok(html.includes('href="/legal"'), 'the footer links to /legal');
     const legal = await fetch(`${BASE}/legal`);
@@ -328,6 +329,20 @@ async function main() {
     for (const p of ['/download/0.0.2/Shepetal-0.0.2.dmg', `/download/${v}/latest.json`, '/latest.json']) {
       assert.equal((await fetch(`${BASE}${p}`)).status, 404, p);
     }
+  });
+
+  // ---- 0c. Download is open: the landing page's main CTA, followed signed out, reaches the DMG with no sign-in on the way.
+  await check('landing CTA signed out: Try 30 days free -> /install -> /download -> the DMG, no auth redirect', async () => {
+    const html = await (await fetch(`${BASE}/`)).text();
+    const cta = html.match(/<a class="kc-cta[^"]*" href="([^"]+)">Try 30 days free<\/a>/)?.[1];
+    assert.equal(cta, '/install', 'the main CTA');
+    const install = await fetch(`${BASE}${cta}?ref=e2e`, { redirect: 'manual' });
+    assert.equal(install.status, 200, `/install: ${install.status} ${install.headers.get('location')}`);
+    const next = unescape((await install.text()).match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? '');
+    assert.equal(next, '/download?ref=e2e', 'the install guide starts the download, with the attribution');
+    const dl = await fetch(`${BASE}${next}`, { redirect: 'manual' });
+    assert.equal(dl.status, 302, `/download: ${dl.status}`);
+    assert.match(dl.headers.get('location') ?? '', /^\/download\/[\d.]+\/Shepetal-[\d.]+\.dmg$/, 'straight to the DMG, not to sign-in');
   });
 
   // ---- 1. Signed out, /app/login runs the Google sign-in and comes back to the same URL.

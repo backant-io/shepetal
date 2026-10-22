@@ -1,5 +1,4 @@
 import { Fragment } from 'react';
-import { SignInButton } from '@/components/SignInButton';
 import { FLOWS, HERO_WORDS, TYPED_WORDS, flowWords, type FlowId } from './choreography';
 import { KeySvg } from './KeySvg';
 import { StoryMotion } from './StoryMotion';
@@ -26,12 +25,12 @@ function Flow({ id }: { id: FlowId }) {
   );
 }
 
-/** The trial button: the Google sign-in form, then the account page with the download. It works without JavaScript. */
+/** The trial button: the install guide, which starts the download. Open, no sign-in (that happens in the app). */
 function TryButton({ className = '' }: { className?: string }) {
   return (
-    <SignInButton redirectTo="/account" className={`kc-cta ${className}`.trim()} formClassName="kc-form">
+    <a className={`kc-cta ${className}`.trim()} href="/install">
       {TRY}
-    </SignInButton>
+    </a>
   );
 }
 

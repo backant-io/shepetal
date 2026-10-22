@@ -141,15 +141,15 @@ export function StoryMotion() {
       rafS = requestAnimationFrame(sync);
     };
 
-    // ?ref=<site> and utm_* of this visit ride along with the trial's sign-in, on to /account and the download
+    // ?ref=<site> and utm_* of this visit ride along with the trial button, on to /install and the download
     const params = new URLSearchParams(window.location.search);
     for (const name of ['ref', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
       const value = params.get(name);
       if (!value || !/^[\w.+-]{1,64}$/.test(value)) continue;
-      root.querySelectorAll<HTMLFormElement>('form.kc-form').forEach((form) => {
-        const input = document.createElement('input');
-        Object.assign(input, { type: 'hidden', name, value });
-        form.appendChild(input);
+      root.querySelectorAll<HTMLAnchorElement>('a.kc-cta').forEach((a) => {
+        const url = new URL(a.href);
+        url.searchParams.set(name, value);
+        a.href = url.pathname + url.search;
       });
     }
 
