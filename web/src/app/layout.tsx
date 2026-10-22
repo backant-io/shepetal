@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next';
 import { preload } from 'react-dom';
+import { SITE_URL } from '@/lib/site';
 import '@/styles/system.css';
 
 const title = 'shepetal: press one key, your words appear';
@@ -15,7 +16,7 @@ const ogImage = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL('https://shepetal.backant.io'),
+  metadataBase: new URL(SITE_URL),
   title: { default: title, template: '%s - shepetal' },
   description,
   openGraph: {

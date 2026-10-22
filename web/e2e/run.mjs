@@ -231,7 +231,7 @@ async function main() {
 
   const log = createWriteStream(logFile);
   // --local-upstream: with the custom-domain route in wrangler.toml, wrangler dev otherwise rewrites Host and
-  // Origin to shepetal.backant.io, and the consent POST fails its Origin check against AUTH_URL with a 403.
+  // Origin to the first custom domain, and the consent POST fails its Origin check against AUTH_URL with a 403.
   worker = spawn(
     join(BIN, 'wrangler'),
     ['dev', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(await freePort()),

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
 import { checkoutUrl, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
+import { SITE_URL } from './site';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -99,7 +100,7 @@ describe('lifetime ($23.99 once)', () => {
 
   it('creates a payment-mode session for the one-time price that accepts codes and that the webhook turns into a license', async () => {
     const create = vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/cs_1' } as never);
-    expect(await checkoutUrl(user, 'https://shepetal.backant.io', 'lifetime')).toBe('https://checkout.stripe.com/c/pay/cs_1');
+    expect(await checkoutUrl(user, SITE_URL, 'lifetime')).toBe('https://checkout.stripe.com/c/pay/cs_1');
     const params = create.mock.calls[0][0] as Stripe.Checkout.SessionCreateParams;
     expect(params).toMatchObject({
       mode: 'payment',
@@ -356,7 +357,7 @@ describe('never charged twice', () => {
 describe('subscription ($0.99 a month)', () => {
   it('creates a subscription-mode session for the monthly price, tagged so its subscription events are found', async () => {
     const create = vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/cs_2' } as never);
-    await checkoutUrl(user, 'https://shepetal.backant.io', 'monthly');
+    await checkoutUrl(user, SITE_URL, 'monthly');
     const params = create.mock.calls[0][0] as Stripe.Checkout.SessionCreateParams;
     expect(params).toMatchObject({
       mode: 'subscription',
@@ -443,8 +444,8 @@ describe('subscription ($0.99 a month)', () => {
   it("opens the Billing Portal for the user's customer with shepetal's configuration", async () => {
     expect(await portalUrl(user, 'https://s')).toBeNull();
     const create = vi.spyOn(getStripe().billingPortal.sessions, 'create').mockResolvedValue({ url: 'https://billing.stripe.com/p/session/1' } as never);
-    expect(await portalUrl({ ...user, stripe_customer_id: 'cus_1' }, 'https://shepetal.backant.io')).toBe('https://billing.stripe.com/p/session/1');
-    expect(create).toHaveBeenCalledWith({ customer: 'cus_1', configuration: 'bpc_test', return_url: 'https://shepetal.backant.io/account' });
+    expect(await portalUrl({ ...user, stripe_customer_id: 'cus_1' }, SITE_URL)).toBe('https://billing.stripe.com/p/session/1');
+    expect(create).toHaveBeenCalledWith({ customer: 'cus_1', configuration: 'bpc_test', return_url: `${SITE_URL}/account` });
   });
 });
 

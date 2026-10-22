@@ -1,0 +1,55 @@
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import { ensureAuthUrl, hostRedirect, LEGACY_HOST, SHEPETAL_DOMAIN, SITE_URL } from './site';
+
+const at = (host: string, path: string) => hostRedirect(new URL(`https://${host}${path}`));
+const moved = (r: Response | null) => r && [r.status, r.headers.get('location')];
+
+describe('the one domain', () => {
+  it('comes from wrangler.toml [vars] SHEPETAL_DOMAIN, https only', () => {
+    expect(SHEPETAL_DOMAIN).toBe('shepetal.app');
+    expect(SITE_URL).toBe('https://shepetal.app');
+  });
+
+  it('is what wrangler.toml attaches: the domain, its www and the old host, and no other host is hard-coded', () => {
+    const toml = readFileSync(new URL('../../wrangler.toml', import.meta.url), 'utf8');
+    const routes = [...toml.matchAll(/pattern = "([^"]+)", custom_domain = true/g)].map((m) => m[1]);
+    expect(routes).toEqual([SHEPETAL_DOMAIN, `www.${SHEPETAL_DOMAIN}`, LEGACY_HOST]);
+    expect(toml).not.toMatch(/^(AUTH_URL|NEXTAUTH_URL)\s*=/m);
+  });
+
+  it('gives next-auth SITE_URL in production and leaves a local AUTH_URL alone', () => {
+    const prod: Record<string, string | undefined> = {};
+    expect(ensureAuthUrl(prod)).toBe(SITE_URL);
+    expect(prod).toEqual({ AUTH_URL: SITE_URL, NEXTAUTH_URL: SITE_URL });
+    const local: Record<string, string | undefined> = { AUTH_URL: 'http://localhost:8787' };
+    expect(ensureAuthUrl(local)).toBe('http://localhost:8787');
+    expect(local.NEXTAUTH_URL).toBe('http://localhost:8787');
+  });
+});
+
+describe('hosts', () => {
+  it('serves everything on the domain itself, on workers.dev previews and on localhost', () => {
+    for (const host of [SHEPETAL_DOMAIN, 'cc5b28db-shepetal-web.business-c0d.workers.dev', 'localhost:8787'])
+      for (const path of ['/', '/account', '/app/login?state=x', '/appcast.xml', '/api/license']) expect(at(host, path)).toBeNull();
+  });
+
+  it('sends www to the apex with a 301, keeping the path and query', () => {
+    expect(moved(at(`www.${SHEPETAL_DOMAIN}`, '/'))).toEqual([301, `${SITE_URL}/`]);
+    expect(moved(at(`www.${SHEPETAL_DOMAIN}`, '/terms?x=1'))).toEqual([301, `${SITE_URL}/terms?x=1`]);
+    expect(moved(at(`www.${SHEPETAL_DOMAIN}`, '/api/license'))).toEqual([301, `${SITE_URL}/api/license`]);
+  });
+
+  it('answers /api/* directly on the old host, never with a redirect, so released app builds keep working', () => {
+    for (const path of ['/api/license', '/api/checkout', '/api/app/token', '/api/app/revoke', '/api/billing/portal', '/api/stripe/webhook', '/api/auth/session', '/api'])
+      expect(at(LEGACY_HOST, path)).toBeNull();
+  });
+
+  it('moves pages, /app/login (with its query) and /appcast.xml from the old host to the domain with a 301', () => {
+    const q = '?redirect_uri=shepetal%3A%2F%2Fauth&state=a%20b&code_challenge=xyz&code_challenge_method=S256';
+    expect(moved(at(LEGACY_HOST, `/app/login${q}`))).toEqual([301, `${SITE_URL}/app/login${q}`]);
+    expect(moved(at(LEGACY_HOST, '/appcast.xml'))).toEqual([301, `${SITE_URL}/appcast.xml`]);
+    for (const path of ['/', '/account', '/login', '/privacy', '/download', '/apiary'])
+      expect(moved(at(LEGACY_HOST, path))).toEqual([301, `${SITE_URL}${path}`]);
+  });
+});

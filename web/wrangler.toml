@@ -1,12 +1,19 @@
 name = "shepetal-web"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
-main = ".open-next/worker.js"
+# worker.ts: the host rules (www and the old host, src/lib/site.ts), then OpenNext's worker (.open-next/worker.js).
+main = "worker.ts"
 
-# workers.dev only for now. The shepetal.backant.io custom domain is added at launch.
 workers_dev = true
-# Go-live: uncomment the next line, then npm run deploy.
-routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]
+# Custom domains: the site's domain (SHEPETAL_DOMAIN below), its www (301 to the apex), and the old host, which every
+# released app build calls (/api/* answers there directly; pages, /app/login and /appcast.xml 301 to the domain).
+# `wrangler deploy` attaches them and creates their DNS records: that is a GO step (GO-LIVE.md). site.test.ts checks
+# that these three match SHEPETAL_DOMAIN.
+routes = [
+  { pattern = "shepetal.app", custom_domain = true },
+  { pattern = "www.shepetal.app", custom_domain = true },
+  { pattern = "shepetal.backant.io", custom_domain = true },
+]
 
 [assets]
 directory = ".open-next/assets"
@@ -19,8 +26,9 @@ database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
 migrations_dir = "migrations"
 
 [vars]
-NEXTAUTH_URL = "https://shepetal.backant.io"
-AUTH_URL = "https://shepetal.backant.io"
+# The site's one domain (https only). Auth callbacks (AUTH_URL), Stripe's success, cancel and portal return URLs,
+# metadata, OG, canonical URLs and the sitemap are all built from it (src/lib/site.ts, domain.config.mjs).
+SHEPETAL_DOMAIN = "shepetal.app"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
 # and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
 # scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and

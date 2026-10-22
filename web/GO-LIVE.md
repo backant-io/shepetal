@@ -1,4 +1,6 @@
-# Going live: shepetal.backant.io
+# Going live: shepetal.app
+
+The site's domain is `SHEPETAL_DOMAIN` in `wrangler.toml` [vars] (`shepetal.app`); every URL the site builds comes from it (`src/lib/site.ts`). The Worker also keeps answering on the old host, `shepetal.backant.io`, which every released app build calls: there `/api/*` answers directly, and pages, `/app/login` (with its query) and `/appcast.xml` are a 301 to the same path on shepetal.app. `www.shepetal.app` is a 301 to the apex. `web/e2e/hosts.mjs` tests all three hosts on the Worker runtime.
 
 Do these in order. Steps marked **Pavel** need an account only Pavel has. Run every command from `web/` on `main`, with wrangler logged in to Hegler Technologies (`npx wrangler whoami`) and `AWS_PROFILE=backant`. No command here prints a secret.
 
@@ -13,8 +15,9 @@ Do these in order. Steps marked **Pavel** need an account only Pavel has. Run ev
 
 Google Cloud Console → APIs & Services → Credentials → backant's OAuth client (the ID in SSM `/backant/WEB_GOOGLE_CLIENT_ID`):
 
-- Authorized redirect URIs: **add** `https://shepetal.backant.io/api/auth/callback/google`. Keep `https://backant.io/api/auth/callback/google`.
-- Nothing else. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, not Google's: never add them to Google. No JavaScript origin is needed (server-side code flow). `backant.io` is already an authorized domain, which covers the subdomain.
+- Authorized redirect URIs: **add** `https://shepetal.app/api/auth/callback/google`. Keep `https://backant.io/api/auth/callback/google`, and keep `https://shepetal.backant.io/api/auth/callback/google` if it is there (the live site uses it until the deploy in step 5, and a rollback would again).
+- OAuth consent screen → Branding → Authorized domains: **add** `shepetal.app`. If Google asks to verify it, verify it in Google Search Console with the TXT record it gives, added in Cloudflare → shepetal.app → DNS (a TXT record does not conflict with the custom domains).
+- Nothing else. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, not Google's: never add them to Google. No JavaScript origin is needed (server-side code flow). Sign-in always comes back to shepetal.app, whichever host it started on (AUTH_URL is built from SHEPETAL_DOMAIN).
 - The consent screen shows backant's app name.
 
 ## 3. Stripe (Pavel, backant account, live mode)
@@ -24,7 +27,18 @@ Google Cloud Console → APIs & Services → Credentials → backant's OAuth cli
    ```sh
    cd web && STRIPE_SECRET_KEY="$(aws ssm get-parameter --with-decryption --name /backant/WEB_STRIPE_SECRET_KEY --query Parameter.Value --output text)" node scripts/stripe-setup.mjs --live
    ```
-2. The webhook endpoint `https://shepetal.backant.io/api/stripe/webhook` (we_1USl5ADrjgXysMQjYGGaUepu) must send `checkout.session.completed`, `checkout.session.async_payment_succeeded`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid` and `invoice.payment_failed`. Do not touch backant's own endpoint or its secret.
+   The script sets the Billing Portal's return URL and its privacy and terms links from SHEPETAL_DOMAIN (`https://shepetal.app/account`, `/privacy`, `/terms`).
+2. Move shepetal's webhook endpoint (we_1USl5ADrjgXysMQjYGGaUepu, today `https://shepetal.backant.io/api/stripe/webhook`) to the domain. Its id and signing secret stay the same, so `STRIPE_WEBHOOK_SECRET` does not change. Do this **after** step 5, once https://shepetal.app answers. Until then the old URL keeps working, because `/api/*` answers on the old host:
+
+   ```sh
+   stripe webhook_endpoints update we_1USl5ADrjgXysMQjYGGaUepu --live \
+     --url https://shepetal.app/api/stripe/webhook \
+     -d "enabled_events[]=checkout.session.completed" -d "enabled_events[]=checkout.session.async_payment_succeeded" \
+     -d "enabled_events[]=customer.subscription.updated" -d "enabled_events[]=customer.subscription.deleted" \
+     -d "enabled_events[]=invoice.paid" -d "enabled_events[]=invoice.payment_failed" -d "enabled_events[]=charge.refunded"
+   ```
+
+   Do not touch backant's own endpoint or its secret.
 3. Copy that endpoint's signing secret (`whsec_…`) for step 4 if it is not set yet.
 
 Both sites share this Stripe account, so each webhook sees the other's events. shepetal acts only on sessions and subscriptions with `metadata.app = "shepetal"` and answers everything else 200. backant's handler acts on every `mode=subscription` checkout that has a `client_reference_id`, so shepetal's subscription checkouts carry none (the user id is in metadata), and backant finds no client for shepetal's Stripe customers on subscription events. Filtering `metadata.app = "shepetal"` out in backant's handler as well is the safe follow-up.
@@ -59,27 +73,39 @@ ssm /backant/WEB_STRIPE_SECRET_KEY | npx wrangler secret put STRIPE_SECRET_KEY
 - Never set `STRIPE_API_BASE` in production. It is for `web/e2e` only, and the code ignores it unless the key starts with `sk_test_`.
 - The Google client secret now lives in two places. If it is rotated, update `/backant/WEB_GOOGLE_CLIENT_SECRET` and shepetal's `GOOGLE_CLIENT_SECRET` together.
 
-## 5. Custom domain (Pavel)
+## 5. Custom domains (Pavel)
 
-`AUTH_URL` is `https://shepetal.backant.io`, so Google sign-in and `/app/login` only work there, not on workers.dev.
+`wrangler.toml` routes attach three custom domains on deploy: `shepetal.app`, `www.shepetal.app` and `shepetal.backant.io` (already attached today). Cloudflare creates their DNS records and certificates.
 
-1. Check that the backant.io zone has no DNS record for `shepetal` yet (Cloudflare dashboard → backant.io → DNS). A custom domain cannot replace one.
-2. Uncomment the `routes` line in `web/wrangler.toml` (`routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]`), merge that to `main`, and deploy:
+1. Check that the shepetal.app zone (Cloudflare → shepetal.app → DNS) has no A, AAAA or CNAME record on `shepetal.app` or `www`: a custom domain cannot replace one. On 22.10.26 the zone had no records.
+2. Record the live version, for a rollback: `npx wrangler deployments list | tail -8`.
+3. Deploy (this attaches the domains):
 
 ```sh
-sed -i '' 's/^# routes = /routes = /' wrangler.toml && npm run deploy
+npm run deploy          # opennextjs-cloudflare build && opennextjs-cloudflare deploy
+npx wrangler deployments list | tail -8
 ```
+
+4. Wait until `curl -sI https://shepetal.app/` answers (the certificate takes a few minutes), then move the Stripe webhook (step 3.2).
+
+To take the new domain down again without touching the old host: Workers & Pages → shepetal-web → Settings → Domains & Routes → remove `shepetal.app` and `www.shepetal.app`. `npx wrangler rollback <version>` restores the code; custom domains are not part of a version.
 
 ## 6. Smoke tests (anyone, right after step 5)
 
 ```sh
-B=https://shepetal.backant.io
+B=https://shepetal.app
+O=https://shepetal.backant.io
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/                # 301 https://shepetal.app/
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$O/app/login?state=x"   # 301 https://shepetal.app/app/login?state=x
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/appcast.xml     # 301 https://shepetal.app/appcast.xml
+curl -s -o /dev/null -w '%{http_code}\n' $O/api/license                     # 401, never a redirect (released apps)
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://www.shepetal.app/terms   # 301 https://shepetal.app/terms
 CH=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM   # any 43-character challenge
 curl -sI $B/ | grep -iE '^(HTTP|strict-transport)'                       # 200, HSTS
 curl -sI $B/ | grep -io "form-action[^;]*"                                # includes shepetal: http://127.0.0.1:* (the consent form's redirect)
-curl -s $B/api/auth/providers                                           # callbackUrl https://shepetal.backant.io/api/auth/callback/google
+curl -s $B/api/auth/providers                                           # callbackUrl https://shepetal.app/api/auth/callback/google
 curl -s -o /dev/null -w '%{http_code}\n' "$B/app/login?redirect_uri=https%3A%2F%2Fevil.com&state=x&code_challenge=$CH&code_challenge_method=S256"   # 400
-curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$B/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=x&code_challenge=$CH&code_challenge_method=S256"   # 307 https://accounts.google.com/...redirect_uri=https%3A%2F%2Fshepetal.backant.io%2Fapi%2Fauth%2Fcallback%2Fgoogle...
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$B/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=x&code_challenge=$CH&code_challenge_method=S256"   # 307 https://accounts.google.com/...redirect_uri=https%3A%2F%2Fshepetal.app%2Fapi%2Fauth%2Fcallback%2Fgoogle...
 curl -s -X POST $B/api/app/token -H 'content-type: application/json' -d '{"code":"x","code_verifier":"x","redirect_uri":"shepetal://auth"}'   # 400 {"error":"invalid_grant"}
 curl -s -o /dev/null -w '%{http_code}\n' $B/api/license                  # 401
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/api/stripe/webhook -d '{}'   # 400
@@ -92,7 +118,7 @@ Then a real sign-in as the Linux and Windows apps do it (loopback redirect, PKCE
 ```sh
 python3 - <<'PY'
 import base64, hashlib, http.server, json, secrets, urllib.error, urllib.parse, urllib.request, webbrowser
-B, R = 'https://shepetal.backant.io', 'http://127.0.0.1:53682/callback'
+B, R = 'https://shepetal.app', 'http://127.0.0.1:53682/callback'
 v = secrets.token_urlsafe(48); st = secrets.token_urlsafe(16)
 ch = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).rstrip(b'=').decode()
 got = {}
@@ -124,7 +150,7 @@ PY
 - Sign in on https://backant.io and open its dashboard: backant's own login still works.
 - Mac (#70): install a build with `ShepetalRequiresSignIn` = true, choose Sign in with Google in the menu, and check that Home shows "Free trial: 30 days left" and that fn dictates.
 
-If something is wrong: `npx wrangler rollback` (previous version) or remove the `routes` line and deploy, which takes shepetal.backant.io down without touching backant.io.
+If something is wrong: `npx wrangler rollback <the version from step 5.2>`. Removing a custom domain in the dashboard takes that host down without touching backant.io.
 
 ## Known limits
 

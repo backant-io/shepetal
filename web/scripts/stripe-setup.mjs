@@ -18,10 +18,11 @@
 //
 // Change the defaults with env vars:
 //   LIFETIME_CENTS=2399 MONTHLY_CENTS=99 PH_CODE=PRODUCTHUNT PH_CENTS_OFF=1900 PH_EXPIRES=2026-11-01T00:00:00Z
-//   PH_COUPON_ID=shepetal_producthunt SITE_URL=https://shepetal.backant.io
+//   PH_COUPON_ID=shepetal_producthunt SITE_URL=https://<SHEPETAL_DOMAIN>
 // A coupon or promotion code cannot be edited in Stripe once made: to change PH_CENTS_OFF, give a new
 // PH_COUPON_ID; to change the code's rules or expiry, archive the code in the Dashboard and run this again.
 import Stripe from 'stripe';
+import { shepetalDomain } from '../domain.config.mjs';
 
 const live = process.argv.includes('--live');
 const key = process.env.STRIPE_SECRET_KEY ?? '';
@@ -37,7 +38,7 @@ const cfg = {
   centsOff: int('PH_CENTS_OFF', 1900),
   expires: Math.floor(Date.parse(process.env.PH_EXPIRES ?? '2026-11-01T00:00:00Z') / 1000),
   couponId: process.env.PH_COUPON_ID ?? 'shepetal_producthunt',
-  site: process.env.SITE_URL ?? 'https://shepetal.backant.io',
+  site: process.env.SITE_URL ?? `https://${shepetalDomain()}`,
 };
 if (!Number.isFinite(cfg.expires)) fail('PH_EXPIRES is not a date');
 if (cfg.centsOff >= cfg.lifetimeCents) fail('PH_CENTS_OFF must be less than LIFETIME_CENTS');
