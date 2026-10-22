@@ -22,7 +22,7 @@ const SCREENS = [
 export default function Press() {
   return (
     <>
-      <SiteHeader end={<Link href="/account">Account</Link>} />
+      <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal s-press">
         <h1 className="s-h2">Press.</h1>
         <p className="s-mono">For writers, editors and podcasters</p>

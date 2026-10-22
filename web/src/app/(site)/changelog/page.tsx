@@ -24,7 +24,7 @@ export default async function Changelog() {
   const list = await published();
   return (
     <>
-      <SiteHeader end={<Link href="/account">Account</Link>} />
+      <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal s-changelog">
         <h1 className="s-h2">Changelog.</h1>
         <p className="s-mono">shepetal for Mac</p>

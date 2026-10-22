@@ -87,7 +87,7 @@ const QAS: QA[] = [
     a: (
       <p>
         30 days free, with no card. Then $23.99 once, yours forever with updates included, or $0.99 a month, which you
-        can cancel anytime on your <Link href="/account">account page</Link>.
+        can cancel anytime on your <Link href="/account" prefetch={false}>account page</Link>.
       </p>
     ),
     text: '30 days free, with no card. Then $23.99 once, yours forever with updates included, or $0.99 a month, which you can cancel anytime on your account page.',
@@ -124,7 +124,7 @@ export default function Faq() {
   };
   return (
     <>
-      <SiteHeader end={<Link href="/account">Account</Link>} />
+      <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal s-faq">
         <h1 className="s-h2">Questions.</h1>
         <div className="s-prose">

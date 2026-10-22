@@ -10,7 +10,7 @@ export const metadata: Metadata = pageMetadata('refunds', { title: 'Refund Polic
 export default function Refunds() {
   return (
     <>
-      <SiteHeader end={<Link href="/account">Account</Link>} />
+      <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal">
         <h1 className="s-h2">Refund Policy</h1>
         <p className="s-mono">Last updated: October 22, 2026</p>
@@ -36,7 +36,7 @@ export default function Refunds() {
 
           <h2>Monthly subscription, $0.99 a month</h2>
           <p>
-            Cancel anytime on your <Link href="/account">account page</Link>, under Settings. shepetal keeps working until
+            Cancel anytime on your <Link href="/account" prefetch={false}>account page</Link>, under Settings. shepetal keeps working until
             the end of the month you have paid for, and nothing is charged again. A month you have already started is
             not refunded.
           </p>

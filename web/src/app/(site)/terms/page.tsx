@@ -8,7 +8,7 @@ export const metadata: Metadata = pageMetadata('terms', { title: 'Terms of Use',
 export default function TermsOfUse() {
   return (
     <>
-      <SiteHeader end={<Link href="/account">Account</Link>} />
+      <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal">
         <h1 className="s-h2">Terms of Use</h1>
         <p className="s-mono">Version 1.2. Last revised on October 22, 2026</p>
