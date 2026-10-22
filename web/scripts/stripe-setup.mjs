@@ -226,6 +226,7 @@ Object.assign(out, {
     'customer.subscription.deleted',
     'invoice.paid',
     'invoice.payment_failed',
+    'charge.refunded',
   ].join(','),
 });
 for (const n of notes) console.log(`- ${n}`);

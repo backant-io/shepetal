@@ -11,7 +11,7 @@ async function open(req: Request, flow: unknown): Promise<Opened> {
   const user = await requestUser(req);
   if (!user) return { error: 'unauthorized', status: 401 };
   const url = await portalUrl(user, siteUrl(req), flow === 'cancel' ? 'cancel' : undefined);
-  if (!url) return { error: flow === 'cancel' ? 'no_renewing_subscription' : 'no_customer', status: flow === 'cancel' ? 409 : 404 };
+  if (!url) return { error: flow === 'cancel' ? 'no_subscription' : 'no_customer', status: 404 };
   return { url };
 }
 

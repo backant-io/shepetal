@@ -40,8 +40,9 @@ export async function checkoutUI(url, { code, shot, pay = true, returnTo } = {})
     codeResult = refusal ? { refused: refusal } : off ? { applied: off } : { unclear: t.slice(0, 300) };
   }
   const summary = await text(p);
+  const codeField = (await p.locator('#promotionCode').count()) > 0;
   if (shot) await p.screenshot({ path: join(EVIDENCE, `${shot}.png`), fullPage: true });
-  if (!pay) return { codeResult, summary };
+  if (!pay) return { codeResult, summary, codeField };
   if (codeResult?.refused) {
     // Clear the refused code before paying.
     await p.locator('#promotionCode').fill('');
@@ -60,7 +61,7 @@ export async function checkoutUI(url, { code, shot, pay = true, returnTo } = {})
   await p.locator('button[type="submit"]').click();
   await p.waitForURL((u) => u.href.startsWith(returnTo), { timeout: 60000 });
   await p.context().close();
-  return { codeResult, summary };
+  return { codeResult, summary, codeField };
 }
 
 /** The Billing Portal as a subscriber uses it: Cancel subscription, then confirm. */

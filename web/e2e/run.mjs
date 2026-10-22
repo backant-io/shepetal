@@ -103,6 +103,11 @@ const fakeStripe = createServer((req, res) => {
       });
     }
     if (route === 'GET /v1/subscriptions/sub_e2e') return reply(fakeSub);
+    if (route === 'GET /v1/checkout/sessions') return reply({ object: 'list', has_more: false, data: [] });
+    if (route === 'GET /v1/promotion_codes') {
+      const coupon = params.code === 'PRODUCTHUNT' ? { id: 'shepetal_producthunt', metadata: { app: 'shepetal' } } : { id: 'backant100', metadata: {} };
+      return reply({ object: 'list', has_more: false, data: [{ id: `promo_e2e_${params.code}`, object: 'promotion_code', code: params.code, active: true, coupon }] });
+    }
     if (route === 'GET /v1/invoices/in_e2e') return reply({ id: 'in_e2e', object: 'invoice', status: fakeSub.status === 'past_due' ? 'open' : 'paid' });
     if (route === 'POST /v1/subscriptions/sub_e2e') {
       if (params.cancel_at_period_end) fakeSub.cancel_at_period_end = params.cancel_at_period_end === 'true';
@@ -353,6 +358,7 @@ async function main() {
   assert.equal((await app('POST', '/api/checkout', { json: {} })).status, 401, 'checkout signed out');
   assert.equal((await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'yearly' } })).status, 400, 'an unknown plan');
   const calls = (path, method = 'POST') => stripeCalls.filter((c) => c.path === path && c.method === method);
+  assert.deepEqual(await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'monthly', code: 'PRODUCTHUNT' } }), { status: 400, body: { error: 'code_lifetime_only', message: 'The code works on the one-time price only.' } });
   const co = await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'monthly' } });
   assert.equal(co.status, 200, JSON.stringify(co.body));
   assert.match(co.body.url, /^https:\/\/checkout\.stripe\.com\//);
@@ -362,13 +368,13 @@ async function main() {
   const subSent = calls('/v1/checkout/sessions')[0].params;
   assert.equal(subSent.mode, 'subscription');
   assert.equal(subSent['line_items[0][price]'], 'price_e2e_shepetal_monthly');
-  assert.equal(subSent.allow_promotion_codes, 'true');
+  assert.equal(subSent.allow_promotion_codes, undefined, "Stripe's code field stays off");
   assert.equal(subSent.customer, 'cus_e2e');
   assert.equal(subSent.client_reference_id, undefined, "no client_reference_id on a subscription: backant's handler would take it");
   assert.equal(subSent['subscription_data[metadata][app]'], 'shepetal');
   const userId = subSent['subscription_data[metadata][user_id]'];
   assert.match(userId ?? '', /^\d+$/, 'the subscription carries the user id');
-  ok(`checkout monthly: ${co.body.url} (mode subscription, shepetal_monthly by lookup_key, promotion codes, customer cus_e2e, user ${userId} in the subscription metadata)`);
+  ok(`checkout monthly: ${co.body.url} (mode subscription, shepetal_monthly by lookup_key, no code field and a code refused with 400, customer cus_e2e, user ${userId} in the subscription metadata)`);
 
   // ---- 7. Stripe's webhook. backant.io uses the same Stripe account, so this endpoint also gets
   // backant's checkouts: only shepetal's sessions and subscriptions count, everything else is a 200 no-op.
@@ -467,10 +473,12 @@ async function main() {
   const cancelled = await app('POST', '/api/billing/cancel', { token: accessToken });
   assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
   assert.equal(calls('/v1/subscriptions/sub_e2e').at(-1)?.params.cancel_at_period_end, 'true');
-  assert.deepEqual([cancelled.body.status, cancelled.body.subscription.status, cancelled.body.subscription.ends_at], ['active', 'cancels_at_period_end', through]);
-  assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 409, body: { error: 'no_renewing_subscription' } });
+  assert.deepEqual([cancelled.body.settings.status, cancelled.body.settings.subscription.status, cancelled.body.settings.subscription.ends_at], ['active', 'cancels_at_period_end', through]);
+  assert.deepEqual([cancelled.body.license.status, cancelled.body.license.renews], ['active', false]);
+  assert.equal((await app('GET', '/api/license', { token: accessToken })).body.renews, false, 'the license says it at once');
+  assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 404, body: { error: 'no_subscription' } });
   const resumed = await app('POST', '/api/billing/resume', { token: accessToken });
-  assert.equal(resumed.body.subscription.status, 'active');
+  assert.equal(resumed.body.settings.subscription.status, 'active');
   await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
     const t = await accountText();
     for (const s of ['$0.99 a month.', 'Monthly', 'Active', 'Next charge', 'Manage billing', 'Switch to lifetime', 'Cancel subscription', 'Cancel your subscription?', 'nothing is charged again'])
@@ -483,13 +491,15 @@ async function main() {
   ok('plan settings: GET /api/account/plan (active, next billing date, $0.99), cancel at period end, resume, GET /api/billing/portal redirects to the portal');
 
   // Switch to lifetime: bought while subscribed, the subscription ends at once with no further charge.
-  const lt = await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'lifetime' } });
+  assert.deepEqual((await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'lifetime', code: 'PRODUCTHUNT100' } })).body.error, 'invalid_code', "backant's codes never work");
+  const lt = await app('POST', '/api/checkout', { token: accessToken, json: { plan: 'lifetime', code: 'PRODUCTHUNT' } });
   assert.equal(lt.status, 200, JSON.stringify(lt.body));
   const sent = calls('/v1/checkout/sessions').at(-1).params;
   assert.equal(sent.mode, 'payment');
   assert.equal(sent['line_items[0][price]'], 'price_e2e_shepetal_lifetime');
   assert.equal(sent['line_items[0][quantity]'], '1');
-  assert.equal(sent.allow_promotion_codes, 'true');
+  assert.equal(sent.allow_promotion_codes, undefined);
+  assert.equal(sent['discounts[0][promotion_code]'], 'promo_e2e_PRODUCTHUNT', 'the code is on the session');
   assert.equal(sent.customer, 'cus_e2e');
   assert.equal(sent.client_reference_id, userId, 'client_reference_id is the user id');
   assert.equal(calls('/v1/customers').length, 1, 'the same Stripe customer again');

@@ -1,11 +1,15 @@
 #!/usr/bin/env node
 // Both plans end to end in Stripe TEST mode, on the real Worker (wrangler dev, a fresh local D1) and the real
 // Stripe test API, with webhooks forwarded by `stripe listen` (the Stripe CLI, logged in to the account):
-//   1. lifetime with the PRODUCTHUNT code ($23.99 - $19.00 = $4.99), then checkout is 409;
-//   2. monthly: the code is refused, the subscription is paid at $0.99; a second subscription is 409; the code is
-//      refused on the lifetime price for a customer who has paid before (first_time_transaction);
+//   1. lifetime with the PRODUCTHUNT code ($23.99 - $19.00 = $4.99) from the site's own code field; checkout is 409 after;
+//   2. monthly: the code is refused (by the API, and by Stripe), a 100%-off code of another product is refused, the
+//      subscription is paid at $0.99; a second subscription is 409; the code is refused for a customer who has paid;
+//   plan settings: the current plan, cancel and resume at period end, the portal on its cancel flow and as a link;
 //   3. Manage subscription: the Billing Portal, Cancel subscription; it stays active until the period end;
 //   4. a renewal on a declining card (payment_failed, expired), then a good card (active again);
+//   switch to lifetime: the subscription ends at once with no further charge, handled once;
+//   never charged twice: a second tab's session is expired; a subscription paid by a lifetime owner is ended and
+//      refunded; a refund of the lifetime payment ends the license;
 //   5. a redelivered event is a duplicate; a forged signature is 400.
 // It never prints a secret, and refuses a live key. Needs `npm run e2e` (or the OpenNext build) first.
 //
@@ -109,7 +113,7 @@ const worker = spawn(
 worker.stdout.pipe(wlog);
 worker.stderr.pipe(wlog);
 const slog = createWriteStream(join(OUT, 'stripe-listen.log'));
-const EVENTS = 'checkout.session.completed,checkout.session.async_payment_succeeded,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed';
+const EVENTS = 'checkout.session.completed,checkout.session.async_payment_succeeded,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed,charge.refunded';
 const listen = spawn(STRIPE_CLI, ['listen', '--events', EVENTS, '--forward-to', `${BASE}/api/stripe/webhook`], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
 // The listen banner shows the signing secret: it never reaches the log.
 for (const st of [listen.stdout, listen.stderr]) st.on('data', (d) => slog.write(String(d).replace(/whsec_[A-Za-z0-9]+/g, 'whsec_(hidden)')));
@@ -184,7 +188,7 @@ async function until(what, fn, ms = 60_000) {
 }
 const show = (o) => JSON.stringify(o);
 const UI = process.env.BROWSER === '1' ? await import('./stripe-browser.mjs') : null;
-const due = (summary) => summary.match(/Total due \| ([^|]+)/)?.[1]?.trim() ?? summary.match(/(Total|due)[^|]*\| ([^|]+)/)?.[2];
+const due = (summary) => summary.match(/Total due(?: today)? \| ([^|]+)/)?.[1]?.trim() ?? summary.match(/(Total|due)[^|]*\| ([^|]+)/)?.[2];
 
 try {
   for (let i = 0; ; i++) {
@@ -200,17 +204,18 @@ try {
   const a = await person(`pricing-a-${run}@example.com`);
   note(`\n## 1. Lifetime, with the code PRODUCTHUNT (${a.email})`);
   note(`license before: ${show(await a.license())}`);
-  let co = await a.call('POST', '/api/checkout', { plan: 'lifetime' });
+  let co = await a.call('POST', '/api/checkout', { plan: 'lifetime', code: 'PRODUCTHUNT' });
   assert.equal(co.status, 200, show(co));
   let cs = await stripe('GET', `/v1/checkout/sessions/${sessionOf(co.body.url)}`);
-  note(`checkout session ${cs.id}: mode ${cs.mode}, amount_total ${cs.amount_total} ${cs.currency}, allow_promotion_codes ${cs.allow_promotion_codes ?? '(not returned)'}, customer ${cs.customer}`);
+  note(`POST /api/checkout {plan: "lifetime", code: "PRODUCTHUNT"}: session ${cs.id}: mode ${cs.mode}, amount_subtotal ${cs.amount_subtotal}, amount_total ${cs.amount_total} ${cs.currency}, allow_promotion_codes ${cs.allow_promotion_codes ?? '(off)'}, customer ${cs.customer}`);
   let paid;
   if (UI) {
-    const r = await UI.checkoutUI(co.body.url, { code: 'PRODUCTHUNT', shot: '1-lifetime-producthunt', returnTo: BASE });
-    note(`Stripe Checkout in a headless browser: PRODUCTHUNT typed into "Add promotion code": ${show(r.codeResult)}; the page showed total due ${due(r.summary)}; paid with 4242 (screenshots 1-lifetime-producthunt*.png)`);
+    const r = await UI.checkoutUI(co.body.url, { shot: '1-lifetime-producthunt', returnTo: BASE });
+    note(`Stripe Checkout in a headless browser: the page showed "${r.summary.match(/[^|]*\$19\.00 off[^|]*/)?.[0]?.trim()}" and total due ${due(r.summary)}; Stripe's own code field: ${r.codeField ? 'shown (!)' : 'none'}; paid with 4242 (screenshots 1-lifetime-producthunt*.png)`);
+    assert.equal(r.codeField, false);
   } else {
-    paid = await pay(cs.id, { code: 'PRODUCTHUNT' });
-    note(`PRODUCTHUNT entered on the payment page: due ${paid.due} cents; paid with 4242`);
+    paid = await pay(cs.id);
+    note(`paid with 4242: due ${paid.due} cents`);
   }
   await until('lifetime license', async () => (await a.license()).plan === 'lifetime');
   cs = await stripe('GET', `/v1/checkout/sessions/${cs.id}`, { 'expand[0]': 'total_details.breakdown' });
@@ -224,29 +229,37 @@ try {
   // ---- 2. Monthly: the code refused, then paid at $0.99.
   const b = await person(`pricing-b-${run}@example.com`);
   note(`\n## 2. Monthly ${b.email}: the code is refused, then a subscription at $0.99`);
+  const withCode = await b.call('POST', '/api/checkout', { plan: 'monthly', code: 'PRODUCTHUNT' });
+  note(`POST /api/checkout {plan: "monthly", code: "PRODUCTHUNT"}: ${withCode.status} ${show(withCode.body)}`);
+  assert.equal(withCode.status, 400);
+  // A code from elsewhere on the shared account (like backant.io's 100% codes) never works on shepetal.
+  const foreignCoupon = await stripe('GET', '/v1/coupons/shepetal_e2e_foreign100');
+  if (foreignCoupon.http === 404) {
+    await stripe('POST', '/v1/coupons', { id: 'shepetal_e2e_foreign100', percent_off: 100, duration: 'once', name: 'e2e: a code that is not shepetal', metadata: { app: 'shepetal-e2e-foreign' } });
+    await stripe('POST', '/v1/promotion_codes', { coupon: 'shepetal_e2e_foreign100', code: 'FOREIGN100TEST', metadata: { app: 'shepetal-e2e-foreign' } });
+  }
+  const foreign = await b.call('POST', '/api/checkout', { plan: 'lifetime', code: 'FOREIGN100TEST' });
+  note(`a 100%-off code of another product on the account (FOREIGN100TEST, no applies_to): ${foreign.status} ${show(foreign.body)}`);
+  assert.equal(foreign.body.error, 'invalid_code');
   co = await b.call('POST', '/api/checkout', { plan: 'monthly' });
   assert.equal(co.status, 200, show(co));
   cs = await stripe('GET', `/v1/checkout/sessions/${sessionOf(co.body.url)}`);
-  note(`checkout session ${cs.id}: mode ${cs.mode}, amount_total ${cs.amount_total} ${cs.currency}, client_reference_id ${cs.client_reference_id}`);
-  const refused = UI
-    ? (await UI.checkoutUI(co.body.url, { code: 'PRODUCTHUNT', shot: '2-monthly-code-refused', pay: false })).codeResult
-    : await pay(cs.id, { code: 'PRODUCTHUNT' });
-  note(`PRODUCTHUNT entered on the subscription's ${UI ? 'Checkout page (headless browser, screenshot 2-monthly-code-refused.png)' : 'payment page'}: refused: ${refused.refused}`);
-  assert.ok(refused.refused, 'the code must be refused on the subscription');
+  note(`checkout session ${cs.id}: mode ${cs.mode}, amount_total ${cs.amount_total} ${cs.currency}, client_reference_id ${cs.client_reference_id}, allow_promotion_codes ${cs.allow_promotion_codes ?? '(off)'}`);
   const direct = await stripe('POST', '/v1/checkout/sessions', {
     mode: 'subscription',
-    line_items: { 0: { price: cs.line_items?.data?.[0]?.price?.id ?? (await stripe('GET', '/v1/prices', { lookup_keys: { 0: 'shepetal_monthly' } })).data[0].id, quantity: 1 } },
+    line_items: { 0: { price: (await stripe('GET', '/v1/prices', { lookup_keys: { 0: 'shepetal_monthly' } })).data[0].id, quantity: 1 } },
     discounts: { 0: { promotion_code: (await stripe('GET', '/v1/promotion_codes', { code: 'PRODUCTHUNT' })).data[0].id } },
     success_url: 'https://example.com/s',
   });
-  note(`a subscription session created with the code as a discount (API): HTTP ${direct.http}: ${direct.error?.message ?? 'created (!)'}`);
+  note(`and Stripe itself: a subscription session with PRODUCTHUNT as a discount (API): HTTP ${direct.http}: ${direct.error?.message ?? 'created (!)'}`);
   assert.notEqual(direct.http, 200);
   if (UI) {
     const r = await UI.checkoutUI(co.body.url, { shot: '2-monthly', returnTo: BASE });
-    note(`paid without the code in the Checkout page: total due ${due(r.summary)}`);
+    note(`paid in the Checkout page: total due ${due(r.summary)}; Stripe's code field: ${r.codeField ? 'shown (!)' : 'none'}`);
+    assert.equal(r.codeField, false);
   } else {
     paid = await pay(cs.id);
-    note(`paid without the code: due ${paid.due} cents`);
+    note(`paid: due ${paid.due} cents`);
   }
   await until('subscription license', async () => (await b.license()).plan === 'subscription');
   const lb = await b.license();
@@ -255,10 +268,10 @@ try {
   const [ub] = (await d1(`SELECT plan, sub_id, sub_status, current_period_end, cancel_at_period_end, paid_through, stripe_customer_id FROM users WHERE email = '${b.email}'`)).rows;
   note(`D1 row: ${show(ub)}`);
   note(`second monthly checkout: ${show(await b.call('POST', '/api/checkout', { plan: 'monthly' }))}`);
-  // first_time_transaction: this customer has paid once, so the code is refused on the lifetime price too.
-  co = await b.call('POST', '/api/checkout', { plan: 'lifetime' });
-  const second = await pay(sessionOf(co.body.url), { code: 'PRODUCTHUNT', applyOnly: true });
-  note(`PRODUCTHUNT on the lifetime price for this customer, who has paid before: ${second.refused ? `refused: ${second.refused}` : `accepted (!) due ${second.due}`}`);
+  // first_time_transaction: this customer has paid once, so Stripe refuses the code on the lifetime price too.
+  const second = await b.call('POST', '/api/checkout', { plan: 'lifetime', code: 'PRODUCTHUNT' });
+  note(`PRODUCTHUNT on the lifetime price for this customer, who has paid before: ${second.status} ${show(second.body)}`);
+  assert.equal(second.body.error, 'code_not_applicable');
 
   // ---- 3. Billing Portal and cancel.
   // ---- Plan settings (GET /api/account/plan, cancel and resume through the API).
@@ -270,8 +283,8 @@ try {
   note(`subscription (web session): ${show(ps)}`);
   assert.deepEqual([ps.plan, ps.subscription.status, ps.subscription.amount_display, ps.subscription.next_billing_date], ['subscription', 'active', '$0.99', lb.paid_through]);
   const cancelled = await b.call('POST', '/api/billing/cancel', undefined, false);
-  note(`POST /api/billing/cancel: ${cancelled.status} subscription ${show(cancelled.body.subscription)}, actions ${show(cancelled.body.actions)}`);
-  assert.equal(cancelled.body.subscription.status, 'cancels_at_period_end');
+  note(`POST /api/billing/cancel: ${cancelled.status} license ${show(cancelled.body.license)}, settings.subscription ${show(cancelled.body.settings.subscription)}, actions ${show(cancelled.body.settings.actions)}`);
+  assert.equal(cancelled.body.settings.subscription.status, 'cancels_at_period_end');
   let inStripe = await stripe('GET', `/v1/subscriptions/${ub.sub_id}`);
   note(`in Stripe: status ${inStripe.status}, cancel_at_period_end ${inStripe.cancel_at_period_end}, cancel_at ${new Date(inStripe.cancel_at * 1000).toISOString()}`);
   assert.equal(inStripe.cancel_at_period_end, true);
@@ -279,7 +292,7 @@ try {
   assert.deepEqual([(await b.license()).status, (await b.license()).renews], ['active', false]);
   const resumed = await b.call('POST', '/api/billing/resume', undefined, false);
   inStripe = await stripe('GET', `/v1/subscriptions/${ub.sub_id}`);
-  note(`POST /api/billing/resume: ${resumed.status} ${resumed.body.subscription.status}; in Stripe cancel_at_period_end ${inStripe.cancel_at_period_end}`);
+  note(`POST /api/billing/resume: ${resumed.status} ${resumed.body.settings.subscription.status}; in Stripe cancel_at_period_end ${inStripe.cancel_at_period_end}`);
   assert.equal(inStripe.cancel_at_period_end, false);
   const flow = await b.call('POST', '/api/billing/portal', { flow: 'cancel' }, false);
   note(`POST /api/billing/portal {flow: "cancel"}: ${flow.status}, the portal's cancel page answers ${(await fetch(flow.body.url, { redirect: 'manual' })).status}`);
@@ -374,6 +387,41 @@ try {
   const again2 = await fetch(`${BASE}/api/stripe/webhook`, { method: 'POST', headers: { 'stripe-signature': `t=${t2},v1=${createHmac('sha256', WHSEC).update(`${t2}.${cb}`).digest('hex')}` }, body: cb });
   note(`the same event with its record removed, so it runs again: ${again2.status}; license ${(await d.license()).plan}; invoices still ${(await stripe('GET', '/v1/invoices', { subscription: ud.sub_id, limit: 10 })).data.length}`);
   assert.equal(again2.status, 200);
+
+  // ---- Never charged twice.
+  note('\n## Never charged twice');
+  const e = await person(`pricing-e-${run}@example.com`);
+  const tab1 = sessionOf((await e.call('POST', '/api/checkout', { plan: 'monthly' }, false)).body.url);
+  const tab2 = sessionOf((await e.call('POST', '/api/checkout', { plan: 'lifetime' }, false)).body.url);
+  const s1 = await stripe('GET', `/v1/checkout/sessions/${tab1}`);
+  note(`two tabs: the monthly session opened first is now ${s1.status}; paying it: ${await pay(tab1).then(() => 'paid (!)', (err) => `refused (${err.message.split('\n')[0]})`)}`);
+  assert.equal(s1.status, 'expired');
+  await pay(tab2);
+  await until('lifetime for e', async () => (await e.license()).plan === 'lifetime');
+  note(`the second tab (lifetime) paid: ${(await e.license()).plan}`);
+  // A race the expiry cannot stop: a monthly session already open and paid for a lifetime owner. Built here with the
+  // same metadata the site uses, for person a.
+  const [ua] = (await d1(`SELECT id, stripe_customer_id FROM users WHERE email = '${a.email}'`)).rows;
+  const tag = { app: 'shepetal', user_id: String(ua.id) };
+  const raced = await stripe('POST', '/v1/checkout/sessions', {
+    mode: 'subscription', customer: ua.stripe_customer_id, success_url: `${BASE}/account?purchased=1`,
+    line_items: { 0: { price: (await stripe('GET', '/v1/prices', { lookup_keys: { 0: 'shepetal_monthly' } })).data[0].id, quantity: 1 } },
+    metadata: { ...tag, plan: 'monthly' }, subscription_data: { metadata: tag },
+  });
+  await pay(raced.id);
+  const racedSub = (await stripe('GET', `/v1/checkout/sessions/${raced.id}`)).subscription;
+  await until('the extra subscription ended', async () => (await stripe('GET', `/v1/subscriptions/${racedSub}`)).status === 'canceled', 90_000);
+  const racedInv = (await stripe('GET', '/v1/invoices', { subscription: racedSub, limit: 5 })).data[0];
+  await until('its refund', async () => (await stripe('GET', '/v1/refunds', { payment_intent: racedInv.payment_intent })).data.length > 0, 60_000);
+  const rf = (await stripe('GET', '/v1/refunds', { payment_intent: racedInv.payment_intent })).data[0];
+  note(`a monthly subscription paid by a lifetime owner (${racedSub}): ${(await stripe('GET', `/v1/subscriptions/${racedSub}`)).status}, refund ${rf.id} ${rf.amount} ${rf.currency} ${rf.status}; license still ${(await a.license()).plan}`);
+  assert.equal((await a.license()).plan, 'lifetime');
+
+  // A refund of the lifetime payment (as from the Dashboard under the 14-day refund term) ends the license.
+  const [uaPi] = (await d1(`SELECT lifetime_payment_intent AS pi FROM users WHERE email = '${e.email}'`)).rows;
+  await stripe('POST', '/v1/refunds', { payment_intent: uaPi.pi });
+  await until('license ended by the refund', async () => (await e.license()).plan !== 'lifetime', 90_000);
+  note(`the lifetime payment of ${e.email} refunded: license ${show(await e.license())}`);
 
   // ---- 5. A redelivered event is handled once; a forged one is refused.
   note('\n## 5. Webhook idempotency and signature');

@@ -72,6 +72,11 @@
 .s-plan { border-top: 1px solid var(--ink); padding-top: 1.25rem; display: flex; flex-direction: column; align-items: flex-start; }
 .s-price { margin: 0; font-weight: 520; font-size: clamp(2.25rem, calc(4.2 * var(--u)), 7.5rem); line-height: 1; letter-spacing: -.04em; }
 .s-price-line { margin: .6rem 0 1.4rem; font-size: 1.125rem; font-weight: 480; }
+.s-plan-buy { display: flex; flex-direction: column; align-items: flex-start; gap: 1rem; width: 100%; }
+.s-field { display: flex; flex-direction: column; gap: .4rem; width: 100%; max-width: 14rem; }
+.s-label { font-family: var(--mono); font-size: .75rem; letter-spacing: .01em; color: var(--ink2); }
+.s-input { width: 100%; padding: .65rem .8rem; border: 1px solid var(--ink); border-radius: 4px; background: transparent; color: var(--ink); font: 500 1rem/1.2 var(--mono); text-transform: uppercase; letter-spacing: .04em; }
+.s-input:focus-visible { outline: 2px solid #FF4F12; outline-offset: 2px; }
 
 /* the confirmation */
 .s-dialog { max-width: min(32rem, calc(100vw - 2rem)); padding: 2rem; border: 1px solid var(--ink); border-radius: 4px; background: var(--ground); color: var(--ink); box-shadow: 0 30px 60px -20px rgba(22,21,18,.45); }

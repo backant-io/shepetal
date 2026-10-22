@@ -22,6 +22,7 @@ export type User = {
   paid_through?: string | null;
   sub_amount?: number | null;
   sub_currency?: string | null;
+  lifetime_payment_intent?: string | null;
 };
 
 /** Body of GET /api/license (see API.md). */
@@ -107,13 +108,30 @@ export async function setCustomer(userId: number, customer: string): Promise<voi
     .run();
 }
 
-/** A paid lifetime purchase: the user is 'active' forever. Idempotent (Stripe retries webhooks). False if no such user. */
-export async function activate(userId: number, now = Date.now()): Promise<boolean> {
+/**
+ * A paid lifetime purchase: the user is 'active' forever. Idempotent (Stripe retries webhooks). False if no such user.
+ * `paymentIntent` is the payment that bought it (kept from the first purchase).
+ */
+export async function activate(userId: number, paymentIntent: string | null = null, now = Date.now()): Promise<boolean> {
   const r = await db()
     .prepare(
-      "UPDATE users SET status = 'active', plan = 'lifetime', purchased_at = COALESCE(purchased_at, ?2) WHERE id = ?1",
+      `UPDATE users SET status = 'active', plan = 'lifetime', purchased_at = COALESCE(purchased_at, ?2),
+         lifetime_payment_intent = COALESCE(lifetime_payment_intent, ?3) WHERE id = ?1`,
     )
-    .bind(userId, new Date(now).toISOString())
+    .bind(userId, new Date(now).toISOString(), paymentIntent)
+    .run();
+  return r.meta.changes === 1;
+}
+
+/** The lifetime payment was refunded: the license ends (back to the trial dates, or a running subscription). */
+export async function revokeLifetime(paymentIntent: string): Promise<boolean> {
+  const r = await db()
+    .prepare(
+      `UPDATE users SET status = 'trial', purchased_at = NULL, lifetime_payment_intent = NULL,
+         plan = CASE WHEN sub_id IS NOT NULL AND sub_status NOT IN ('canceled', 'incomplete', 'incomplete_expired') THEN 'subscription' ELSE NULL END
+       WHERE lifetime_payment_intent = ?1 AND status = 'active'`,
+    )
+    .bind(paymentIntent)
     .run();
   return r.meta.changes === 1;
 }
@@ -131,7 +149,7 @@ export type Subscription = {
   currency?: string | null;
 };
 
-const TERMINAL = new Set(['canceled', 'incomplete', 'incomplete_expired']);
+export const TERMINAL = new Set(['canceled', 'incomplete', 'incomplete_expired']);
 const iso = (s: number) => new Date(s * 1000).toISOString();
 
 /**
@@ -171,7 +189,7 @@ export async function applySubscription(userId: number, sub: Subscription): Prom
   const stored = user.sub_id === sub.id ? (user.paid_through ?? null) : null;
   const r = await db()
     .prepare(
-      `UPDATE users SET plan = CASE WHEN plan = 'lifetime' THEN plan ELSE 'subscription' END,
+      `UPDATE users SET plan = CASE WHEN plan = 'lifetime' OR ?3 IN ('incomplete', 'incomplete_expired') THEN plan ELSE 'subscription' END,
          sub_id = ?2, sub_status = ?3, current_period_end = ?4, cancel_at_period_end = ?5, paid_through = ?6,
          sub_amount = COALESCE(?7, sub_amount), sub_currency = COALESCE(?8, sub_currency)
        WHERE id = ?1`,

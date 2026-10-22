@@ -33,6 +33,14 @@ describe('Buy button', () => {
     });
   });
 
+  it('sends a code with the lifetime plan, and says why a code was refused', async () => {
+    const f = json(200, { url: 'https://checkout.stripe.com/c/pay/cs_test_2' });
+    await startCheckout('lifetime', f, 'PRODUCTHUNT');
+    expect(f).toHaveBeenCalledWith('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'lifetime', code: 'PRODUCTHUNT' }) });
+    expect(await startCheckout('lifetime', json(400, { error: 'invalid_code' }), 'NOPE')).toEqual({ error: 'This code is not valid.' });
+    expect(await startCheckout('lifetime', json(400, { error: 'code_not_applicable', message: 'This code is for a first purchase.' }), 'PRODUCTHUNT')).toEqual({ error: 'This code is for a first purchase.' });
+  });
+
   it('never navigates on a server error, a missing url or a network failure', async () => {
     for (const f of [
       json(500, { url: 'https://checkout.stripe.com/x' }),
@@ -56,7 +64,7 @@ describe('Buy button', () => {
       expect(await changeRenewal(action, f)).toEqual({ ok: true });
       expect(f).toHaveBeenCalledWith(`/api/billing/${action}`, { method: 'POST' });
       expect(await changeRenewal(action, json(401, {}))).toEqual({ error: expect.stringMatching(/sign in again/) });
-      expect(await changeRenewal(action, json(409, { error: 'no_renewing_subscription' }))).toEqual({
+      expect(await changeRenewal(action, json(404, { error: 'no_subscription' }))).toEqual({
         error: expect.stringMatching(/Reload/),
       });
     }
@@ -70,6 +78,7 @@ describe('Buy button', () => {
     expect(html).toMatch(/\$0\.99<\/p><p class="s-price-line">a month\.<\/p>/);
     expect(html).toContain('Buy once');
     expect(html).toContain('Subscribe');
+    expect(html).toContain('name="code"');
     expect(html).not.toContain('4.99');
   });
 });

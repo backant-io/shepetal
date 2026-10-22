@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
-import { checkoutUrl, getStripe, handleWebhook, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
+import { checkoutUrl, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -24,9 +24,12 @@ let evtN = 0;
 beforeEach(async () => {
   user = await upsertUser('a@example.com');
   vi.spyOn(getStripe().customers, 'create').mockResolvedValue({ id: 'cus_1' } as never);
+  vi.spyOn(getStripe().checkout.sessions, 'list').mockImplementation(() => none() as never);
 });
 afterEach(() => vi.restoreAllMocks());
 
+/** An empty Stripe list (auto-pagination), or one with these items. */
+const none = (...items: object[]) => ({ async *[Symbol.asyncIterator]() { yield* items; } });
 const event = (object: object, type = 'checkout.session.completed', id = `evt_${++evtN}`) =>
   JSON.stringify({ id, object: 'event', type, data: { object } });
 const session = (over: object = {}) => ({
@@ -101,12 +104,14 @@ describe('lifetime ($23.99 once)', () => {
     expect(params).toMatchObject({
       mode: 'payment',
       line_items: [{ price: 'price_lifetime_test', quantity: 1 }],
-      allow_promotion_codes: true,
       customer: 'cus_1',
       client_reference_id: String(user.id),
       metadata: { app: 'shepetal', plan: 'lifetime', user_id: String(user.id) },
     });
     expect(params.subscription_data).toBeUndefined();
+    // Stripe's own code field stays off: backant.io's codes on the shared account (some 100% off) must not apply.
+    expect(params.allow_promotion_codes).toBeUndefined();
+    expect(params.discounts).toBeUndefined();
     await send(event(session({ client_reference_id: params.client_reference_id, metadata: params.metadata })));
     expect((await fresh()).status).toBe('active');
   });
@@ -137,7 +142,7 @@ describe('lifetime ($23.99 once)', () => {
     const paid = event(session(), 'checkout.session.completed', 'evt_switch');
     await send(paid);
     expect(cancel).toHaveBeenCalledTimes(1);
-    expect(cancel).toHaveBeenCalledWith('sub_1', { invoice_now: false, prorate: false }, { idempotencyKey: 'shepetal-lifetime-sub_1' });
+    expect(cancel).toHaveBeenCalledWith('sub_1', { invoice_now: false, prorate: false }, { idempotencyKey: 'shepetal-end-sub_1' });
     expect(list).toHaveBeenCalledWith({ subscription: 'sub_1', status: 'open', limit: 100 });
     expect(voided).toHaveBeenCalledWith('in_open');
     expect(await fresh()).toMatchObject({ status: 'active', plan: 'lifetime', sub_status: 'canceled' });
@@ -162,6 +167,192 @@ describe('lifetime ($23.99 once)', () => {
   });
 });
 
+describe('the PRODUCTHUNT code', () => {
+  const promo = (code: string, app?: string) => ({ id: `promo_${code}`, code, coupon: { id: 'c', metadata: app ? { app } : {} } });
+
+  it('puts a shepetal code on the lifetime session as a discount', async () => {
+    const list = vi.spyOn(getStripe().promotionCodes, 'list').mockResolvedValue({ data: [promo('PRODUCTHUNT', 'shepetal')] } as never);
+    const create = vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://x' } as never);
+    await checkoutUrl(user, 'https://s', 'lifetime', ' PRODUCTHUNT ');
+    expect(list).toHaveBeenCalledWith({ code: 'PRODUCTHUNT', active: true, limit: 10 });
+    const params = create.mock.calls[0][0] as Stripe.Checkout.SessionCreateParams;
+    expect(params.discounts).toEqual([{ promotion_code: 'promo_PRODUCTHUNT' }]);
+    expect(params.allow_promotion_codes).toBeUndefined();
+  });
+
+  it('refuses any code on the monthly plan, before asking Stripe', async () => {
+    const list = vi.spyOn(getStripe().promotionCodes, 'list');
+    const create = vi.spyOn(getStripe().checkout.sessions, 'create');
+    await expect(checkoutUrl(user, 'https://s', 'monthly', 'PRODUCTHUNT')).rejects.toMatchObject({ code: 'code_lifetime_only' });
+    expect(list).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("refuses backant.io's codes on the shared account, even 100% off ones", async () => {
+    vi.spyOn(getStripe().promotionCodes, 'list').mockResolvedValue({ data: [promo('PRODUCTHUNT100')] } as never);
+    const create = vi.spyOn(getStripe().checkout.sessions, 'create');
+    await expect(checkoutUrl(user, 'https://s', 'lifetime', 'PRODUCTHUNT100')).rejects.toMatchObject({ code: 'invalid_code' });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("says when Stripe refuses the code (used before, ended, a customer who has paid)", async () => {
+    vi.spyOn(getStripe().promotionCodes, 'list').mockResolvedValue({ data: [promo('PRODUCTHUNT', 'shepetal')] } as never);
+    vi.spyOn(getStripe().checkout.sessions, 'create').mockRejectedValue(
+      new Stripe.errors.StripeInvalidRequestError({ message: 'This promotion code cannot be redeemed because the associated customer has prior transactions.' } as never),
+    );
+    await expect(checkoutUrl(user, 'https://s', 'lifetime', 'PRODUCTHUNT')).rejects.toMatchObject({ code: 'code_not_applicable' });
+  });
+
+  it('expires the open sessions of the customer first, so a second tab cannot pay twice', async () => {
+    vi.spyOn(getStripe().checkout.sessions, 'list').mockImplementation(
+      () => none({ id: 'cs_old', metadata: { app: 'shepetal' } }, { id: 'cs_backant', metadata: {} }) as never,
+    );
+    const expire = vi.spyOn(getStripe().checkout.sessions, 'expire').mockResolvedValue({} as never);
+    vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://x' } as never);
+    await checkoutUrl(user, 'https://s', 'monthly');
+    expect(getStripe().checkout.sessions.list).toHaveBeenCalledWith({ customer: 'cus_1', status: 'open', limit: 100 });
+    expect(expire).toHaveBeenCalledTimes(1);
+    expect(expire).toHaveBeenCalledWith('cs_old');
+  });
+});
+
+describe('never charged twice', () => {
+  const stubEnd = (ended: object) => {
+    const cancel = vi.spyOn(getStripe().subscriptions, 'cancel').mockResolvedValue(ended as never);
+    vi.spyOn(getStripe().invoices, 'list').mockImplementation(((p: { status: string }) =>
+      p.status === 'paid' ? none({ id: 'in_paid', amount_paid: 99, payment_intent: 'pi_sub' }) : none()) as never);
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    return { cancel, refund };
+  };
+
+  it('ends and refunds a subscription paid by an owner of the lifetime license (a second tab)', async () => {
+    await send(event(session({ payment_intent: 'pi_life' })));
+    const later = sub({ created: nowS() + 60 }); // made after the lifetime purchase
+    const ended = sub({ status: 'canceled', ended_at: nowS() });
+    retrieving(later, later, ended);
+    const { cancel, refund } = stubEnd(ended);
+    await send(event(later, 'customer.subscription.updated'));
+    expect(cancel).toHaveBeenCalledWith('sub_1', { invoice_now: false, prorate: false }, { idempotencyKey: 'shepetal-end-sub_1' });
+    expect(refund).toHaveBeenCalledWith(
+      { payment_intent: 'pi_sub', metadata: { app: 'shepetal', reason: 'duplicate_subscription' } },
+      { idempotencyKey: 'shepetal-refund-pi_sub' },
+    );
+    expect(await license()).toMatchObject({ status: 'active', plan: 'lifetime' });
+  });
+
+  it('keeps the first of two subscriptions and ends and refunds the later one', async () => {
+    retrieving(sub({ id: 'sub_A', created: 100 }));
+    await send(event(sub({ id: 'sub_A' }), 'customer.subscription.updated'));
+    const later = sub({ id: 'sub_B', created: 200 });
+    const endedB = sub({ id: 'sub_B', status: 'canceled', created: 200, ended_at: nowS() });
+    // sync sub_B, then the stored sub_A, then endSubscription(sub_B) reads it twice.
+    retrieving(later, sub({ id: 'sub_A', created: 100 }), later, endedB);
+    const { cancel, refund } = stubEnd(endedB);
+    await send(event(later, 'customer.subscription.updated'));
+    expect(cancel).toHaveBeenCalledWith('sub_B', expect.anything(), expect.anything());
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect(await fresh()).toMatchObject({ sub_id: 'sub_A', sub_status: 'active' });
+    // sub_B's own deleted event later changes nothing.
+    retrieving(endedB);
+    await send(event(endedB, 'customer.subscription.deleted'));
+    expect(await fresh()).toMatchObject({ sub_id: 'sub_A', sub_status: 'active' });
+  });
+
+  it('refunds a second lifetime payment and keeps the first', async () => {
+    await send(event(session({ payment_intent: 'pi_first' })));
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await send(event(session({ id: 'cs_2', payment_intent: 'pi_second' })));
+    expect(refund).toHaveBeenCalledWith(
+      { payment_intent: 'pi_second', metadata: { app: 'shepetal', reason: 'duplicate_lifetime' } },
+      { idempotencyKey: 'shepetal-refund-pi_second' },
+    );
+    // A retry of the first purchase refunds nothing.
+    await send(event(session({ payment_intent: 'pi_first' })));
+    expect(refund).toHaveBeenCalledTimes(1);
+    expect((await fresh()).lifetime_payment_intent).toBe('pi_first');
+  });
+
+  it('ends the lifetime license when its payment is refunded, and ignores refunds of other payments', async () => {
+    await send(event(session({ payment_intent: 'pi_life' })));
+    await send(event({ id: 'ch_1', object: 'charge', payment_intent: 'pi_other', refunded: true }, 'charge.refunded'));
+    expect((await license()).plan).toBe('lifetime');
+    await send(event({ id: 'ch_2', object: 'charge', payment_intent: 'pi_life', refunded: false }, 'charge.refunded'));
+    expect((await license()).plan).toBe('lifetime'); // a partial refund keeps it
+    await send(event({ id: 'ch_3', object: 'charge', payment_intent: 'pi_life', refunded: true }, 'charge.refunded'));
+    expect(await license()).toMatchObject({ plan: 'trial', status: 'trial' });
+  });
+
+  it('refunds nothing when a re-bought lifetime purchase is handled again, and its refund ends it', async () => {
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await send(event(session({ payment_intent: 'pi_A' })));
+    await send(event({ id: 'ch_A', object: 'charge', payment_intent: 'pi_A', refunded: true }, 'charge.refunded'));
+    expect((await license()).plan).toBe('trial');
+    await send(event(session({ id: 'cs_B', payment_intent: 'pi_B' })));
+    await send(event(session({ id: 'cs_B', payment_intent: 'pi_B' }))); // run again (a resend: a new event id)
+    expect(refund).not.toHaveBeenCalled();
+    expect((await fresh()).lifetime_payment_intent).toBe('pi_B');
+    await send(event({ id: 'ch_B', object: 'charge', payment_intent: 'pi_B', refunded: true }, 'charge.refunded'));
+    expect((await license()).plan).toBe('trial');
+  });
+
+  it('never refunds a purchase from before the plans when its event runs again', async () => {
+    await db().prepare("UPDATE users SET status = 'active', plan = 'lifetime', purchased_at = '2026-10-01T00:00:00.000Z' WHERE id = ?1").bind(user.id).run();
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await send(event(session({ payment_intent: 'pi_legacy' })));
+    expect(refund).not.toHaveBeenCalled();
+    expect((await fresh()).lifetime_payment_intent).toBe('pi_legacy');
+  });
+
+  it('keeps the past months of a subscription that began before the lifetime purchase (a switch whose cancel failed)', async () => {
+    retrieving(sub({ created: nowS() - 90 * DAY }));
+    await send(event(sub(), 'customer.subscription.updated'));
+    await db().prepare("UPDATE users SET status = 'active', plan = 'lifetime', purchased_at = ?2 WHERE id = ?1").bind(user.id, new Date().toISOString()).run();
+    const old = sub({ created: nowS() - 90 * DAY });
+    const ended = sub({ status: 'canceled', created: nowS() - 90 * DAY, ended_at: nowS() });
+    retrieving(old, old, ended);
+    const { cancel, refund } = stubEnd(ended);
+    await send(event(old, 'customer.subscription.updated'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(refund).not.toHaveBeenCalled();
+  });
+
+  it('refunds one of two lifetime payments handled at the same moment', async () => {
+    const refund = vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await Promise.all([send(event(session({ id: 'cs_x', payment_intent: 'pi_x' }))), send(event(session({ id: 'cs_y', payment_intent: 'pi_y' })))]);
+    expect(refund).toHaveBeenCalledTimes(1);
+    const kept = (await fresh()).lifetime_payment_intent;
+    expect(refund.mock.calls[0][0]).toMatchObject({ payment_intent: kept === 'pi_x' ? 'pi_y' : 'pi_x' });
+  });
+
+  it('keeps a paid-up subscription over an older one in arrears, which just stops', async () => {
+    retrieving(sub({ id: 'sub_A', created: 100, status: 'past_due' }));
+    await send(event(sub({ id: 'sub_A' }), 'customer.subscription.updated'));
+    const b = sub({ id: 'sub_B', created: 200 });
+    const endedA = sub({ id: 'sub_A', status: 'canceled', created: 100, ended_at: nowS() });
+    retrieving(b, sub({ id: 'sub_A', created: 100, status: 'past_due' }), sub({ id: 'sub_A', created: 100, status: 'past_due' }), endedA);
+    const { cancel, refund } = stubEnd(endedA);
+    await send(event(b, 'customer.subscription.updated'));
+    expect(cancel).toHaveBeenCalledWith('sub_A', expect.anything(), expect.anything());
+    expect(refund).not.toHaveBeenCalled();
+    expect(await fresh()).toMatchObject({ sub_id: 'sub_B', sub_status: 'active' });
+    expect((await license()).status).toBe('active');
+  });
+
+  it('treats a refund Stripe already made (after its 24 h idempotency window) as done', async () => {
+    await send(event(session({ payment_intent: 'pi_first' })));
+    vi.spyOn(getStripe().refunds, 'create').mockRejectedValue(
+      new Stripe.errors.StripeInvalidRequestError({ code: 'charge_already_refunded', message: 'Charge has already been refunded.' } as never),
+    );
+    expect((await send(event(session({ id: 'cs_2', payment_intent: 'pi_second' })))).status).toBe(200);
+  });
+
+  it('never shows a subscription that was never paid as one that ended', async () => {
+    retrieving(sub({ status: 'incomplete_expired' }));
+    await send(event(sub(), 'customer.subscription.updated'));
+    expect((await license()).plan).toBe('trial');
+  });
+});
+
 describe('subscription ($0.99 a month)', () => {
   it('creates a subscription-mode session for the monthly price, tagged so its subscription events are found', async () => {
     const create = vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://checkout.stripe.com/c/pay/cs_2' } as never);
@@ -170,7 +361,6 @@ describe('subscription ($0.99 a month)', () => {
     expect(params).toMatchObject({
       mode: 'subscription',
       line_items: [{ price: 'price_monthly_test', quantity: 1 }],
-      allow_promotion_codes: true,
       customer: 'cus_1',
       metadata: { app: 'shepetal', plan: 'monthly', user_id: String(user.id) },
       subscription_data: { metadata: { app: 'shepetal', user_id: String(user.id) } },
@@ -280,6 +470,17 @@ describe('plan settings: cancel, resume, the portal', () => {
     expect(await setCancelAtPeriodEnd(await fresh(), false)).toBe(false);
   });
 
+  it('gives the next charge of a renewing subscription, and none once cancelled', async () => {
+    const u = await subscribed({ items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } });
+    expect(await nextCharge(u)).toEqual({ amount: 99, currency: 'usd', at: u.current_period_end });
+    expect(await nextCharge({ ...u, cancel_at_period_end: 1 })).toBeNull();
+    expect(await nextCharge({ ...u, sub_status: 'past_due' })).toBeNull();
+    expect(await nextCharge(user)).toBeNull();
+    // A row without the amount yet reads it from Stripe once.
+    retrieving(sub({ items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } }));
+    expect(await nextCharge({ ...u, sub_amount: null, sub_currency: null })).toMatchObject({ amount: 99, currency: 'usd' });
+  });
+
   it('refuses to cancel without a subscription', async () => {
     const update = vi.spyOn(getStripe().subscriptions, 'update');
     expect(await setCancelAtPeriodEnd(user, true)).toBe(false);
@@ -326,6 +527,19 @@ describe('each event once', () => {
     spy.mockResolvedValueOnce(sub());
     expect((await send(payload)).status).toBe(200);
     expect((await license()).status).toBe('active');
+  });
+
+  it('takes an event again when its claim never finished (the Worker was cut off), but not while it runs', async () => {
+    const payload = event(sub(), 'customer.subscription.updated', 'evt_cut');
+    const at = (ms: number) => new Date(Date.now() - ms).toISOString();
+    await db().prepare("INSERT INTO stripe_events (id, type, received_at) VALUES ('evt_cut', 'customer.subscription.updated', ?1)").bind(at(1000)).run();
+    expect((await send(payload)).status).toBe(409);
+    await db().prepare("UPDATE stripe_events SET received_at = ?1 WHERE id = 'evt_cut'").bind(at(5 * 60_000)).run();
+    retrieving(sub());
+    expect(await (await send(payload)).json()).toEqual({ received: true });
+    expect((await license()).status).toBe('active');
+    expect((await db().prepare("SELECT done FROM stripe_events WHERE id = 'evt_cut'").first())?.done).toBe(1);
+    expect(await (await send(payload)).json()).toEqual({ received: true, duplicate: true });
   });
 
   it('ignores event types it does not handle, without recording them', async () => {
