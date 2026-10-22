@@ -172,6 +172,17 @@ final class HubTests: XCTestCase {
                       "openedHub() must hand the Hub the menu's own controllers")
     }
 
+    // F81: Settings has Meeting transcripts next to Recordings, and the launch and hourly sweep apply it to the
+    // meeting store, leaving out the meeting being recorded, as the audio retention does.
+    func testTranscriptRetentionIsInSettingsAndInTheHourlySweep() throws {
+        let settings = try AppSource.body(of: "private struct SettingsTab: View {", in: try AppSource.code("Hub.swift"))
+        XCTAssertTrue(settings.contains("TranscriptRetentionPicker(store: meetings)"), "Settings lacks Meeting transcripts")
+        let rest = try AppSource.body(of: "    private func applyRetention() {", in: try AppSource.code("App.swift"))
+        let sweep = rest[..<(try XCTUnwrap(rest.range(of: "\n    }\n")).lowerBound)]
+        XCTAssertTrue(sweep.contains("applyTranscriptRetention(days: TranscriptRetention.days, recording: meetings.current?.id)"),
+                      "applyRetention() does not sweep transcripts")
+    }
+
     // MARK: Dictionary tab (F91)
 
     private var dictionaryURL: URL { pipeline.dictionary }
@@ -278,7 +289,7 @@ final class HubTests: XCTestCase {
         let micMenu = try XCTUnwrap(menus.first { $0.contains("Test USB Mic") }, "\(menus)")
         XCTAssertEqual(micMenu, try XCTUnwrap(mic.menuItem().submenu).items.map(\.title))
         XCTAssertTrue(micMenu.contains("Prefer Test USB Mic"), "\(micMenu)")
-        XCTAssertEqual(menus.first { !$0.contains("Test USB Mic") }?.first, "Automatic", "the Languages menu")
+        XCTAssertTrue(menus.first { !$0.contains("Test USB Mic") }?.contains("Automatic") == true, "the Languages menu")  // F41's Translate to English comes first on macOS 15
         _ = buttons.map { $0.menu }
         XCTAssertEqual(languageBuilds, 2, "each click builds the menu again, so its ticks are current")
         XCTAssertEqual(shortcuts, 0)

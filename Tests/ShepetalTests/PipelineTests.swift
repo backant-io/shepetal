@@ -326,7 +326,8 @@ final class PipelineTests: XCTestCase {
         pipeline.styleDefaults = defaults
         for id in ["com.tinyspeck.slackmacgap", "com.apple.mail", "com.apple.MobileSMS", "com.apple.TextEdit", ""] {
             let styled = await pipeline.finishText("Hey Anna, I will send it at 5 p.m.", bundleId: id)
-            XCTAssertEqual(styled.text, Cleanup.apply("Hey Anna, I will send it at 5 p.m."), id)
+            let want = Cleanup.apply("Hey Anna, I will send it at 5 p.m.")
+            XCTAssertEqual(styled.text, id == "com.apple.mail" ? EmailFormat.apply(want) : want, id)  // F36 lays out email
         }
     }
 

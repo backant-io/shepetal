@@ -113,7 +113,7 @@ struct MeetingTranscriptView: View {
             }
             .padding(16)
             Divider()
-            if r.segments.isEmpty {
+            if r.segments.isEmpty && r.transcriptDeletedAt == nil {
                 ContentUnavailableView("No speech was recorded", systemImage: "waveform",
                                        description: Text("Nothing was transcribed in this meeting."))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -123,6 +123,10 @@ struct MeetingTranscriptView: View {
                     VStack(alignment: .leading, spacing: 16) {
                         summary(shown)
                         Divider()
+                        if let deleted = MeetingFormat.transcriptDeleted(r) {  // F81: the summary stays
+                            Text(deleted.title).font(.headline)
+                            Text(deleted.detail).foregroundStyle(.secondary)
+                        }
                         LazyVStack(spacing: 12) {
                             ForEach(Array(shown.segments.enumerated()), id: \.offset) { _, s in Bubble(segment: s) }
                         }

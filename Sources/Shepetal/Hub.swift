@@ -77,8 +77,9 @@ extension Pipeline {
         let samples = try AudioStore.read(wav)
         e.rawText = try await engine.transcribe(await Task.detached { VoiceIsolation.apply(samples) }.value, wav: wav)
         // The row's app picks the format and the style (F33, F37); the command stays out of the text (F42).
-        let text = await finishText(e.rawText, bundleId: e.bundleId, url: e.url).text
+        let finished = await finishText(e.rawText, bundleId: e.bundleId, url: e.url), text = finished.text
         e.text = pressEnterCommand() ? PressEnter.split(text, raw: e.rawText).text : text
+        if finished.snippet == nil { e.text = await translate(e.text).text }  // F41; a snippet stays as stored (F40)
         e.model = engine.name
         try history.update(e)
         return e
@@ -239,6 +240,7 @@ private struct HomeTab: View {
                 if !missing.isEmpty { Button("Open Permissions…", action: model.openPermissions) }
                 StatsSection(history: model.pipeline.history)
                 InsightsSection(history: model.pipeline.history)  // F61, F62: streak, heatmap, card
+                ShareStatsSection(history: model.pipeline.history)  // F118
                 Section("Recent notices") {
                     let notices = model.notices()
                     if notices.isEmpty { Text("None yet").foregroundStyle(.secondary) }
@@ -310,6 +312,7 @@ private struct SettingsTab: View {
     }()
     @AppStorage(MeetingRecorder.autoRecordKey) private var autoRecordMeetings = false
     @AppStorage(Indicator.creatorModeKey) private var creatorMode = false
+    @AppStorage(LiveText.key) private var liveText = LiveText.defaultOn
     @AppStorage(MediaControl.muteKey) private var muteWhileDictating = false
     @AppStorage(MediaControl.pauseKey) private var pauseWhileDictating = false
     @AppStorage(PressEnter.key) private var pressEnterCommand = false
@@ -333,10 +336,14 @@ private struct SettingsTab: View {
                 Text("Keep recordings").tag(Retention.keep)
                 Text("Delete recordings after 24 hours").tag(Retention.delete24h)
             }
+            TranscriptRetentionPicker(store: meetings)  // F81
             Button("Open recordings folder") { NSWorkspace.shared.open(Paths.audio) }
             DataExportButton(history: model.pipeline.history, meetings: meetings)
             Toggle("Creator mode: show “\(Indicator.creatorLabel)” next to 🤫 while recording", isOn: $creatorMode)
             Text("For screen recordings and streams, so viewers see when you dictate.")
+                .font(.caption).foregroundStyle(.secondary)
+            Toggle("Show words while you speak", isOn: $liveText)
+            Text("Your last words show next to 🤫 while you dictate. Only the final text is pasted, into the window you dictated into. Not with the alternative engine.")
                 .font(.caption).foregroundStyle(.secondary)
             Toggle("Milestone notices", isOn: $milestoneNotices)
             Text("A short note next to 🤫 when a dictation reaches a streak or a word count, once each time.")
@@ -346,6 +353,7 @@ private struct SettingsTab: View {
             Text("When the cleanup model rewrites a dictation, such as one with a correction or a list, it also gets up to 500 characters on each side of the cursor and up to 500 of the selection, on this Mac. It can fix the case of a name or go on with a numbered list, never add a word you did not say. Other dictations are not affected. The field's text is never saved or logged.")
                 .font(.caption).foregroundStyle(.secondary)
             Button("Dictionary…", action: model.openDictionary)
+            Button("Snippets…") { SnippetsFile.open(model.pipeline.snippets) }  // F40
             HubInputSettings(input: input)
             AIAppsSettings()
             if FnKeySystem.enabled, let previous = FnKeySetting.restorable(FnKeySystem.io) {
@@ -353,6 +361,8 @@ private struct SettingsTab: View {
             }
             Button("Permissions…", action: model.openPermissions)
             StylesSection()  // F37
+            MyVoiceSection(url: model.pipeline.voiceFile, cleanup: { [weak model] in model?.pipeline.cleanup })  // F38
+            EmailSection()  // F36: the signature
             AppFormatSection(history: model.pipeline.history)  // F33
             if model.updater != nil { Toggle("Install updates automatically", isOn: $model.automaticallyInstalls) }
             LabeledContent("Version", value: Self.version)

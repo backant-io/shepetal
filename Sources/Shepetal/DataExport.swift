@@ -2,7 +2,8 @@ import AppKit
 import ShepetalCore
 import SwiftUI
 
-/// F64: Settings' "Export my data…" writes everything shepetal keeps into one owner-only folder the user picked:
+/// F64: Settings' "Export my data…" writes everything shepetal keeps, except notes (F55, not exported yet: #256),
+/// into one owner-only folder the user picked:
 /// history.json and history.csv (every dictation, archived ones too), dictionary.json and a copy of
 /// dictionary.txt, meetings.json, and one Markdown file per meeting. Recordings are not copied: the rows name
 /// their paths, and "Open recordings folder" has them. Model names are left out (they never reach the user).

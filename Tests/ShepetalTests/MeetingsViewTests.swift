@@ -213,6 +213,7 @@ final class MeetingsViewTests: XCTestCase {
         ended.startedAt = t0.addingTimeInterval(-3600)
         try store.save(ended)
         model.query = "facetime"
+        model.searchNow()  // what runs once typing pauses (F120)
         XCTAssertEqual(model.meetings.map(\.id), ["other"])
         XCTAssertEqual(model.record?.meeting.id, "other")
         model.query = ""
@@ -255,5 +256,139 @@ final class MeetingsViewTests: XCTestCase {
         // A store that refuses says so instead of losing the notes silently.
         model.setNotes("x", for: "gone")
         XCTAssertTrue(model.message.hasPrefix("Notes not saved"))
+    }
+
+    // F81: Wispr Flow's choices (keep, or 1 to 365 days), and a meeting whose transcript went says when and after
+    // how long, while its summary and notes stay worth copying.
+    func testDeletedTranscriptSaysAfterHowManyDaysAndTheSummaryStays() throws {
+        XCTAssertEqual(TranscriptRetention.choices, [0, 1, 7, 30, 90, 180, 365])
+        XCTAssertEqual(TranscriptRetention.choices.map(TranscriptRetention.label),
+                       ["Keep transcripts", "Delete transcripts after 1 day", "Delete transcripts after 7 days",
+                        "Delete transcripts after 30 days", "Delete transcripts after 90 days",
+                        "Delete transcripts after 180 days", "Delete transcripts after 365 days"])
+        XCTAssertNil(MeetingFormat.transcriptDeleted(record), "kept")
+        var r = record
+        let ended = try XCTUnwrap(r.meeting.endedAt)
+        r.transcriptDeletedAt = ended.addingTimeInterval(86_400 + 1_800)  // the hourly sweep after 1 day
+        XCTAssertEqual(MeetingFormat.transcriptDeleted(r, timeZone: utc)?.title, "Transcript deleted after 1 day")
+        XCTAssertEqual(MeetingFormat.transcriptDeleted(r, timeZone: utc)?.detail,
+                       "Deleted on 21.10.26, as set in Settings under Meeting transcripts. The summary and your notes stay.")
+        r.transcriptDeletedAt = ended.addingTimeInterval(7 * 86_400 + 60)
+        XCTAssertEqual(MeetingFormat.transcriptDeleted(r, timeZone: utc)?.title, "Transcript deleted after 7 days")
+
+        let store = InMemoryMeetingStore([record])
+        let model = MeetingsModel(store: store, copy: { _ in })
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: "a", now: ended.addingTimeInterval(86_401)), [],
+                       "the meeting being recorded keeps its transcript")
+        XCTAssertEqual(try store.applyTranscriptRetention(days: 1, recording: nil, now: ended.addingTimeInterval(86_401)), ["a"])
+        model.refresh()
+        let shown = try XCTUnwrap(model.record)
+        XCTAssertEqual(shown.segments, [])
+        XCTAssertEqual(MeetingFormat.transcriptDeleted(shown, timeZone: utc)?.title, "Transcript deleted after 1 day")
+        XCTAssertEqual(shown.summary?.overview, "The beta ships on Friday.")
+        XCTAssertTrue(model.canCopySummary)
+        XCTAssertFalse(MeetingFormat.markdown(shown, timeZone: utc).contains("## Transcript"))
+    }
+
+    // F78: All lists every meeting; Folders lists the open folder's, newest first. A meeting can be in two folders,
+    // and deleting a folder leaves its meetings in All. Search in the Folders tab stays in the open folder, and a
+    // meeting the folder hides still opens (Open in Meetings) by going back to All.
+    func testFoldersTabListsTheOpenFolderAndScopesTheSearch() throws {
+        let store = InMemoryMeetingStore()
+        for (id, app, h) in [("old", "Zoom", 0.0), ("mid", "FaceTime", 1), ("new", "Teams", 2)] {
+            try store.save(meeting(id, app, at: t0.addingTimeInterval(h * 3600)))
+            try store.append([Segment(speaker: .others, start: 1, end: 2, text: "the \(id) budget is fine")], to: id)
+        }
+        let model = MeetingsModel(store: store, copy: { _ in })
+        model.refresh()
+        XCTAssertEqual(model.meetings.map(\.id), ["new", "mid", "old"])
+
+        model.createFolder("Clients")
+        let clients = try XCTUnwrap(model.folderID)
+        XCTAssertEqual(model.tab, .folders, "a new folder opens")
+        XCTAssertEqual(model.meetings, [])
+        XCTAssertNil(model.record)
+        model.toggle("old", in: clients)
+        model.toggle("new", in: clients)
+        model.toggle("mid", in: clients)
+        model.toggle("mid", in: clients)  // and out again
+        XCTAssertEqual(model.meetings.map(\.id), ["new", "old"])
+        XCTAssertEqual(model.folders.map(\.name), ["Clients"])
+
+        model.query = "budget"
+        model.searchNow()
+        XCTAssertEqual(model.meetings.map(\.id), ["new", "old"], "only the folder's")
+        XCTAssertEqual(model.snippets["old"], "the old budget is fine")
+        model.tab = .all
+        XCTAssertEqual(model.meetings.map(\.id), ["new", "mid", "old"])
+        model.query = ""
+        model.searchNow()
+        XCTAssertEqual(model.snippets["old"], "")
+
+        model.createFolder("Beta")
+        let beta = try XCTUnwrap(model.folderID)
+        model.toggle("old", in: beta)
+        XCTAssertEqual(model.folders.map(\.name), ["Beta", "Clients"])
+        XCTAssertEqual(model.folders.filter { $0.meetingIDs.contains("old") }.count, 2, "old is in both")
+        model.renameFolder(beta, to: "Launch")
+        XCTAssertEqual(model.folders.map(\.name), ["Clients", "Launch"])
+        model.deleteFolder(beta)
+        XCTAssertEqual(model.folderID, clients, "the next folder opens")
+        XCTAssertEqual(model.meetings.map(\.id), ["new", "old"], "old stays in Clients")
+        model.openFolder(clients)
+        model.select("mid")  // not in Clients
+        XCTAssertEqual(model.tab, .all)
+        XCTAssertEqual(model.record?.meeting.id, "mid")
+        model.tab = .all
+        XCTAssertEqual(model.meetings.count, 3, "deleting a folder deletes no meeting")
+
+        model.createFolder("  ")
+        XCTAssertTrue(model.message.hasPrefix("Folder not created"), model.message)
+    }
+
+    // F120: typing "zoo" asks the store once, after the pause, not once per letter, and the view's 1 s poll
+    // (refresh) never searches for a half-typed word: on a large store each ranked search costs a noticeable moment
+    // on the main thread. A poll with nothing new asks the store nothing. The pause is injected and held open, so the
+    // test needs no clock.
+    func testTypingAsksTheStoreOnceItPauses() async throws {
+        let store = InMemoryMeetingStore()
+        try store.save(meeting("a", "Zoom", at: t0))
+        try store.save(meeting("b", "Teams", at: t0.addingTimeInterval(-60)))
+        var held: [CheckedContinuation<Void, Never>] = []
+        let model = MeetingsModel(store: store, copy: { _ in }, pause: { await withCheckedContinuation { held.append($0) } })
+        model.refresh()  // the tab opens
+        model.query = "z"
+        model.refresh()  // the poll, between keystrokes: nothing new, so no search
+        try store.setNotes("zebra", for: "b")  // a write lands while typing (a live segment, a note)
+        model.refresh()  // so the poll searches again, for what was last searched
+        model.query = "zo"
+        model.query = "zoo"
+        model.refresh()
+        for _ in 0..<1_000 where held.count < 3 { await Task.yield() }
+        XCTAssertEqual(held.count, 3)
+        XCTAssertEqual(store.asked, ["", ""], "neither a keystroke nor the poll asks for a half-typed word")
+        XCTAssertEqual(model.meetings.map(\.id), ["a", "b"])
+        held.forEach { $0.resume() }
+        held = []
+        for _ in 0..<1_000 where store.asked.count < 3 { await Task.yield() }
+        for _ in 0..<100 { await Task.yield() }  // room for a second, wrong query
+        XCTAssertEqual(store.asked, ["", "", "zoo"])
+        XCTAssertEqual(model.meetings.map(\.id), ["a"])
+
+        model.refresh()
+        XCTAssertEqual(store.asked, ["", "", "zoo"], "nothing changed: the poll does not search again")
+        try store.save(meeting("c", "Zoom", at: t0.addingTimeInterval(60)))  // a new meeting lands
+        model.refresh()
+        XCTAssertEqual(store.asked, ["", "", "zoo", "zoo"])
+        XCTAssertEqual(model.meetings.map(\.id), ["c", "a"])
+
+        // Open in Meetings (Hub.showMeeting) empties the field, then asks for a meeting the search still hides.
+        model.query = ""
+        model.select("b")
+        XCTAssertEqual(model.record?.meeting.id, "b")
+        XCTAssertEqual(model.meetings.map(\.id), ["c", "a", "b"])
+        held.forEach { $0.resume() }  // the emptied field's pause, already cancelled
+        for _ in 0..<100 { await Task.yield() }
+        XCTAssertEqual(model.record?.meeting.id, "b")
     }
 }
