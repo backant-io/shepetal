@@ -313,6 +313,12 @@ async function main() {
     };
     const meta = /<meta name="shepetal-analytics" content="\{&quot;key&quot;:&quot;phc_e2e&quot;/;
     for (const path of ['/', '/faq']) assert.match((await cached(path)).body, meta, path);
+    // A page OpenNext served from its copy is kept in the data center's cache (worker.ts), one entry per body.
+    const again = await fetch(`${BASE}/`);
+    assert.equal(again.headers.get('cf-cache-status'), 'HIT', 'the second / comes from the cache');
+    secure(again, '/ from the cache');
+    assert.match(await again.text(), meta, 'the analytics meta is added to the cached page too');
+    assert.equal((await cached('/', { rsc: '1' })).type, 'text/x-component', 'the RSC payload of a cached page is its own entry');
     assert.equal((await cached('/faq', { rsc: '1' })).type, 'text/x-component');
     assert.equal((await cached('/faq', { rsc: '1', 'next-router-prefetch': '1', 'next-router-segment-prefetch': '/_tree' })).type, 'text/x-component');
     const missing = await cached('/perf-probe-not-found', {}, 404);
