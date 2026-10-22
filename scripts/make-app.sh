@@ -45,7 +45,7 @@ REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-$ZIP}
 SPARKLE_PUBLIC_KEY=${SPARKLE_PUBLIC_KEY:-aXU+sm8y+UDKwB2M7DxhacVN/BAgTqMsHq2rMc3fibs=}
 # The one place the update domain lives. release.sh and mac-release.yml read the feed URL back from the built app
 # for the appcast's download URLs, so the DMG is served from the same site. Every shipped build keeps it.
-SHEPETAL_DOMAIN=${SHEPETAL_DOMAIN:-shepetal.backant.io}
+SHEPETAL_DOMAIN=${SHEPETAL_DOMAIN:-shepetal.app}
 [[ $SHEPETAL_DOMAIN =~ ^[a-z0-9.-]+$ ]] || { echo "SHEPETAL_DOMAIN must be a bare host name: $SHEPETAL_DOMAIN" >&2; exit 2; }
 case ${UPDATES:-0} in
   1) UPDATE_KEYS="<key>SUFeedURL</key><string>https://$SHEPETAL_DOMAIN/appcast.xml</string>

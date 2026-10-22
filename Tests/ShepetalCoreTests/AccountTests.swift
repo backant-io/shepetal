@@ -205,6 +205,23 @@ final class AccountTests: XCTestCase {
         }
     }
 
+    /// Updates come from the same site as the account: every shipped build keeps its SUFeedURL for good (make-app.sh).
+    func testTheUpdateFeedIsOnTheSiteAndNoSourceLinksToGitHub() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../..").standardized
+        let makeApp = try String(contentsOf: root.appendingPathComponent("scripts/make-app.sh"), encoding: .utf8)
+        XCTAssertTrue(makeApp.contains("SHEPETAL_DOMAIN=${SHEPETAL_DOMAIN:-\(Site.host)}\n"), "the feed's default domain is Site.host")
+        // #277: the repository goes private, so the app links to no GitHub page.
+        let files = FileManager.default.enumerator(at: root.appendingPathComponent("Sources"), includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
+        XCTAssertFalse(files.isEmpty)
+        for f in files {
+            for (n, line) in try String(contentsOf: f, encoding: .utf8).components(separatedBy: "\n").enumerated()
+            where line.contains("github.com") && !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                XCTFail("\(f.lastPathComponent):\(n + 1) links to GitHub")
+            }
+        }
+    }
+
     func testBaseURLDefaultsToTheServiceAndHonorsTheOverride() {
         unsetenv("SHEPETAL_ACCOUNT_URL")
         XCTAssertEqual(AccountClient().base.absoluteString, "https://shepetal.app")

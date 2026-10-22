@@ -141,7 +141,7 @@ Not in scope here: the language and shortcut steps of F89. They stay in the 🤫
 
 | Info.plist key | Value |
 |---|---|
-| `SUFeedURL` | `https://<SHEPETAL_DOMAIN>/appcast.xml`. The domain is set in one place, make-app.sh (default `shepetal.backant.io` until Pavel's own domain is live), and every shipped build keeps it |
+| `SUFeedURL` | `https://<SHEPETAL_DOMAIN>/appcast.xml`. The domain is set in one place, make-app.sh (default `shepetal.app`), and every shipped build keeps it |
 | `SUPublicEDKey` | the public EdDSA key (public; committed in make-app.sh) |
 | `SUEnableAutomaticChecks` | `true`. Sparkle never asks "check automatically?" |
 | `SUScheduledCheckInterval` | `86400` (daily) |
