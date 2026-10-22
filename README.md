@@ -10,7 +10,7 @@ An open-source replacement for Wispr Flow. Status: in design.
 
 From a release (exact click-by-click steps are in each release's notes):
 
-1. Download `Shepetal-<version>.dmg` from the [Mac releases](https://github.com/backant-io/shepetal/releases) and open it.
+1. Download `Shepetal-<version>.dmg` from the site's `/download` page and open it.
 2. Drag Shepetal into Applications in the window that opens, then open it from Applications. (Opened from the DMG or Downloads instead, it offers to move itself, once per version: to /Applications, or to ~/Applications when it cannot write there. It updates itself only from Applications.)
 3. Shepetal runs in the menu bar (🤫) with no Dock icon, and a tiny 🤫 sits in the bottom-left corner of the screen. The welcome window shows Microphone, Accessibility and Input Monitoring (and System Audio Recording for meetings, optional) with their live status and an Open button each. Grant the three, sign in with Google if asked, then hold `fn` in the test field. "Start Shepetal when I log in" is ticked; Done applies it.
 4. Hold `fn` and talk in any app.
@@ -53,13 +53,13 @@ With a certificate it signs with the hardened runtime and `scripts/mac/Shepetal.
 
 `.github/workflows/mac-release.yml` releases an annotated `v<x.y.z>-mac` tag on main in jobs that keep the signing secrets away from repository code (#227):
 - **provenance** (no secrets, no repo code): the tag is annotated and its commit is on main;
-- **build** (no secrets): `scripts/mac/release.sh --unsigned`: the guard (`scripts/mac/release_guard.py`: tag format, full clone, on main, version and build above the last published Mac release), the Swift tests, and an ad-hoc DMG;
+- **build** (no secrets): `scripts/mac/release.sh --unsigned`: the guard (`scripts/mac/release_guard.py`: tag format, full clone, on main), the Swift tests, and an ad-hoc DMG with updates on (`UPDATES=1`);
 - **sign** (environment `mac-release`, runs no repo script): inline `codesign` of the app inside the DMG with Developer ID and the hardened runtime, nested code first; the designated requirement must equal `scripts/mac/designated-requirement.txt`, or every user would have to grant the permissions again; then `notarytool`, `stapler` and `spctl`;
-- **appcast** (environment `mac-release`, runs no repo script): Sparkle 2.10.0's own `generate_appcast`, downloaded and checked against its SHA-256;
-- **verify** (no secrets): `scripts/mac/verify-update.swift`, the appcast's EdDSA signature and length against the `SUPublicEDKey` inside the built app;
-- **draft** (runs no repo script): a **draft** release with the DMG, its `.sha256` and `appcast.xml`. Nothing is published by CI: try the draft's DMG, write the notes, and click Publish release (a full release, not a pre-release).
+- **appcast** (environment `mac-release`, runs no repo script): Sparkle 2.10.0's own `generate_appcast`, downloaded and checked against its SHA-256, with the DMG's URL on the site in the app's `SUFeedURL` (`https://<domain>/download/<version>/`);
+- **verify** (no secrets): `scripts/mac/verify-update.swift`, the appcast's EdDSA signature and length against the `SUPublicEDKey` inside the built app, plus its `SUFeedURL`, the enclosure URL and the `.sha256`;
+- **stage** (environment `mac-release`, runs no repo script): the DMG, its `.sha256` and `appcast.xml` go to `staging/<version>/` in the R2 bucket `shepetal-releases`, which is never served. Nothing is published by CI: try the DMG, then `scripts/mac/promote.sh <version> --latest` checks those exact bytes again, copies them to `releases/<version>/` and points `latest.json` (what `/download` and `/appcast.xml` serve) at them (docs/install-and-update.md 3).
 
-Credentials live only in the `mac-release` environment (`MAC_DEVELOPER_ID_P12`, `MAC_DEVELOPER_ID_P12_PASSWORD`, `NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`, `SPARKLE_ED_PRIVATE_KEY`); a missing one fails the run. On the maintainer's Mac, `scripts/mac/release.sh` does the whole release with the login Keychain (the Developer ID identity, the notarytool profile `shepetal-notary`, the Sparkle key from `generate_keys`), and a missing credential makes it a dry run that lists what it skipped. A PR that touches the release path runs `release.sh --dry-run` and then the sign, appcast and verify steps ad-hoc with a throwaway Sparkle key, and keeps the DMG as a workflow artifact. Setup steps: docs/install-and-update.md, "Pavel must provide".
+Credentials live only in the `mac-release` environment (`MAC_DEVELOPER_ID_P12`, `MAC_DEVELOPER_ID_P12_PASSWORD`, `NOTARY_KEY_P8`, `NOTARY_KEY_ID`, `NOTARY_ISSUER_ID`, `SPARKLE_ED_PRIVATE_KEY`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ENDPOINT`); a missing one fails the run. On the maintainer's Mac, `scripts/mac/release.sh` does the whole release with the login Keychain (the Developer ID identity, the notarytool profile `shepetal-notary`, the Sparkle key from `generate_keys`), and a missing credential makes it a dry run that lists what it skipped. A PR that touches the release path runs `release.sh --dry-run`, then the sign, appcast and verify steps ad-hoc with a throwaway Sparkle key, keeps the verified files as a workflow artifact, and runs `scripts/mac/test-promote.sh` on them against a throwaway local R2. Setup steps: docs/install-and-update.md, "Pavel must provide".
 
 ### Use
 
