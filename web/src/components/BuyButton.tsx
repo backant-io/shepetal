@@ -166,7 +166,7 @@ export function CancelSubscription({ until }: { until: string }) {
               setBusy(true);
               setError('');
               const r = await changeRenewal('cancel');
-              if ('ok' in r) return window.location.reload();
+              if ('ok' in r) return window.location.assign(window.location.pathname);
               setError(r.error);
               setBusy(false);
             }}
