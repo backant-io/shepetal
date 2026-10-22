@@ -88,9 +88,7 @@ export default function TermsOfUse() {
           <p>
             Subject to these Terms, Company grants you a non-transferable, non-exclusive, revocable, limited license to
             use the Service for your own personal or internal business use, during your trial, after a lifetime purchase
-            without time limit, and with a subscription for as long as it is paid. The shepetal source code is published
-            under the MIT License, and nothing in these Terms limits the rights that license gives you to the source
-            code.
+            without time limit, and with a subscription for as long as it is paid.
           </p>
           <p>
             You shall not (a) resell, sublicense or share your Account or license with others; (b) interfere with or

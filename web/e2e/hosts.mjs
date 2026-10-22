@@ -104,6 +104,22 @@ try {
     assert.equal(login.status, 307);
     assert.ok(decodeURIComponent(loc(login)).includes(`redirect_uri=${SITE}/api/auth/callback/google`), 'Google sign-in with the callback on the domain');
     ok(`${DOMAIN}: pages 200, /api/* answers, the canonical URL and Google's callback are on ${SITE}`);
+
+    // Pavel's rule: nothing public discloses the source code, its license or where it is hosted. Every page in the
+    // sitemap plus the pages it leaves out, as the Worker renders them; the font and emoji license files are
+    // third-party notices and are not pages.
+    const sitemap = await (await get('/sitemap.xml')).text();
+    const paths = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => new URL(m[1]).pathname);
+    assert.ok(paths.length >= 9, `the sitemap lists the public pages (${paths.length})`);
+    for (const path of [...paths, '/install', '/login', '/account', '/robots.txt', '/sitemap.xml']) {
+      const r = await get(path);
+      assert.equal(r.status, 200, path);
+      const page = await r.text();
+      const text = page.replace(/<script[\s\S]*?<\/script>|<style[\s\S]*?<\/style>/g, ' ').replace(/<[^>]+>/g, ' ');
+      assert.doesNotMatch(page, /github/i, `${path} names GitHub`);
+      assert.doesNotMatch(text, /MIT License|source code|open[- ]source/i, `${path} mentions the source code or its license`);
+    }
+    ok(`${DOMAIN}: no page names GitHub, the source code, open source or the MIT License (${paths.length} sitemap pages and 5 more)`);
   });
 
   await onHost(`www.${DOMAIN}`, async (get) => {
