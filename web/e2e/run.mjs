@@ -118,7 +118,12 @@ const fakeStripe = createServer((req, res) => {
     }
     if (route === 'GET /v1/invoices/in_e2e') return reply({ id: 'in_e2e', object: 'invoice', status: fakeSub.status === 'past_due' ? 'open' : 'paid' });
     if (route === 'POST /v1/subscriptions/sub_e2e') {
-      if (params.cancel_at_period_end) fakeSub.cancel_at_period_end = params.cancel_at_period_end === 'true';
+      // As Stripe does: cancel at period end sets cancel_at to the period end; cancel_at '' clears it.
+      if (params.cancel_at_period_end) {
+        fakeSub.cancel_at_period_end = params.cancel_at_period_end === 'true';
+        fakeSub.cancel_at = fakeSub.cancel_at_period_end ? fakeSub.current_period_end : null;
+      }
+      if ('cancel_at' in params) Object.assign(fakeSub, { cancel_at: params.cancel_at ? Number(params.cancel_at) : null, cancel_at_period_end: false });
       return reply(fakeSub);
     }
     if (route === 'DELETE /v1/subscriptions/sub_e2e') {
@@ -488,7 +493,7 @@ async function main() {
   assert.equal(subSent.allow_promotion_codes, undefined, "Stripe's code field stays off");
   assert.equal(subSent['automatic_tax[enabled]'], 'true', 'Stripe Tax');
   assert.equal(subSent['consent_collection[terms_of_service]'], 'required', 'the EU consent to delivery right away');
-  assert.match(subSent['custom_text[terms_of_service_acceptance][message]'] ?? '', /14-day right of withdrawal/);
+  assert.match(subSent['custom_text[terms_of_service_acceptance][message]'] ?? '', /14-day \[right of withdrawal\]\(http:\/\/localhost:\d+\/refunds#withdrawal\)/, 'the withdrawal information is linked');
   assert.equal(subSent.success_url, `${BASE}/account?purchased=1`, 'Stripe URLs follow the site address');
   assert.equal(subSent.customer, 'cus_e2e');
   assert.equal(subSent.client_reference_id, undefined, "no client_reference_id on a subscription: backant's handler would take it");
@@ -602,36 +607,70 @@ async function main() {
   assert.equal(resumed.body.settings.subscription.status, 'active');
 
   // § 312k BGB: "Verträge hier kündigen" in the footer leads to /cancel, a static page, and its Jetzt kündigen button
-  // cancels with no sign-in (no cookie, no token): the subscription stops at the end of the paid month at once.
-  await check('/cancel: the footer button, a static page, and Jetzt kündigen with no sign-in ends the subscription at period end, with a receipt to keep; the same receipt for an unknown email, which gets no account', async () => {
+  // cancels with no sign-in (no cookie, no token). The receipt comes at once, the same for every email; the work runs
+  // after it (waitUntil): Stripe, the record, and the notice to Pavel (wrangler dev only prints it).
+  await check('/cancel: the footer button, a static page, and Jetzt kündigen with no sign-in: the receipt at once, then the subscription ends at period end or on a later date (shown on /account, undone by Resume), every declaration recorded and sent to Pavel; another site, an unknown email and a flood get nothing', async () => {
     assert.match(await (await fetch(`${BASE}/terms`)).text(), /<a [^>]*href="\/cancel"[^>]*>Verträge hier kündigen<\/a>/, 'the footer carries the button');
     const page = await fetch(`${BASE}/cancel`);
     assert.equal(page.status, 200);
     assert.equal(page.headers.get('x-opennext-cache'), 'HIT', '/cancel is served from the prerendered cache');
     assert.match(await page.text(), /<button type="submit"[^>]*>Jetzt kündigen<\/button>/);
-    const press = (fields) =>
-      fetch(`${BASE}/api/cancel`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE }, body: new URLSearchParams(fields) });
+    const press = (fields, origin = BASE) =>
+      fetch(`${BASE}/api/cancel`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin }, body: new URLSearchParams(fields) });
+    const updates = () => calls('/v1/subscriptions/sub_e2e');
+    const settle = async (what, done) => {
+      for (let i = 0; !(await done()); i++) {
+        if (i > 100) throw new Error(`not done after 10 s: ${what}`);
+        await sleep(100);
+      }
+    };
+    const refused = await press({ email }, 'https://evil.example');
+    assert.equal(refused.status, 403, 'a post from another site is refused');
+    assert.match(await refused.text(), /was not received/);
+    const before = updates().length;
     const sentAt = Date.now();
     const res = await press({ kind: 'ordinary', reason: '', contract: 'monthly', end: 'asap', date: '', email: email.toUpperCase() });
     const receipt = await res.text();
     assert.equal(res.status, 200, receipt);
     assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'self'/, 'worker.ts answers it, with the security headers');
-    assert.equal(calls('/v1/subscriptions/sub_e2e').at(-1)?.params.cancel_at_period_end, 'true', 'Stripe: cancel at period end');
-    const l = await app('GET', '/api/license', { token: accessToken });
-    assert.deepEqual([l.body.status, l.body.renews, l.body.paid_through], ['active', false, through], 'it works until the end of the paid month');
+    assert.match(receipt, /Your cancellation is received\.[\s\S]*It will be processed now\./);
+    assert.doesNotMatch(receipt, /stops renewing|is cancelled/, 'the receipt claims nothing before it is done');
+    assert.match(receipt, /no email has been sent/, 'and says no email was sent while SES is not set up');
     const stamp = receipt.match(/Sent with the Jetzt kündigen button on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC\./);
     assert.ok(stamp && Math.abs(Date.parse(`${stamp[1]}T${stamp[2]}Z`) - sentAt) < 60_000, 'the receipt carries the time it was sent');
     assert.match(receipt, /<a href="data:text\/plain;charset=utf-8,[^"]+" download="shepetal-cancellation-\d{4}-\d{2}-\d{2}\.txt">/, 'and a file to keep');
+    await settle('Stripe: cancel at period end', () => updates().length > before);
+    assert.equal(updates().length, before + 1, 'one Stripe call, and none for the refused post');
+    assert.equal(updates().at(-1)?.params.cancel_at_period_end, 'true', 'Stripe: cancel at period end');
+    const l = await app('GET', '/api/license', { token: accessToken });
+    assert.deepEqual([l.body.status, l.body.renews, l.body.paid_through], ['active', false, through], 'it works until the end of the paid month');
     const other = 'nobody-e2e@example.com';
     const stranger = await (await press({ email: other })).text();
     const blank = (html, who) => html.replaceAll(who, '@').replaceAll(encodeURIComponent(who), '@').replace(/\d{4}-\d{2}-\d{2}( at |%20at%20)\d{2}(:|%3A)\d{2}(:|%3A)\d{2}/g, 'T');
     assert.equal(blank(stranger, other), blank(receipt, email.toUpperCase()), 'the same page whether the email has an account or not');
+    await settle('both recorded', async () => (await d1('SELECT count(*) FROM cancellations'))[0][0] === 2);
     assert.deepEqual(await d1(`SELECT count(*) FROM users WHERE email = '${other}'`), [[0]], 'no account is created');
-    assert.deepEqual(await d1('SELECT outcome FROM cancellations ORDER BY id'), [['cancelled_at_period_end'], ['no_account']], 'both are recorded');
+    assert.deepEqual(await d1('SELECT outcome, ends_at FROM cancellations ORDER BY id'), [['cancelled', through], ['no_account', null]], 'both are recorded, with the end Stripe has');
+    const log = () => readFileSync(logFile, 'utf8');
+    await settle("Pavel's notices", () => log().includes(`cancel: no_account: ${other}`));
+    assert.match(log(), /cancel: cancelled: /, 'Pavel is told of the cancellation too');
     const bad = await press({ email: '' });
     await bad.text(); // an unread body leaves the socket behind (EPIPE on the next request)
     assert.equal(bad.status, 400, 'the email is required');
     assert.equal((await app('POST', '/api/billing/resume', { token: accessToken })).body.settings.subscription.status, 'active', 'Resume on /account undoes it');
+    // A later day: Stripe's cancel_at, which /account shows as the end and Resume clears.
+    const day = new Date(Date.parse(through) + 20 * 86_400_000).toISOString().slice(0, 10);
+    await (await press({ end: 'date', date: day, email })).text();
+    await settle('Stripe: cancel_at', () => updates().at(-1)?.params.cancel_at !== undefined);
+    assert.equal(updates().at(-1).params.cancel_at, String(Date.parse(`${day}T23:59:59Z`) / 1000));
+    const ending = await app('GET', '/api/account/plan', { token: accessToken });
+    assert.deepEqual([ending.body.subscription.status, ending.body.subscription.ends_at, ending.body.subscription.next_billing_date, ending.body.actions.resume], ['cancels_at_period_end', `${day}T23:59:59.000Z`, null, true], '/account shows the date and offers Resume');
+    assert.equal((await app('POST', '/api/billing/resume', { token: accessToken })).body.settings.subscription.status, 'active');
+    assert.equal(updates().at(-1).params.cancel_at, '', 'Resume clears the date');
+    // A flood: at most 5 a minute for one email (and one address), the rest not received.
+    const flood = [];
+    for (let i = 0; i < 6; i++) flood.push((await press({ email: other })).status);
+    assert.ok(flood.includes(429), `over the limit: ${flood}`);
   });
   await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
     const t = await accountText();

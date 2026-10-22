@@ -76,7 +76,8 @@ export default function TermsOfUse() {
             soon as you pay. If you are a consumer in the European Union, the United Kingdom or another country with a
             right of withdrawal, you would normally have 14 days to withdraw from the purchase. At checkout you ask us to
             deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. Your
-            receipt confirms this.
+            receipt confirms this. The full withdrawal information and the model withdrawal form are in our{' '}
+            <Link href="/refunds#withdrawal">refund policy</Link>.
           </p>
           <p>
             <strong>Refunds.</strong> The free trial lets you try shepetal before you pay. Even so, if shepetal does not
@@ -151,8 +152,10 @@ export default function TermsOfUse() {
           <p>
             If you believe that one of our users is unlawfully infringing copyright through the use of the Service,
             please contact our designated Copyright Agent: Pavel Hegler, 5214f Diamond Heights Boulevard, San Francisco,
-            CA 94131, US, telephone (415) 969-2829, <a href="mailto:support@shepetal.app">support@shepetal.app</a>.
+            CA 94131, US, telephone (415) 969-2829, <a href="mailto:privacy@backant.io">privacy@backant.io</a>.
           </p>
+          {/* The Copyright Agent's details as designated with the US Copyright Office (17 U.S.C. § 512(c)(2)): change
+              them only together with that designation. */}
 
           <h2>11. Dispute resolution</h2>
           <p>

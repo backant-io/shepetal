@@ -19,6 +19,8 @@ export type User = {
   sub_status?: string | null;
   current_period_end?: string | null;
   cancel_at_period_end?: number | null;
+  /** When a cancelled subscription ends (Stripe's cancel_at, ISO). Set: it no longer renews. */
+  cancel_at?: string | null;
   paid_through?: string | null;
   sub_amount?: number | null;
   sub_currency?: string | null;
@@ -64,7 +66,7 @@ export function licenseOf(user: User, now = Date.now()): License {
     const sub = {
       plan: 'subscription' as const,
       paid_through: through,
-      renews: RENEWING.has(user.sub_status ?? '') && !user.cancel_at_period_end,
+      renews: RENEWING.has(user.sub_status ?? '') && !user.cancel_at_period_end && !user.cancel_at,
       payment_failed: FAILED.has(user.sub_status ?? ''),
       email: user.email,
     };
@@ -160,6 +162,8 @@ export type Subscription = {
   current_period_start: number;
   current_period_end: number;
   cancel_at_period_end: boolean;
+  /** When it is set to end (a cancellation at the period end, or on a date). */
+  cancel_at?: number | null;
   ended_at: number | null;
   /** What a renewal charges (the price's unit_amount and currency), when known. */
   amount?: number | null;
@@ -208,11 +212,11 @@ export async function applySubscription(userId: number, sub: Subscription): Prom
     .prepare(
       `UPDATE users SET plan = CASE WHEN plan = 'lifetime' OR ?3 IN ('incomplete', 'incomplete_expired') THEN plan ELSE 'subscription' END,
          sub_id = ?2, sub_status = ?3, current_period_end = ?4, cancel_at_period_end = ?5, paid_through = ?6,
-         sub_amount = COALESCE(?7, sub_amount), sub_currency = COALESCE(?8, sub_currency)
+         sub_amount = COALESCE(?7, sub_amount), sub_currency = COALESCE(?8, sub_currency), cancel_at = ?9
        WHERE id = ?1`,
     )
     .bind(userId, sub.id, sub.status, iso(sub.current_period_end), sub.cancel_at_period_end ? 1 : 0, paidThrough(sub, stored),
-      sub.amount ?? null, sub.currency ?? null)
+      sub.amount ?? null, sub.currency ?? null, sub.cancel_at ? iso(sub.cancel_at) : null)
     .run();
   return r.meta.changes === 1;
 }
@@ -222,9 +226,9 @@ export function liveSubscription(user: User): string | null {
   return user.sub_id && !TERMINAL.has(user.sub_status ?? '') ? user.sub_id : null;
 }
 
-/** A subscription that will charge again, so it can be cancelled to its period end. */
+/** A subscription that will charge again, so it can be cancelled to its period end. One set to end on a date does not. */
 export function renewingSubscription(user: User): string | null {
-  return user.sub_id && RENEWING.has(user.sub_status ?? '') && !user.cancel_at_period_end ? user.sub_id : null;
+  return user.sub_id && RENEWING.has(user.sub_status ?? '') && !user.cancel_at_period_end && !user.cancel_at ? user.sub_id : null;
 }
 
 /** Body of GET /api/account/plan (API.md): what the plan settings on /account show and offer. */
@@ -243,7 +247,7 @@ export type PlanSettings = {
     paid_through: string | null;
     /** The next charge, for an active subscription; null once cancelled, past due or ended. */
     next_billing_date: string | null;
-    /** When it stops: the period end once cancelled, or when it ended. */
+    /** When it stops: once cancelled, the end Stripe has (the period end, or a later date asked for on /cancel); or when it ended. */
     ends_at: string | null;
     /** What each renewal charges, in the smallest currency unit (99 = $0.99), and how to show it. */
     amount: number | null;
@@ -271,7 +275,7 @@ export function planSettings(user: User, now = Date.now()): PlanSettings {
       status,
       paid_through: l.paid_through,
       next_billing_date: status === 'active' ? l.paid_through : null,
-      ends_at: status === 'cancels_at_period_end' || status === 'ended' ? l.paid_through : null,
+      ends_at: status === 'cancels_at_period_end' ? (user.cancel_at ?? l.paid_through) : status === 'ended' ? l.paid_through : null,
       amount: user.sub_amount ?? null,
       currency: user.sub_currency ?? null,
       amount_display: money(user.sub_amount, user.sub_currency),

@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { SiteHeader } from '@/components/site/Shell';
-import { ASAP, CONTRACT, KIND } from '@/lib/cancel';
+import { ASAP, CONTRACT, DATE_RULE, KIND } from '@/lib/cancel';
 
 export const metadata: Metadata = {
   title: 'Cancel your contract',
@@ -11,7 +11,7 @@ export const metadata: Metadata = {
 /**
  * Where "Verträge hier kündigen" in the footer leads (§ 312k BGB): no sign-in, and nothing on the page but what the
  * law lists (the type of cancellation and a reason, who you are, the contract, when it ends, where the confirmation
- * goes) and the "Jetzt kündigen" button. No offers, no "are you sure?" (BGH I ZR 200/25). Static: a plain form that
+ * goes: the email field is both, § 312k(2) Nr. 1 b and e) and the "Jetzt kündigen" button. No offers, no "are you sure?" (BGH I ZR 200/25). Static: a plain form that
  * works without JavaScript, posted to /api/cancel, which worker.ts answers.
  */
 export default function Cancel() {
@@ -49,7 +49,7 @@ export default function Cancel() {
               <input type="radio" name="end" value="asap" defaultChecked /> {ASAP}
             </label>
             <label>
-              <input type="radio" name="end" value="date" /> On this date:
+              <input type="radio" name="end" value="date" /> On this date, {DATE_RULE}:
             </label>
             <label className="s-cancel-field">
               Date
@@ -57,7 +57,7 @@ export default function Cancel() {
             </label>
           </fieldset>
           <label className="s-cancel-field">
-            Email of your shepetal account, which identifies your contract
+            Email of your shepetal account: it identifies your contract, and the confirmation goes to it
             <input type="email" name="email" required autoComplete="email" maxLength={254} />
           </label>
           <button type="submit" className="s-btn s-btn-signal">

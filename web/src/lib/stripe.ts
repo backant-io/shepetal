@@ -104,8 +104,8 @@ export async function customerFor(user: User): Promise<string> {
  */
 export const consentText = (plan: CheckoutPlan, origin: string) =>
   plan === 'lifetime'
-    ? `I want shepetal delivered right away, and I understand that this ends my 14-day right of withdrawal. I accept the [Terms](${origin}/terms) and the [Refund policy](${origin}/refunds).`
-    : `I want my subscription to start right away, and I understand that this ends my 14-day right of withdrawal. I can cancel anytime. I accept the [Terms](${origin}/terms) and the [Refund policy](${origin}/refunds).`;
+    ? `I want shepetal delivered right away, and I understand that this ends my 14-day [right of withdrawal](${origin}/refunds#withdrawal). I accept the [Terms](${origin}/terms) and the [Refund policy](${origin}/refunds).`
+    : `I want my subscription to start right away, and I understand that this ends my 14-day [right of withdrawal](${origin}/refunds#withdrawal). I can cancel anytime. I accept the [Terms](${origin}/terms) and the [Refund policy](${origin}/refunds).`;
 
 /** On receipts and invoices: the confirmation of that consent, on a durable medium. */
 export const CONFIRMATION = 'Delivered right away at your request. You acknowledged that this ends the 14-day right of withdrawal.';
@@ -246,22 +246,37 @@ export async function portalUrl(user: User, base: string, flow?: 'cancel'): Prom
  * it before the webhook arrives. False if the user has no subscription in that state.
  */
 export async function setCancelAtPeriodEnd(user: User, cancel: boolean): Promise<boolean> {
-  const id = cancel ? renewingSubscription(user) : user.sub_id && user.cancel_at_period_end && user.sub_status === 'active' ? user.sub_id : null;
+  const ending = user.cancel_at_period_end || user.cancel_at;
+  const id = cancel ? renewingSubscription(user) : user.sub_id && ending && user.sub_status === 'active' ? user.sub_id : null;
   if (!id) return false;
-  const s = await getStripe().subscriptions.update(id, { cancel_at_period_end: cancel });
+  // Resume clears an end set on a date (/cancel) the way Stripe unsets a field: an empty cancel_at.
+  const s = await getStripe().subscriptions.update(id, cancel || user.cancel_at_period_end ? { cancel_at_period_end: cancel } : { cancel_at: '' });
   await applySubscription(user.id, snapshot(s));
   return true;
 }
 
 /**
- * POST /api/cancel with an end date after the paid time: the subscription renews until `at` (Unix seconds), then
- * ends, with no proration. Stripe's webhook stores the end when it comes. False without a renewing subscription.
+ * POST /api/cancel (§ 312k BGB): the live subscription ends at the end of its period, or on `at` (Unix seconds) if
+ * that is later. A date is capped at three months after the paid time, and an end already set is never moved later,
+ * so a declaration never adds a charge. Stripe bills a period that a later date cuts short only up to that date.
+ * The end Stripe answers with is stored at once (the webhook brings it too) and returned: changed false when an
+ * earlier end was already set. Null without a live subscription.
  */
-export async function cancelAt(user: User, at: number): Promise<boolean> {
-  const id = renewingSubscription(user);
-  if (!id) return false;
-  await getStripe().subscriptions.update(id, { cancel_at: at, proration_behavior: 'none' });
-  return true;
+export async function cancelAt(user: User, at: number | null): Promise<{ ends_at: string; changed: boolean } | null> {
+  const id = liveSubscription(user);
+  if (!id || !user.current_period_end) return null;
+  const periodEnd = Date.parse(user.current_period_end) / 1000;
+  const cap = new Date(user.paid_through ?? user.current_period_end);
+  cap.setUTCMonth(cap.getUTCMonth() + 3);
+  const end = at && at > periodEnd ? Math.max(periodEnd, Math.min(at, cap.getTime() / 1000)) : periodEnd;
+  const set = user.cancel_at ? Date.parse(user.cancel_at) / 1000 : null;
+  if (set && set <= end) return { ends_at: user.cancel_at!, changed: false };
+  const s = await getStripe().subscriptions.update(
+    id,
+    end === periodEnd && !set ? { cancel_at_period_end: true } : { cancel_at: end, proration_behavior: 'none' },
+  );
+  await applySubscription(user.id, snapshot(s));
+  return { ends_at: new Date((s.cancel_at ?? end) * 1000).toISOString(), changed: true };
 }
 
 /**
@@ -339,6 +354,7 @@ function snapshot(s: Stripe.Subscription): Subscription {
     current_period_start: s.current_period_start ?? item?.current_period_start ?? 0,
     current_period_end: s.current_period_end ?? item?.current_period_end ?? 0,
     cancel_at_period_end: s.cancel_at_period_end,
+    cancel_at: s.cancel_at ?? null,
     ended_at: s.ended_at ?? null,
   };
 }

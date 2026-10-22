@@ -1,6 +1,8 @@
-import { renewingSubscription, userByEmail } from './account';
+import { userByEmail, type User } from './account';
 import { db } from './db';
-import { cancelAt, setCancelAtPeriodEnd } from './stripe';
+import { OWNER, sendMail, sesEnabled } from './mail';
+import { SITE_URL } from './site';
+import { cancelAt } from './stripe';
 
 /**
  * A cancellation sent with the "Jetzt kündigen" button on /cancel (§ 312k BGB): the fields of the form, as declared.
@@ -11,8 +13,10 @@ export type Declaration = {
   /** For an extraordinary cancellation: the good cause. */
   reason: string;
   contract: 'monthly' | 'lifetime';
-  /** The requested end (YYYY-MM-DD), or null: as soon as possible. */
+  /** The requested end (YYYY-MM-DD, a day after the one it was sent on), or null: as soon as possible. */
   end: string | null;
+  /** A date that was entered but is not a later day (past, today, or no such day): it ends as soon as possible. */
+  badDate: string | null;
   email: string;
   /** When it came in, which counts as when it was sent (§ 312k(4)). */
   at: Date;
@@ -20,20 +24,28 @@ export type Declaration = {
 
 export const KIND = { ordinary: 'Ordinary cancellation', extraordinary: 'Extraordinary cancellation for good cause' };
 export const CONTRACT = { monthly: 'shepetal monthly subscription', lifetime: 'shepetal lifetime license' };
-export const ASAP = 'As soon as possible, at the end of the month already paid';
+export const ASAP = 'As soon as possible, at the end of the period already paid';
+/** How far a requested date may be: the end then is that date, at most three months after the period already paid. */
+export const DATE_RULE = 'not before the end of the period already paid, and at most three months after it';
+
+const day = (d: Date) => d.toISOString().slice(0, 10);
 
 /** The form as posted, or null without an email (the one required field). */
 export function declarationOf(form: FormData, at = new Date()): Declaration | null {
   const field = (k: string) => String(form.get(k) ?? '').trim();
   const email = field('email').slice(0, 254);
   if (!/^[^\s@]+@[^\s@]+$/.test(email)) return null;
-  const date = field('date');
+  // A date filled in counts even if "On this date" was not chosen. It must be a real day after today (2026-02-31
+  // parses, but is no day); anything else ends it as soon as possible (§ 312k(5)), and the receipt says so.
+  const date = field('date').slice(0, 10);
+  const real = /^\d{4}-\d{2}-\d{2}$/.test(date) && !isNaN(Date.parse(date)) && day(new Date(date)) === date;
+  const end = real && date > day(at) ? date : null;
   return {
     kind: field('kind') === 'extraordinary' ? 'extraordinary' : 'ordinary',
     reason: field('reason').slice(0, 2000),
     contract: field('contract') === 'lifetime' ? 'lifetime' : 'monthly',
-    // An "On this date" without a date ends it as soon as possible (§ 312k(5)).
-    end: field('end') === 'date' && /^\d{4}-\d{2}-\d{2}$/.test(date) && !isNaN(Date.parse(date)) ? date : null,
+    end,
+    badDate: date && !end ? date : null,
     email,
     at,
   };
@@ -42,11 +54,13 @@ export function declarationOf(form: FormData, at = new Date()): Declaration | nu
 /** "2026-10-22 at 14:03:05 UTC" */
 export const utc = (d: Date) => `${d.toISOString().slice(0, 10)} at ${d.toISOString().slice(11, 19)} UTC`;
 
-/**
- * The confirmation: what was declared, when it came in and when the contract is to end (§ 312k(3) and (4)). The
- * receipt page shows it and offers it as a file to keep.
- */
-export function confirmationText(d: Declaration): string {
+/** What was sent, and when (§ 312k(3)): the receipt page shows it and offers it as a file to keep. */
+export function declarationText(d: Declaration): string {
+  const end = d.end
+    ? `${d.end}, ${DATE_RULE}`
+    : d.badDate
+      ? `${ASAP} (the date entered, ${d.badDate}, is not a day after today)`
+      : ASAP;
   return [
     'Cancellation (Kündigung)',
     '',
@@ -56,43 +70,130 @@ export function confirmationText(d: Declaration): string {
     `Type: ${KIND[d.kind]}`,
     ...(d.kind === 'extraordinary' ? [`Reason: ${d.reason || '(none given)'}`] : []),
     `Contract: ${CONTRACT[d.contract]}`,
-    `End of the contract: ${d.end ? `on ${d.end}` : ASAP}`,
-    `Email of the account: ${d.email}`,
+    `End of the contract: ${end}`,
+    `Email of the account, for the confirmation: ${d.email}`,
     '',
     'To: BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA (shepetal), support@shepetal.app',
   ].join('\n');
 }
 
+/** What was done about a declaration. Never thrown: a failure is outcome 'error' with the message. */
+export type Handling = {
+  /** The account under the email, matched lowercased (never created). */
+  user: User | null;
+  outcome: 'cancelled' | 'already_ending' | 'no_subscription' | 'lifetime' | 'no_account' | 'error';
+  /** When the subscription ends, as Stripe has it (ISO). */
+  endsAt: string | null;
+  error: string | null;
+};
+
+const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
 /**
- * Acts on a declaration: a renewing monthly subscription under that email stops renewing, at the end of the paid
- * month, or at a requested date after it. Anything else (a lifetime license, no subscription, no account) is only
- * recorded. The result is for the record and the log, never for the sender: the page is the same either way, so it
- * tells no one which emails have an account.
+ * Acts on a declaration: a live subscription under that email ends at the end of the paid period, or on the date
+ * asked for (stripe.ts cancelAt caps it and never moves an end later). Whatever contract was chosen: an account has
+ * one or the other, and a subscriber who picks "lifetime license" still means the subscription (§§ 133, 157 BGB).
+ * An extraordinary cancellation stops the renewal the same way; Pavel decides about ending it at once (his notice).
  */
-export async function cancelContract(d: Declaration): Promise<{ userId: number | null; outcome: string }> {
-  const user = await userByEmail(d.email);
-  if (!user) return { userId: null, outcome: 'no_account' };
-  if (d.contract !== 'monthly' || !renewingSubscription(user)) return { userId: user.id, outcome: 'no_subscription' };
-  const end = d.end ? Date.parse(`${d.end}T23:59:59Z`) : 0;
-  if (user.paid_through && end > Date.parse(user.paid_through)) {
-    await cancelAt(user, Math.floor(end / 1000));
-    return { userId: user.id, outcome: 'cancel_at' };
+export async function cancelContract(d: Declaration): Promise<Handling> {
+  let user: User | null = null;
+  try {
+    user = await userByEmail(d.email);
+    if (!user) return { user, outcome: 'no_account', endsAt: null, error: null };
+    const ended = await cancelAt(user, d.end ? Date.parse(`${d.end}T23:59:59Z`) / 1000 : null);
+    if (ended) return { user, outcome: ended.changed ? 'cancelled' : 'already_ending', endsAt: ended.ends_at, error: null };
+    return { user, outcome: user.status === 'active' ? 'lifetime' : 'no_subscription', endsAt: null, error: null };
+  } catch (e) {
+    return { user, outcome: 'error', endsAt: null, error: message(e) };
   }
-  await setCancelAtPeriodEnd(user, true);
-  return { userId: user.id, outcome: 'cancelled_at_period_end' };
 }
 
 /** Keeps the declaration, and deletes those older than three years after the end of their year. */
-export async function recordCancellation(d: Declaration, userId: number | null, outcome: string): Promise<void> {
+export async function recordCancellation(d: Declaration, h: Handling): Promise<void> {
   await db().batch([
     db().prepare('DELETE FROM cancellations WHERE received_at < ?1').bind(`${d.at.getUTCFullYear() - 3}-01-01`),
     db()
       .prepare(
-        `INSERT INTO cancellations (received_at, email, kind, reason, contract, end_requested, user_id, outcome)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        `INSERT INTO cancellations (received_at, email, kind, reason, contract, end_requested, user_id, outcome, ends_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
       )
-      .bind(d.at.toISOString(), d.email.toLowerCase(), d.kind, d.reason || null, d.contract, d.end, userId, outcome),
+      .bind(d.at.toISOString(), d.email.toLowerCase(), d.kind, d.reason || null, d.contract, d.end, h.user?.id ?? null, h.outcome, h.endsAt),
   ]);
+}
+
+/**
+ * The § 312k(4) confirmation to the account's email: the declaration, when it came in, and when the contract ends.
+ * It states an end only once Stripe has it: after a failure it says the cancellation will be processed.
+ */
+export function confirmationText(d: Declaration, h: Handling): string {
+  const ends = h.endsAt && utc(new Date(h.endsAt));
+  const done =
+    h.outcome === 'cancelled' || h.outcome === 'already_ending'
+      ? [
+          `Your subscription is cancelled. It ends on ${ends}, and nothing is charged after that.`,
+          ...(d.contract === 'lifetime' ? ['You chose the lifetime license, but this account has the monthly subscription, so the subscription is what ends.'] : []),
+          ...(d.kind === 'extraordinary' ? ['You cancelled for good cause: we look at your reason and write to you whether it ends earlier and what is refunded.'] : []),
+          '',
+          `If you did not send this, sign in at ${SITE_URL}/account and choose Resume subscription before ${ends}, or reply to this email.`,
+        ]
+      : h.outcome === 'lifetime'
+        ? ['Your lifetime license has no term and nothing renews, so nothing more is charged. We write to you about your cancellation.']
+        : h.outcome === 'no_subscription'
+          ? ['This account has no subscription that renews, so nothing is charged and there was nothing to end.']
+          : ['Your cancellation is received and will be processed. We confirm the date your contract ends in a separate email.'];
+  return [declarationText(d), '', ...done, '', 'BackAnt, Inc. (shepetal), support@shepetal.app'].join('\n');
+}
+
+/**
+ * Runs after the answer has gone (POST /api/cancel's waitUntil), so the answer takes as long for every email: the
+ * lookup, Stripe, the record, the confirmation to the account (SES, when set up) and Pavel's notice of every
+ * declaration with what happened. Never throws.
+ */
+export async function processDeclaration(d: Declaration): Promise<void> {
+  const h = await cancelContract(d);
+  const problems = h.error ? [`acting on it failed: ${h.error}`] : [];
+  try {
+    await recordCancellation(d, h);
+  } catch (e) {
+    problems.push(`recording it in D1 failed: ${message(e)}`);
+  }
+  const confirmation = confirmationText(d, h);
+  let sent = 'not sent: no account under this email';
+  if (h.user && !sesEnabled()) sent = `not sent: SES is not set up. Send the text below to ${h.user.email} by hand.`;
+  else if (h.user) {
+    try {
+      // To the account's own address, never one a stranger typed: the match was on it.
+      await sendMail(h.user.email, 'Your cancellation of shepetal (Kündigungsbestätigung)', confirmation);
+      sent = `sent to ${h.user.email}`;
+    } catch (e) {
+      problems.push(`the confirmation email failed: ${message(e)}`);
+      sent = `FAILED. Send the text below to ${h.user.email} by hand.`;
+    }
+  }
+  for (const p of problems) console.error(`cancel: ${p}`);
+  const todo = [
+    ...(h.outcome === 'error' ? ['Cancel it by hand in Stripe: the subscription may still renew.'] : []),
+    ...(d.kind === 'extraordinary' ? ['Extraordinary: decide whether it ends at once and what is refunded, and tell the customer.'] : []),
+    ...(h.outcome === 'lifetime' ? ['Lifetime license: decide what the customer wants (a refund within 14 days?) and reply.'] : []),
+  ];
+  const notice = [
+    `A cancellation came in through /cancel: ${h.outcome}${h.endsAt ? `, ends ${utc(new Date(h.endsAt))}` : ''}.`,
+    '',
+    `Account: ${h.user ? `#${h.user.id}, ${h.user.email}, plan ${h.user.plan ?? 'trial'}${h.user.sub_id ? `, ${h.user.sub_id} (${h.user.sub_status})` : ''}` : 'none under this email'}`,
+    `Confirmation to the customer: ${sent}`,
+    ...problems.map((p) => `PROBLEM: ${p}`),
+    ...todo.map((t) => `TO DO: ${t}`),
+    '',
+    '--- The declaration ---',
+    declarationText(d),
+    ...(h.user ? ['', '--- The confirmation ---', confirmation] : []),
+  ].join('\n');
+  const flags = [d.kind === 'extraordinary' && 'extraordinary', problems.length && 'PROBLEM'].filter(Boolean).join(', ');
+  try {
+    await sendMail(OWNER, `cancel: ${h.outcome}${flags ? ` (${flags})` : ''}: ${d.email}`.slice(0, 200), notice);
+  } catch (e) {
+    console.error(`cancel: the notice to ${OWNER} failed: ${message(e)}`);
+  }
 }
 
 const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -113,17 +214,26 @@ pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:1.2rem;border:1px solid 
 </style></head><body><a class="mark" href="/">shepetal</a><main>${body}</main></body></html>`;
 }
 
-/** The answer to the button: the confirmation, with the time it was sent, as a page and as a file to keep (§ 312k(3)). */
-export function receiptHtml(d: Declaration): string {
-  const text = confirmationText(d);
+/**
+ * The answer to the button, before anything is done about it (the same page for every email, at once): the
+ * declaration with the time it was sent, as a page and as a file to keep (§ 312k(3)). It never says what was done,
+ * since nothing is yet; `ses` says whether a confirmation email will follow.
+ */
+export function receiptHtml(d: Declaration, ses: boolean): string {
+  const text = declarationText(d);
   const file = `shepetal-cancellation-${d.at.toISOString().slice(0, 10)}.txt`;
   return page(
-    'Cancellation sent',
-    `<h1>Your cancellation is sent.</h1>
+    'Cancellation received',
+    `<h1>Your cancellation is received.</h1>
 <p class="mono">Sent with the Jetzt kündigen button on ${utc(d.at)}.</p>
 <pre>${esc(text)}</pre>
-<p><a href="data:text/plain;charset=utf-8,${encodeURIComponent(text)}" download="${file}">Download this confirmation</a> (${file}). Keep it: it shows what you sent and when.</p>
-<p>If you chose the monthly subscription and this email has one, it stops renewing. It ends at the end of the month already paid, or on the date you chose if that is later, and nothing is charged after it ends.</p>
+<p><a href="data:text/plain;charset=utf-8,${encodeURIComponent(text)}" download="${file}">Download this cancellation</a> (${file}). Keep it: it shows what you sent and when.</p>
+<p>It will be processed now. A subscription under this email ends at the end of the period already paid, or on the date you entered (${DATE_RULE}), and nothing is charged after it ends.</p>
+${
+  ses
+    ? '<p>If this email belongs to a shepetal account, the confirmation, with the date your contract ends, goes to it by email. If none arrives, write to <a href="mailto:support@shepetal.app">support@shepetal.app</a>.</p>'
+    : '<p>Confirmation emails are not sent automatically yet, so no email has been sent. Keep this page or the download as your record. If this email belongs to a shepetal account, we confirm the cancellation and the date it ends to it by hand.</p>'
+}
 <p>Questions: <a href="mailto:support@shepetal.app">support@shepetal.app</a></p>`,
   );
 }
@@ -131,3 +241,11 @@ export function receiptHtml(d: Declaration): string {
 /** The form came without an email (a browser that skipped the required field). */
 export const missingEmailHtml = () =>
   page('Cancel your contract', '<h1>Enter your email.</h1><p>The email of your shepetal account is needed to find your contract. <a href="/cancel">Back to the form</a></p>');
+
+/** Posted from another site, or with no Origin: not received. */
+export const otherOriginHtml = () =>
+  page('Cancel your contract', `<h1>Send it from the form.</h1><p>This cancellation was not received: it did not come from the form on shepetal.app. <a href="/cancel">Open the form</a>, or write to <a href="mailto:support@shepetal.app">support@shepetal.app</a>.</p>`);
+
+/** More than 5 a minute from one address or for one email: not received. */
+export const tooManyHtml = () =>
+  page('Cancel your contract', `<h1>Wait a minute.</h1><p>Too many cancellations were sent in a short time, so this one was not received. Wait a minute and send it again from <a href="/cancel">the form</a>, or write to <a href="mailto:support@shepetal.app">support@shepetal.app</a>.</p>`);

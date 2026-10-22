@@ -46,13 +46,66 @@ export default function Refunds() {
             before the switch are not refunded.
           </p>
 
-          <h2>Your right of withdrawal</h2>
+          {/* The withdrawal information of Directive 2011/83/EU Art. 6(1)(h) and (k), in the words of its Annex I (A),
+              and the model withdrawal form of Annex I (B) (Art. 246a § 1(2) EGBGB, Anlage 1 and 2). */}
+          <h2 id="withdrawal">Your right of withdrawal</h2>
           <p>
-            shepetal is digital content, delivered the moment you pay. In the European Union, the United Kingdom and
-            other places with a 14-day right of withdrawal, you ask at checkout for delivery right away and acknowledge
-            that this ends that right. Your receipt confirms it. The 14-day refund on the lifetime license above applies
-            anyway.
+            If you are a consumer in the European Union, the United Kingdom or another country with this right, you have
+            the following right of withdrawal.
           </p>
+          <h3>Right of withdrawal</h3>
+          <p>
+            You have the right to withdraw from this contract within 14 days without giving any reason. The withdrawal
+            period will expire after 14 days from the day of the conclusion of the contract: the day you buy the
+            lifetime license or start the subscription.
+          </p>
+          <p>
+            To exercise the right of withdrawal, you must inform us (BackAnt, Inc., 131 Continental Dr, Suite 305, Newark,
+            DE 19713, USA, <a href="mailto:support@shepetal.app">support@shepetal.app</a>) of your decision to withdraw
+            from this contract by an unequivocal statement, for example an email or a letter sent by post. You may use
+            the model withdrawal form below, but it is not obligatory. To meet the withdrawal deadline, it is sufficient
+            for you to send your communication concerning your exercise of the right of withdrawal before the withdrawal
+            period has expired.
+          </p>
+          <h3>Effects of withdrawal</h3>
+          <p>
+            If you withdraw from this contract, we shall reimburse to you all payments received from you without undue
+            delay and in any event not later than 14 days from the day on which we are informed about your decision to
+            withdraw from this contract. We will carry out such reimbursement using the same means of payment as you used
+            for the initial transaction, unless you have expressly agreed otherwise; in any event, you will not incur any
+            fees as a result of such reimbursement.
+          </p>
+          <p>
+            If you asked for the subscription to begin during the withdrawal period, you shall pay us an amount which is
+            in proportion to what has been provided until you have told us of your withdrawal from this contract, in
+            comparison with the full coverage of the contract.
+          </p>
+          <h3>When the right of withdrawal ends early</h3>
+          <p>
+            shepetal is digital content that is not supplied on a tangible medium. Your right of withdrawal ends before
+            the 14 days are over as soon as we begin to supply it, which is right after you pay, because at checkout you
+            expressly agree that we begin before the withdrawal period ends, you acknowledge that you thereby lose your
+            right of withdrawal, and your receipt confirms both (§&nbsp;356(6) of the German Civil Code, Art. 16(m) of
+            Directive 2011/83/EU). Where the monthly subscription counts as a service instead, the right ends only once
+            the service has been provided in full (§&nbsp;356(5) of the German Civil Code), so you can withdraw within
+            the 14 days and pay for the time up to then, as above. The 14-day refund on the lifetime license above
+            applies anyway.
+          </p>
+          <h3>Model withdrawal form</h3>
+          <p>(Complete and return this form only if you wish to withdraw from the contract.)</p>
+          <div className="s-box">
+            <p>
+              To BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA, support@shepetal.app:
+              <br />I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract for the supply of the
+              following digital content (*)/for the provision of the following service (*):
+              <br />Ordered on (*)/received on (*):
+              <br />Name of consumer(s):
+              <br />Address of consumer(s):
+              <br />Signature of consumer(s) (only if this form is notified on paper):
+              <br />Date:
+            </p>
+            <p>(*) Delete as appropriate.</p>
+          </div>
 
           <h2>How refunds work</h2>
           <p>We refund to the card you paid with. Your bank shows it within 5 to 10 business days.</p>

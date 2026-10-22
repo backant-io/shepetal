@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
-import { checkoutUrl, CONFIRMATION, consentText, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
+import { cancelAt, checkoutUrl, CONFIRMATION, consentText, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
 import { SITE_URL } from './site';
 import { useTestDb } from './test-db';
 
@@ -126,7 +126,7 @@ describe('lifetime ($23.99 once)', () => {
       consent_collection: { terms_of_service: 'required' },
       custom_text: { terms_of_service_acceptance: { message: consentText('lifetime', SITE_URL) } },
     });
-    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/delivered right away.*ends my 14-day right of withdrawal/);
+    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/delivered right away.*ends my 14-day \[right of withdrawal\]\(https:\/\/[^/]+\/refunds#withdrawal\)/);
     expect(params.payment_intent_data?.description).toContain('ends the 14-day right of withdrawal');
     expect(params.payment_intent_data?.statement_descriptor_suffix).toBe('SHEPETAL');
     await send(event(session({ client_reference_id: params.client_reference_id, metadata: params.metadata })));
@@ -516,6 +516,60 @@ describe('plan settings: cancel, resume, the portal', () => {
     // A row without the amount yet reads it from Stripe once.
     retrieving(sub({ items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } }));
     expect(await nextCharge({ ...u, sub_amount: null, sub_currency: null })).toMatchObject({ amount: 99, currency: 'usd' });
+  });
+
+  // /cancel (§ 312k BGB) can be used by anyone who knows a subscriber's email: what it sets must never cost the owner
+  // more (no end moved later, no far-off date that keeps charging), and /account must show it and offer Resume.
+  describe('cancelAt, the button without sign-in', () => {
+    const end = nowS() + 29 * DAY;
+    const plus3Months = () => {
+      const d = new Date(end * 1000);
+      d.setUTCMonth(d.getUTCMonth() + 3);
+      return d.getTime() / 1000;
+    };
+
+    it('ends at the period end as soon as possible, stored at once from Stripe and shown on /account', async () => {
+      const u = await subscribed({ current_period_end: end });
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue(sub({ current_period_end: end, cancel_at_period_end: true, cancel_at: end }) as never);
+      expect(await cancelAt(u, null)).toEqual({ ends_at: new Date(end * 1000).toISOString(), changed: true });
+      expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+      expect((await fresh()).cancel_at).toBe(new Date(end * 1000).toISOString());
+    });
+
+    it('caps a requested date at three months after the paid time, and never sets an end before the period end', async () => {
+      const u = await subscribed({ current_period_end: end });
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockImplementation(async (_id, p) => sub({ current_period_end: end, cancel_at: (p as { cancel_at: number }).cancel_at }) as never);
+      expect((await cancelAt(u, end + 365 * DAY))?.ends_at).toBe(new Date(plus3Months() * 1000).toISOString());
+      expect(update).toHaveBeenLastCalledWith('sub_1', { cancel_at: plus3Months(), proration_behavior: 'none' });
+      await cancelAt({ ...u }, end - DAY);
+      expect(update).toHaveBeenLastCalledWith('sub_1', { cancel_at_period_end: true });
+    });
+
+    it('never moves an end already set later, but moves it earlier', async () => {
+      const set = end + 20 * DAY;
+      const u = await subscribed({ current_period_end: end, cancel_at: set });
+      expect(u.cancel_at).toBe(new Date(set * 1000).toISOString());
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue(sub({ current_period_end: end, cancel_at: end }) as never);
+      expect(await cancelAt(u, set + 30 * DAY)).toEqual({ ends_at: u.cancel_at, changed: false });
+      expect(update).not.toHaveBeenCalled();
+      expect(await cancelAt(u, null)).toEqual({ ends_at: new Date(end * 1000).toISOString(), changed: true });
+      expect(update).toHaveBeenCalledWith('sub_1', { cancel_at: end, proration_behavior: 'none' });
+    });
+
+    it('counts an end on a date as not renewing: no next charge, no Cancel, and Resume clears it', async () => {
+      const u = await subscribed({ current_period_end: end, cancel_at: end + 20 * DAY, items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } });
+      expect(await nextCharge(u)).toBeNull();
+      expect(await setCancelAtPeriodEnd(u, true)).toBe(false);
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue(sub({ current_period_end: end }) as never);
+      expect(await setCancelAtPeriodEnd(u, false)).toBe(true);
+      expect(update).toHaveBeenCalledWith('sub_1', { cancel_at: '' });
+      expect((await fresh()).cancel_at).toBeNull();
+      expect((await license()).renews).toBe(true);
+    });
+
+    it('does nothing without a live subscription', async () => {
+      expect(await cancelAt(user, null)).toBeNull();
+    });
   });
 
   it('refuses to cancel without a subscription', async () => {

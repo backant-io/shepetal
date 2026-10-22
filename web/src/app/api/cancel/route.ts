@@ -1,26 +1,27 @@
-import { cancelContract, declarationOf, missingEmailHtml, receiptHtml, recordCancellation } from '@/lib/cancel';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
+import { declarationOf, missingEmailHtml, otherOriginHtml, processDeclaration, receiptHtml, tooManyHtml } from '@/lib/cancel';
+import { sesEnabled } from '@/lib/mail';
 
 const html = (body: string, status = 200) =>
   new Response(body, { status, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
 
 /**
- * The "Jetzt kündigen" button on /cancel (§ 312k BGB): no sign-in. Answered by worker.ts itself (no Next). The
- * declaration counts as received whatever happens next, so a failure at Stripe or in D1 is logged and the
- * confirmation is shown anyway. The answer is the same whether the email has an account or not.
+ * The "Jetzt kündigen" button on /cancel (§ 312k BGB): no sign-in. Answered by worker.ts itself (no Next).
+ * - Only from the site's own form: a browser sends its Origin with every POST, so another site cannot make its
+ *   visitors' browsers send cancellations.
+ * - At most 5 a minute per IP address and per email (the CANCEL_LIMIT binding, per Cloudflare location).
+ * - The declaration counts as received when it is sent, so the receipt goes back at once, the same for every email,
+ *   and everything else (the lookup, Stripe, the record, the emails) runs after it (processDeclaration), so the time
+ *   it takes tells no one whether an email has an account.
  */
 export async function POST(req: Request) {
+  if (req.headers.get('origin') !== new URL(req.url).origin) return html(otherOriginHtml(), 403);
   const d = declarationOf(await req.formData().catch(() => new FormData()));
   if (!d) return html(missingEmailHtml(), 400);
-  let done: { userId: number | null; outcome: string } = { userId: null, outcome: 'error' };
-  try {
-    done = await cancelContract(d);
-  } catch (e) {
-    console.error('cancel: acting on the declaration failed', e instanceof Error ? e.message : e);
-  }
-  try {
-    await recordCancellation(d, done.userId, done.outcome);
-  } catch (e) {
-    console.error('cancel: recording the declaration failed', e instanceof Error ? e.message : e);
-  }
-  return html(receiptHtml(d));
+  const { env, ctx } = getCloudflareContext();
+  const keys = [`ip:${req.headers.get('cf-connecting-ip') ?? ''}`, `email:${d.email.toLowerCase()}`];
+  const limits = await Promise.all(keys.map((key) => env.CANCEL_LIMIT.limit({ key })));
+  if (limits.some((l) => !l.success)) return html(tooManyHtml(), 429);
+  ctx.waitUntil(processDeclaration(d));
+  return html(receiptHtml(d, sesEnabled()));
 }

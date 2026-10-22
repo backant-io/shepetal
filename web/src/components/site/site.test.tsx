@@ -110,6 +110,11 @@ describe('cancelling without signing in (§ 312k BGB)', () => {
     expect(html).not.toContain('href="/account"');
   });
 
+  it('is reachable from the page for unknown paths too', async () => {
+    const { default: NotFound } = await import('@/app/not-found');
+    expect(renderToStaticMarkup(<NotFound />)).toMatch(/<a (?=[^>]*href="\/cancel")[^>]*>Verträge hier kündigen<\/a>/);
+  });
+
   it('needs no sign-in anywhere on the way: no session on the page, none in the API, which worker.ts answers', () => {
     const page = src('app/(site)/cancel/page.tsx');
     expect(page).not.toMatch(/@\/lib\/auth|next-auth|searchParams|cookies\(|headers\(/);
@@ -153,7 +158,30 @@ describe('legal pages', () => {
     expect(page('terms').replace(/\s+/g, ' ')).toContain('within 14 days of a lifetime purchase for a full refund');
   });
 
-  // One address for support, refunds and privacy: the review found the Terms sending people to another one.
+  // Directive 2011/83/EU Art. 6(1)(h) and (k): before the contract, the conditions, the time limit and the procedure
+  // of the right of withdrawal, the model form, and when the right is lost. Missing, the period never starts
+  // (§ 356(3) BGB) and runs for 12 months and 14 days (§ 356(4) BGB).
+  it('give the full withdrawal information and the model withdrawal form, linked from the Terms and the checkout', () => {
+    const refunds = page('refunds').replace(/\s+/g, ' ');
+    for (const s of [
+      'id="withdrawal"',
+      'You have the right to withdraw from this contract within 14 days without giving any reason.',
+      'The withdrawal period will expire after 14 days from the day of the conclusion of the contract',
+      'by an unequivocal statement',
+      'it is sufficient for you to send your communication concerning your exercise of the right of withdrawal before the withdrawal period has expired',
+      'not later than 14 days from the day on which we are informed about your decision to withdraw',
+      'you expressly agree that we begin before the withdrawal period ends, you acknowledge that you thereby lose your right of withdrawal',
+      'Model withdrawal form',
+      'I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract',
+      'Signature of consumer(s) (only if this form is notified on paper)',
+      '(*) Delete as appropriate.',
+    ])
+      expect(refunds).toContain(s);
+    expect(page('terms')).toContain('href="/refunds#withdrawal"');
+  });
+
+  // One address for support, refunds and privacy: the review found the Terms sending people to another one. The one
+  // exception is the Copyright Agent of Terms section 10, whose address must match the US Copyright Office designation.
   it('give one contact address, support@shepetal.app, on every page', () => {
     const dir = join(__dirname, '..', '..', 'app', '(site)');
     const files = [
@@ -161,7 +189,9 @@ describe('legal pages', () => {
       ...['site', 'story', 'account'].flatMap((d) => readdirSync(join(__dirname, '..', d)).filter((f) => f.endsWith('.tsx')).map((f) => join(__dirname, '..', d, f))),
     ];
     const emails = new Set(files.flatMap((f) => readFileSync(f, 'utf8').match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) ?? []));
-    expect([...emails].filter((e) => !e.endsWith('@example.com'))).toEqual(['support@shepetal.app']);
+    expect([...emails].filter((e) => !e.endsWith('@example.com')).sort()).toEqual(['privacy@backant.io', 'support@shepetal.app']);
+    expect(page('terms').match(/privacy@backant\.io/g)).toHaveLength(2);
+    expect(page('terms').replace(/\s+/g, ' ')).toMatch(/designated Copyright Agent: Pavel Hegler[^<]*<a href="mailto:privacy@backant\.io">/);
     for (const p of ['terms', 'privacy', 'refunds', 'faq', 'impressum', 'install']) expect(page(p), p).toContain('mailto:support@shepetal.app');
   });
 

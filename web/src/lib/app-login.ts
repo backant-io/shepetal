@@ -71,6 +71,7 @@ form{margin:0}
 button{display:inline-flex;align-items:center;font:inherit;font-weight:600;font-size:1.0625rem;letter-spacing:-.005em;padding:1.1rem 1.6rem;border:0;border-radius:4px;cursor:pointer;background:#FF4F12;color:#161512;box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 4px 0 #9a2f08,0 9px 14px -6px rgba(154,47,8,.5)}
 button:hover{background:#ff5f28}button:active{transform:translateY(3px)}
 a{color:#161512}
+footer{padding:2.5rem 0 1.6rem}
 a:focus-visible,button:focus-visible{outline:2px solid #FF4F12;outline-offset:3px}
 @media (max-width:760px){main{grid-template-columns:minmax(0,1fr);padding-top:3rem}h1{font-size:clamp(2.2rem,calc(10.4*var(--u)),6rem)}}`;
 
@@ -91,6 +92,7 @@ export function consentPage(email: string, r: LoginRequest, csrf: string): strin
 <p class="small">Continue if you just chose Sign in in the app yourself.</p>
 <form method="post" action="/app/login">${inputs}<button type="submit">Continue</button></form>
 <a class="mono" href="/app/login?${esc(loginQuery(r))}&amp;switch=1">Not you? Use another account</a></div></main>
+<footer class="mono"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/cancel" lang="de">Verträge hier kündigen</a></footer>
 </body></html>`;
 }
 
