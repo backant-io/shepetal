@@ -59,7 +59,9 @@ describe('install help (the app is not notarized)', () => {
     expect(read('account')).toContain('href={`/install${from}`}');
     const install = read('install');
     expect(install).toContain('<meta httpEquiv="refresh" content={`1;url=${download}`} />');
-    expect(install).toContain('const download = `/download${attributionQuery(');
+    // static: worker.ts adds ?ref= and utm_* to both /download links at the edge (edge.test.ts)
+    expect(install).toContain("const download = '/download';");
+    expect(install).not.toContain('searchParams');
     expect(install).toContain('<InstallSteps />');
     expect(install).toContain('href={download}');
   });
