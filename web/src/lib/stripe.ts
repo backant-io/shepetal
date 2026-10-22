@@ -195,6 +195,21 @@ export async function setCancelAtPeriodEnd(user: User, cancel: boolean): Promise
 }
 
 /**
+ * The next charge of a renewing subscription, for the settings card: amount in the smallest currency unit (99),
+ * currency ("usd") and when (ISO). Null when nothing renews (lifetime, trial, cancelled, past due, ended). From the
+ * account row; the amount is read from Stripe once if the row has none yet.
+ */
+export async function nextCharge(user: User): Promise<{ amount: number; currency: string; at: string } | null> {
+  const id = renewingSubscription(user);
+  const at = user.current_period_end;
+  if (!id || !at || user.sub_status !== 'active' && user.sub_status !== 'trialing') return null;
+  if (user.sub_amount != null && user.sub_currency) return { amount: user.sub_amount, currency: user.sub_currency, at };
+  const snap = snapshot(await getStripe().subscriptions.retrieve(id));
+  await applySubscription(user.id, snap);
+  return snap.amount != null && snap.currency ? { amount: snap.amount, currency: snap.currency, at } : null;
+}
+
+/**
  * Switch to lifetime: the lifetime license was paid, so the subscription ends now. No further charge: no
  * proration, no final invoice, and an unpaid renewal invoice is voided. Safe to run twice (Stripe retries the webhook).
  */

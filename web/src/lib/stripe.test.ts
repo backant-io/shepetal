@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
-import { checkoutUrl, getStripe, handleWebhook, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
+import { checkoutUrl, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -468,6 +468,17 @@ describe('plan settings: cancel, resume, the portal', () => {
     expect(update).toHaveBeenLastCalledWith('sub_1', { cancel_at_period_end: false });
     expect((await license()).renews).toBe(true);
     expect(await setCancelAtPeriodEnd(await fresh(), false)).toBe(false);
+  });
+
+  it('gives the next charge of a renewing subscription, and none once cancelled', async () => {
+    const u = await subscribed({ items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } });
+    expect(await nextCharge(u)).toEqual({ amount: 99, currency: 'usd', at: u.current_period_end });
+    expect(await nextCharge({ ...u, cancel_at_period_end: 1 })).toBeNull();
+    expect(await nextCharge({ ...u, sub_status: 'past_due' })).toBeNull();
+    expect(await nextCharge(user)).toBeNull();
+    // A row without the amount yet reads it from Stripe once.
+    retrieving(sub({ items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } }));
+    expect(await nextCharge({ ...u, sub_amount: null, sub_currency: null })).toMatchObject({ amount: 99, currency: 'usd' });
   });
 
   it('refuses to cancel without a subscription', async () => {

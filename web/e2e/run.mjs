@@ -451,10 +451,12 @@ async function main() {
   const cancelled = await app('POST', '/api/billing/cancel', { token: accessToken });
   assert.equal(cancelled.status, 200, JSON.stringify(cancelled.body));
   assert.equal(calls('/v1/subscriptions/sub_e2e').at(-1)?.params.cancel_at_period_end, 'true');
-  assert.deepEqual([cancelled.body.status, cancelled.body.subscription.status, cancelled.body.subscription.ends_at], ['active', 'cancels_at_period_end', through]);
-  assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 409, body: { error: 'no_renewing_subscription' } });
+  assert.deepEqual([cancelled.body.settings.status, cancelled.body.settings.subscription.status, cancelled.body.settings.subscription.ends_at], ['active', 'cancels_at_period_end', through]);
+  assert.deepEqual([cancelled.body.license.status, cancelled.body.license.renews], ['active', false]);
+  assert.equal((await app('GET', '/api/license', { token: accessToken })).body.renews, false, 'the license says it at once');
+  assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 404, body: { error: 'no_subscription' } });
   const resumed = await app('POST', '/api/billing/resume', { token: accessToken });
-  assert.equal(resumed.body.subscription.status, 'active');
+  assert.equal(resumed.body.settings.subscription.status, 'active');
   const link = await fetch(`${BASE}/api/billing/portal`, { redirect: 'manual', headers: { authorization: `Bearer ${accessToken}` } });
   assert.deepEqual([link.status, link.headers.get('location')], [303, 'https://billing.stripe.com/p/session/test_e2e']);
   assert.equal((await app('GET', '/api/account/plan')).status, 401);

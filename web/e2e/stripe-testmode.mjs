@@ -283,8 +283,8 @@ try {
   note(`subscription (web session): ${show(ps)}`);
   assert.deepEqual([ps.plan, ps.subscription.status, ps.subscription.amount_display, ps.subscription.next_billing_date], ['subscription', 'active', '$0.99', lb.paid_through]);
   const cancelled = await b.call('POST', '/api/billing/cancel', undefined, false);
-  note(`POST /api/billing/cancel: ${cancelled.status} subscription ${show(cancelled.body.subscription)}, actions ${show(cancelled.body.actions)}`);
-  assert.equal(cancelled.body.subscription.status, 'cancels_at_period_end');
+  note(`POST /api/billing/cancel: ${cancelled.status} license ${show(cancelled.body.license)}, settings.subscription ${show(cancelled.body.settings.subscription)}, actions ${show(cancelled.body.settings.actions)}`);
+  assert.equal(cancelled.body.settings.subscription.status, 'cancels_at_period_end');
   let inStripe = await stripe('GET', `/v1/subscriptions/${ub.sub_id}`);
   note(`in Stripe: status ${inStripe.status}, cancel_at_period_end ${inStripe.cancel_at_period_end}, cancel_at ${new Date(inStripe.cancel_at * 1000).toISOString()}`);
   assert.equal(inStripe.cancel_at_period_end, true);
@@ -292,7 +292,7 @@ try {
   assert.deepEqual([(await b.license()).status, (await b.license()).renews], ['active', false]);
   const resumed = await b.call('POST', '/api/billing/resume', undefined, false);
   inStripe = await stripe('GET', `/v1/subscriptions/${ub.sub_id}`);
-  note(`POST /api/billing/resume: ${resumed.status} ${resumed.body.subscription.status}; in Stripe cancel_at_period_end ${inStripe.cancel_at_period_end}`);
+  note(`POST /api/billing/resume: ${resumed.status} ${resumed.body.settings.subscription.status}; in Stripe cancel_at_period_end ${inStripe.cancel_at_period_end}`);
   assert.equal(inStripe.cancel_at_period_end, false);
   const flow = await b.call('POST', '/api/billing/portal', { flow: 'cancel' }, false);
   note(`POST /api/billing/portal {flow: "cancel"}: ${flow.status}, the portal's cancel page answers ${(await fetch(flow.body.url, { redirect: 'manual' })).status}`);
