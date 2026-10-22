@@ -341,7 +341,7 @@ final class AccountControllerTests: XCTestCase {
         let a = account()
         try await until("checked at launch") { a.access == .expired }
         XCTAssertTrue(titles(a).contains("Get shepetal: $23.99 once or $0.99 a month…"))
-        status = "active"  // paid on shepetal.backant.io
+        status = "active"  // paid on shepetal.app
         let sent = server.requests.count
         XCTAssertFalse(a.allowFnDown(), "this press is still blocked")
         try await Task.sleep(nanoseconds: 300_000_000)

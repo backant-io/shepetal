@@ -140,7 +140,7 @@ final class Account: NSObject, ObservableObject {
         if signedOut {
             tokens.delete()
             token = nil
-            message = "Signed out on shepetal.backant.io. Sign in again."
+            message = "Signed out on \(Site.host). Sign in again."
         } else if case let .failure(error) = result {
             message = "Could not check the license: \(error.localizedDescription)"
         } else {
@@ -244,7 +244,7 @@ final class Account: NSObject, ObservableObject {
                 recheckPaid = true
             } catch let e as AccountError where e == .signedOut {
                 signOut()
-                message = "Signed out on shepetal.backant.io. Sign in again."
+                message = "Signed out on \(Site.host). Sign in again."
             } catch {
                 message = "Manage subscription did not open: \(error.localizedDescription)"
             }

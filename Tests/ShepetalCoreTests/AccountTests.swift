@@ -41,10 +41,10 @@ final class AccountTests: XCTestCase {
 
     func testLoginURL() throws {
         let p = PKCE(verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", state: "st4te")
-        let url = AppLogin.loginURL(base: URL(string: "https://shepetal.backant.io")!, pkce: p)
+        let url = AppLogin.loginURL(base: URL(string: "https://shepetal.app")!, pkce: p)
         let c = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         XCTAssertEqual(c.scheme, "https")
-        XCTAssertEqual(c.host, "shepetal.backant.io")
+        XCTAssertEqual(c.host, "shepetal.app")
         XCTAssertEqual(c.path, "/app/login")
         let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         XCTAssertEqual(q, ["redirect_uri": "shepetal://auth", "state": "st4te",
@@ -91,7 +91,7 @@ final class AccountTests: XCTestCase {
     }
 
     func testOnlyWebPagesAreOpened() {
-        XCTAssertTrue(AccountClient.isWebPage(URL(string: "https://shepetal.backant.io/app/login")!))
+        XCTAssertTrue(AccountClient.isWebPage(URL(string: "https://shepetal.app/app/login")!))
         XCTAssertTrue(AccountClient.isWebPage(URL(string: "http://localhost:3000/app/login")!))
         XCTAssertFalse(AccountClient.isWebPage(URL(string: "http://evil.example/app/login")!))
         XCTAssertFalse(AccountClient.isWebPage(URL(string: "file:///System/Applications/Calculator.app")!))
@@ -173,7 +173,7 @@ final class AccountTests: XCTestCase {
 
     func testBuyOpensThePlanChoiceAndManageOpensTheBillingPortal() async throws {
         XCTAssertEqual(client.plansPage.absoluteString, server.url.absoluteString + "/account#plans")
-        XCTAssertEqual(AccountClient(base: AccountClient.defaultBase).plansPage.absoluteString, "https://shepetal.backant.io/account#plans")
+        XCTAssertEqual(AccountClient(base: AccountClient.defaultBase).plansPage.absoluteString, "https://shepetal.app/account#plans")
 
         server.handler = { _ in (200, ["url": "https://billing.stripe.com/p/session/test_1"]) }
         let url = try await client.billingPortal(token: "tok-1")
@@ -189,9 +189,27 @@ final class AccountTests: XCTestCase {
         do { _ = try await client.billingPortal(token: "tok-1"); XCTFail("only web pages are opened") } catch {}
     }
 
+    /// The site address is one constant (`Site.base`): no source line names another shepetal host.
+    func testTheSiteAddressIsOneConstant() throws {
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources").standardized
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" } ?? []
+        XCTAssertFalse(files.isEmpty)
+        for f in files {
+            for (n, line) in try String(contentsOf: f, encoding: .utf8).components(separatedBy: "\n").enumerated()
+            where line.contains("shepetal.backant.io") && !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                XCTFail("\(f.lastPathComponent):\(n + 1) names the old host; use Site.base")
+            }
+            let text = try String(contentsOf: f, encoding: .utf8)
+            XCTAssertFalse(text.contains("\"https://shepetal.app") && f.lastPathComponent != "Account.swift", "\(f.lastPathComponent) writes the address itself")
+        }
+    }
+
     func testBaseURLDefaultsToTheServiceAndHonorsTheOverride() {
         unsetenv("SHEPETAL_ACCOUNT_URL")
-        XCTAssertEqual(AccountClient().base.absoluteString, "https://shepetal.backant.io")
+        XCTAssertEqual(AccountClient().base.absoluteString, "https://shepetal.app")
+        XCTAssertEqual(AccountClient.defaultBase, Site.base, "one constant")
+        XCTAssertEqual(Site.host, "shepetal.app")
         setenv("SHEPETAL_ACCOUNT_URL", "http://127.0.0.1:9", 1)
         defer { unsetenv("SHEPETAL_ACCOUNT_URL") }
         XCTAssertEqual(AccountClient().base.absoluteString, "http://127.0.0.1:9")

@@ -50,8 +50,8 @@ struct MenuState {
 /// (only with an updater), the last text, input, help, quit. Everything else is in the shepetal window (Home and
 /// Settings).
 enum MenuModel {
-    static let helpCenter = URL(string: "https://shepetal.backant.io/help")!
-    /// The contact address on shepetal.backant.io (web/ terms page); the site has no feedback page.
+    static let helpCenter = Site.base.appendingPathComponent("help")
+    /// The contact address on the site's terms page; the site has no feedback page.
     static let feedback = URL(string: "mailto:founder@backant.io?subject=shepetal%20feedback")!
     static let pastMeetingsShown = 8
     /// Buy shows from this many trial days left, and after the trial.

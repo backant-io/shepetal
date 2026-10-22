@@ -62,7 +62,7 @@ final class ShareCardTests: XCTestCase {
         XCTAssertEqual(url.host, "x.com")
         let text = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "text" }?.value)
         XCTAssertEqual(text, "I've dictated \(12_340.formatted()) words with shepetal at 142 words per minute, on a 7-day streak. "
-                           + "Voice dictation that never leaves my Mac: https://shepetal.backant.io")
+                           + "Voice dictation that never leaves my Mac: https://shepetal.app")
         XCTAssertFalse(ShareStats(words: 5, wpm: 90, streak: 0).text.contains("streak"), "no streak is left out")
     }
 

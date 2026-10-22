@@ -131,8 +131,17 @@ public struct AccountError: LocalizedError, Equatable {
     public static let alreadyBought = AccountError("You already own Shepetal", status: 409)
 }
 
+/// shepetal's site and account service: ONE constant for every address the app opens or calls (sign-in, license,
+/// plans, the Billing Portal, the help center, the share card). The old host shepetal.backant.io keeps answering /api/*,
+/// so released builds keep working.
+public enum Site {
+    public static let base = URL(string: "https://shepetal.app")!
+    /// "shepetal.app", for messages.
+    public static var host: String { base.host ?? "shepetal.app" }
+}
+
 public struct AccountClient: Sendable {
-    public static let defaultBase = URL(string: "https://shepetal.backant.io")!
+    public static let defaultBase = Site.base
     public let base: URL
     private let session: URLSession
 
@@ -152,7 +161,7 @@ public struct AccountClient: Sendable {
                                             json: ["code": code, "code_verifier": verifier, "redirect_uri": AppLogin.redirectURI])
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard status == 200, let token = body["access_token"] as? String, !token.isEmpty else {
-            if let e = body["error"] as? String { throw AccountError("Sign-in failed on shepetal.backant.io (\(e))", status: status) }
+            if let e = body["error"] as? String { throw AccountError("Sign-in failed on \(Site.host) (\(e))", status: status) }
             throw Self.unexpected(status)
         }
         return (token, body["email"] as? String ?? "")

@@ -380,7 +380,7 @@ final class MenuModelTests: XCTestCase {
             XCTAssertTrue(ModelNameTests.offending("\"\(t)\"").isEmpty, "model name in \(t)")
         }
         XCTAssertTrue(everything.contains("Open shepetal") && everything.contains("Quit shepetal"))
-        XCTAssertEqual(MenuModel.helpCenter.absoluteString, "https://shepetal.backant.io/help")
+        XCTAssertEqual(MenuModel.helpCenter.absoluteString, "https://shepetal.app/help")
         XCTAssertEqual(MenuModel.feedback.scheme, "mailto")
     }
 
