@@ -31,6 +31,13 @@ final class MeetingsModel: ObservableObject {
     @Published private(set) var snippets: [String: String] = [:]
     @Published private(set) var record: MeetingRecord?
     @Published private(set) var message = ""
+    /// F123: show meetings held in another script in Latin letters (MeetingAsk.swift). For this session only.
+    @Published var latin = false
+    /// F73: the transcript line an answer was clicked on; the meeting's transcript opens there.
+    @Published var jump: TranscriptJump?
+    /// F73: the Ask pane's questions and answers, kept for the session.
+    lazy var ask = MeetingAskModel(store: store)
+    var latinCache: (original: MeetingRecord, latin: MeetingRecord)?
 
     /// `copy` writes the general pasteboard; tests pass their own. It runs only from the Copy summary button.
     /// `pause` is how long typing in the search field has to stop before the store is asked; tests pass their own.
@@ -156,26 +163,26 @@ final class MeetingsModel: ObservableObject {
 
     func copySummary() {
         guard let r = record, canCopySummary else { return }
-        copy(MeetingFormat.markdown(r, transcript: false))
+        copy(MeetingFormat.markdown(shown(r), transcript: false))
         message = "Summary copied"
     }
 
     func copyTranscript() {
         guard let r = record, !r.segments.isEmpty else { return }
-        copy(MeetingFormat.transcript(r))
+        copy(MeetingFormat.transcript(shown(r)))
         message = "Transcript copied"
     }
 
     /// Writes the Markdown to a file the user picks. Nothing is written without the panel.
     func export() {
-        guard let r = record else { return }
+        guard let r = record, let markdown = exportMarkdown else { return }
         let panel = NSSavePanel()
         panel.nameFieldStringValue = MeetingFormat.filename(r.meeting)
         panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try MeetingFormat.markdown(r).write(to: url, atomically: true, encoding: .utf8)
+            try markdown.write(to: url, atomically: true, encoding: .utf8)
             message = "Exported \(url.lastPathComponent)"
         } catch {
             message = "Export failed: \(error.localizedDescription)"
@@ -359,7 +366,7 @@ private struct LiveBadge: View {
 }
 
 private struct MeetingDetail: View {
-    enum Pane: String, CaseIterable { case summary = "Summary", notes = "Notes", transcript = "Transcript" }
+    enum Pane: String, CaseIterable { case summary = "Summary", notes = "Notes", transcript = "Transcript", ask = "Ask" }
 
     let record: MeetingRecord
     @ObservedObject var model: MeetingsModel
@@ -368,7 +375,7 @@ private struct MeetingDetail: View {
     init(record: MeetingRecord, model: MeetingsModel) {
         self.record = record
         self.model = model
-        _pane = State(initialValue: record.summary == nil ? .transcript : .summary)
+        _pane = State(initialValue: record.summary == nil || model.jump?.meetingID == record.meeting.id ? .transcript : .summary)
     }
 
     private var live: Bool { record.meeting.endedAt == nil }
@@ -396,18 +403,24 @@ private struct MeetingDetail: View {
                 }
                 .pickerStyle(.segmented).labelsHidden().fixedSize()
                 Spacer()
+                if model.canShowLatin { LatinToggle(model: model) }
                 // Icons only when the window is too narrow for the labels.
                 ViewThatFits(in: .horizontal) { actions.fixedSize(); actions.labelStyle(.iconOnly) }
             }
             .padding(.horizontal, 24).padding(.bottom, 12)
 
             Divider()
+            let shown = model.shown(record)  // in Latin letters when the toggle is on (F123); the Notes editor keeps the original
             switch pane {
-            case .summary: SummaryPane(summary: record.summary, notes: noteLines(record.notes), live: live)
+            case .summary: SummaryPane(summary: shown.summary, notes: noteLines(shown.notes), live: live)
             case .notes: NotesPane(record: record, model: model)
-            case .transcript: TranscriptPane(segments: record.segments, live: live, deleted: MeetingFormat.transcriptDeleted(record))
+            case .transcript:
+                TranscriptPane(segments: shown.segments, live: live, deleted: MeetingFormat.transcriptDeleted(record),
+                               target: model.jump?.meetingID == record.meeting.id ? model.jump : nil)
+            case .ask: MeetingAskView(ask: model.ask, meetings: model, meetingID: record.meeting.id)
             }
         }
+        .onChange(of: model.jump) { if model.jump?.meetingID == record.meeting.id { pane = .transcript } }
     }
 
     private var actions: some View {
@@ -547,6 +560,8 @@ private struct TranscriptPane: View {
     let live: Bool
     /// F81: the retention setting deleted it.
     var deleted: (title: String, detail: String)?
+    /// An answer clicked in the Ask pane (F73): scrolled to and marked.
+    var target: TranscriptJump?
 
     var body: some View {
         if segments.isEmpty, let deleted {
@@ -559,11 +574,15 @@ private struct TranscriptPane: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(Array(segments.enumerated()), id: \.offset) { i, s in Bubble(segment: s).id(i) }
+                        ForEach(Array(segments.enumerated()), id: \.offset) { i, s in Bubble(segment: s, marked: target?.segment == i).id(i) }
                     }
                     .padding(20)
                 }
-                .onAppear { if live { proxy.scrollTo(segments.count - 1, anchor: .bottom) } }
+                .onAppear {
+                    if let target { proxy.scrollTo(target.segment, anchor: .center) }
+                    else if live { proxy.scrollTo(segments.count - 1, anchor: .bottom) }
+                }
+                .onChange(of: target) { if let target { withAnimation { proxy.scrollTo(target.segment, anchor: .center) } } }
                 // ponytail: always follows the newest line while live, even if the user scrolled up.
                 .onChange(of: segments.count) {
                     if live { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(segments.count - 1, anchor: .bottom) } }
@@ -575,6 +594,8 @@ private struct TranscriptPane: View {
 
 struct Bubble: View {
     let segment: Segment
+    /// The line an answer pointed at (F73).
+    var marked = false
 
     var body: some View {
         let me = segment.speaker == .me
@@ -587,6 +608,7 @@ struct Bubble: View {
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .background(me ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12),
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .overlay { if marked { RoundedRectangle(cornerRadius: 14, style: .continuous).stroke(Color.accentColor, lineWidth: 2) } }
         }
         .frame(maxWidth: 480, alignment: me ? .trailing : .leading)
         .frame(maxWidth: .infinity, alignment: me ? .trailing : .leading)

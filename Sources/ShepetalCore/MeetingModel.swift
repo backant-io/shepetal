@@ -216,6 +216,8 @@ public protocol MeetingStoring: AnyObject {
     func setFolders(_ folderIDs: Set<String>, for meetingID: String) throws
     /// The folder's meetings, newest first.
     func list(inFolder folderID: String, limit: Int) throws -> [Meeting]
+    /// The ids of the meetings that say most about `terms` (any of them, each a substring), best first (F73).
+    func shortlist(_ terms: [String], limit: Int) throws -> [String]
 }
 
 public extension MeetingStoring {
@@ -229,6 +231,19 @@ public extension MeetingStoring {
     func applyTranscriptRetention(days: Int, recording: String?, now: Date = Date()) throws -> [String] {
         guard days > 0 else { return [] }
         return try deleteTranscripts(endedBefore: now.addingTimeInterval(-Double(days) * 86_400), recording: recording, now: now)
+    }
+
+    /// Without a ranked index: the meetings that contain the most of the terms, newest first among equals.
+    func shortlist(_ terms: [String], limit: Int) throws -> [String] {
+        var hits: [String: Int] = [:], order: [String] = []
+        for t in Set(terms) {
+            for m in try search(t, limit: Int.max) {
+                if hits[m.id] == nil { order.append(m.id) }
+                hits[m.id, default: 0] += 1
+            }
+        }
+        let newest = try list(limit: Int.max).map(\.id)
+        return Array(order.sorted { (hits[$0]!, newest.firstIndex(of: $1) ?? 0) > (hits[$1]!, newest.firstIndex(of: $0) ?? 0) }.prefix(limit))
     }
 }
 
