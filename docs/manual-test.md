@@ -38,20 +38,21 @@ The app is signed with a certificate when the build machine has one (`scripts/ma
 8. 🤫 › Permissions needed… or Settings › Permissions… Expected: the same window, at step 1.
 
 ### M-UPD-1: updating from an older build
-Test feed: a pre-release whose assets hold `appcast.xml` and the DMG (pre-release assets are public; the Worker ignores pre-releases). Both builds must be release builds signed with the same Developer ID and carry the committed `SUPublicEDKey`.
+Test feed: build B promoted without `--latest` (`scripts/mac/promote.sh <B's version>`). Its files are under `https://<domain>/download/<B's version>/`, while `/download` and `/appcast.xml` still serve LATEST, so nobody else is offered B. Both builds must be release builds signed with the same Developer ID and carry the committed `SUPublicEDKey`.
 1. Install build A (for example 0.2.0) from its DMG, grant the permissions, sign in, turn on Start at login.
-2. `defaults write io.backant.shepetal ShepetalFeedURL https://github.com/backant-io/shepetal/releases/download/<pre-release tag>/appcast.xml` (https only; anything else is ignored), then quit and open Shepetal.
-3. 🤫 › Check for Updates… Expected: Sparkle's window offers build B (0.2.1). Click Install and Relaunch. Expected: Shepetal restarts as B (Settings › Version), with the permissions, the login item and the sign-in kept (no permission prompt, fn dictates straight away).
-4. Clean up: `defaults delete io.backant.shepetal ShepetalFeedURL`.
-5. Downgrade: drag build A's DMG copy over B in /Applications, open it, and click Check for Updates…. Expected: B is offered again. Sparkle never offers A to B.
-6. From v0.1.0 (Apple Development signed, no Sparkle): it never updates itself. Install the first Developer ID DMG by hand once; macOS asks for Microphone, Input Monitoring and Accessibility again, and once to read the sign-in token (Always Allow) or you sign in again.
+2. `defaults write io.backant.shepetal ShepetalFeedURL https://<domain>/download/<B's version>/appcast.xml` (https only; anything else is ignored), then quit and open Shepetal.
+3. Click into a text field of another app, then 🤫 › Check for Updates… Expected: the card "A new version of shepetal is ready. Install now?" with Install Now and Later, just above 🤫 (one row above where the meeting card shows); no window opens, and typing still goes to the other app. Click Later. Expected: the card goes and nothing downloads (no "Shepetal is downloading the update" next to 🤫).
+4. Check for Updates… again, then Install Now. Expected: "Shepetal is downloading the update", then Shepetal restarts as B (Settings › Version), with the permissions, the login item and the sign-in kept (no permission prompt, fn dictates straight away). Check for Updates… on B: "Shepetal is up to date" next to 🤫.
+5. Downgrade: drag build A's DMG copy over B in /Applications, open it, and click Check for Updates…. Expected: the card offers B again. Sparkle never offers A to B.
+6. Clean up: `defaults delete io.backant.shepetal ShepetalFeedURL`.
+7. From v0.1.0 (Apple Development signed, no Sparkle): it never updates itself. Install the first Developer ID DMG by hand once; macOS asks for Microphone, Input Monitoring and Accessibility again, and once to read the sign-in token (Always Allow) or you sign in again.
 
-### M-UPD-2: an update waits for idle
-1. With the test feed from M-UPD-1 and Settings › Install updates automatically on, start a long dictation (double-tap fn) right before a background check finds B (or click Check for Updates…, then Install and Relaunch while dictating).
-2. Expected: no restart during the dictation; after Install and Relaunch, "Shepetal restarts to update when the dictation ends" next to 🤫, and the restart comes right after it ends. The same during a meeting recording and its transcription ("…when the meeting ends").
-3. A background-downloaded update installs only once fn has been left alone for 20 minutes (or when you quit).
-4. Turn Install updates automatically off. Expected: a found update shows as "Update to <version>…" in the 🤫 menu instead of a window popping up.
-5. Point `ShepetalFeedURL` at an appcast whose DMG does not match its signature (edit one byte of a copy of the DMG and upload it to a pre-release with that appcast). Expected: "Update failed: …" next to 🤫 for a few seconds, nothing installs, and the 🤫 menu shows no status line.
+### M-UPD-2: the update card never shows while Shepetal works
+1. With the test feed from M-UPD-1, start a long dictation (double-tap fn), then click 🤫 › Check for Updates…. Expected: no card while you dictate; it shows within a second after the dictation ends.
+2. With the card up, start a dictation. Expected: the card goes within a second and the dictation lands in the app you are in. When it ends, the card is back (this was a manual check). The same during a meeting recording and its transcription.
+3. A scheduled find: quit Shepetal, `defaults write io.backant.shepetal SULastCheckTime -date 2000-01-01`, open it and dictate once right away. Expected: after that dictation, no card until fn has been left alone for 20 minutes; meanwhile the 🤫 menu reads "Update to <version>…", and clicking it shows the card at once. Click Later: nothing downloads and no restart, now or when you quit.
+4. Click Install Now, then start a dictation before the download ends. Expected: no restart during the dictation; "Shepetal restarts to update when the dictation ends" next to 🤫, and the restart comes right after it ends ("…when the meeting ends" during a meeting).
+5. A bad signature: copy B's DMG and change one byte, put it and a copy of B's appcast into R2 under `releases/<an unused version>/` with `npx wrangler r2 object put … --remote` (promote.sh refuses such a DMG), and edit that appcast's enclosure `url` to the copy. Point `ShepetalFeedURL` at that appcast and click Install Now. Expected: "Update failed: …" next to 🤫 for a few seconds, nothing installs, and the 🤫 menu shows no status line. Delete the two objects afterwards.
 
 ### M-UNINST-1: uninstall, recordings kept
 1. Open shepetal › Settings and scroll to the bottom. Expected: a small grey "Uninstall Shepetal…" link is the last item; there is no uninstall in the 🤫 menu.
@@ -65,8 +66,10 @@ Test feed: a pre-release whose assets hold `appcast.xml` and the DMG (pre-releas
 2. Click Uninstall. Expected: as M-UNINST-1, and `~/Library/Application Support/Shepetal` is in the Trash too, and `defaults read io.backant.shepetal` finds no domain.
 
 ### M-UNINST-3: a waiting update does not bring the app back
-1. With the test feed from M-UPD-1 and automatic install on, let Sparkle download B in the background (Console: `Shepetal` "will install on quit"), then uninstall right away (fn untouched for less than 20 minutes, so it waits).
-2. Expected: after Shepetal quits, /Applications/Shepetal.app stays gone (the uninstall stops `io.backant.shepetal-sparkle-updater` and trashes `~/Library/Caches/io.backant.shepetal`). If it comes back, the waiting installer must be stopped some other way: report it.
+Nothing installs on quit without Install Now any more, so only a yes can leave an installer waiting.
+1. With the test feed from M-UPD-1, click Check for Updates…, then Later, and uninstall. Expected: Shepetal quits and /Applications/Shepetal.app stays gone.
+2. Install A again. Click Check for Updates…, then Install Now, and uninstall while "Shepetal is downloading the update" shows (a slow network helps).
+3. Expected: after Shepetal quits, /Applications/Shepetal.app stays gone (the uninstall stops `io.backant.shepetal-sparkle-updater` and trashes `~/Library/Caches/io.backant.shepetal`). If it comes back, the waiting installer must be stopped some other way: report it.
 
 ### M-SETUP-4: the 🌐 key at launch, restore and uninstall
 1. Quit Shepetal. Set "Press 🌐 key to" to Show Emoji & Symbols. Open Shepetal.

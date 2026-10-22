@@ -5,20 +5,25 @@ import Sparkle
 import SwiftUI
 
 /// Sparkle 2 behind Check for Updates… (docs/install-and-update.md 3). Only release builds have a feed (make-app.sh
-/// with UPDATES=1 writes SUFeedURL and SUPublicEDKey); every other build keeps `NoUpdateChecker`. A downloaded update
-/// installs only when `UpdateGate` allows it, or when Shepetal quits.
+/// with UPDATES=1 writes SUFeedURL and SUPublicEDKey); every other build keeps `NoUpdateChecker`. Ask first (Pavel,
+/// 22.10.26): its own user driver, so Sparkle never opens a window. A found update is the card above the meeting card
+/// (`MeetingCard.update`), never up while Shepetal works (`UpdatePrompt`), and nothing downloads or installs before
+/// Install Now. A card, not an alert: an alert takes focus from the app Shepetal pastes into.
 @MainActor
-final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, @preconcurrency SPUStandardUserDriverDelegate {
+final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, SPUUserDriver {
     /// `defaults write io.backant.shepetal ShepetalFeedURL https://…/appcast.xml` tests an update on one Mac.
     static let feedOverrideKey = "ShepetalFeedURL"
-    private var controller: SPUStandardUpdaterController!
+    private var updater: SPUUpdater!
     private let activity: () -> Activity
     private let hint: (String) -> Void
-    private var installNow: (() -> Void)?
     private var relaunch: (() -> Void)?
     private var timer: Timer?
-    /// "Update to 0.2.1…" when automatic install is off and a scheduled check found one.
-    private var found: String?
+    private var prompt = UpdatePrompt()
+    /// Sparkle's question about the found update, answered once: install or dismiss, never skip (that skips the
+    /// version for good).
+    private var reply: ((SPUUserUpdateChoice) -> Void)?
+    private lazy var card = MeetingCard.update(onInstall: { [weak self] in self?.answer(.install) },
+                                               onLater: { [weak self] in self?.answer(.dismiss) })
 
     static func make(activity: @escaping () -> Activity, hint: @escaping (String) -> Void) -> any UpdateChecking {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -30,31 +35,39 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, @preco
         self.activity = activity
         self.hint = hint
         super.init()
-        controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: self)
-        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in
+        updater = SPUUpdater(hostBundle: .main, applicationBundle: .main, userDriver: self, delegate: self)
+        do { try updater.start() } catch { hint("Updates are off: \(error.localizedDescription)") }
+        // Every second, so the card is down within a second of a dictation or recording starting.
+        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
     }
 
     /// Always: the item is never greyed out. A click while Sparkle cannot check says why instead.
     var canCheckForUpdates: Bool { true }
-    var menuTitle: String { found ?? "Check for Updates…" }
+    var menuTitle: String { prompt.version.map { "Update to \($0)…" } ?? "Check for Updates…" }
     func checkForUpdates() {
-        // Sparkle's own canCheckForUpdates is false only while it downloads the feed or an update in the background.
-        guard controller.updater.canCheckForUpdates else { return hint("Shepetal is downloading an update") }
-        controller.checkForUpdates(nil)
-    }
-
-    /// Settings › Install updates automatically.
-    var automaticallyInstalls: Bool {
-        get { controller.updater.automaticallyDownloadsUpdates }
-        set { controller.updater.automaticallyDownloadsUpdates = newValue }
+        if prompt.version != nil { return showUpdateInFocus() }
+        // Sparkle's own canCheckForUpdates is false while it checks or downloads.
+        guard updater.canCheckForUpdates else { return hint("Shepetal is downloading an update") }
+        updater.checkForUpdates()
     }
 
     private func tick() {
-        let now = Date()
-        if let install = installNow, UpdateGate.allows(activity(), now: now) { installNow = nil; install() }
-        if let go = relaunch, UpdateGate.allows(activity(), now: now, manual: true) { relaunch = nil; go() }
+        let now = Date(), a = activity()
+        if prompt.expired(now: now) { answer(.dismiss) }
+        let was = prompt.showing
+        if prompt.update(a, now: now) != was { card.show(prompt.showing ? prompt.version : nil) }
+        if let go = relaunch, UpdateGate.allows(a, now: now, manual: true) { relaunch = nil; go() }
+    }
+
+    /// Install Now or Later. Later downloads nothing, and the next daily check asks again.
+    private func answer(_ choice: SPUUserUpdateChoice) {
+        prompt = UpdatePrompt()
+        card.show(nil)
+        let r = reply
+        reply = nil
+        r?(choice)
     }
 
     // MARK: SPUUpdaterDelegate
@@ -64,15 +77,7 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, @preco
         return url
     }
 
-    /// Downloaded in the background: keep the block and run it once Shepetal is idle. Quitting installs it anyway.
-    func updater(_ updater: SPUUpdater, willInstallUpdateOnQuit item: SUAppcastItem,
-                 immediateInstallationBlock: @escaping () -> Void) -> Bool {
-        installNow = immediateInstallationBlock
-        tick()
-        return true
-    }
-
-    /// Install and Relaunch from the dialog: waits only for the work under way.
+    /// After Install Now: the relaunch waits only for the work under way.
     func updater(_ updater: SPUUpdater, shouldPostponeRelaunchForUpdate item: SUAppcastItem,
                  untilInvokingBlock installHandler: @escaping () -> Void) -> Bool {
         let a = activity()
@@ -87,21 +92,64 @@ final class SparkleUpdater: NSObject, UpdateChecking, SPUUpdaterDelegate, @preco
         if e.domain == SUSparkleErrorDomain, let notice = UpdateGate.failure(code: e.code, e.localizedDescription) { hint(notice) }
     }
 
-    // MARK: SPUStandardUserDriverDelegate: gentle reminders, so no update window opens at a random moment
+    // MARK: SPUUserDriver: the card, and hints next to 🤫. Sparkle calls these on the main thread.
 
-    var supportsGentleScheduledUpdateReminders: Bool { true }
-
-    func standardUserDriverShouldHandleShowingScheduledUpdate(_ update: SUAppcastItem, andInImmediateFocus immediateFocus: Bool) -> Bool {
-        immediateFocus
+    func showUpdateFound(with appcastItem: SUAppcastItem, state: SPUUserUpdateState,
+                         reply: @escaping (SPUUserUpdateChoice) -> Void) {
+        guard !appcastItem.isInformationOnlyUpdate else { return reply(.dismiss) }
+        prompt.version = appcastItem.displayVersionString
+        prompt.found = Date()
+        prompt.manual = state.userInitiated
+        self.reply = reply
+        tick()
     }
 
-    func standardUserDriverWillHandleShowingUpdate(_ handleShowingUpdate: Bool, forUpdate update: SUAppcastItem, state: SPUUserUpdateState) {
-        if !handleShowingUpdate { found = "Update to \(update.displayVersionString)…" }
+    /// Reached only after Install Now.
+    func showReady(toInstallAndRelaunch reply: @escaping (SPUUserUpdateChoice) -> Void) { reply(.install) }
+
+    /// Check for Updates… while the found update waits: the card at once, or as soon as the work ends.
+    func showUpdateInFocus() {
+        prompt.manual = true
+        tick()
     }
 
-    func standardUserDriverDidReceiveUserAttention(forUpdate update: SUAppcastItem) { found = nil }
+    func showDownloadInitiated(cancellation: @escaping () -> Void) { hint("Shepetal is downloading the update") }
 
-    func standardUserDriverWillFinishUpdateSession() { found = nil }
+    /// Only after a manual check.
+    func showUpdateNotFoundWithError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        hint("Shepetal is up to date")
+        acknowledgement()
+    }
+
+    /// After a manual check or Install Now. `didAbortWithError` already says what `UpdateGate.failure` covers.
+    func showUpdaterError(_ error: Error, acknowledgement: @escaping () -> Void) {
+        let e = error as NSError
+        if e.domain != SUSparkleErrorDomain || UpdateGate.failure(code: e.code, e.localizedDescription) == nil {
+            hint("Update failed: \(e.localizedDescription)")
+        }
+        acknowledgement()
+    }
+
+    /// Sparkle ends the session: answered, failed or done.
+    func dismissUpdateInstallation() {
+        prompt = UpdatePrompt()
+        reply = nil
+        card.show(nil)
+    }
+
+    func show(_ request: SPUUpdatePermissionRequest, reply: @escaping (SUUpdatePermissionResponse) -> Void) {
+        reply(SUUpdatePermissionResponse(automaticUpdateChecks: true, sendSystemProfile: false))
+    }
+
+    func showUpdateInstalledAndRelaunched(_ relaunched: Bool, acknowledgement: @escaping () -> Void) { acknowledgement() }
+    func showUserInitiatedUpdateCheck(cancellation: @escaping () -> Void) {}
+    func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}
+    func showUpdateReleaseNotesFailedToDownloadWithError(_ error: Error) {}
+    func showDownloadDidReceiveExpectedContentLength(_ expectedContentLength: UInt64) {}
+    func showDownloadDidReceiveData(ofLength length: UInt64) {}
+    func showDownloadDidStartExtractingUpdate() {}
+    func showExtractionReceivedProgress(_ progress: Double) {}
+    func showInstallingUpdate(withApplicationTerminated applicationTerminated: Bool, retryTerminatingApplication: @escaping () -> Void) {}
 }
 
 /// Offers once per version to move a copy run from the DMG, Downloads or App Translocation to /Applications

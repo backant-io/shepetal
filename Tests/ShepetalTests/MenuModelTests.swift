@@ -273,8 +273,8 @@ final class MenuModelTests: XCTestCase {
         // With Sparkle the item is always there and enabled: a click while Sparkle downloads says so instead.
         XCTAssertTrue(try AppSource.code("Install.swift").contains("var canCheckForUpdates: Bool { true }"))
 
-        // A scheduled check that found an update while automatic install is off renames the item instead of opening a
-        // window at a random moment; the menu keeps its length.
+        // A found update that waits for Install Now renames the item instead of opening a window at a random moment;
+        // the menu keeps its length.
         let found = MenuModel.groups(MenuState(canCheckForUpdates: true, checkForUpdatesTitle: "Update to 0.2.1…"))
         XCTAssertTrue(found.joined().contains { $0.title == "Update to 0.2.1…" && $0.action == .checkForUpdates })
         XCTAssertEqual(found.joined().count, MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count)
