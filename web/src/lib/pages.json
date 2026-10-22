@@ -1,0 +1,74 @@
+{
+  "home": {
+    "path": "/",
+    "title": "Press one key. Your words appear wherever you speak.",
+    "sub": "Dictation for Mac. Your voice never leaves it.",
+    "updated": "2026-10-22",
+    "priority": 1,
+    "freq": "weekly"
+  },
+  "faq": {
+    "path": "/faq",
+    "title": "Questions.",
+    "sub": "Installing, privacy, offline use, languages and the Macs it runs on.",
+    "updated": "2026-10-22",
+    "priority": 0.7,
+    "freq": "monthly"
+  },
+  "changelog": {
+    "path": "/changelog",
+    "title": "Changelog.",
+    "sub": "Every shepetal release for Mac.",
+    "updated": "2026-10-22",
+    "priority": 0.6,
+    "freq": "weekly"
+  },
+  "press": {
+    "path": "/press",
+    "title": "Press.",
+    "sub": "The name, the facts, the logo and screenshots.",
+    "updated": "2026-10-22",
+    "priority": 0.5,
+    "freq": "monthly"
+  },
+  "refunds": {
+    "path": "/refunds",
+    "title": "Refund Policy.",
+    "sub": "30 days free, and a full refund within 14 days.",
+    "updated": "2026-10-22",
+    "priority": 0.3,
+    "freq": "yearly"
+  },
+  "privacy": {
+    "path": "/privacy",
+    "title": "Privacy Policy.",
+    "sub": "Your voice never leaves your Mac.",
+    "updated": "2026-10-22",
+    "priority": 0.3,
+    "freq": "yearly"
+  },
+  "terms": {
+    "path": "/terms",
+    "title": "Terms of Use.",
+    "sub": "The trial, the lifetime license and the subscription.",
+    "updated": "2026-10-20",
+    "priority": 0.3,
+    "freq": "yearly"
+  },
+  "impressum": {
+    "path": "/impressum",
+    "title": "Legal notice.",
+    "sub": "Who makes shepetal, and how to reach us.",
+    "updated": "2026-10-22",
+    "priority": 0.2,
+    "freq": "yearly"
+  },
+  "legal": {
+    "path": "/legal",
+    "title": "Legal.",
+    "sub": "Licenses, attribution and trademarks.",
+    "updated": "2026-10-22",
+    "priority": 0.2,
+    "freq": "yearly"
+  }
+}

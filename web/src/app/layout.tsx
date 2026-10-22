@@ -1,19 +1,15 @@
 import type { Metadata, Viewport } from 'next';
 import { preload } from 'react-dom';
+import { Analytics } from '@/components/Analytics';
+import { ogImage } from '@/lib/seo';
 import { SITE_URL } from '@/lib/site';
 import '@/styles/system.css';
 
 const title = 'shepetal: press one key, your words appear';
-const description = 'Press one key. Your words appear wherever you speak. 100% private dictation for Mac.';
-// A static file, so link previews (X, iMessage, Slack) get it from the edge without waking the Worker.
-// Built from web/og/og.html in headless Chrome. The brand keeps the price off link previews.
-const ogImage = {
-  url: '/og.jpg',
-  width: 1200,
-  height: 630,
-  type: 'image/jpeg',
-  alt: 'shepetal. Press one key. The orange fn key on a concrete-white ground.',
-};
+const description = 'Press one key. Your words appear wherever you speak. Dictation for Mac: your voice never leaves it.';
+// Static files, so link previews (X, iMessage, Slack) get them from the edge without waking the Worker. Each public
+// page has its own (src/lib/seo.ts, rendered by og/pages.mjs); this is the default. No price on a preview.
+const preview = ogImage('home');
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -26,9 +22,9 @@ export const metadata: Metadata = {
     siteName: 'shepetal',
     type: 'website',
     locale: 'en_US',
-    images: [ogImage],
+    images: [preview],
   },
-  twitter: { card: 'summary_large_image', title, description, images: [ogImage] },
+  twitter: { card: 'summary_large_image', title, description, images: [preview] },
   // The tab and app icons are the Noto 🤫 (BRAND.md).
   icons: {
     icon: [
@@ -47,7 +43,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   preload('/fonts/archivo-latin.woff2', { as: 'font', type: 'font/woff2', crossOrigin: '' });
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }

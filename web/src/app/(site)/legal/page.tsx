@@ -1,12 +1,9 @@
 import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
 
-export const metadata: Metadata = {
-  title: 'Legal',
-  description: 'The licenses, attribution and trademark notices for shepetal.',
-  alternates: { canonical: '/legal' },
-};
+export const metadata: Metadata = pageMetadata('legal', { title: 'Legal', description: 'The licenses, attribution and trademark notices for shepetal.' });
 
 export default function Legal() {
   return (
@@ -20,7 +17,9 @@ export default function Legal() {
           <p>
             The <Link href="/impressum">legal notice (Impressum)</Link> names who runs shepetal and how to reach us. The{' '}
             <Link href="/terms">Terms of Use</Link>, the <Link href="/refunds">Refund Policy</Link> and the{' '}
-            <Link href="/privacy">Privacy Policy</Link> are their own pages.
+            <Link href="/privacy">Privacy Policy</Link> are their own pages. Questions are answered in the{' '}
+            <Link href="/faq">FAQ</Link>, releases are in the <Link href="/changelog">changelog</Link>, and the press kit
+            is on the <Link href="/press">press page</Link>.
           </p>
 
           <h2>Fonts</h2>

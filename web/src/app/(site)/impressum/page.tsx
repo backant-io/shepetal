@@ -1,12 +1,9 @@
 import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
 
-export const metadata: Metadata = {
-  title: 'Legal notice',
-  description: 'Who runs shepetal and how to reach us (Impressum).',
-  alternates: { canonical: '/impressum' },
-};
+export const metadata: Metadata = pageMetadata('impressum', { title: 'Legal notice', description: 'Who runs shepetal and how to reach us (Impressum).' });
 
 // The seller's details from Pavel's legal records (22.10.26). backant.io itself never mentions shepetal.
 export default function Impressum() {

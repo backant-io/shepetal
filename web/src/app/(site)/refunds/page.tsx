@@ -1,12 +1,9 @@
 import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
 
-export const metadata: Metadata = {
-  title: 'Refund Policy',
-  description: 'Try shepetal free for 30 days. A full refund within 14 days of a lifetime purchase, and cancel a subscription anytime.',
-  alternates: { canonical: '/refunds' },
-};
+export const metadata: Metadata = pageMetadata('refunds', { title: 'Refund Policy', description: 'Try shepetal free for 30 days. A full refund within 14 days of a lifetime purchase, and cancel a subscription anytime.' });
 
 // The rules are the Terms of Use's (section 2, Refunds) and what the payment code does: a refunded lifetime license
 // ends, a cancelled subscription runs to the end of its paid month, and a second charge for the same thing is refunded.

@@ -1,12 +1,9 @@
 import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
 
-export const metadata: Metadata = {
-  title: 'Terms of Use',
-  description: 'The terms for using shepetal, its free trial, the lifetime license and the monthly subscription.',
-  alternates: { canonical: '/terms' },
-};
+export const metadata: Metadata = pageMetadata('terms', { title: 'Terms of Use', description: 'The terms for using shepetal, its free trial, the lifetime license and the monthly subscription.' });
 
 export default function TermsOfUse() {
   return (

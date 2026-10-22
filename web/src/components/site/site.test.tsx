@@ -56,11 +56,12 @@ describe('install help (the app is not notarized)', () => {
 
   it('is where the account’s Download button lands, and that page starts the download', () => {
     const read = (p: string) => readFileSync(join(__dirname, '..', '..', 'app', '(site)', p, 'page.tsx'), 'utf8');
-    expect(read('account')).toContain('href="/install"');
+    expect(read('account')).toContain('href={`/install${from}`}');
     const install = read('install');
-    expect(install).toContain('<meta httpEquiv="refresh" content="1;url=/download" />');
+    expect(install).toContain('<meta httpEquiv="refresh" content={`1;url=${download}`} />');
+    expect(install).toContain('const download = `/download${attributionQuery(');
     expect(install).toContain('<InstallSteps />');
-    expect(install).toContain('href="/download"');
+    expect(install).toContain('href={download}');
   });
 });
 
