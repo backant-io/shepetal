@@ -1,12 +1,21 @@
-import NextAuth from 'next-auth';
+import NextAuth, { type NextAuthConfig } from 'next-auth';
 import Google from 'next-auth/providers/google';
 import { upsertUser, type User } from './account';
+import { siteOrigin } from './site';
 import { bearer, userForToken } from './tokens';
 
 // Same Google OAuth client and next-auth setup as backant.io: JWT sessions, no adapter.
 // Cookies stay host-only, so a shepetal session never reaches backant.io and the reverse.
 // Lazy config: env and the D1 binding only exist inside a request on the Worker.
-export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
+// AUTH_URL (where Google's callback lands: <origin>/api/auth/callback/google) follows SHEPETAL_DOMAIN; a local run
+// or the e2e sets AUTH_URL itself.
+export const { handlers, auth, signIn, signOut } = NextAuth(() => {
+  process.env.AUTH_URL ||= siteOrigin();
+  process.env.NEXTAUTH_URL ||= process.env.AUTH_URL;
+  return config();
+});
+
+const config = (): NextAuthConfig => ({
   providers: [
     Google({
       clientId: process.env.GOOGLE_CLIENT_ID,
@@ -21,10 +30,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => ({
     },
   },
   trustHost: true,
-}));
+});
 
-/** The site origin links point at: AUTH_URL (https://shepetal.backant.io in production). */
-export const siteUrl = (req: Request) => process.env.AUTH_URL || new URL(req.url).origin;
+/** The site origin links point at: AUTH_URL when a local run sets it, else https://<SHEPETAL_DOMAIN>. */
+export const siteUrl = (_req?: Request) => process.env.AUTH_URL || siteOrigin();
 
 /**
  * The caller of an API route: the app's bearer token if one is sent (an invalid

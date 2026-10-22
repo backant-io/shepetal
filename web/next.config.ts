@@ -1,5 +1,7 @@
+import { readFileSync } from 'node:fs';
 import type { NextConfig } from 'next';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
+import { wranglerDomain } from './src/lib/wrangler-domain';
 
 // Gives `next dev` the D1 binding from wrangler.toml (local D1 in .wrangler/).
 initOpenNextCloudflareForDev();
@@ -31,6 +33,8 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Build-time copy of the domain for metadata (metadataBase, OG, canonical); the Worker reads the same var at runtime.
+  env: { SHEPETAL_DOMAIN: wranglerDomain(readFileSync(`${__dirname}/wrangler.toml`, 'utf8')) },
   // Pin the root: stray lockfiles in parent folders otherwise become the workspace root.
   outputFileTracingRoot: __dirname,
   // No experimental.inlineCss: it puts the CSS in the page twice (a <style> and the RSC payload), 49.8 KB gzip

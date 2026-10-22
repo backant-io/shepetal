@@ -3,7 +3,7 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Terms of Use',
-  description: 'The terms for using shepetal, its free trial and the one-time purchase.',
+  description: 'The terms for using shepetal, its free trial, the lifetime license and the monthly subscription.',
   alternates: { canonical: '/terms' },
 };
 
@@ -11,12 +11,13 @@ export default function TermsOfUse() {
   return (
     <main className="mx-auto max-w-3xl px-4 pt-16 sm:px-8">
       <h1 className="display text-[clamp(2.75rem,8vw,4.5rem)] leading-none">Terms of Use</h1>
-      <p className="mt-4 text-sm text-[var(--hush)]">Version 1.0. Last revised on October 20, 2026</p>
+      <p className="mt-4 text-sm text-[var(--hush)]">Version 1.2. Last revised on October 22, 2026</p>
 
       <div className="prose-legal mt-12">
         <p>
           This website (the &quot;Site&quot;) and the shepetal app (together, the
-          &quot;Service&quot;) belong to Backant Inc. (&quot;Company&quot;, &quot;us&quot;, &quot;our&quot; and
+          &quot;Service&quot;) belong to BackAnt, Inc., a Delaware corporation (Delaware file number 10279385), 131 Continental
+          Dr, Suite 305, Newark, DE 19713, USA (&quot;Company&quot;, &quot;us&quot;, &quot;our&quot; and
           &quot;we&quot;). Certain features of the Service may be subject to additional guidelines, terms or rules,
           which will be posted on the Site in connection with such features and are incorporated by reference into
           these Terms.
@@ -42,24 +43,54 @@ export default function TermsOfUse() {
           unauthorized use. You may ask us to delete your Account at any time.
         </p>
 
-        <h2>2. Free trial and purchase</h2>
+        <h2>2. Free trial, purchase and subscription</h2>
         <p>
           Your free trial starts the first time you sign in to the Service and lasts 30 days. The trial needs no payment
           method, and it ends on its own without any charge.
         </p>
         <p>
-          After the trial you can buy shepetal with a one-time payment of $4.99 USD. A purchase gives you a perpetual
-          license to use shepetal, including the future updates we release, and there is no subscription or recurring
-          charge. Payments are processed by Stripe under Stripe&apos;s own terms. If we change the price, the change
-          applies only to purchases made afterwards.
+          You can keep using shepetal in one of two ways. Prices include the sales tax or VAT that applies where you
+          live; checkout shows the tax and the total before you pay, in your currency where we offer it (US dollars or
+          euros). Stripe processes every payment under Stripe&apos;s own terms. If we change a price, the change applies only to purchases made afterwards, and
+          to a subscription only after we tell you by email at least 30 days before its next renewal.
+        </p>
+        <p>
+          <strong>Lifetime license.</strong> A one-time payment of $23.99 gives you a perpetual license to use shepetal,
+          including the future updates we release. There is no recurring charge.
+        </p>
+        <p>
+          <strong>Monthly subscription.</strong> $0.99 a month. Your subscription renews automatically every month, on
+          the day of the month you subscribed, and we charge the payment method you gave until you cancel. You can
+          cancel anytime from your account page, under Manage subscription. When you cancel, shepetal keeps working
+          until the end of the month you have paid for, and there is no further charge. If a renewal payment fails,
+          shepetal stops working until the payment goes through; you can update your card under Manage subscription.
+        </p>
+        <p>
+          <strong>Promotion codes.</strong> A promotion code applies only to the purchase it names, until the date it
+          ends, once per account. A code never applies to the subscription unless it says so.
+        </p>
+        <p>
+          <strong>Delivery right away and your right of withdrawal.</strong> shepetal is digital content, delivered as
+          soon as you pay. If you are a consumer in the European Union, the United Kingdom or another country with a
+          right of withdrawal, you would normally have 14 days to withdraw from the purchase. At checkout you ask us to
+          deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. Your
+          receipt confirms this.
+        </p>
+        <p>
+          <strong>Refunds.</strong> The free trial lets you try shepetal before you pay. Even so, if shepetal does not
+          work for you, write to <a href="mailto:founder@backant.io">founder@backant.io</a> within 14 days of a lifetime
+          purchase for a full refund; a refund ends the license. Monthly payments are not refunded for the part of a
+          month you have already started, and cancelling stops every later charge. The full policy is on our{' '}
+          <Link href="/refunds">refund policy</Link> page. This does not limit any right the law where you live gives
+          you, including your rights if shepetal is faulty.
         </p>
 
         <h2>3. License</h2>
         <p>
           Subject to these Terms, Company grants you a non-transferable, non-exclusive, revocable, limited license to
-          use the Service for your own personal or internal business use, during your trial and, after a purchase,
-          without time limit. The shepetal source code is published under the MIT License, and nothing in these Terms
-          limits the rights that license gives you to the source code.
+          use the Service for your own personal or internal business use, during your trial, after a lifetime purchase
+          without time limit, and with a subscription for as long as it is paid. The shepetal source code is published
+          under the MIT License, and nothing in these Terms limits the rights that license gives you to the source code.
         </p>
         <p>
           You shall not (a) resell, sublicense or share your Account or license with others; (b) interfere with or
@@ -82,7 +113,7 @@ export default function TermsOfUse() {
 
         <h2>6. Third-party links</h2>
         <p>
-          The Service may contain links to third-party websites and services, such as Stripe and GitHub. They are not
+          The Service may contain links to third-party websites and services, such as Stripe. They are not
           under the control of Company, and Company is not responsible for them.
         </p>
 
@@ -134,8 +165,9 @@ export default function TermsOfUse() {
 
         <h2>12. Contact</h2>
         <p>
-          Pavel Hegler, Backant Inc., 5214f Diamond Heights Boulevard, San Francisco, California 94131. Telephone +1
-          (415) 969-2829. Email <a href="mailto:founder@backant.io">founder@backant.io</a>.
+          BackAnt, Inc., a Delaware corporation (file number 10279385), registered address 131 Continental Dr, Suite 305,
+          Newark, DE 19713, USA. Contact: Pavel Hegler, 5214f Diamond Heights Boulevard, San Francisco, California
+          94131. Telephone +1 (415) 969-2829. Email <a href="mailto:founder@backant.io">founder@backant.io</a>.
         </p>
         <p>
           See also our <Link href="/privacy">Privacy Policy</Link>.

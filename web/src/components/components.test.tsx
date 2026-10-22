@@ -1,27 +1,60 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { startCheckout } from './BuyButton';
-import { daysLeft, LicenseSummary } from './LicenseSummary';
+import type { License } from '@/lib/account';
+import { PlanPicker, startCheckout, startPortal } from './BuyButton';
+import { actionsFor, daysLeft, LicenseSummary } from './LicenseSummary';
 
 const json = (status: number, body: unknown) =>
   vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status }));
 
 describe('Buy button', () => {
-  it('posts to /api/checkout and opens the Stripe url it returns', async () => {
-    const f = json(200, { url: 'https://checkout.stripe.com/c/pay/cs_test_1' });
-    expect(await startCheckout(f)).toEqual({ url: 'https://checkout.stripe.com/c/pay/cs_test_1' });
-    expect(f).toHaveBeenCalledWith('/api/checkout', { method: 'POST' });
+  it('posts the plan to /api/checkout and opens the Stripe url it returns', async () => {
+    for (const plan of ['lifetime', 'monthly'] as const) {
+      const f = json(200, { url: 'https://checkout.stripe.com/c/pay/cs_test_1' });
+      expect(await startCheckout(plan, f)).toEqual({ url: 'https://checkout.stripe.com/c/pay/cs_test_1' });
+      expect(f).toHaveBeenCalledWith('/api/checkout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+    }
   });
 
-  it('tells a signed-out user to sign in again, and an owner that they already own it, so nobody pays twice', async () => {
-    expect(await startCheckout(json(401, { error: 'unauthorized' }))).toEqual({ error: expect.stringMatching(/sign in again/) });
-    expect(await startCheckout(json(409, { error: 'already_active' }))).toEqual({ error: expect.stringMatching(/already own/) });
+  it('tells a signed-out user to sign in again, and an owner or subscriber what they have, so nobody pays twice', async () => {
+    expect(await startCheckout('lifetime', json(401, { error: 'unauthorized' }))).toEqual({ error: expect.stringMatching(/sign in again/) });
+    expect(await startCheckout('lifetime', json(409, { error: 'already_active' }))).toEqual({ error: expect.stringMatching(/already own/) });
+    expect(await startCheckout('monthly', json(409, { error: 'already_subscribed' }))).toEqual({ error: expect.stringMatching(/subscription is active/) });
+  });
+
+  it('sends a code with the lifetime plan, and says why a code was refused', async () => {
+    const f = json(200, { url: 'https://checkout.stripe.com/c/pay/cs_test_2' });
+    await startCheckout('lifetime', f, 'PRODUCTHUNT');
+    expect(f).toHaveBeenCalledWith('/api/checkout', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ plan: 'lifetime', code: 'PRODUCTHUNT' }) });
+    expect(await startCheckout('lifetime', json(400, { error: 'invalid_code' }), 'NOPE')).toEqual({ error: 'This code is not valid.' });
+    expect(await startCheckout('lifetime', json(400, { error: 'code_not_applicable', message: 'This code is for a first purchase.' }), 'PRODUCTHUNT')).toEqual({ error: 'This code is for a first purchase.' });
   });
 
   it('never navigates on a server error, a missing url or a network failure', async () => {
     for (const f of [json(500, { url: 'https://checkout.stripe.com/x' }), json(200, {}), vi.fn<typeof fetch>(async () => Promise.reject(new Error('offline')))]) {
-      expect(await startCheckout(f)).toEqual({ error: expect.stringMatching(/did not open/) });
+      expect(await startCheckout('lifetime', f)).toEqual({ error: expect.stringMatching(/did not open/) });
+      expect(await startPortal(f)).toEqual({ error: expect.stringMatching(/did not open/) });
     }
+  });
+
+  it('opens the Billing Portal from Manage subscription', async () => {
+    const f = json(200, { url: 'https://billing.stripe.com/p/session/1' });
+    expect(await startPortal(f)).toEqual({ url: 'https://billing.stripe.com/p/session/1' });
+    expect(f).toHaveBeenCalledWith('/api/billing/portal', { method: 'POST' });
+  });
+
+  it('offers both plans, $23.99 once and $0.99 a month, and never the retired price', () => {
+    const html = renderToStaticMarkup(<PlanPicker />);
+    expect(html).toContain('id="plans"');
+    expect(html).toContain('$23.99 once');
+    expect(html).toContain('$0.99 a month');
+    expect(html).toContain('Cancel anytime.');
+    expect(html).toContain('name="code"');
+    expect(html).not.toContain('4.99');
   });
 });
 
@@ -29,6 +62,8 @@ describe('/account license summary', () => {
   const DAY = 86_400_000;
   const now = Date.parse('2026-10-20T12:00:00.000Z');
   const email = 'a@example.com';
+  const base: License = { status: 'trial', plan: 'trial', trial_ends_at: null, paid_through: null, renews: false, payment_failed: false, email };
+  const render = (l: Partial<License>) => renderToStaticMarkup(<LicenseSummary license={{ ...base, ...l }} now={now} />);
 
   it('counts trial days up, so a fresh trial shows 30 and the last hours still show 1', () => {
     expect(daysLeft(new Date(now + 30 * DAY).toISOString(), now)).toBe(30);
@@ -36,25 +71,49 @@ describe('/account license summary', () => {
     expect(daysLeft(new Date(now - DAY).toISOString(), now)).toBe(0);
   });
 
-  it('shows days left during the trial', () => {
-    const html = renderToStaticMarkup(
-      <LicenseSummary license={{ status: 'trial', trial_ends_at: new Date(now + 12.5 * DAY).toISOString(), email }} now={now} />,
-    );
+  it('shows days left during the trial, and both prices', () => {
+    const html = render({ trial_ends_at: new Date(now + 12.5 * DAY).toISOString() });
     expect(html).toContain('13 days left');
     expect(html).toContain('November 2, 2026');
+    expect(html).toContain('$23.99 once, or $0.99 a month');
+    expect(actionsFor({ ...base })).toEqual({ plans: true, manage: false });
   });
 
-  it('shows "yours forever" for a purchase, with no trial date', () => {
-    const html = renderToStaticMarkup(<LicenseSummary license={{ status: 'active', trial_ends_at: null, email }} now={now} />);
+  it('shows "yours forever" for the lifetime license, with no date and nothing to buy or manage', () => {
+    const l = { ...base, status: 'active' as const, plan: 'lifetime' as const };
+    const html = render(l);
     expect(html).toContain('Yours forever');
     expect(html).not.toContain('left');
+    expect(actionsFor(l)).toEqual({ plans: false, manage: false });
   });
 
-  it('asks for the one-time $4.99 once the trial ended', () => {
-    const html = renderToStaticMarkup(
-      <LicenseSummary license={{ status: 'expired', trial_ends_at: '2026-10-01T00:00:00.000Z', email }} now={now} />,
-    );
+  it('shows the renewal date of a subscription, with Manage subscription', () => {
+    const l = { ...base, status: 'active' as const, plan: 'subscription' as const, paid_through: '2026-11-20T00:00:00.000Z', renews: true };
+    expect(render(l)).toContain('Renews on November 20, 2026');
+    expect(actionsFor(l)).toEqual({ plans: false, manage: true });
+  });
+
+  it('shows when a cancelled subscription ends', () => {
+    const html = render({ status: 'active', plan: 'subscription', paid_through: '2026-11-20T00:00:00.000Z', renews: false });
+    expect(html).toContain('Yours until November 20, 2026');
+  });
+
+  it('asks for a new card after a failed renewal, through Manage subscription', () => {
+    const l = { ...base, status: 'expired' as const, plan: 'subscription' as const, paid_through: '2026-10-19T00:00:00.000Z', renews: true, payment_failed: true };
+    expect(render(l)).toContain('Payment failed');
+    expect(actionsFor(l)).toEqual({ plans: false, manage: true });
+  });
+
+  it('offers the plans again once a subscription ended', () => {
+    const l = { ...base, status: 'expired' as const, plan: 'subscription' as const, paid_through: '2026-10-01T00:00:00.000Z' };
+    expect(render(l)).toContain('Your subscription ended');
+    expect(actionsFor(l)).toEqual({ plans: true, manage: false });
+  });
+
+  it('offers the plans once the trial ended', () => {
+    const html = render({ status: 'expired', trial_ends_at: '2026-10-01T00:00:00.000Z' });
     expect(html).toContain('Your trial ended');
-    expect(html).toContain('$4.99');
+    expect(html).toContain('Pick a plan');
+    expect(html).not.toContain('4.99');
   });
 });

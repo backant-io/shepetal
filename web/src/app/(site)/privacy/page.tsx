@@ -15,7 +15,8 @@ export default function PrivacyPolicy() {
 
       <div className="prose-legal mt-12">
         <p>
-          Backant Inc. (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes shepetal, a
+          BackAnt, Inc., a Delaware corporation, 131 Continental Dr, Suite 305, Newark, DE 19713, USA (the
+          &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes shepetal, a
           dictation app for Mac, and runs this website (the &quot;Site&quot;). The Site and the
           shepetal app together are the &quot;Service&quot;. This Privacy Policy explains what information we collect
           when you use the Service, how we use it and how we protect it. &quot;You&quot; refers to you, as a user of the
@@ -40,12 +41,15 @@ export default function PrivacyPolicy() {
         <h3>1. Your account</h3>
         <p>
           You sign in with your Google account. Google tells us your email address, and we store it together with the
-          date your free trial started and whether you bought shepetal.
+          date your free trial started and your plan: the lifetime license, or a subscription with its status and the
+          date it is paid through.
         </p>
         <h3>2. Purchases</h3>
         <p>
-          Payments are handled by Stripe. Your card details go straight to Stripe, and we receive the confirmation that
-          you paid and the date of the payment.
+          Payments are handled by Stripe. Your card details go straight to Stripe, and so does the billing address (and a
+          VAT ID, if you give one) that Stripe uses to work out the sales tax or VAT. We keep your Stripe customer ID and
+          receive the confirmation that you paid, the date of the payment and, for a subscription, its renewal date and
+          whether a renewal payment failed.
         </p>
         <h3>3. The app sign-in</h3>
         <p>
@@ -73,8 +77,8 @@ export default function PrivacyPolicy() {
         </p>
         <p>
           We share information with the vendors that run parts of the Service for us, and only as far as they need it:
-          Google for sign-in, Stripe for payments, Cloudflare for hosting and GitHub, which serves the installer
-          downloads. They use it only at our direction.
+          Google for sign-in, Stripe for payments and tax, and Cloudflare for hosting and the downloads. They use it only
+          at our direction.
         </p>
         <p>
           We may share information with outside parties if we have a good-faith belief that access, use, preservation
