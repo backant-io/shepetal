@@ -128,8 +128,27 @@ describe('lifetime ($23.99 once)', () => {
     });
     expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/delivered right away.*ends my 14-day right of withdrawal/);
     expect(params.payment_intent_data?.description).toContain('ends the 14-day right of withdrawal');
+    expect(params.payment_intent_data?.statement_descriptor_suffix).toBe('SHEPETAL');
     await send(event(session({ client_reference_id: params.client_reference_id, metadata: params.metadata })));
     expect((await fresh()).status).toBe('active');
+  });
+
+  it("brands both plans' Checkout as shepetal per session, on the API version that has branding_settings", async () => {
+    // The account's own branding is backant's (backant.io shares it): shepetal's look must travel with each session.
+    const create = vi.spyOn(getStripe().checkout.sessions, 'create').mockResolvedValue({ url: 'https://x' } as never);
+    await checkoutUrl(user, SITE_URL, 'lifetime');
+    await checkoutUrl(await fresh(), SITE_URL, 'monthly');
+    for (const [params, options] of create.mock.calls as unknown as [Stripe.Checkout.SessionCreateParams, unknown][]) {
+      expect(params).toMatchObject({
+        branding_settings: {
+          display_name: 'shepetal',
+          logo: { type: 'url', url: 'https://shepetal.app/press/shepetal-wordmark-ink.png' },
+          icon: { type: 'url', url: 'https://shepetal.app/icon-512.png' },
+        },
+      });
+      // Older API versions refuse branding_settings, and so every checkout.
+      expect(options).toEqual({ apiVersion: '2025-09-30.clover' });
+    }
   });
 
   it('keeps one Stripe customer per user, so the PRODUCTHUNT code (first transaction only) works once per user', async () => {

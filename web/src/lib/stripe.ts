@@ -14,6 +14,7 @@ import {
   type User,
 } from './account';
 import { db } from './db';
+import { SITE_URL } from './site';
 
 let stripe: Stripe | undefined;
 
@@ -34,6 +35,22 @@ export function getStripe(): Stripe {
   });
   return stripe;
 }
+
+/**
+ * shepetal's look on Stripe Checkout (the wordmark, the icon as favicon, the site's colours), set per session, so the
+ * shared account's branding stays backant's. Receipts and invoices keep the account's branding: BackAnt, Inc. is the
+ * seller. branding_settings needs API 2025-09-30.clover on the create call; stripe@17's types predate it.
+ */
+export const CHECKOUT_API_VERSION = '2025-09-30.clover';
+export const CHECKOUT_BRANDING = {
+  display_name: 'shepetal',
+  logo: { type: 'url', url: `${SITE_URL}/press/shepetal-wordmark-ink.png` },
+  icon: { type: 'url', url: `${SITE_URL}/icon-512.png` },
+  background_color: '#E6E4DE',
+  button_color: '#161512',
+  font_family: 'inter',
+  border_style: 'rounded',
+};
 
 // backant's Stripe account also sends backant.io's own checkouts to every webhook
 // endpoint, so shepetal's sessions and subscriptions carry this tag and the webhook ignores the rest.
@@ -158,6 +175,7 @@ export async function checkoutUrl(user: User, base: string, plan: CheckoutPlan =
       terms_of_service_acceptance: { message: consentText(plan, base) },
       submit: { message: plan === 'lifetime' ? 'shepetal is yours right after you pay.' : 'Your subscription starts right after you pay.' },
     },
+    branding_settings: CHECKOUT_BRANDING,
   };
   let session: Stripe.Checkout.Session;
   try {
@@ -168,11 +186,13 @@ export async function checkoutUrl(user: User, base: string, plan: CheckoutPlan =
             mode: 'payment',
             client_reference_id: String(user.id),
             // The description is on the receipt email: the purchase and the consent, on a durable medium.
-            payment_intent_data: { metadata: tag, description: `shepetal lifetime license. ${CONFIRMATION}` },
+            // The card statement reads "BACKANT, I* SHEPETAL" (the account's prefix, then this suffix).
+            payment_intent_data: { metadata: tag, description: `shepetal lifetime license. ${CONFIRMATION}`, statement_descriptor_suffix: 'SHEPETAL' },
           }
         : // No client_reference_id: backant.io's webhook (same Stripe account) acts on every subscription checkout
           // that has one, as its own client id. The user id travels in metadata instead.
           { ...common, mode: 'subscription', subscription_data: { metadata: tag } },
+      { apiVersion: CHECKOUT_API_VERSION },
     );
   } catch (e) {
     // Stripe refuses a code that has ended or was used up, or meets a customer who has paid before.
