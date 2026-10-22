@@ -7,10 +7,10 @@
 //
 // What it sets up (each found by its lookup_key, its id, or metadata app=shepetal; nothing else in the
 // shared account is read for a decision or changed):
-//   - product "Shepetal" (metadata app=shepetal, plan=lifetime, tax code downloadable software) with a one-time price,
+//   - product "shepetal" (metadata app=shepetal, plan=lifetime, tax code downloadable software) with a one-time price,
 //     lookup_key shepetal_lifetime.
 //     A product with metadata app=shepetal and no plan (the first $4.99 product) becomes this product.
-//   - product "Shepetal Monthly" (metadata app=shepetal, plan=monthly, tax code downloadable software) with a monthly price,
+//   - product "shepetal monthly" (metadata app=shepetal, plan=monthly, tax code downloadable software) with a monthly price,
 //     lookup_key shepetal_monthly.
 //   - both prices tax-inclusive (Stripe Tax takes the VAT or sales tax out of the price, so the buyer pays the price
 //     shown), in USD with a EUR price for EU buyers (currency_options). Set per price, so the account's default
@@ -88,9 +88,9 @@ async function product(products, plan, name) {
   if (!p) {
     p = await stripe.products.create({ name, tax_code: TAX_CODES[plan], metadata: { app: APP, plan } });
     notes.push(`created product ${p.id} (${name}, tax code ${TAX_CODES[plan]})`);
-  } else if (!p.active || p.metadata.plan !== plan || p.tax_code !== TAX_CODES[plan]) {
-    p = await stripe.products.update(p.id, { active: true, tax_code: TAX_CODES[plan], metadata: { app: APP, plan } });
-    notes.push(`updated product ${p.id}: active, metadata plan=${plan}, tax code ${TAX_CODES[plan]}`);
+  } else if (!p.active || p.name !== name || p.metadata.plan !== plan || p.tax_code !== TAX_CODES[plan]) {
+    p = await stripe.products.update(p.id, { active: true, name, tax_code: TAX_CODES[plan], metadata: { app: APP, plan } });
+    notes.push(`updated product ${p.id}: active, name ${name}, metadata plan=${plan}, tax code ${TAX_CODES[plan]}`);
   }
   return p;
 }
@@ -228,8 +228,9 @@ async function portal() {
 process.on('unhandledRejection', (e) => fail(`${e?.message ?? e}${e?.requestId ? ` (request ${e.requestId})` : ''}`));
 
 const products = await shepetalProducts();
-const lifetime = await product(products, 'lifetime', 'Shepetal');
-const monthly = await product(products, 'monthly', 'Shepetal Monthly');
+// Lowercase, as the brand writes it: the name is on Checkout's line item and on receipts and invoices.
+const lifetime = await product(products, 'lifetime', 'shepetal');
+const monthly = await product(products, 'monthly', 'shepetal monthly');
 if (lifetime.id === monthly.id) fail('the lifetime and monthly products must be separate');
 const lifetimePrice = await price('shepetal_lifetime', lifetime.id, cfg.lifetimeCents, cfg.lifetimeEur, false);
 const monthlyPrice = await price('shepetal_monthly', monthly.id, cfg.monthlyCents, cfg.monthlyEur, true);
