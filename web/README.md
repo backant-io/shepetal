@@ -18,7 +18,8 @@ The website and account service at https://shepetal.backant.io: the landing page
 | `src/lib/stripe.ts` | `getStripe()`, checkout per plan, the Billing Portal, the webhook |
 | `scripts/stripe-setup.mjs` | finds or creates the Stripe objects and prints their IDs |
 | `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |
-| `src/app/(site)/` | pages: the landing page and the account page |
+| `src/app/(story)/page.tsx`, `src/components/story/` | the landing page: the approved "full scroll story". `choreography.ts` is the design's one table of scroll timings and writing windows (ported from its build.mjs); `story.generated.css` is generated from it (native CSS scroll timelines plus the paused-animation fallback that `StoryMotion.tsx` drives with `--p`) |
+| `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
 | `src/app/api/` | the API routes in API.md |
 
 ## What comes from backant.io
@@ -68,7 +69,21 @@ grep -E '^GOOGLE_CLIENT_(ID|SECRET)=' /Users/sorcecoder/github/backant/backant-m
 
 Local Google sign-in only works if `http://localhost:3000/api/auth/callback/google` is an authorized redirect URI on the OAuth client.
 
+## Tests
+
+| Command | What |
+|---|---|
+| `npm test`, `npm run type-check` | unit tests (vitest) and the types |
+| `npm run e2e` | the real Worker (`wrangler dev`, a fresh local D1) with a fake Stripe API: sign-in, the app login, checkout per plan, the webhooks, and /account for a trial user, a subscriber and a lifetime owner |
+| `node e2e/stripe-testmode.mjs` | both plans and the plan settings API against the real Stripe test API (`STRIPE_SECRET_KEY=sk_test_…`) |
+| `node e2e/account-testmode.mjs` | the plan settings on /account in a headless browser, in Stripe test mode: subscribe, Manage billing, cancel at period end, resume, switch to lifetime |
+| `node e2e/design-match.mjs` | the landing page against the design's reference frames (1440×900 and 390×844), an optional sweep against its standalone preview (`SWEEP=1`), and the check that the key never covers text. Viewport-sized captures only |
+
+The browser tests use `playwright-core` from `PLAYWRIGHT_CORE` and a chromium headless shell from `PLAYWRIGHT_BROWSERS_PATH`: no window, no focus, no clipboard.
+
 ## Deploy
+
+Preview first: `npx opennextjs-cloudflare build && npx wrangler versions upload` uploads a version without sending it traffic and prints its preview URL. Production (below) only at launch.
 
 ```sh
 cd web
