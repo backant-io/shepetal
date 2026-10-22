@@ -17,6 +17,7 @@ The website and account service at https://shepetal.backant.io: the landing page
 | `src/lib/account.ts` | `upsertUser`, `getLicense`, `licenseOf` (the trial rule, tested in `account.test.ts`) |
 | `src/lib/stripe.ts` | `getStripe()` |
 | `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |
+| `src/lib/download.ts` | `/download`, the release files and `/appcast.xml`, from the R2 bucket `shepetal-releases` |
 | `src/app/(site)/` | pages: the landing page and the account page |
 | `src/app/api/` | the API routes in API.md |
 
@@ -91,7 +92,7 @@ At launch, uncomment the `routes` line in `wrangler.toml` and deploy again: `sed
 
 - **Stripe on Workers:** `getStripe()` already uses the fetch HTTP client. To verify the webhook, read the raw body with `req.text()`, then call `stripe.webhooks.constructEventAsync(body, sig, process.env.STRIPE_WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider())`.
 - **Emails:** `upsertUser` lowercases emails. Store the email from the row it returns.
-- **`/download`:** the GitHub API allows 60 unauthenticated calls an hour per IP, and Worker egress IPs are shared. Cache the latest-release lookup, for example with `fetch(url, { cf: { cacheTtl: 300 } })`.
+- **Downloads:** `/download`, `/download/<v>/<file>` and `/appcast.xml` (API.md) read the R2 bucket `shepetal-releases` (binding `RELEASES`) and never another server. LATEST is `latest.json` there, written only by `scripts/mac/promote.sh <v> --latest` after it has checked the files. Never add `public/appcast.xml`: it would shadow the route. To try it locally, put files with `npx wrangler r2 object put shepetal-releases/releases/<v>/<file> --local --file <file>` and `latest.json` the same way.
 - **Copy:** never name the speech model or any AI model in site copy, metadata or alt text. Write "on-device speech recognition".
 
 ## Preview
