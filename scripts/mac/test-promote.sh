@@ -2,7 +2,8 @@
 # scripts/mac/promote.sh against throwaway local R2 buckets, with a dry-run release's verified files. The mac-release.yml
 # dry run passes its signed/; by hand, pass a downloaded mac-release-dry-run artifact.
 #   scripts/mac/test-promote.sh <dir with Shepetal-<v>.dmg, Shepetal-<v>.dmg.sha256 and appcast.xml>
-# What must hold: nothing unchecked, or not above LATEST, is ever written, and LATEST moves only with --latest.
+# What must hold: nothing unchecked, or not above LATEST, is ever written, LATEST moves only with --latest, and
+# `promote.sh <previous> --latest` (pulling a bad release) always works.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 A=$(cd "${1:?usage: $0 <dir with the dry-run release files>}" && pwd)
@@ -32,13 +33,16 @@ if promote "$T/r2-flipped" "$V" --latest; then no "a flipped byte was promoted"
 elif nothing_in "$T/r2-flipped" && ! has "$T/r2-flipped" latest.json; then refused "a flipped byte is refused before anything is written"
 else no "a flipped byte was refused, but something was written"; fi
 
-# The same app re-packed (other bytes, a matching .sha256, the old appcast) mounts fine; its signature must refuse it.
+# The same app re-packed (other bytes; a matching .sha256 and appcast length, the old signature) mounts fine; only
+# the EdDSA signature can refuse it.
 cp -R "$A" "$T/repacked"
 rm "$T/repacked/$DMG"
 hdiutil convert "$A/$DMG" -format UDZO -o "$T/repacked/$DMG" -quiet
 (cd "$T/repacked" && shasum -a 256 "$DMG" > "$DMG.sha256")
+sed -i '' "s/length=\"[0-9]*\"/length=\"$(stat -f %z "$T/repacked/$DMG")\"/" "$T/repacked/appcast.xml"
 stage "$T/r2-repacked" "$T/repacked"
 if promote "$T/r2-repacked" "$V" --latest; then no "a re-packed DMG was promoted under the old signature"
+elif ! grep -q "the signature does not match the DMG" "$T/log"; then no "a re-packed DMG was refused, but not by its signature"
 elif nothing_in "$T/r2-repacked" && ! has "$T/r2-repacked" latest.json; then refused "a re-packed DMG is refused before anything is written"
 else no "a re-packed DMG was refused, but something was written"; fi
 
@@ -49,6 +53,7 @@ printf '<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
 r2 "$T/r2-below" put shepetal-releases/latest.json --file "$T/latest.json"
 r2 "$T/r2-below" put shepetal-releases/releases/9.9.9/appcast.xml --file "$T/previous.xml"
 if promote "$T/r2-below" "$V" --latest; then no "a release below LATEST was promoted"
+elif ! grep -q "release guard: version $V is not above the published 9.9.9" "$T/log"; then no "a release below LATEST was refused, but not by the release guard"
 elif nothing_in "$T/r2-below" && same "$T/r2-below" latest.json "$T/latest.json"; then refused "a release below LATEST is refused, and LATEST stays"
 else no "a release below LATEST was refused, but something was written"; fi
 
@@ -64,6 +69,14 @@ printf '{"version":"%s","build":%s}\n' "$V" "$BUILD" > "$T/want.json"
 if ! promote "$T/r2" "$V" --latest; then no "promote $V --latest"
 elif same "$T/r2" latest.json "$T/want.json"; then ok "promote $V --latest: latest.json is $(cat "$T/want.json")"
 else no "promote $V --latest wrote $(cat "$T/got" 2>/dev/null)"; fi
+
+# Pulling a bad release: LATEST (9.9.9) points back at $V, promoted before. The "above LATEST" check is skipped only
+# for releases/<v>/; a staged release below LATEST stays refused (above).
+r2 "$T/r2" put shepetal-releases/latest.json --file "$T/latest.json"
+r2 "$T/r2" put shepetal-releases/releases/9.9.9/appcast.xml --file "$T/previous.xml"
+if ! promote "$T/r2" "$V" --latest; then no "promote $V --latest could not point LATEST back from 9.9.9"
+elif same "$T/r2" latest.json "$T/want.json"; then ok "promote $V --latest points LATEST back from 9.9.9: $(cat "$T/want.json")"
+else no "promote $V --latest from 9.9.9 wrote $(cat "$T/got" 2>/dev/null)"; fi
 
 # SKIP_NOTARY never reaches the real bucket.
 if R2=--remote scripts/mac/promote.sh "$V" >"$T/log" 2>&1; then no "SKIP_NOTARY=1 ran against --remote"
