@@ -169,6 +169,14 @@ describe('consent page', () => {
     expect(html).toContain('Not you? Use another account');
   });
 
+  // The account email is collected here (GDPR Art. 13: inform at collection), and § 312k BGB wants the cancel button
+  // on every page of the site.
+  it('links the Privacy Policy and the cancellation button', () => {
+    const html = consentPage('a@example.com', r, 'c');
+    expect(html).toContain('<a href="/privacy">Privacy</a>');
+    expect(html).toContain('<a href="/cancel" lang="de">Verträge hier kündigen</a>');
+  });
+
   // state and email come from outside: they must never become markup.
   it('escapes what it echoes', () => {
     const html = consentPage('<b>@example.com', r, 'c');

@@ -231,6 +231,18 @@ describe('/account plan settings', () => {
     expect(html).not.toContain('Cancel subscription');
   });
 
+  // A date after the paid month, set on /cancel: Stripe renews once more and bills the days up to it. "Nothing is
+  // charged again" would be false there.
+  it('shows the one last, shortened charge of a subscription cancelled to a later date', () => {
+    const s = sub('cancels_at_period_end', { resume: true, switch_to_lifetime: true, portal: true });
+    s.subscription!.ends_at = '2026-12-31T23:59:59.000Z';
+    const html = render(s);
+    expect(statusLine(s.subscription!)).toEqual({ value: 'Cancelled', note: 'Works until December 31, 2026.' });
+    expect(html).toMatch(/One last charge<span class="s-val-note">On November 21, 2026, only for the days up to December 31, 2026\. Nothing after that\.<\/span>/);
+    expect(html).not.toContain('Nothing is charged again.');
+    expect(html).not.toContain('Cancels at the end of the period');
+  });
+
   it('sends a subscriber whose renewal failed to Manage billing', () => {
     const html = render(sub('past_due', { cancel: true, switch_to_lifetime: true, portal: true }));
     expect(html).toContain('Payment failed');
