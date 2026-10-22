@@ -482,7 +482,7 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertNil(AccountState.load(stateURL).license)
     }
 
-    func testOfflineGraceKeepsACachedTrialForSevenDays() async throws {
+    func testACachedTrialDictatesOfflineUntilItsEnd() async throws {
         try tokens.write("tok-1")
         server.handler = { _ in (0, [:]) }  // the service does not answer
         let ends = Date() + 10 * day
@@ -494,8 +494,12 @@ final class AccountControllerTests: XCTestCase {
         XCTAssertTrue(a.allowFnDown(), "6 days offline still dictates")
         XCTAssertTrue(a.message.contains("Could not check"))
 
-        a.now = { Date() + 1.5 * 86_400 }  // now 7.5 days since the last good check
-        XCTAssertFalse(a.allowFnDown(), "past 7 days offline dictation is off")
+        a.now = { Date() + 3 * 86_400 }  // 9 days since the last good check, 7 days before the trial ends
+        XCTAssertTrue(a.allowFnDown(), "past 7 days offline a trial still dictates, until its end")
+        XCTAssertEqual(a.access, .trial(daysLeft: 7))
+
+        a.now = { Date() + 11 * 86_400 }  // a day past the trial's end, still offline
+        XCTAssertFalse(a.allowFnDown(), "past its end dictation is off")
         XCTAssertEqual(a.access, .unchecked)
         XCTAssertEqual(hints.last, "Connect to the internet so Shepetal can check your license")
     }

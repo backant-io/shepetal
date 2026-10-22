@@ -308,16 +308,37 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(AccountPolicy.access(token: token, state: refunded, now: now), .expired)
     }
 
-    /// The 7-day offline grace is for trials only (and a cached "expired", which dictates either way).
-    func testTrialsKeepTheSevenDayOfflineGrace() {
-        let ends = now + 20 * day
-        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 7 * day), now: now),
-                       .trial(daysLeft: 20), "exactly 7 days still counts")
-        let trial = state(.trial, ends: ends, checkedAgo: 7 * day - 60)
-        XCTAssertEqual(AccountPolicy.access(token: token, state: trial, now: now), .trial(daysLeft: 20), "6.9 days offline still works")
-        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 7 * day + 1), now: now), .unchecked)
-        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 8 * day), now: now), .unchecked)
+    /// Pavel, 22.10.26: a trial works offline until its own end date, the one the service sealed, however long the Mac
+    /// has been offline. Past that date it stops, as before; a cached "expired" still asks for a check after 7 days.
+    func testATrialWorksOfflineUntilItsEndDate() {
+        // Day 20 of 30, offline since sign-in: it still dictates, with the days left counted from the sealed end.
+        let day20 = state(.trial, ends: now + 10 * day, checkedAgo: 20 * day)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: day20, now: now), .trial(daysLeft: 10))
+        XCTAssertTrue(AccountPolicy.access(token: token, state: day20, now: now).allowsDictation, "day 20 offline dictates")
+        for ago in [7 * day + 1, 8 * day, 29 * day] {
+            XCTAssertTrue(AccountPolicy.access(token: token, state: state(.trial, ends: now + 1, checkedAgo: ago), now: now).allowsDictation,
+                          "\(ago / day) days offline, before the end")
+        }
+        // Past its end it does not, offline for long or not.
+        for ago in [day, 31 * day] {
+            let ended = AccountPolicy.access(token: token, state: state(.trial, ends: now - 1, checkedAgo: ago), now: now)
+            XCTAssertFalse(ended.allowsDictation, "a trial past its end, checked \(ago / day) days ago")
+        }
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: now - 1, checkedAgo: day), now: now), .expired)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: now, checkedAgo: day), now: now), .expired,
+                       "the end itself is past")
+        // The end date is sealed: moved out, even offline inside the real trial, it grants nothing.
+        var pushed = day20
+        pushed.license?.trialEndsAt = now + 300 * day
+        XCTAssertEqual(AccountPolicy.access(token: token, state: pushed, now: now), .unchecked, "edited trial end")
+        var revived = state(.trial, ends: now - 1, checkedAgo: 31 * day)
+        revived.license?.trialEndsAt = now + day
+        XCTAssertFalse(AccountPolicy.access(token: token, state: revived, now: now).allowsDictation, "an ended trial edited back to life")
         XCTAssertEqual(AccountPolicy.access(token: token, state: state(.expired, checkedAgo: 8 * day), now: now), .unchecked)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.expired, checkedAgo: 6 * day), now: now), .expired)
+
+        let ends = now + 20 * day
+        let trial = state(.trial, ends: ends, checkedAgo: 7 * day - 60)
 
         // A failed check keeps the cached license and the time of the last good one.
         let (failed, out) = AccountPolicy.apply(.failure(URLError(.notConnectedToInternet)), to: trial, now: now, token: token)

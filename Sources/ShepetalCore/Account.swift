@@ -260,8 +260,8 @@ public enum Access: Equatable, Sendable {
     case subscriptionEnded
     /// The renewal could not be charged. Dictation is off until the card works.
     case paymentFailed
-    /// Signed in, but no license the service confirmed: none yet, a trial not checked in the last 7 days, or a cache
-    /// whose seal does not match.
+    /// Signed in, but no license the service confirmed: none yet, an expired license or ended subscription not checked
+    /// in the last 7 days, or a cache whose seal does not match.
     case unchecked
 
     public var allowsDictation: Bool {
@@ -403,7 +403,8 @@ public struct AccountState: Codable, Equatable, Sendable {
 }
 
 public enum AccountPolicy {
-    /// A trial stays valid this long without reaching the service. A lifetime license has no limit.
+    /// A cached "expired" or ended subscription is believed this long without reaching the service, then the app asks
+    /// for a check. A trial holds until its end date and a lifetime license for good, whatever this says.
     public static let offlineGrace: TimeInterval = 7 * 86_400
     /// A renewing subscription holds this long past its paid-through date without a check, so "Works offline"
     /// stays true across a renewal the app has not heard about yet.
@@ -425,13 +426,14 @@ public enum AccountPolicy {
                 return .subscription(paidThrough: through, renews: renews)
             }
             return renews ? .unchecked : .subscriptionEnded
-        case nil: break  // a trial or an expired license: the offline grace below
+        case nil: break  // a trial or an expired license
         }
-        guard let checked = state.lastGoodCheck, now.timeIntervalSince(checked) <= offlineGrace else { return .unchecked }
-        // The cached end date counts even offline: a trial does not outlive its end by staying offline.
+        // A trial works offline until its own end date (Pavel, 22.10.26), however long ago the last check was. The date
+        // is the service's, sealed with the token above, so an edited one grants nothing. Past it, the rules below.
         if license.status == .trial, let end = license.trialEndsAt, end > now {
             return .trial(daysLeft: Int((end.timeIntervalSince(now) / 86_400).rounded(.up)))
         }
+        guard let checked = state.lastGoodCheck, now.timeIntervalSince(checked) <= offlineGrace else { return .unchecked }
         if let sub = license.subscription { return sub.paymentFailed ? .paymentFailed : .subscriptionEnded }
         return .expired
     }
@@ -445,7 +447,7 @@ public enum AccountPolicy {
     }
 
     /// Folds a check result into the cache. A 401 signs out (the caller drops the token); a failed
-    /// check keeps the cached license, so a trial's 7-day grace counts from the last good check. An answer is
+    /// check keeps the cached license and the time of the last good check. An answer is
     /// sealed with `token`, the one the check was sent with.
     public static func apply(_ result: Result<LicenseReply, Error>, to state: AccountState, now: Date,
                              token: String) -> (AccountState, signedOut: Bool) {

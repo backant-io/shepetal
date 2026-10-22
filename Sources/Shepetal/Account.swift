@@ -5,7 +5,7 @@ import ShepetalCore
 /// checked at launch and then every 24 h, in the background, never while a dictation runs: a dictation that starts
 /// cancels a check in flight. The last good answer is cached in <data>/account.json, sealed with the token: a
 /// lifetime license then holds offline for good, a subscription through its paid period (plus 14 days while it
-/// renews), a trial for 7 days.
+/// renews), a trial until its end date.
 @MainActor
 final class Account: NSObject, ObservableObject {
     static let shared = Account(client: AccountClient(), tokens: .keychain(),
