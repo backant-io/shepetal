@@ -10,6 +10,10 @@
 #   scripts/mac/promote.sh 0.2.0 --latest   the same, then latest.json, last. This is Pavel's GO.
 #   scripts/mac/promote.sh 0.1.9 --latest   points LATEST back at a release promoted before (pulling a bad one).
 #                                           Sparkle never downgrades anyone who already updated: fix forward.
+#   scripts/mac/promote.sh 0.2.3 --latest --unnotarized
+#                                           Pavel's decision (22.10.26): ship a DMG signed with Apple Development and
+#                                           not notarized. Skips only the staple and Gatekeeper checks; every other
+#                                           check above still runs. macOS then sends users to Open Anyway.
 #   R2='--local --persist-to /abs/dir' SKIP_NOTARY=1 ...   a local R2 and an ad-hoc dry-run DMG (agents, tests)
 #   SMOKE=<base url> ...                    where --latest checks /download and /appcast.xml; by default the
 #                                           enclosure's site with the remote R2, nowhere with a local one
@@ -18,11 +22,17 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 fail() { echo "promote: $*" >&2; exit 1; }
-V=${1:-} LATEST=0
-[ "${2:-}" = --latest ] && LATEST=1
-if ! [[ $V =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ $# -ne $((1 + LATEST)) ]; then echo "usage: $0 <x.y.z> [--latest]" >&2; exit 2; fi
+usage() { echo "usage: $0 <x.y.z> [--latest] [--unnotarized]" >&2; exit 2; }
+V=${1:-} LATEST=0 NOTARY=1
+[[ $V =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || usage
+for a in "${@:2}"; do
+  case $a in --latest) LATEST=1 ;; --unnotarized) NOTARY=0 ;; *) usage ;; esac
+done
 R2=${R2:---remote}
-if [[ " $R2 " == *" --remote "* ]] && [ "${SKIP_NOTARY:-0}" = 1 ]; then fail "SKIP_NOTARY=1 is only for a local R2"; fi
+if [ "${SKIP_NOTARY:-0}" = 1 ]; then
+  [[ " $R2 " == *" --remote "* ]] && fail "SKIP_NOTARY=1 is only for a local R2"
+  NOTARY=0
+fi
 W=$(mktemp -d)
 trap 'hdiutil detach -quiet "$W/mnt" 2>/dev/null || true; rm -rf "$W"' EXIT
 DMG=Shepetal-$V.dmg
@@ -58,16 +68,16 @@ echo "promote: $V from $SRC/$V/${PV:+, LATEST is $PV (build $PB)}"
 
 # 2. The checks, on the bytes that get published.
 [ "$(cat "$W/$DMG.sha256")" = "$(cd "$W" && shasum -a 256 "$DMG")" ] || fail "$DMG.sha256 is not the SHA-256 of $DMG"
-if [ "${SKIP_NOTARY:-0}" = 1 ]; then
-  echo "promote: SKIP_NOTARY=1, so notarization and Gatekeeper are not checked (local R2 only)" >&2
+if [ "$NOTARY" = 0 ]; then
+  echo "promote: unnotarized (--unnotarized or SKIP_NOTARY=1): the staple and Gatekeeper are not checked" >&2
 else
-  xcrun stapler validate "$W/$DMG"
+  xcrun stapler validate "$W/$DMG" || fail "$DMG is not notarized and stapled (Pavel's call to ship it anyway: --unnotarized)"
   spctl -a -vv -t open --context context:primary-signature "$W/$DMG"
 fi
 mkdir "$W/mnt"
 hdiutil attach "$W/$DMG" -nobrowse -readonly -noautoopen -mountpoint "$W/mnt" -quiet || fail "$DMG does not mount (damaged?)"
 cp "$W/mnt/Shepetal.app/Contents/Info.plist" "$W/Info.plist"
-[ "${SKIP_NOTARY:-0}" = 1 ] || spctl -a -vv -t exec "$W/mnt/Shepetal.app"
+[ "$NOTARY" = 0 ] || spctl -a -vv -t exec "$W/mnt/Shepetal.app"
 hdiutil detach "$W/mnt" -quiet
 [ "$(plutil -extract CFBundleShortVersionString raw "$W/Info.plist")" = "$V" ] || fail "$DMG does not hold version $V"
 BUILD=$(plutil -extract CFBundleVersion raw "$W/Info.plist")

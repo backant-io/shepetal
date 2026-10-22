@@ -3,7 +3,9 @@
 # dry run passes its signed/; by hand, pass a downloaded mac-release-dry-run artifact.
 #   scripts/mac/test-promote.sh <dir with Shepetal-<v>.dmg, Shepetal-<v>.dmg.sha256 and appcast.xml>
 # What must hold: nothing unchecked, or not above LATEST, is ever written, LATEST moves only with --latest, and
-# `promote.sh <previous> --latest` (pulling a bad release) always works.
+# `promote.sh <previous> --latest` (pulling a bad release) always works. Every promote below passes --unnotarized
+# (Pavel ships unnotarized, 22.10.26; the dry run is signed ad-hoc), so each refusal shows that the flag skips only
+# the staple and Gatekeeper checks.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 A=$(cd "${1:?usage: $0 <dir with the dry-run release files>}" && pwd)
@@ -12,17 +14,41 @@ V=${DMG#Shepetal-}; V=${V%.dmg}
 BUILD=$(sed -n 's:.*<sparkle\:version>\([0-9]*\)</sparkle\:version>.*:\1:p' "$A/appcast.xml")
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT
-export SKIP_NOTARY=1  # the dry run is signed ad-hoc
 bad=0
 r2() { local d=$1; shift; (cd "$T" && WRANGLER_SEND_METRICS=false npx --yes wrangler@4.151.3 r2 object "$@" --local --persist-to "$d" >/dev/null 2>&1); }
 stage() { for f in "$DMG" "$DMG.sha256" appcast.xml; do r2 "$1" put "shepetal-releases/staging/$V/$f" --file "$2/$f"; done; }
 has() { r2 "$1" get "shepetal-releases/$2" --file "$T/got"; }
 same() { has "$1" "$2" && cmp -s "$T/got" "$3"; }
-promote() { R2="--local --persist-to $1" scripts/mac/promote.sh "${@:2}" >"$T/log" 2>&1; }
+promote() { R2="--local --persist-to $1" scripts/mac/promote.sh "${@:2}" --unnotarized >"$T/log" 2>&1; }
 ok() { echo "ok   $1"; }
 refused() { echo "ok   $1: $(tail -1 "$T/log")"; }
 no() { echo "FAIL $1"; sed 's/^/     | /' "$T/log"; bad=1; }
 nothing_in() { ! has "$1" "releases/$V/$DMG" && ! has "$1" "releases/$V/$DMG.sha256" && ! has "$1" "releases/$V/appcast.xml"; }
+
+# Without --unnotarized, a DMG with no notarization ticket is refused, and nothing is written.
+stage "$T/r2-notary" "$A"
+if R2="--local --persist-to $T/r2-notary" scripts/mac/promote.sh "$V" --latest >"$T/log" 2>&1; then no "an unnotarized DMG was promoted without --unnotarized"
+elif ! grep -q "is not notarized and stapled" "$T/log"; then no "an unnotarized DMG was refused, but not by the staple check"
+elif nothing_in "$T/r2-notary" && ! has "$T/r2-notary" latest.json; then refused "without --unnotarized, an unnotarized DMG is refused"
+else no "an unnotarized DMG was refused, but something was written"; fi
+
+# A .sha256 that is not the DMG's is refused.
+cp -R "$A" "$T/badsum"
+(cd "$T/badsum" && shasum -a 256 appcast.xml | sed "s/appcast.xml/$DMG/" > "$DMG.sha256")
+stage "$T/r2-badsum" "$T/badsum"
+if promote "$T/r2-badsum" "$V" --latest; then no "a wrong .sha256 was promoted"
+elif ! grep -q "$DMG.sha256 is not the SHA-256 of $DMG" "$T/log"; then no "a wrong .sha256 was refused, but not by the SHA-256 check"
+elif nothing_in "$T/r2-badsum" && ! has "$T/r2-badsum" latest.json; then refused "a wrong .sha256 is refused"
+else no "a wrong .sha256 was refused, but something was written"; fi
+
+# An appcast that offers the DMG at another URL (signature and length still right) is refused.
+cp -R "$A" "$T/elsewhere"
+sed -i '' 's|url="https://[^/"]*/|url="https://elsewhere.example/|' "$T/elsewhere/appcast.xml"
+stage "$T/r2-elsewhere" "$T/elsewhere"
+if promote "$T/r2-elsewhere" "$V" --latest; then no "an appcast with another enclosure URL was promoted"
+elif ! grep -q "appcast.xml does not offer" "$T/log"; then no "an appcast with another enclosure URL was refused, but not by the URL check"
+elif nothing_in "$T/r2-elsewhere" && ! has "$T/r2-elsewhere" latest.json; then refused "an appcast with another enclosure URL is refused"
+else no "an appcast with another enclosure URL was refused, but something was written"; fi
 
 # A DMG with one flipped byte (and a .sha256 that matches it) is refused, and nothing is written.
 cp -R "$A" "$T/flipped"
@@ -79,7 +105,7 @@ elif same "$T/r2" latest.json "$T/want.json"; then ok "promote $V --latest point
 else no "promote $V --latest from 9.9.9 wrote $(cat "$T/got" 2>/dev/null)"; fi
 
 # SKIP_NOTARY never reaches the real bucket.
-if R2=--remote scripts/mac/promote.sh "$V" >"$T/log" 2>&1; then no "SKIP_NOTARY=1 ran against --remote"
+if SKIP_NOTARY=1 R2=--remote scripts/mac/promote.sh "$V" >"$T/log" 2>&1; then no "SKIP_NOTARY=1 ran against --remote"
 elif grep -q "SKIP_NOTARY=1 is only for a local R2" "$T/log"; then refused "SKIP_NOTARY=1 is refused with --remote"
 else no "SKIP_NOTARY=1 with --remote failed for another reason"; fi
 
