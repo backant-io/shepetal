@@ -86,7 +86,9 @@ The browser tests use `playwright-core` from `PLAYWRIGHT_CORE` and a chromium he
 
 ## Deploy
 
-Preview first: `npx opennextjs-cloudflare build && npx wrangler versions upload` uploads a version without sending it traffic and prints its preview URL. Production (below) only at launch.
+Preview first: `npx opennextjs-cloudflare build && npx opennextjs-cloudflare upload` uploads a version without sending it traffic and prints its preview URL. Production (below) only at launch.
+
+The prerendered pages, robots.txt and the sitemap are served from their build-time copies (`open-next.config.ts`): the Workers Free plan gives a request 10 ms of CPU, and a React render takes more. `opennextjs-cloudflare deploy` and `upload` copy them into the assets (populateCache). **A plain `wrangler deploy` or `wrangler versions upload` ships without them**, and every page is rendered again (no `x-opennext-cache: HIT`). The copies are read-only, so a page can never revalidate: a `revalidate`, revalidatePath, revalidateTag or `'use cache'` needs another incremental cache.
 
 ```sh
 cd web
