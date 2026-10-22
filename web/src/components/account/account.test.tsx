@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { licenseOf, planSettings, type User } from '@/lib/account';
-import { AccountBody, notice } from './Account';
+import { AccountBody, notice, scrollToHash } from './Account';
 
 // /account is static and filled in by the browser from GET /api/account ({license, settings}): the copy a signed-in
 // user reads per plan, which the e2e used to read from server-rendered HTML.
@@ -74,5 +74,31 @@ describe('the account page, per plan', () => {
     const page = readFileSync(join(__dirname, '..', '..', 'app', '(site)', 'account', 'page.tsx'), 'utf8');
     expect(page).not.toMatch(/@\/lib\/auth|upsertUser|use server|searchParams/);
     expect(page).toContain('action="/api/auth/signout"');
+  });
+});
+
+// The Mac app's Buy button opens /account#plans. The account renders in the browser after GET /api/account, so the
+// browser's own jump to #plans on load finds nothing: the page scrolls there itself once the plans are in.
+describe('/account#plans, the apps’ Buy link', () => {
+  const html = (u: User) => renderToStaticMarkup(<AccountBody license={licenseOf(u, NOW)} settings={planSettings(u, NOW)} search="" now={NOW} />);
+
+  it('renders id="plans" for everyone who can buy: a trial, an ended trial, an ended subscription', () => {
+    const ended: User = { ...subscriber, plan: null, sub_status: 'canceled', current_period_end: iso(NOW - DAY), paid_through: iso(NOW - DAY) };
+    for (const u of [base, { ...base, trial_started_at: iso(NOW - 40 * DAY) }, ended]) expect(html(u).match(/id="plans"/g), JSON.stringify(u)).toHaveLength(1);
+    expect(html(lifetime)).not.toContain('id="plans"'); // nothing left to buy
+  });
+
+  it('scrolls to the element the fragment names once it is there, and to nothing otherwise', () => {
+    const scrolled: string[] = [];
+    const doc = { getElementById: (id: string) => (id === 'plans' ? ({ scrollIntoView: () => scrolled.push(id) } as unknown as HTMLElement) : null) };
+    expect(scrollToHash('#plans', doc)).toBe(true);
+    expect(scrolled).toEqual(['plans']);
+    for (const hash of ['', '#', '#nope', '#%E0%A4%A']) expect(scrollToHash(hash, doc), hash).toBe(false);
+    expect(scrolled).toEqual(['plans']);
+  });
+
+  it('is wired: Account scrolls after the account data has rendered', () => {
+    const src = readFileSync(join(__dirname, 'Account.tsx'), 'utf8');
+    expect(src).toMatch(/useEffect\(\(\) => \{\s*if \(data\) scrollToHash\(location\.hash, document\);\s*\}, \[data\]\);/);
   });
 });

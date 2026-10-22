@@ -1,5 +1,6 @@
 import { upsertUser, type User } from './account';
 import { s256 } from './app-login';
+import { errorName } from './native';
 import { safeNext } from './next-path';
 import { same, seal, unb64url, unseal } from './session';
 import { SITE_URL } from './site';
@@ -129,8 +130,9 @@ function tokenUrl(): string {
 
 /**
  * The claims of an id_token that came straight from Google's token endpoint over TLS, so its signature need not be
- * checked (OpenID Connect Core 3.1.3.7, item 6); the rest of 3.1.3.7 is: the issuer, our client as the audience (and
- * azp when there are several or it is sent), not expired, not issued in the future. Null when any of it fails.
+ * checked (OpenID Connect Core 3.1.3.7, item 6); the rest of 3.1.3.7 is: the issuer, our client as the audience (a
+ * string equal to it, or a list holding it with azp equal to it; azp, when sent, is always ours), not expired, not
+ * issued in the future. Null when any of it fails.
  */
 export function idTokenClaims(jwt: unknown, clientId: string, now = Date.now()): Record<string, unknown> | null {
   if (typeof jwt !== 'string' || !clientId) return null;
@@ -143,9 +145,12 @@ export function idTokenClaims(jwt: unknown, clientId: string, now = Date.now()):
     return null;
   }
   if (!c || typeof c !== 'object') return null;
-  const auds = Array.isArray(c.aud) ? c.aud : [c.aud];
-  if (!ISSUERS.includes(c.iss as string) || !auds.includes(clientId)) return null;
-  if ((auds.length > 1 || c.azp !== undefined) && c.azp !== clientId) return null;
+  if (typeof c.iss !== 'string' || !ISSUERS.includes(c.iss)) return null;
+  // aud: our client id itself, compared whole; a list must hold it, and then azp must be our client (3.1.3.7, 3-5).
+  if (typeof c.aud === 'string') {
+    if (c.aud !== clientId) return null;
+  } else if (!Array.isArray(c.aud) || !c.aud.some((a) => a === clientId) || c.azp !== clientId) return null;
+  if (c.azp !== undefined && c.azp !== clientId) return null;
   if (typeof c.exp !== 'number' || c.exp * 1000 <= now) return null;
   if (typeof c.iat !== 'number' || c.iat * 1000 > now + 300_000) return null;
   return c;
@@ -156,21 +161,25 @@ export function idTokenClaims(jwt: unknown, clientId: string, now = Date.now()):
  * Its state must match (constant time); the code is exchanged with the client secret and the PKCE verifier; the
  * id_token's claims are checked, and the email must be verified. The first sign-in creates the user and starts the
  * trial (upsertUser; later sign-ins keep trial_started_at). Then the session cookie and a 302 to where the sign-in
- * started. Every failure is a 302 to /login?error=<code>, logged with the code and the HTTP status only.
+ * started. Every failure is a 302 to /login?error=<code>, logged with the code and a short fixed cause (the token
+ * endpoint's HTTP status, or an exception's class name) only.
  */
 export async function googleCallback(req: Request): Promise<Response> {
   const spent = setCookie(OAUTH, '', 0);
-  const fail = (code: 'AccessDenied' | 'Configuration', status?: number) => {
-    console.error(`google sign-in: ${code}${status ? ` (token endpoint ${status})` : ''}`);
+  // The log line names the cause in a few fixed words, never a token, code, cookie or email.
+  const fail = (code: 'AccessDenied' | 'Configuration', cause: string) => {
+    console.error(`google sign-in: ${code} (${cause})`);
     return redirectTo(`/login?error=${code}`, 302, spent);
   };
   try {
     const q = new URL(req.url).searchParams;
-    if (q.get('error')) return fail('AccessDenied'); // cancelled at Google
+    if (q.get('error')) return fail('AccessDenied', 'cancelled at Google');
     const o = await unsealFrom(req, OAUTH);
     const state = q.get('state');
     const code = q.get('code');
-    if (!o || typeof o.s !== 'string' || typeof o.v !== 'string' || !state || !code || !same(state, o.s)) return fail('Configuration');
+    if (!o || typeof o.s !== 'string' || typeof o.v !== 'string') return fail('Configuration', 'no valid sign-in cookie');
+    if (!state || !code) return fail('Configuration', 'no code or state');
+    if (!same(state, o.s)) return fail('Configuration', 'state mismatch');
     const clientId = process.env.GOOGLE_CLIENT_ID ?? '';
     const res = await fetch(tokenUrl(), {
       method: 'POST',
@@ -184,16 +193,16 @@ export async function googleCallback(req: Request): Promise<Response> {
         client_secret: process.env.GOOGLE_CLIENT_SECRET ?? '',
       }),
     });
-    if (!res.ok) return fail('Configuration', res.status);
+    if (!res.ok) return fail('Configuration', `token endpoint ${res.status}`);
     const claims = idTokenClaims(((await res.json()) as { id_token?: unknown }).id_token, clientId);
-    if (!claims) return fail('Configuration');
+    if (!claims) return fail('Configuration', 'id_token claims refused');
     const email = typeof claims.email === 'string' ? claims.email.trim() : '';
-    if (!email || claims.email_verified !== true) return fail('AccessDenied');
+    if (!email || claims.email_verified !== true) return fail('AccessDenied', 'email missing or not verified');
     const user = await upsertUser(email); // the first shepetal sign-in starts the 30-day trial
     const session = setCookie(SESSION, await sealFor(SESSION, { e: user.email }, SESSION_S), SESSION_S);
     return redirectTo(safeNext(typeof o.n === 'string' ? o.n : null), 302, spent, session);
-  } catch {
-    return fail('Configuration');
+  } catch (e) {
+    return fail('Configuration', `exception ${errorName(e)}`);
   }
 }
 

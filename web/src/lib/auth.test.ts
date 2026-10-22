@@ -80,6 +80,18 @@ describe('starting Google sign-in', () => {
     expect(cookie).not.toContain(sealed!.v as string); // the verifier never leaves the cookie in clear
   });
 
+  it('keeps the state, the PKCE verifier and the return path unreadable in the cookie, and the email in the session', async () => {
+    const go = await start('/account#plans');
+    const value = jar(go).split('=')[1];
+    const { s: state, v: verifier, n } = (await unseal(SECRET, 'shepetal-oauth', value))!;
+    expect(n).toBe('/account#plans');
+    const session = jar(await back(`code=x&state=${state}`, jar(go))).split('=')[1];
+    for (const [cookie, plain] of [[value, state], [value, verifier], [value, '/account'], [value, 'plans'], [session, 'a@example.com'], [session, 'Example']] as const) {
+      expect(cookie).not.toContain(plain);
+      expect(Buffer.from(cookie as string, 'base64url').toString('latin1').toLowerCase()).not.toContain(String(plain).toLowerCase());
+    }
+  });
+
   it('refuses a POST from another site or without Origin (login CSRF)', async () => {
     for (const origin of ['https://evil.example', 'null', `${ORIGIN}.evil.example`, null]) {
       const res = await start('/account', origin);
@@ -169,6 +181,41 @@ describe('the Google callback', () => {
     expect(await users()).toEqual([]);
   });
 
+  // A string aud is our client id or nothing (a substring match took 'evil' + clientId); a list must hold it AND come
+  // with azp = our client, or a token Google issued to another client that merely lists ours would sign in here.
+  it('aud: a string equal to the client id; a list with it only when azp is our client', () => {
+    const ok = (over: object) => idTokenClaims(jwt(claims(over)), CLIENT) !== null;
+    expect(ok({ aud: CLIENT, azp: undefined })).toBe(true);
+    expect(ok({ aud: CLIENT })).toBe(true);
+    for (const aud of [`evil${CLIENT}`, `${CLIENT}evil`, ` ${CLIENT}`, CLIENT.toUpperCase(), CLIENT.slice(0, -1), '', 0, null, {}, { [CLIENT]: 1 }])
+      expect(ok({ aud, azp: undefined }), JSON.stringify(aud)).toBe(false);
+    expect(ok({ aud: [CLIENT], azp: CLIENT })).toBe(true);
+    expect(ok({ aud: [CLIENT, 'other'], azp: CLIENT })).toBe(true);
+    for (const [aud, azp] of [[[CLIENT], undefined], [[CLIENT, 'other'], undefined], [[CLIENT], 'other'], [['other'], CLIENT], [[`evil${CLIENT}`], CLIENT], [[], CLIENT], [[[CLIENT]], CLIENT]])
+      expect(ok({ aud, azp }), JSON.stringify([aud, azp])).toBe(false);
+    expect(ok({ iss: 'https://accounts.google.com.evil' })).toBe(false);
+    expect(ok({ iss: undefined })).toBe(false);
+    expect(ok({ exp: nowS() - 1 })).toBe(false);
+  });
+
+  it('logs why a callback failed in a few fixed words, never the code, a token, the cookie or the email', async () => {
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const go = await start();
+    failedWith(await back('code=4%2Fabc&state=wrong', jar(go)), 'Configuration');
+    failedWith(await back('code=4%2Fabc&state=x'), 'Configuration');
+    // An exception (D1 down, here with the email in its message) is the same 302, logged by class name only.
+    vi.spyOn(await import('./account'), 'upsertUser').mockRejectedValue(new TypeError('D1 refused a@example.com ya29.secret'));
+    failedWith(await signIn(), 'Configuration');
+    const out = log.mock.calls.map((c) => c.join(' '));
+    expect(out).toEqual([
+      'google sign-in: Configuration (state mismatch)',
+      'google sign-in: Configuration (no valid sign-in cookie)',
+      'google sign-in: Configuration (exception TypeError)',
+    ]);
+    const cookie = jar(go).split('=')[1];
+    for (const secret of ['4/abc', '4%2Fabc', cookie, 'a@example.com', 'A@Example.com', 'ya29', 'eyJ', 'google-client-secret', SECRET]) expect(out.join('\n')).not.toContain(secret);
+  });
+
   it('logs a failed code exchange with the status only: no token, id_token or client secret', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     google(null, 400);
@@ -185,7 +232,8 @@ describe('the Google callback', () => {
       const res = await signIn(evil);
       expect(res.headers.get('location'), JSON.stringify(evil)).toBe(`${SITE_URL}/account`);
     }
-    expect((await signIn('/%09/evil.example')).headers.get('location')).toBe(`${SITE_URL}/%09/evil.example`); // a path here
+    expect((await signIn('/%09/evil.example')).headers.get('location')).toBe(`${SITE_URL}/account`); // a tab once decoded
+    expect((await signIn('/account#plans')).headers.get('location')).toBe(`${SITE_URL}/account#plans`);
   });
 
   // The id_token is trusted because it comes from Google's token endpoint over TLS: no setting may point that elsewhere
@@ -242,6 +290,19 @@ describe('the web session', () => {
     expect(await requestUser(req('GET', {}))).toBeNull();
   });
 
+  // A header that is there but not a valid Bearer is a client that meant to use a token: falling back to the cookie
+  // would answer it as whoever is signed in to the browser. The route answers 401.
+  it('a malformed or unknown Authorization header beside a valid cookie: the route answers 401', async () => {
+    const { GET: account } = await import('@/app/api/account/route');
+    const cookie = await sessionCookie();
+    const get = (headers: Record<string, string>) => account(new Request(`${SITE_URL}/api/account`, { headers }));
+    expect((await get({ cookie })).status).toBe(200);
+    for (const authorization of ['', 'Basic eDp4', 'Bearer', 'Bearer ', 'Bearer a b', 'Bearer,x', 'Token abc', 'bearer-x', 'Bearer not-a-token', `Bearer ${cookie.split('=')[1]}`]) {
+      const res = await get({ authorization, cookie });
+      expect([res.status, await res.json()], JSON.stringify(authorization)).toEqual([401, { error: 'unauthorized' }]);
+    }
+  });
+
   it('a session for an email with no row creates it (as the old account page did)', async () => {
     expect((await requestUser(req('GET', { cookie: await sessionCookie('new@example.com') })))?.email).toBe('new@example.com');
     expect((await users()).map((u) => u.email)).toContain('new@example.com');
@@ -255,7 +316,9 @@ describe('the web session', () => {
     };
     expect(await at('/login', cookie)).toEqual([307, `${SITE_URL}/account`, 'private, no-store']);
     expect(await at('/login?next=%2Fapp%2Flogin%3Fstate%3Dx', cookie)).toEqual([307, `${SITE_URL}/app/login?state=x`, 'private, no-store']);
-    for (const evil of ['%2F%09%2Fevil.example', '%2F.%2F%2Fevil.example', '%2F%5Cevil.example', '%2F%2Fevil.example'])
+    // The signed-in 307 is where round 1's dot-segment bug became an open redirect: each lands on /account.
+    for (const evil of ['%2F%09%2Fevil.example', '%2F.%2F%2Fevil.example', '%2F%5Cevil.example', '%2F%2Fevil.example', '%2F.%2F.%2F%2Fevil.example',
+      '%2F..%2F%2Fevil.example', '%2F%252F%252Fevil.example', '%2F%25252F%25252Fevil.example', '%2F%255Cevil.example', '%2F%2509%2Fevil.example', 'https%3A%2F%2Fevil.example'])
       expect((await at(`/login?next=${evil}`, cookie))?.[1], evil).toBe(`${SITE_URL}/account`);
     expect(await at('/login?error=AccessDenied', cookie)).toBeNull(); // the failed line, not a loop
     expect(await at('/login')).toBeNull();

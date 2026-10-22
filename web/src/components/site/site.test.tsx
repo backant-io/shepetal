@@ -39,7 +39,7 @@ describe('where a sign-in returns to', () => {
     expect(safeNext('/account#plans')).toBe('/account#plans');
     expect(safeNext('/account?purchased=1')).toBe('/account?purchased=1');
     expect(safeNext('/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=a%20b')).toBe('/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=a%20b');
-    expect(safeNext('/%09/evil.example')).toBe('/%09/evil.example'); // an encoded tab stays a path segment
+    expect(safeNext('/%09/evil.example')).toBe('/account'); // an encoded tab: refused once decoded (next-path.test.ts)
     for (const bad of [undefined, null, '', 'https://evil.example/', '//evil.example/x', '/\\evil.example', 'account'])
       expect(safeNext(bad)).toBe('/account');
   });

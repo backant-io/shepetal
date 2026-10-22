@@ -505,8 +505,12 @@ async function main() {
     assert.deepEqual(settings.actions, { cancel: false, resume: false, switch_to_lifetime: false, portal: false, choose_plan: true });
     const r = await browse(`${BASE}/login`, session);
     assert.deepEqual([r.status, r.headers.get('location')], [307, `${BASE}/account`], '/login signed in goes to the account');
-    const next = await browse(`${BASE}/login?next=%2F.%2F%2Fevil.example`, session);
-    assert.equal(next.headers.get('location'), `${BASE}/account`, 'never to another site');
+    for (const evil of ['%2F.%2F%2Fevil.example', '%2F.%2F.%2F%2Fevil.example', '%2F..%2F%2Fevil.example', '%2F%2F%2Fevil.example', '%2F%252F%252Fevil.example', '%2F%5Cevil.example', '%2F%2509%2Fevil.example', 'https%3A%2F%2Fevil.example']) {
+      const next = await browse(`${BASE}/login?next=${evil}`, session);
+      assert.deepEqual([next.status, next.headers.get('location')], [307, `${BASE}/account`], `never to another site: ${evil}`);
+    }
+    const plans = await browse(`${BASE}/login?next=%2Faccount%23plans`, session);
+    assert.equal(plans.headers.get('location'), `${BASE}/account#plans`, 'the apps’ Buy link keeps #plans');
   });
 
   // ---- 3. Signed in, a GET shows the consent page and issues nothing; Continue (a POST) redirects

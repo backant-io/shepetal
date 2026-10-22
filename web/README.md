@@ -15,7 +15,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | `src/lib/db.ts` | `db()`: the D1 binding (inside a request only) |
 | `src/lib/auth.ts` | Google sign-in, the session, `requestUser` (Bearer token or session). The first sign-in creates the user and starts the trial |
 | `src/lib/account.ts` | `upsertUser`, `getLicense`, `licenseOf` (the trial rule, tested in `account.test.ts`) |
-| `src/lib/stripe.ts` | `getStripe()`, checkout per plan, the Billing Portal, the webhook. The calls go over fetch (`src/lib/stripe-api.ts`); the `stripe` package is there for its types, the setup script and the tests |
+| `src/lib/stripe.ts` | `getStripe()`, checkout per plan, the Billing Portal, the webhook. The calls go over fetch (`src/lib/stripe-api.ts`, typed as `StripeClient`: only the calls it implements compile; a GET, or a POST or DELETE with an Idempotency-Key, is retried twice after a 429, a 5xx or a network error); the `stripe` package is there for its types, the setup script and the tests |
 | `scripts/stripe-setup.mjs` | finds or creates the Stripe objects and prints their IDs |
 | `src/lib/analytics.ts`, `src/components/Analytics.tsx` | PostHog (backant's project, US cloud), cookieless, every event tagged `app=shepetal`; off unless the `POSTHOG_KEY` secret is set. Server events from the Worker: `download_served`, `appcast_check`, `license_first_call`, `checkout_completed` |
 | `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |

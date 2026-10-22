@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import Stripe from 'stripe';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { formEncode, StripeApiError, stripeApi, verifyWebhook } from './stripe-api';
+import { formEncode, MAX_RETRIES, retryDelay, StripeApiError, stripeApi, verifyWebhook } from './stripe-api';
 
 // The Stripe calls go over fetch instead of the SDK (CPU on the Workers Free plan), so they must say exactly what the
 // SDK said, and the webhook must be refused exactly when the SDK would have refused it (or stricter).
@@ -83,6 +83,98 @@ describe('the fetch client', () => {
   });
 });
 
+// The SDK retried a failed call twice when it was safe to send again (lib/stripe.ts relied on that: a 429 or a
+// passing 5xx at checkout would otherwise be an error on the buyer's screen). A POST without an Idempotency-Key may
+// have been done by Stripe before the answer was lost, so it is never sent twice.
+describe('retries', () => {
+  const calls: RequestInit[] = [];
+  const sleeps: number[] = [];
+  /** fetch answering each call in turn: a status (with headers), or 'network' for a rejected fetch. */
+  const answer = (...steps: (number | 'network' | [number, Record<string, string>])[]) => {
+    calls.length = 0;
+    sleeps.length = 0;
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      calls.push(init);
+      const step = steps.shift()!;
+      if (step === 'network') throw new TypeError('Network connection lost.');
+      const [status, headers] = typeof step === 'number' ? [step, {}] : step;
+      return Response.json(status === 200 ? { id: 'ok', data: [], has_more: false } : { error: { type: 'api_error', message: `status ${status}` } }, { status, headers });
+    });
+  };
+  const s = stripeApi('sk_test_x', 'http://127.0.0.1:1', async (ms) => void sleeps.push(ms));
+
+  it('retries a GET after a 429, a 5xx or a network error, at most twice, with backoff', async () => {
+    answer(500, 'network', 200);
+    expect(await s.subscriptions.retrieve('sub_1')).toMatchObject({ id: 'ok' });
+    expect(calls).toHaveLength(3);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(375);
+    expect(sleeps[0]).toBeLessThanOrEqual(500);
+    expect(sleeps[1]).toBeGreaterThanOrEqual(750);
+    expect(sleeps[1]).toBeLessThanOrEqual(1000);
+
+    answer(503, 502, 500, 200);
+    await expect(s.prices.list({ limit: 1 })).rejects.toMatchObject({ statusCode: 500 });
+    expect(calls).toHaveLength(1 + MAX_RETRIES);
+    expect(MAX_RETRIES).toBe(2);
+
+    answer('network', 'network', 'network');
+    await expect(s.invoices.retrieve('in_1')).rejects.toThrow('Network connection lost.');
+    expect(calls).toHaveLength(3);
+
+    answer([429, { 'retry-after': '2' }], 200);
+    await s.invoices.retrieve('in_1');
+    expect(sleeps).toEqual([2000]); // Stripe's Retry-After
+  });
+
+  it('retries a POST or DELETE only with an Idempotency-Key, sending the same key and body again', async () => {
+    answer('network', 503, 200);
+    await s.refunds.create({ payment_intent: 'pi_1' }, { idempotencyKey: 'shepetal-refund-pi_1' });
+    expect(calls).toHaveLength(3);
+    for (const c of calls) expect([c.body, (c.headers as Record<string, string>)['idempotency-key']]).toEqual(['payment_intent=pi_1', 'shepetal-refund-pi_1']);
+
+    answer(500, 200);
+    await s.subscriptions.cancel('sub_1', { prorate: false }, { idempotencyKey: 'shepetal-end-sub_1' });
+    expect(calls.map((c) => c.method)).toEqual(['DELETE', 'DELETE']);
+
+    for (const fail of [500, 429, 'network'] as const) {
+      answer(fail, 200);
+      await expect(s.subscriptions.update('sub_1', { cancel_at_period_end: true })).rejects.toThrow();
+      expect(calls, String(fail)).toHaveLength(1);
+    }
+    answer(500, 200);
+    await expect(s.checkout.sessions.expire('cs_1')).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('never retries a 4xx other than 429, or what Stripe marks Stripe-Should-Retry: false', async () => {
+    for (const status of [400, 401, 402, 404, 409]) {
+      answer(status, 200);
+      await expect(s.subscriptions.retrieve('sub_1')).rejects.toMatchObject({ statusCode: status });
+      expect(calls).toHaveLength(1);
+    }
+    answer([503, { 'stripe-should-retry': 'false' }], 200);
+    await expect(s.subscriptions.retrieve('sub_1')).rejects.toMatchObject({ statusCode: 503 });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('waits 0.5 s, then 1 s, with jitter, never more than 5 s', () => {
+    expect([retryDelay(0, undefined, () => 0), retryDelay(0, undefined, () => 1)]).toEqual([375, 500]);
+    expect([retryDelay(1, undefined, () => 0), retryDelay(1, undefined, () => 1)]).toEqual([750, 1000]);
+    expect(retryDelay(0, new Response(null, { headers: { 'retry-after': '60' } }))).toBe(5000);
+    expect(retryDelay(0, new Response(null, { headers: { 'retry-after': 'soon' } }), () => 1)).toBe(500);
+  });
+});
+
+it('is typed as only what it implements: tsc refuses any other Stripe call', () => {
+  const s = stripeApi('sk_test_x');
+  // @ts-expect-error: coupons are not implemented by the fetch client
+  expect(s.coupons).toBeUndefined();
+  // @ts-expect-error: subscriptions.list is not implemented
+  expect(s.subscriptions.list).toBeUndefined();
+  // @ts-expect-error: webhooks are checked by verifyWebhook, not the client
+  expect(s.webhooks).toBeUndefined();
+});
+
 describe('the webhook signature', () => {
   const secret = 'whsec_test_0123456789';
   const body = JSON.stringify({ id: 'evt_1', type: 'checkout.session.completed', data: { object: { name: 'Zoë Åström 🔑' } } });
@@ -114,6 +206,58 @@ describe('the webhook signature', () => {
       [null, body, secret],
     ] as [string | null, string, string][])
       await expect(verifyWebhook(payload, header, key, now), String(header)).rejects.toThrow();
+  });
+
+  // The SDK is the reference: for these payloads, secrets, timestamps and headers, verifyWebhook accepts exactly
+  // what stripe.webhooks.constructEvent (tolerance 300 s) accepts, except a t more than 300 s in the future, which
+  // the SDK lets through and this refuses.
+  it('agrees with the Stripe SDK’s own verifier on SDK-signed headers', async () => {
+    const stripe = new Stripe('sk_test_x');
+    const at = 1_790_000_000_750; // not a whole second: the SDK counts whole seconds
+    const nowS = Math.floor(at / 1000);
+    const payloads = [body, '{}', JSON.stringify({ id: 'evt_2', object: 'event', data: { object: { amount: 2399 } } }, null, 2), '{"a":"\\u00e9 é\\r\\n","b":[1,2]}\r\n'];
+    const secrets = [secret, 'whsec_Zm9vYmFyYmF6cXV4K/9+==', 'whsec_' + 'x'.repeat(64)];
+    const ages = [0, 1, 299, 300, 301, 3600, -1, -299, -300, -301, -3600];
+    let checked = 0;
+    for (const payload of payloads)
+      for (const key of secrets)
+        for (const age of ages) {
+          const t = nowS - age;
+          const sign = (k = key, scheme?: string, p = payload) => stripe.webhooks.generateTestHeaderString({ payload: p, secret: k, timestamp: t, scheme });
+          const good = sign().split(',')[1];
+          const other = sign('whsec_other').split(',')[1];
+          const headers = [
+            sign(),
+            `t=${t},${other},${good}`, // several v1: any may match (secret rotation)
+            `t=${t},${good},${other}`,
+            `t=${t},${other}`,
+            sign(key, 'v0'), // the wrong scheme
+            `${sign(key, 'v0')},${good}`,
+            `t=${t}, ${good}`, // a space: not a v1 to the SDK
+            `${good},t=${t}`,
+            `t=${t},${good.toUpperCase().replace('V1', 'v1')}`,
+            sign(key, undefined, payload + ' '), // signed for another body
+          ];
+          for (const header of headers) {
+            const sdkOk = (() => {
+              try {
+                stripe.webhooks.constructEvent(payload, header, key, 300, undefined, at);
+                return true;
+              } catch {
+                return false;
+              }
+            })();
+            const ours = await verifyWebhook(payload, header, key, at).then(() => true, () => false);
+            expect(ours, JSON.stringify({ payload, key, age, header })).toBe(sdkOk && age >= -300);
+            if (header === headers[0]) expect(sdkOk).toBe(age <= 300); // the SDK's own header: only too old fails there
+            checked++;
+          }
+        }
+    expect(checked).toBe(payloads.length * secrets.length * ages.length * 10);
+    // The secret is checked whole: the right one with or without whsec_, or with whitespace, is another key.
+    const header = stripe.webhooks.generateTestHeaderString({ payload: body, secret, timestamp: nowS });
+    for (const key of [secret.slice(6), `${secret} `, `${secret}\n`, secret.toUpperCase()])
+      await expect(verifyWebhook(body, header, key, at), JSON.stringify(key)).rejects.toThrow();
   });
 
   it('refuses a signature older or newer than 300 s (a replay)', async () => {

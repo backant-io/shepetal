@@ -52,6 +52,23 @@ export function AccountBody({ license, settings, search, now }: Data & { search:
   );
 }
 
+/**
+ * Scrolls to the element the URL's #fragment names, once the account has rendered: the apps' Buy button opens
+ * /account#plans, and the browser looked for #plans on load, before the account (and the plans in it) was there.
+ */
+export function scrollToHash(hash: string, doc: Pick<Document, 'getElementById'>): boolean {
+  if (hash.length < 2) return false;
+  let id: string;
+  try {
+    id = decodeURIComponent(hash.slice(1));
+  } catch {
+    return false;
+  }
+  const el = doc.getElementById(id);
+  el?.scrollIntoView();
+  return !!el;
+}
+
 /** Loads GET /api/account (the session cookie); signed out, the sign-in page, which comes back here. */
 export function Account() {
   const [data, setData] = useState<Data | null>(null);
@@ -65,6 +82,9 @@ export function Account() {
       })
       .catch(() => setFailed(true));
   }, []);
+  useEffect(() => {
+    if (data) scrollToHash(location.hash, document);
+  }, [data]);
   if (data) return <AccountBody {...data} search={location.search} now={Date.now()} />;
   return (
     <main className="s-main">

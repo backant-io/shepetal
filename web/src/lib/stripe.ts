@@ -17,15 +17,15 @@ import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { db } from './db';
 import { OWNER, sendMail, sesEnabled } from './mail';
 import { SITE_URL } from './site';
-import { StripeApiError, stripeApi, verifyWebhook } from './stripe-api';
+import { StripeApiError, stripeApi, verifyWebhook, type StripeClient } from './stripe-api';
 
-let stripe: Stripe | undefined;
+let stripe: StripeClient | undefined;
 
 /**
  * backant's Stripe account (same STRIPE_SECRET_KEY as backant.io), over fetch (lib/stripe-api.ts, API 2025-02-24.acacia):
  * the SDK's setup alone took more CPU than a request gets on the Workers Free plan.
  */
-export function getStripe(): Stripe {
+export function getStripe(): StripeClient {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY is not set');
   // web/e2e only: STRIPE_API_BASE points a test key at the harness's fake Stripe API.
