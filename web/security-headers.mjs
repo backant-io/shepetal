@@ -1,5 +1,5 @@
 // The security headers, from one place: next.config.ts puts them on everything Next answers, worker.ts on what it
-// answers itself (/api/license, /api/app/token, /api/app/revoke). The CSP has no nonce, so prerendered pages are
+// answers itself (/api/license, /api/app/token, /api/app/revoke, /unsubscribe). The CSP has no nonce, so prerendered pages are
 // served as they were built.
 
 /** @param {string} posthogHost PostHog's ingestion host (POSTHOG_HOST), the one place analytics may connect to */

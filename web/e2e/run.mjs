@@ -8,7 +8,7 @@
 // for a token, license = trial, checkout per plan = a Stripe Checkout URL, signed webhooks for the
 // subscription (paid, failed, cancelled), the Billing Portal, then the lifetime license. Then the redirect_uri and PKCE rules.
 // Before that, /download and /appcast.xml against the local R2 bucket, before and after a release is put there the way
-// promote.sh does.
+// promote.sh does. Last, the trial emails: the Cron Trigger against a fake SES, and the unsubscribe link they carry.
 //
 // Google is faked with a next-auth session cookie signed with the run's AUTH_SECRET, so the run
 // needs no Google account and no network except Google's OIDC discovery (for the sign-in redirect).
@@ -76,6 +76,8 @@ const fakeSub = {
   items: { object: 'list', data: [] },
 };
 const phEvents = [];
+// The same server stands in for Amazon SES v2 (SES_API_BASE): the trial emails the cron sends.
+const sesCalls = [];
 const fakeStripe = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -86,6 +88,11 @@ const fakeStripe = createServer((req, res) => {
     if (req.method === 'POST' && url.pathname === '/i/v0/e/') {
       phEvents.push(JSON.parse(body));
       return res.end('{"status":"Ok"}');
+    }
+    if (req.method === 'POST' && url.pathname === '/v2/email/outbound-emails') {
+      sesCalls.push({ auth: req.headers.authorization, amzDate: req.headers['x-amz-date'], body: JSON.parse(body) });
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify({ MessageId: `ses-e2e-${sesCalls.length}` }));
     }
     stripeCalls.push({ method: req.method, path: url.pathname, params, auth: req.headers.authorization });
     res.setHeader('content-type', 'application/json');
@@ -151,6 +158,11 @@ const env = {
   STRIPE_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
   POSTHOG_KEY: 'phc_e2e',
   POSTHOG_HOST: `http://127.0.0.1:${fakeStripe.address().port}`,
+  SES_ACCESS_KEY_ID: 'AKIDE2E',
+  SES_SECRET_ACCESS_KEY: randomBytes(20).toString('hex'),
+  SES_REGION: 'eu-central-1',
+  SES_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
+  LIFECYCLE_EMAILS: 'on',
 };
 // An env file instead of --var keeps values out of `ps`, and replaces any developer .dev.vars.
 const envFile = join(tmp, 'e2e.env');
@@ -250,7 +262,7 @@ async function main() {
     join(BIN, 'wrangler'),
     ['dev', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(await freePort()),
       '--local-upstream', `localhost:${port}`,
-      '--persist-to', state, '--env-file', envFile, '--show-interactive-dev-session=false'],
+      '--persist-to', state, '--env-file', envFile, '--show-interactive-dev-session=false', '--test-scheduled'],
     { cwd: WEB, detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   worker.stdout.pipe(log);
@@ -795,6 +807,56 @@ async function main() {
     assert.deepEqual([r.status, r.body], [200, { ok: true }]);
     assert.equal((await app('GET', '/api/license', { token: accessToken })).status, 401);
     assert.equal((await app('POST', '/api/checkout', { token: accessToken, json: {} })).status, 401);
+  });
+
+  // ---- 11. The trial emails: the Cron Trigger (wrangler dev --test-scheduled) sends through the fake SES.
+  const cron = async () => {
+    const before = sesCalls.length;
+    const r = await fetch(`${BASE}/__scheduled?cron=${encodeURIComponent('*/15 * * * *')}`);
+    assert.equal(r.status, 200, `/__scheduled: ${r.status}`);
+    // The sends run in waitUntil, after the answer.
+    for (let i = 0; i < 20 && (await d1("SELECT COUNT(*) FROM lifecycle_emails WHERE status = 'sending'"))[0][0] > 0; i++) await sleep(250);
+    await sleep(500);
+    return sesCalls.slice(before);
+  };
+  const at = (days) => new Date(Date.now() - days * DAY).toISOString();
+  await check('cron: welcome to a new trial, day 25 to a trial user and never to a lifetime owner, signed, nothing twice', async () => {
+    await d1(`UPDATE users SET trial_started_at = '${at(10)}'`); // everyone signed in above is between windows
+    await d1(`INSERT INTO users (email, trial_started_at) VALUES ('fresh@example.com', '${at(0.01)}'), ('ending@example.com', '${at(25.2)}')`);
+    await d1(`INSERT INTO users (email, trial_started_at, status, plan) VALUES ('owner@example.com', '${at(25.2)}', 'active', 'lifetime')`);
+    const sent = await cron();
+    assert.deepEqual(sent.map((c) => [c.body.Destination.ToAddresses[0], c.body.Content.Simple.Subject.Data]).sort(), [
+      ['ending@example.com', 'Your shepetal trial ends in 5 days'],
+      ['fresh@example.com', 'Welcome to shepetal'],
+    ]);
+    for (const c of sent) {
+      assert.match(c.auth, /^AWS4-HMAC-SHA256 Credential=AKIDE2E\/\d{8}\/eu-central-1\/ses\/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=[0-9a-f]{64}$/);
+      assert.equal(c.body.FromEmailAddress, 'shepetal <hello@shepetal.app>');
+      assert.deepEqual(c.body.ReplyToAddresses, ['support@shepetal.app']);
+      assert.ok(c.body.Content.Simple.Body.Html.Data.startsWith('<!doctype html>'));
+    }
+    assert.deepEqual(await cron(), [], 'the next run sends nothing again');
+    const rows = await d1("SELECT kind, status, message_id FROM lifecycle_emails ORDER BY kind");
+    assert.deepEqual(rows.map((r) => r.slice(0, 2)), [['day25', 'sent'], ['welcome', 'sent']]);
+  });
+  await check('unsubscribe: the List-Unsubscribe link asks on GET, unsubscribes on the one-click POST, refuses a forged one', async () => {
+    const welcome = sesCalls.find((c) => c.body.Destination.ToAddresses[0] === 'fresh@example.com');
+    const link = welcome.body.Content.Simple.Headers.find((h) => h.Name === 'List-Unsubscribe').Value.slice(1, -1);
+    assert.deepEqual(welcome.body.Content.Simple.Headers.find((h) => h.Name === 'List-Unsubscribe-Post'), { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' });
+    const local = `${BASE}${new URL(link).pathname}${new URL(link).search}`;
+    const ask = await fetch(local);
+    assert.equal(ask.status, 200);
+    assert.match(await ask.text(), /<form method="post"/);
+    assert.match(ask.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/, 'the security headers, as on every native answer');
+    const [[id]] = await d1("SELECT id FROM users WHERE email = 'fresh@example.com'");
+    assert.equal((await d1(`SELECT COUNT(*) FROM email_unsubscribes WHERE user_id = ${id}`))[0][0], 0, 'GET changed nothing');
+    const forged = local.replace(/u=\d+/, `u=${id + 1}`);
+    assert.equal((await fetch(forged, { method: 'POST', body: 'List-Unsubscribe=One-Click', headers: { 'content-type': 'application/x-www-form-urlencoded' } })).status, 400);
+    const done = await fetch(local, { method: 'POST', body: 'List-Unsubscribe=One-Click', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+    assert.equal(done.status, 200);
+    assert.equal((await d1(`SELECT COUNT(*) FROM email_unsubscribes WHERE user_id = ${id}`))[0][0], 1);
+    await d1(`UPDATE users SET trial_started_at = '${at(3.1)}' WHERE id = ${id}`); // day 3 is due now, but they left
+    assert.deepEqual(await cron(), [], 'no tip after unsubscribing');
   });
 }
 
