@@ -235,6 +235,10 @@ async function main() {
     execFileSync(join(BIN, 'opennextjs-cloudflare'), ['build'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
     ok('opennextjs-cloudflare build');
   }
+  // The prerendered pages' copies (open-next.config.ts) go into the assets on `opennextjs-cloudflare deploy|upload`,
+  // not on a build: without them every page is rendered again, which the fast-path check below catches.
+  execFileSync(join(BIN, 'opennextjs-cloudflare'), ['populateCache', 'local'], { cwd: WEB, stdio: ['ignore', 'pipe', 'inherit'] });
+  ok('populateCache local: the prerendered pages are in the assets');
   const state = join(tmp, 'state');
   wrangler(['d1', 'migrations', 'apply', 'DB', '--local', '--persist-to', state]);
   ok('migrations applied to a fresh local D1');
@@ -285,6 +289,43 @@ async function main() {
     const legal = await fetch(`${BASE}/legal`);
     assert.equal(legal.status, 200);
     assert.ok((await legal.text()).includes('/brand/emoji/NOTICE.txt'), '/legal links the Noto NOTICE');
+  });
+
+  // ---- 0a. The Workers Free plan gives a request 10 ms of CPU, and a React render or loading the Next server takes more.
+  // So the prerendered pages, their RSC payloads, the not-found page, robots and the sitemap are served from the build's
+  // copies (x-opennext-cache: HIT: the Next server never ran), and /api/license by worker.ts itself, each with the
+  // security headers; worker.ts adds what depends on the request (the analytics meta, /install's attribution).
+  await check('fast paths: pages, RSC and segment prefetches, the 404 page, robots and the sitemap from the prerendered cache with the security headers; /install carries ?ref= on; /api/license 401 from worker.ts with them too', async () => {
+    const secure = (r, what) => {
+      assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains; preload', what);
+      assert.match(r.headers.get('content-security-policy') ?? '', /form-action 'self' https:\/\/accounts\.google\.com https:\/\/checkout\.stripe\.com shepetal: http:\/\/127\.0\.0\.1:\*/, what);
+      assert.match(r.headers.get('content-security-policy') ?? '', /font-src 'self' data:/, what);
+      assert.deepEqual(['x-frame-options', 'x-content-type-options', 'referrer-policy', 'permissions-policy'].map((h) => r.headers.get(h)),
+        ['DENY', 'nosniff', 'strict-origin-when-cross-origin', 'camera=(), microphone=(), geolocation=()'], what);
+    };
+    const cached = async (path, headers = {}, status = 200) => {
+      const r = await fetch(`${BASE}${path}`, { headers });
+      const what = `${path} ${JSON.stringify(headers)}`;
+      assert.equal(r.status, status, what);
+      assert.equal(r.headers.get('x-opennext-cache'), 'HIT', `${what} is served from the prerendered cache`);
+      secure(r, what);
+      return { type: r.headers.get('content-type'), body: await r.text() };
+    };
+    const meta = /<meta name="shepetal-analytics" content="\{&quot;key&quot;:&quot;phc_e2e&quot;/;
+    for (const path of ['/', '/faq']) assert.match((await cached(path)).body, meta, path);
+    assert.equal((await cached('/faq', { rsc: '1' })).type, 'text/x-component');
+    assert.equal((await cached('/faq', { rsc: '1', 'next-router-prefetch': '1', 'next-router-segment-prefetch': '/_tree' })).type, 'text/x-component');
+    const missing = await cached('/perf-probe-not-found', {}, 404);
+    assert.match(missing.type ?? '', /^text\/html/);
+    assert.match(missing.body, meta, 'the 404 page has the analytics meta');
+    for (const path of ['/robots.txt', '/sitemap.xml']) await cached(path);
+    const install = (await cached('/install?ref=x&utm_source=y')).body;
+    assert.equal(unescape(install.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the refresh carries the attribution');
+    assert.equal(unescape(install.match(/<a href="(\/download[^"]*)"/)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the fallback link too');
+    assert.match(install, /<meta name="robots" content="noindex"/, '/install stays out of search');
+    const license = await fetch(`${BASE}/api/license`);
+    assert.deepEqual([license.status, await license.json()], [401, { error: 'invalid_token' }]);
+    secure(license, '/api/license');
   });
 
   // ---- 0b. Download is open (sign-in happens in the app) and the Sparkle feed is on this site, both from the local R2
