@@ -36,5 +36,7 @@ The app makes a code_verifier (43 to 128 characters from A-Z a-z 0-9 - . _ ~), i
 
 ## Site
 
-- GET /download (signed in): 302 to the latest backant-io/shepetal GitHub release asset matching Shepetal-*.pkg, or a page saying it is coming soon if none exists.
+- GET /download (open, no sign-in: that happens in the app): 302 to `/download/<v>/Shepetal-<v>.dmg` (relative, `cache-control: public, max-age=300`), where `<v>` is LATEST, the `version` in `latest.json` in the R2 bucket `shepetal-releases`. Only `scripts/mac/promote.sh <v> --latest` writes it. Before the first promotion, a page saying it is coming soon (`no-cache`). A malformed `latest.json` is a 500.
+- GET /download/<v>/<file>, where `<file>` is `Shepetal-<v>.dmg`, `Shepetal-<v>.dmg.sha256` or `appcast.xml`: the R2 object `releases/<v>/<file>`, `cache-control: public, max-age=31536000, immutable`, with an `etag` and `accept-ranges: bytes`. A single `Range` gets 206 with `content-range`, so a broken download resumes, and a range past the end gets 416. Any other version or file, and anything under `staging/` (CI uploads), is 404.
+- GET /appcast.xml: the Sparkle feed the Mac app checks (its SUFeedURL). LATEST's `releases/<v>/appcast.xml` passed through as `application/xml; charset=utf-8`, `public, max-age=300`. Before the first promotion, an empty feed (`<channel/>`, `no-cache`), which Sparkle reads as no update.
 - The trial starts at the user's first shepetal sign-in (web or app) and lasts 30 days, with no card. "active" never expires. Each user is keyed by their Google account email, lowercased.

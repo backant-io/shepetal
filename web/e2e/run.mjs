@@ -6,7 +6,8 @@
 // (OAuth for native apps with PKCE): GET /app/login signed out goes to Google and comes back,
 // signed in it redirects to shepetal://auth with a one-time code, POST /api/app/token trades it
 // for a token, license = trial, checkout = a Stripe Checkout URL, a signed
-// checkout.session.completed webhook, license = active. Then the redirect_uri and PKCE rules.
+// checkout.session.completed webhook, license = active. Then the redirect_uri and PKCE rules. Before that, /download and
+// /appcast.xml against the local R2 bucket, before and after a release is put there the way promote.sh does.
 //
 // Google is faked with a next-auth session cookie signed with the run's AUTH_SECRET, so the run
 // needs no Google account and no network except Google's OIDC discovery (for the sign-in redirect).
@@ -238,6 +239,50 @@ async function main() {
     const legal = await fetch(`${BASE}/legal`);
     assert.equal(legal.status, 200);
     assert.ok((await legal.text()).includes('/brand/emoji/NOTICE.txt'), '/legal links the Noto NOTICE');
+  });
+
+  // ---- 0b. Download is open (sign-in happens in the app) and the Sparkle feed is on this site, both from the local R2
+  // bucket: coming soon and an empty feed before the first promotion, then what latest.json names. staging/ is never served.
+  await check('/download and /appcast.xml signed out: coming soon, then the promoted DMG (resumable) and its feed as stored; never sign-in', async () => {
+    const before = await fetch(`${BASE}/download`, { redirect: 'manual' });
+    assert.equal(before.status, 200, `/download before a release: ${before.status} ${before.headers.get('location')}`);
+    assert.ok((await before.text()).includes('coming soon'), 'coming soon page');
+    const empty = await fetch(`${BASE}/appcast.xml`);
+    const xml = await empty.text();
+    assert.equal(empty.headers.get('content-type'), 'application/xml; charset=utf-8');
+    assert.ok(xml.includes('<rss') && !xml.includes('<item>'), `empty feed: ${xml}`);
+
+    // What scripts/mac/promote.sh leaves in R2, and a staged build that was never promoted.
+    const v = '0.0.1';
+    const dmg = randomBytes(300_000);
+    const feed = `<?xml version="1.0"?>\n<rss version="2.0"><channel><item><enclosure url="${BASE}/download/${v}/Shepetal-${v}.dmg" length="${dmg.length}"/></item></channel></rss>\n`;
+    const put = (key, data) => {
+      writeFileSync(join(tmp, 'object'), data);
+      wrangler(['r2', 'object', 'put', `shepetal-releases/${key}`, '--local', '--persist-to', state, '--file', join(tmp, 'object')]);
+    };
+    put(`releases/${v}/Shepetal-${v}.dmg`, dmg);
+    put(`releases/${v}/appcast.xml`, feed);
+    put('staging/0.0.2/Shepetal-0.0.2.dmg', 'unreviewed');
+    put('latest.json', JSON.stringify({ version: v, build: 1 }));
+
+    const dl = await fetch(`${BASE}/download`, { redirect: 'manual' });
+    assert.equal(dl.status, 302);
+    assert.equal(dl.headers.get('location'), `/download/${v}/Shepetal-${v}.dmg`, 'a relative redirect to the DMG on this site');
+    const url = new URL(dl.headers.get('location'), BASE);
+    const whole = await fetch(url);
+    assert.equal(whole.status, 200);
+    assert.ok(Buffer.from(await whole.arrayBuffer()).equals(dmg), 'the DMG as stored');
+    assert.equal(whole.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    const rest = await fetch(url, { headers: { range: 'bytes=100000-' } }); // a resumed download
+    assert.equal(rest.status, 206);
+    assert.equal(rest.headers.get('content-range'), `bytes 100000-${dmg.length - 1}/${dmg.length}`);
+    assert.ok(Buffer.from(await rest.arrayBuffer()).equals(dmg.subarray(100000)), 'the rest of the DMG');
+    const now = await fetch(`${BASE}/appcast.xml`);
+    assert.equal(now.headers.get('content-type'), 'application/xml; charset=utf-8');
+    assert.equal(await now.text(), feed, 'the promoted feed as stored');
+    for (const p of ['/download/0.0.2/Shepetal-0.0.2.dmg', `/download/${v}/latest.json`, '/latest.json']) {
+      assert.equal((await fetch(`${BASE}${p}`)).status, 404, p);
+    }
   });
 
   // ---- 1. Signed out, /app/login runs the Google sign-in and comes back to the same URL.

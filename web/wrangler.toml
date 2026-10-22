@@ -18,6 +18,11 @@ database_name = "shepetal"
 database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
 migrations_dir = "migrations"
 
+# The Mac releases (src/lib/download.ts): CI stages them, scripts/mac/promote.sh publishes them and writes latest.json.
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "shepetal-releases"
+
 [vars]
 NEXTAUTH_URL = "https://shepetal.backant.io"
 AUTH_URL = "https://shepetal.backant.io"
