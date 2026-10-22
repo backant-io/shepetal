@@ -29,6 +29,20 @@ database_name = "shepetal"
 database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
 migrations_dir = "migrations"
 
+# Notices to Pavel (src/lib/mail.ts): Email Routing's sending, which reaches only this verified address (support@ forwards
+# there too). Free on Workers Free. Customer email goes through Amazon SES instead, once its secrets are set.
+[[send_email]]
+name = "NOTIFY"
+destination_address = "pavel@hegler.tech"
+
+# POST /api/cancel: at most 5 a minute per IP address and per email, in each Cloudflare location (src/lib/cancel.ts).
+[[ratelimits]]
+name = "CANCEL_LIMIT"
+namespace_id = "3120"
+  [ratelimits.simple]
+  limit = 5
+  period = 60
+
 # The Mac releases (src/lib/download.ts): CI stages them, scripts/mac/promote.sh publishes them and writes latest.json.
 [[r2_buckets]]
 binding = "RELEASES"
@@ -54,7 +68,8 @@ WAITLIST_EMAILS = "off"
 #          wrangler secret put GOOGLE_CLIENT_SECRET
 #          wrangler secret put STRIPE_SECRET_KEY
 #          wrangler secret put STRIPE_WEBHOOK_SECRET
-# The waitlist's email (Amazon SES v2, src/lib/ses.ts), read only while WAITLIST_EMAILS is "on":
+# Optional, the § 312k confirmation email to customers through Amazon SES (README.md): without all three, none is sent.
+#   The waitlist (src/lib/ses.ts) reads them too, only while WAITLIST_EMAILS is "on".
 #          wrangler secret put SES_ACCESS_KEY_ID
 #          wrangler secret put SES_SECRET_ACCESS_KEY
 #          wrangler secret put SES_REGION

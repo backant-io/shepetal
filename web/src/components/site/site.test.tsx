@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
@@ -42,11 +42,12 @@ describe('where a sign-in returns to', () => {
 });
 
 describe('install help (the app is not notarized)', () => {
-  it('gives the four steps in order: drag to Applications, Done, Open Anyway in Privacy & Security, once', async () => {
+  // shepetal runs on macOS 14.4 and later: macOS 15 and 14 word the refusal differently, and only 14 has Control-click.
+  it('gives the four steps in order, for macOS 15 and 14: drag to Applications, close the message, Open Anyway, once', async () => {
     const { InstallSteps } = await import('./InstallSteps');
     const text = renderToStaticMarkup(<InstallSteps />).replace(/<[^>]+>/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ');
     let at = 0;
-    for (const s of ['Drag shepetal into Applications.', 'click Done', 'System Settings, then Privacy & Security', 'Open Anyway', 'confirm with your password', 'You do this once.']) {
+    for (const s of ['Drag shepetal into Applications.', 'cannot open shepetal, or could not verify', 'on macOS 15, click Done', 'System Settings, then Privacy & Security', 'shepetal was blocked', 'Open Anyway', 'confirm with your password', 'On macOS 14 you can also Control-click shepetal', 'You do this once.']) {
       const i = text.indexOf(s, at);
       expect(i, s).toBeGreaterThan(-1);
       at = i;
@@ -70,13 +71,55 @@ describe('install help (the app is not notarized)', () => {
 });
 
 describe('footer', () => {
-  it('reads Privacy · Terms · Refunds · Legal, on the landing page and on every other page', async () => {
+  const nav = (html: string) => [...html.matchAll(/<nav aria-label="Legal"[\s\S]*?<\/nav>/g)][0][0];
+  const footers = async () => {
     const { SiteFooter } = await import('./Shell');
-    const links = (html: string) => [...html.matchAll(/<nav aria-label="Legal"[\s\S]*?<\/nav>/g)][0][0].match(/href="[^"]+"/g);
-    const want = ['href="/privacy"', 'href="/terms"', 'href="/refunds"', 'href="/legal"'];
-    expect(links(renderToStaticMarkup(<SiteFooter />))).toEqual(want);
     const { Story } = await import('@/components/story/Story');
-    expect(links(renderToStaticMarkup(<Story />))).toEqual(want);
+    return [nav(renderToStaticMarkup(<SiteFooter />)), nav(renderToStaticMarkup(<Story />))];
+  };
+
+  it('reads Privacy · Terms · Refunds · Legal · Verträge hier kündigen, on the landing page and on every other page', async () => {
+    const want = ['href="/privacy"', 'href="/terms"', 'href="/refunds"', 'href="/legal"', 'href="/cancel"'];
+    for (const html of await footers()) expect(html.match(/href="[^"]+"/g)).toEqual(want);
+  });
+
+  // § 312k BGB: a subscription sold on the site needs a cancellation button on it, always there, labelled exactly
+  // "Verträge hier kündigen" (or something as clear: no court has tested an English wording), leading to /cancel.
+  it('carries the cancellation button in exactly the words the law gives, on both footers', async () => {
+    for (const html of await footers()) expect(html).toMatch(/<a (?=[^>]*href="\/cancel")(?=[^>]*lang="de")[^>]*>Verträge hier kündigen<\/a>/);
+  });
+});
+
+describe('cancelling without signing in (§ 312k BGB)', () => {
+  const src = (p: string) => readFileSync(join(__dirname, '..', '..', p), 'utf8');
+
+  it('is a static page that asks for nothing but what the law lists, then the Jetzt kündigen button', async () => {
+    const { default: Cancel } = await import('@/app/(site)/cancel/page');
+    const html = renderToStaticMarkup(<Cancel />);
+    const main = html.slice(html.indexOf('<main'));
+    const form = main.match(/<form [^>]*>/)?.[0] ?? '';
+    expect(form).toContain('action="/api/cancel"');
+    expect(form).toContain('method="post"');
+    // type and reason, the contract, the end, the email that identifies it: nothing else (BGH I ZR 200/25).
+    expect([...new Set([...main.matchAll(/<(?:input|textarea)[^>]*name="([^"]+)"/g)].map((m) => m[1]))]).toEqual(['kind', 'reason', 'contract', 'end', 'date', 'email']);
+    expect(main.match(/<button\b[^>]*>[^<]*<\/button>/g)).toEqual(['<button type="submit" class="s-btn s-btn-signal">Jetzt kündigen</button>']);
+    expect(main.match(/\brequired\b/g)).toHaveLength(1);
+    expect(main.match(/<input type="email"[^>]*>/)?.[0]).toMatch(/required=""[^>]*name="email"|name="email"[^>]*required=""/);
+    // no offer, no "keep it", no sign-in, no link away from the form
+    expect(main).not.toMatch(/<a\b|<dialog|sign in|keep|lifetime for|\$/i);
+    expect(html).not.toContain('href="/account"');
+  });
+
+  it('is reachable from the page for unknown paths too', async () => {
+    const { default: NotFound } = await import('@/app/not-found');
+    expect(renderToStaticMarkup(<NotFound />)).toMatch(/<a (?=[^>]*href="\/cancel")[^>]*>Verträge hier kündigen<\/a>/);
+  });
+
+  it('needs no sign-in anywhere on the way: no session on the page, none in the API, which worker.ts answers', () => {
+    const page = src('app/(site)/cancel/page.tsx');
+    expect(page).not.toMatch(/@\/lib\/auth|next-auth|searchParams|cookies\(|headers\(/);
+    for (const f of ['app/api/cancel/route.ts', 'lib/cancel.ts']) expect(src(f)).not.toMatch(/@\/lib\/auth|['"]\.\/auth['"]|next-auth|requestUser|upsertUser/);
+    expect(readFileSync(join(__dirname, '..', '..', '..', 'worker.ts'), 'utf8')).toContain("'POST /api/cancel': cancel,");
   });
 });
 
@@ -113,6 +156,55 @@ describe('legal pages', () => {
     for (const s of ['30 days of shepetal, free', 'within 14 days of the purchase', '$23.99 once', '$0.99 a month', 'Cancel anytime', 'nothing is charged again', 'switch to the lifetime license'])
       expect(refunds).toContain(s);
     expect(page('terms').replace(/\s+/g, ' ')).toContain('within 14 days of a lifetime purchase for a full refund');
+  });
+
+  // What the code does, said where a customer reads it: a later end date on /cancel costs one more, shortened charge;
+  // "right away" for good cause is decided by hand; and our own purchase confirmation goes out by email (§ 356(6) Nr. 2 d).
+  it('say what a later end date and an extraordinary cancellation do, and that the purchase is confirmed by email', () => {
+    for (const p of ['refunds', 'terms']) {
+      const text = page(p).replace(/\s+/g, ' ');
+      expect(text, p).toMatch(/[Tt]he subscription then renews once more, and that last charge covers only the days up to your date/);
+      expect(text, p).toMatch(/end right away[.:] (It|it) stops renewing at once/);
+      expect(text, p).toMatch(/we confirm (this|both) by email to the address of your account, with what you bought and the price you paid/);
+      expect(text, p).not.toMatch(/receipt confirms/);
+    }
+  });
+
+  // Directive 2011/83/EU Art. 6(1)(h) and (k): before the contract, the conditions, the time limit and the procedure
+  // of the right of withdrawal, the model form, and when the right is lost. Missing, the period never starts
+  // (§ 356(3) BGB) and runs for 12 months and 14 days (§ 356(4) BGB).
+  it('give the full withdrawal information and the model withdrawal form, linked from the Terms and the checkout', () => {
+    const refunds = page('refunds').replace(/\s+/g, ' ');
+    for (const s of [
+      'id="withdrawal"',
+      'You have the right to withdraw from this contract within 14 days without giving any reason.',
+      'The withdrawal period will expire after 14 days from the day of the conclusion of the contract',
+      'by an unequivocal statement',
+      'it is sufficient for you to send your communication concerning your exercise of the right of withdrawal before the withdrawal period has expired',
+      'not later than 14 days from the day on which we are informed about your decision to withdraw',
+      'you expressly agree that we begin before the withdrawal period ends, you acknowledge that you thereby lose your right of withdrawal',
+      'Model withdrawal form',
+      'I/We (*) hereby give notice that I/We (*) withdraw from my/our (*) contract',
+      'Signature of consumer(s) (only if this form is notified on paper)',
+      '(*) Delete as appropriate.',
+    ])
+      expect(refunds).toContain(s);
+    expect(page('terms')).toContain('href="/refunds#withdrawal"');
+  });
+
+  // One address for support, refunds and privacy: the review found the Terms sending people to another one. The one
+  // exception is the Copyright Agent of Terms section 10, whose address must match the US Copyright Office designation.
+  it('give one contact address, support@shepetal.app, on every page', () => {
+    const dir = join(__dirname, '..', '..', 'app', '(site)');
+    const files = [
+      ...readdirSync(dir, { recursive: true, encoding: 'utf8' }).filter((f) => f.endsWith('.tsx')).map((f) => join(dir, f)),
+      ...['site', 'story', 'account'].flatMap((d) => readdirSync(join(__dirname, '..', d)).filter((f) => f.endsWith('.tsx')).map((f) => join(__dirname, '..', d, f))),
+    ];
+    const emails = new Set(files.flatMap((f) => readFileSync(f, 'utf8').match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) ?? []));
+    expect([...emails].filter((e) => !e.endsWith('@example.com')).sort()).toEqual(['privacy@backant.io', 'support@shepetal.app']);
+    expect(page('terms').match(/privacy@backant\.io/g)).toHaveLength(2);
+    expect(page('terms').replace(/\s+/g, ' ')).toMatch(/designated Copyright Agent: Pavel Hegler[^<]*<a href="mailto:privacy@backant\.io">/);
+    for (const p of ['terms', 'privacy', 'refunds', 'faq', 'impressum', 'install']) expect(page(p), p).toContain('mailto:support@shepetal.app');
   });
 
   it('use the site’s header, type and prose', () => {
