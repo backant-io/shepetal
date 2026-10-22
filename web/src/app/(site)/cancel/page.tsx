@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { SiteHeader } from '@/components/site/Shell';
-import { ASAP, CONTRACT, DATE_RULE, KIND } from '@/lib/cancel';
+import { ASAP, CONTRACT, DATE_RULE, KIND, RIGHT_AWAY } from '@/lib/cancel';
 
 export const metadata: Metadata = {
   title: 'Cancel your contract',
@@ -50,6 +50,9 @@ export default function Cancel() {
             </label>
             <label>
               <input type="radio" name="end" value="date" /> On this date, {DATE_RULE}:
+            </label>
+            <label>
+              <input type="radio" name="end" value="now" /> {RIGHT_AWAY}
             </label>
             <label className="s-cancel-field">
               Date

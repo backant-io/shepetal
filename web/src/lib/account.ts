@@ -172,6 +172,7 @@ export type Subscription = {
 
 export const TERMINAL = new Set(['canceled', 'incomplete', 'incomplete_expired']);
 const iso = (s: number) => new Date(s * 1000).toISOString();
+const isoOrNull = (s: number | null) => (s ? iso(s) : null);
 
 /**
  * The end of the paid time, from the subscription as Stripe has it now and what was stored before.
@@ -201,6 +202,7 @@ export function paidThrough(sub: Subscription, stored: string | null): string | 
 /**
  * Stores a subscription as Stripe has it now (the webhook reads it fresh, so the order events
  * arrive in does not matter). A user has one subscription: an ended one never replaces another.
+ * Cancelled to the period end with no cancel_at from Stripe: cancel_at is the period end, so it is never read as later.
  * False if no such user, or if the snapshot was ignored.
  */
 export async function applySubscription(userId: number, sub: Subscription): Promise<boolean> {
@@ -216,7 +218,7 @@ export async function applySubscription(userId: number, sub: Subscription): Prom
        WHERE id = ?1`,
     )
     .bind(userId, sub.id, sub.status, iso(sub.current_period_end), sub.cancel_at_period_end ? 1 : 0, paidThrough(sub, stored),
-      sub.amount ?? null, sub.currency ?? null, sub.cancel_at ? iso(sub.cancel_at) : null)
+      sub.amount ?? null, sub.currency ?? null, isoOrNull(sub.cancel_at ?? (sub.cancel_at_period_end ? sub.current_period_end : null)))
     .run();
   return r.meta.changes === 1;
 }

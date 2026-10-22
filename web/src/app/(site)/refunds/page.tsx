@@ -42,6 +42,16 @@ export default function Refunds() {
             is charged again. A month you have already started is not refunded.
           </p>
           <p>
+            Without signing in you can also choose a later end date, at most three months after the month you have
+            paid for. The subscription then renews once more, and that last charge covers only the days up to your
+            date. Nothing is charged after it.
+          </p>
+          <p>
+            For an extraordinary cancellation for good cause you can ask for the subscription to end right away. It
+            stops renewing at once. We look at your reason, decide when it ends and what is refunded, and tell you by
+            email.
+          </p>
+          <p>
             If you switch to the lifetime license, the subscription ends at once with no further charge. The months
             before the switch are not refunded.
           </p>
@@ -85,8 +95,9 @@ export default function Refunds() {
             shepetal is digital content that is not supplied on a tangible medium. Your right of withdrawal ends before
             the 14 days are over as soon as we begin to supply it, which is right after you pay, because at checkout you
             expressly agree that we begin before the withdrawal period ends, you acknowledge that you thereby lose your
-            right of withdrawal, and your receipt confirms both (§&nbsp;356(6) of the German Civil Code, Art. 16(m) of
-            Directive 2011/83/EU). Where the monthly subscription counts as a service instead, the right ends only once
+            right of withdrawal. After you pay, we confirm both by email to the address of your account, with what you
+            bought and the price you paid, and your Stripe receipt says it too (§&nbsp;356(6) of the German Civil Code,
+            Art. 16(m) of Directive 2011/83/EU). Where the monthly subscription counts as a service instead, the right ends only once
             the service has been provided in full (§&nbsp;356(5) of the German Civil Code), so you can withdraw within
             the 14 days and pay for the time up to then, as above. The 14-day refund on the lifetime license above
             applies anyway.

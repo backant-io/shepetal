@@ -51,6 +51,14 @@ describe('POST /api/cancel', () => {
     expect(work.processDeclaration).toHaveBeenCalledTimes(1);
   });
 
+  // A host rotating through the addresses of its /64 is still one sender.
+  it('limits an IPv6 sender by its /64 prefix', async () => {
+    await press({ email: 'a@example.com' }, { origin: SITE, 'cf-connecting-ip': '2001:db8:1:2::a' });
+    await press({ email: 'b@example.com' }, { origin: SITE, 'cf-connecting-ip': '2001:db8:1:2:ffff::9' });
+    const ipKeys = cf.limit.mock.calls.map(([o]) => o.key).filter((k) => k.startsWith('ip:'));
+    expect(ipKeys).toEqual(['ip:2001:db8:1:2::/64', 'ip:2001:db8:1:2::/64']);
+  });
+
   it('needs the email', async () => {
     expect((await press({})).status).toBe(400);
     expect(work.processDeclaration).not.toHaveBeenCalled();

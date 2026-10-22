@@ -13,7 +13,9 @@ import {
   type Subscription,
   type User,
 } from './account';
+import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { db } from './db';
+import { OWNER, sendMail, sesEnabled } from './mail';
 import { SITE_URL } from './site';
 
 let stripe: Stripe | undefined;
@@ -258,7 +260,9 @@ export async function setCancelAtPeriodEnd(user: User, cancel: boolean): Promise
 /**
  * POST /api/cancel (§ 312k BGB): the live subscription ends at the end of its period, or on `at` (Unix seconds) if
  * that is later. A date is capped at three months after the paid time, and an end already set is never moved later,
- * so a declaration never adds a charge. Stripe bills a period that a later date cuts short only up to that date.
+ * so a declaration never adds a charge. One already cancelled to its period end (cancel_at_period_end, even with no
+ * cancel_at stored) ends there. A date after the period end makes Stripe renew once more and bill that last period,
+ * shortened to the date, prorated (Stripe allows no other way for a date outside the current period).
  * The end Stripe answers with is stored at once (the webhook brings it too) and returned: changed false when an
  * earlier end was already set. Null without a live subscription.
  */
@@ -269,11 +273,15 @@ export async function cancelAt(user: User, at: number | null): Promise<{ ends_at
   const cap = new Date(user.paid_through ?? user.current_period_end);
   cap.setUTCMonth(cap.getUTCMonth() + 3);
   const end = at && at > periodEnd ? Math.max(periodEnd, Math.min(at, cap.getTime() / 1000)) : periodEnd;
-  const set = user.cancel_at ? Date.parse(user.cancel_at) / 1000 : null;
-  if (set && set <= end) return { ends_at: user.cancel_at!, changed: false };
+  const set = user.cancel_at ? Date.parse(user.cancel_at) / 1000 : user.cancel_at_period_end ? periodEnd : null;
+  if (set && set <= end) return { ends_at: new Date(set * 1000).toISOString(), changed: false };
   const s = await getStripe().subscriptions.update(
     id,
-    end === periodEnd && !set ? { cancel_at_period_end: true } : { cancel_at: end, proration_behavior: 'none' },
+    end === periodEnd && !set
+      ? { cancel_at_period_end: true }
+      : end > periodEnd
+        ? { cancel_at: end }
+        : { cancel_at: end, proration_behavior: 'none' },
   );
   await applySubscription(user.id, snapshot(s));
   return { ends_at: new Date((s.cancel_at ?? end) * 1000).toISOString(), changed: true };
@@ -293,6 +301,69 @@ export async function nextCharge(user: User): Promise<{ amount: number; currency
   await applySubscription(user.id, snap);
   return snap.amount != null && snap.currency ? { amount: snap.amount, currency: snap.currency, at } : null;
 }
+
+const utc = (d: Date) => `${d.toISOString().slice(0, 10)} at ${d.toISOString().slice(11, 19)} UTC`;
+const price = (amount: number | null, currency: string | null) =>
+  amount == null || !currency ? 'as on your Stripe receipt' : `${new Intl.NumberFormat('en-US', { style: 'currency', currency: currency.toUpperCase() }).format(amount / 100)}, tax included`;
+
+/**
+ * Our own confirmation of a purchase, on a durable medium (§ 356(6) Nr. 2 d, § 312f(3) BGB): what was bought, the
+ * price paid, and the consent given at checkout to delivery right away with the acknowledged loss of the 14-day
+ * withdrawal right (CONFIRMATION, only when Stripe recorded that consent).
+ */
+export function purchaseText(p: { plan: CheckoutPlan; email: string; amount: number | null; currency: string | null; at: Date; consented: boolean }): string {
+  return [
+    'Thank you for buying shepetal.',
+    '',
+    `What you bought: ${p.plan === 'lifetime' ? 'shepetal lifetime license. Yours forever, with no recurring charge.' : 'shepetal monthly subscription. It renews every month until you cancel.'}`,
+    `Price paid: ${price(p.amount, p.currency)}`,
+    `Paid on: ${utc(p.at)}`,
+    `Account: ${p.email}`,
+    '',
+    ...(p.consented ? [`${CONFIRMATION} You agreed to this at checkout, before you paid.`, ''] : []),
+    `Terms: ${SITE_URL}/terms`,
+    `Refund policy and withdrawal information: ${SITE_URL}/refunds`,
+    ...(p.plan === 'monthly' ? [`Cancel anytime on ${SITE_URL}/account, or without signing in on ${SITE_URL}/cancel.`] : []),
+    '',
+    'BackAnt, Inc. (shepetal), 131 Continental Dr, Suite 305, Newark, DE 19713, USA, support@shepetal.app',
+  ].join('\n');
+}
+
+/**
+ * Sends the purchase confirmation to the account's email through SES. Without SES nothing goes to the buyer: Pavel
+ * gets the text to send by hand. Never throws.
+ */
+export async function confirmPurchase(user: User, plan: CheckoutPlan, s: Stripe.Checkout.Session, at: number): Promise<void> {
+  const text = purchaseText({
+    plan, email: user.email, amount: s.amount_total ?? null, currency: s.currency ?? null, at: new Date(at * 1000),
+    consented: s.consent?.terms_of_service === 'accepted',
+  });
+  const subject = `Your shepetal ${plan === 'lifetime' ? 'lifetime license' : 'subscription'} (Bestellbestätigung)`;
+  let problem = 'SES is not set up';
+  if (sesEnabled()) {
+    try {
+      return await sendMail(user.email, subject, text);
+    } catch (e) {
+      problem = `sending it failed: ${e instanceof Error ? e.message : e}`;
+    }
+  }
+  try {
+    await sendMail(OWNER, `purchase: confirmation not sent: ${user.email}`, `The purchase confirmation to ${user.email} was not sent (${problem}). Send the text below to it by hand.\n\n${text}`);
+  } catch (e) {
+    console.error(`stripe webhook: purchase confirmation for user ${user.id} not sent (${problem}), nor the notice: ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+/** Work after the answer (the Worker's waitUntil), so the webhook answers Stripe as fast as before. */
+function later(job: Promise<void>): void {
+  try {
+    getCloudflareContext().ctx.waitUntil(job);
+  } catch {
+    // No Worker (tests): the job runs on its own.
+  }
+}
+
+const PAID = new Set(['paid', 'no_payment_required']);
 
 /**
  * Switch to lifetime: the lifetime license was paid, so the subscription ends now. No further charge: no
@@ -428,7 +499,12 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       if (userId && s.consent?.terms_of_service === 'accepted') await recordConsent(userId, event.created);
       if (s.mode === 'subscription') {
         const sub = idOf(s.subscription);
-        if (sub) await syncSubscription(sub);
+        if (!sub) return;
+        await syncSubscription(sub);
+        // The confirmation once it is paid (a delayed payment: at async_payment_succeeded), and only for a subscription
+        // that was kept (not one ended and refunded beside a lifetime license or another subscription).
+        const u = PAID.has(s.payment_status) && userId ? await userById(userId) : null;
+        if (u && u.status !== 'active' && u.sub_id === sub && !TERMINAL.has(u.sub_status ?? '')) later(confirmPurchase(u, 'monthly', s, event.created));
         return;
       }
       // no_payment_required: a code that takes the whole price off.
@@ -453,6 +529,9 @@ async function handleEvent(event: Stripe.Event): Promise<void> {
       const user = await userById(userId);
       const live = user && liveSubscription(user);
       if (live) await endSubscriptionForLifetime(live);
+      // Last, so a failure before it (Stripe retries the event) never sends it twice. Not again for a payment already stored.
+      const again = before.status === 'active' && !!pi && before.lifetime_payment_intent === pi;
+      if (user && !again) later(confirmPurchase(user, 'lifetime', s, event.created));
       return;
     }
     case 'customer.subscription.created':

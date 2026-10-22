@@ -652,7 +652,7 @@ async function main() {
     assert.deepEqual(await d1(`SELECT count(*) FROM users WHERE email = '${other}'`), [[0]], 'no account is created');
     assert.deepEqual(await d1('SELECT outcome, ends_at FROM cancellations ORDER BY id'), [['cancelled', through], ['no_account', null]], 'both are recorded, with the end Stripe has');
     const log = () => readFileSync(logFile, 'utf8');
-    await settle("Pavel's notices", () => log().includes(`cancel: no_account: ${other}`));
+    await settle("Pavel's notices", () => log().includes(`cancel: no_account (UNMATCHED): ${other}`));
     assert.match(log(), /cancel: cancelled: /, 'Pavel is told of the cancellation too');
     const bad = await press({ email: '' });
     await bad.text(); // an unread body leaves the socket behind (EPIPE on the next request)
@@ -660,6 +660,12 @@ async function main() {
     assert.equal((await app('POST', '/api/billing/resume', { token: accessToken })).body.settings.subscription.status, 'active', 'Resume on /account undoes it');
     // A later day: Stripe's cancel_at, which /account shows as the end and Resume clears.
     const day = new Date(Date.parse(through) + 20 * 86_400_000).toISOString().slice(0, 10);
+    // "As soon as possible" chosen with a date left in the field: the period end, not the date (§ 312k(5)).
+    const asap = updates().length;
+    await (await press({ end: 'asap', date: day, email })).text();
+    await settle('Stripe: asap over a leftover date', () => updates().length > asap);
+    assert.deepEqual([updates().at(-1).params.cancel_at_period_end, updates().at(-1).params.cancel_at], ['true', undefined], 'asap wins over the date');
+    assert.equal((await app('POST', '/api/billing/resume', { token: accessToken })).body.settings.subscription.status, 'active');
     await (await press({ end: 'date', date: day, email })).text();
     await settle('Stripe: cancel_at', () => updates().at(-1)?.params.cancel_at !== undefined);
     assert.equal(updates().at(-1).params.cancel_at, String(Date.parse(`${day}T23:59:59Z`) / 1000));
@@ -698,6 +704,12 @@ async function main() {
   assert.equal(calls('/v1/customers').length, 1, 'the same Stripe customer again');
   const paid = await hook(event('checkout.session.completed', { client_reference_id: sent.client_reference_id, metadata: metadataOf(sent) }));
   assert.equal(paid.status, 200, await paid.clone().text());
+  // § 356(6) Nr. 2 d BGB: the purchase is confirmed after the answer. SES is not set up here, so the buyer gets
+  // nothing and Pavel gets the text to send by hand.
+  for (let i = 0; !readFileSync(logFile, 'utf8').includes(`purchase: confirmation not sent: ${email}`); i++) {
+    if (i > 100) throw new Error('no purchase confirmation notice after 10 s');
+    await sleep(100);
+  }
   lic = await app('GET', '/api/license', { token: accessToken });
   assert.deepEqual(lic.body, { status: 'active', plan: 'lifetime', trial_ends_at: null, paid_through: null, renews: false, payment_failed: false, email });
   assert.equal(calls('/v1/subscriptions/sub_e2e', 'DELETE').length, 1, 'the subscription is cancelled now');

@@ -120,7 +120,7 @@ The `routes` in `wrangler.toml` attach the custom domains `shepetal.app`, `www.s
 `src/lib/mail.ts` sends plain text from support@shepetal.app, two ways:
 
 - **To Pavel** (pavel@hegler.tech, where support@shepetal.app forwards): the `NOTIFY` binding (`[[send_email]]` in `wrangler.toml`), Email Routing's sending to a verified destination. It works on Workers Free, costs nothing, and can reach no other address. Every declaration on /cancel is sent here with what was done and what is left to do. `wrangler dev` (and so the e2e) only prints these emails; a deployed or preview version sends them for real.
-- **To customers**: Amazon SES (v2 API, SigV4 signed with WebCrypto in `mail.ts`), only when the three secrets below are set. Without them no customer is emailed, and /cancel's receipt says so. With them, the § 312k(4) BGB confirmation of a cancellation goes to the address of the matched account, never to an address that has no account.
+- **To customers**: Amazon SES (v2 API, SigV4 signed with WebCrypto in `mail.ts`), only when the three secrets below are set. Without them no customer is emailed, and /cancel's receipt says so. With them, two emails go to customers, each to the address of the account, never to one a stranger typed: the § 312k(4) BGB confirmation of a cancellation (never with the reason as typed), and the purchase confirmation after a lifetime purchase or a subscription start (§ 356(6) Nr. 2 d BGB: what was bought, the price paid, the consent to delivery right away and the acknowledged loss of the withdrawal right). Without them, Pavel gets each text to send by hand.
 
 Setting up SES (backant's AWS account, eu-central-1, which has production access; run with `AWS_PROFILE=backant`):
 
@@ -142,7 +142,7 @@ npx wrangler secret put SES_SECRET_ACCESS_KEY   # paste the second
 echo eu-central-1 | npx wrangler secret put SES_REGION
 ```
 
-Then cancel your own test subscription on /cancel: the confirmation should arrive at the account's address, and the notice to Pavel should say `Confirmation to the customer: sent to …`. The Privacy Policy already names Amazon Web Services for these emails.
+Then cancel your own test subscription on /cancel: the confirmation should arrive at the account's address, and the notice to Pavel should say `Confirmation to the customer: sent to …`. A test-mode purchase should bring the purchase confirmation to the buyer's account address. The Privacy Policy already names Amazon Web Services for these emails.
 
 ## Preview
 

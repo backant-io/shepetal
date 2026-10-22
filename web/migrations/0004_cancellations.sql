@@ -10,7 +10,7 @@ CREATE TABLE cancellations (
   reason TEXT,
   -- 'monthly' or 'lifetime', as the sender chose
   contract TEXT NOT NULL,
-  -- the requested end (YYYY-MM-DD), NULL for as soon as possible
+  -- the requested end (YYYY-MM-DD), 'now' for right away (extraordinary), NULL for as soon as possible
   end_requested TEXT,
   -- the account under that email, if there is one
   user_id INTEGER,
@@ -23,3 +23,7 @@ CREATE TABLE cancellations (
 -- When a cancelled subscription ends (Stripe's cancel_at, ISO): the end of the paid period, or a later date asked for
 -- on /cancel. Set means it no longer renews; /account shows the date.
 ALTER TABLE users ADD COLUMN cancel_at TEXT;
+
+-- A subscription already cancelled to its period end ends there: without this, a cancel_at left empty would let a
+-- later date on /cancel move its end later.
+UPDATE users SET cancel_at = paid_through WHERE cancel_at_period_end = 1 AND cancel_at IS NULL AND paid_through IS NOT NULL;

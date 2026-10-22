@@ -4,6 +4,8 @@ import {
   cancelContract,
   declarationOf,
   declarationText,
+  ipKey,
+  plain,
   processDeclaration,
   receiptHtml,
   recordCancellation,
@@ -33,6 +35,7 @@ const decl = (over: Partial<Declaration> = {}): Declaration => ({
   reason: '',
   contract: 'monthly',
   end: null,
+  now: false,
   badDate: null,
   email: 'a@example.com',
   at,
@@ -65,9 +68,21 @@ describe('the declaration', () => {
     expect(declarationOf(form({ email: 'not an email' }), at)).toBeNull();
     expect(declarationOf(form({ email: ' A@Example.com ' }), at)).toEqual(decl({ email: 'A@Example.com' }));
     expect(declarationOf(form({ email: 'a@example.com', end: 'date', date: '' }), at)?.end).toBeNull();
-    expect(declarationOf(form({ email: 'a@example.com', end: 'asap', date: '2026-12-31' }), at)?.end).toBe('2026-12-31');
+    expect(declarationOf(form({ email: 'a@example.com', date: '2026-12-31' }), at)?.end).toBe('2026-12-31');
     expect(declarationOf(form({ email: 'a@example.com', end: 'date', date: '2026-12-31', kind: 'extraordinary', contract: 'lifetime' }), at))
       .toMatchObject({ end: '2026-12-31', kind: 'extraordinary', contract: 'lifetime' });
+  });
+
+  // § 312k(5): what the consumer chose decides. A date typed and then left behind when they picked "as soon as
+  // possible" must not keep the contract (and its charges) running until that date.
+  it('lets an explicitly chosen "as soon as possible" or "right away" win over a date left in the field', () => {
+    expect(declarationOf(form({ email: 'a@example.com', end: 'asap', date: '2026-12-31' }), at)).toMatchObject({ end: null, now: false, badDate: null });
+    expect(declarationOf(form({ email: 'a@example.com', end: 'asap', date: 'garbage' }), at)).toMatchObject({ end: null, badDate: null });
+    const now = declarationOf(form({ email: 'a@example.com', kind: 'extraordinary', end: 'now', date: '2026-12-31' }), at)!;
+    expect(now).toMatchObject({ end: null, now: true, badDate: null });
+    expect(declarationText(now)).toContain('End of the contract: Right away, for an extraordinary cancellation\n');
+    // An ordinary cancellation cannot end before the paid period does: it says so instead of promising "right away".
+    expect(declarationText(decl({ now: true }))).toContain('End of the contract: As soon as possible, at the end of the period already paid (right away is for an extraordinary cancellation)');
   });
 
   it('treats a past, same-day or impossible date as as soon as possible, and says so', () => {
@@ -101,6 +116,57 @@ describe('the receipt', () => {
   it('is the same page for every email, so it tells no one which have an account', () => {
     const blank = (h: string, who: string) => h.replaceAll(who, '@').replaceAll(encodeURIComponent(who), '@');
     expect(blank(receiptHtml(decl({ email: 'x@example.com' }), false), 'x@example.com')).toBe(blank(receiptHtml(decl({ email: 'someone.else@example.org' }), false), 'someone.else@example.org'));
+  });
+});
+
+// Anyone who knows an account's email can fill in the form, and the confirmation goes from support@shepetal.app to
+// that account. Whatever they typed and the email carries back is a phishing message signed by us.
+describe('what goes back to the customer', () => {
+  it('never carries the reason as typed: the account email says "as entered on the form"', () => {
+    const lure = 'Your card was declined. Log in at https://shepetal-billing.example/login to keep shepetal';
+    const d = decl({ kind: 'extraordinary', reason: lure });
+    const text = confirmationText(d, { user: null, outcome: 'cancelled', endsAt: ENDS, error: null });
+    expect(text).toContain('Reason: as entered on the form');
+    expect(text).not.toContain('declined');
+    expect(text).not.toContain('shepetal-billing');
+    // The sender's own receipt and Pavel's copy keep it.
+    expect(declarationText(d)).toContain(`Reason: ${lure}`);
+  });
+
+  it('caps what else it echoes and takes links out of it', () => {
+    expect(plain('bit.ly/abc')).toBe('[link removed]');
+    expect(plain('https://x.example/a b', 100)).toBe('[link removed] b');
+    expect(plain('2027-13-01')).toBe('2027-13-01');
+    expect(plain('x'.repeat(100))).toHaveLength(40);
+    const text = confirmationText(decl({ badDate: 'evil.co/xx' }), { user: null, outcome: 'cancelled', endsAt: ENDS, error: null });
+    expect(text).toContain('(the date entered, [link removed], is not a day after today)');
+    expect(text).not.toContain('evil.co');
+  });
+
+  it('with SES on, sends the account no reason, even for an extraordinary cancellation', async () => {
+    mail.sesEnabled.mockReturnValue(true);
+    await subscribe('a@example.com');
+    await processDeclaration(decl({ kind: 'extraordinary', reason: 'Visit https://phish.example now' }));
+    const calls = mail.sendMail.mock.calls as unknown as [string, string, string][];
+    const [[, , toCustomer]] = calls.filter(([to]) => to !== mail.OWNER);
+    expect(toCustomer).not.toMatch(/phish|Visit/);
+    const [[, , notice]] = calls.filter(([to]) => to === mail.OWNER);
+    expect(notice).toContain('Reason: Visit https://phish.example now');
+  });
+});
+
+// One host holds a whole IPv6 /64 and can send from any address in it: a key per address would let it flood Pavel's
+// mailbox and D1 at 5 a minute per address.
+describe('the throttle key', () => {
+  it('keys IPv4 by the full address and IPv6 by its /64 prefix, however it is written', () => {
+    expect(ipKey('203.0.113.9')).toBe('203.0.113.9');
+    expect(ipKey('::ffff:203.0.113.9')).toBe('203.0.113.9');
+    const prefix = '2001:db8:85a3:1::/64';
+    for (const ip of ['2001:db8:85a3:1::1', '2001:0db8:85a3:0001:ffff:ffff:ffff:ffff', '2001:DB8:85A3:1:1234:5678:9abc:def0', '2001:db8:85a3:1::7%eth0'])
+      expect(ipKey(ip), ip).toBe(prefix);
+    expect(ipKey('2001:db8:85a3:2::1')).not.toBe(prefix);
+    expect(ipKey('2001:db8::1')).toBe('2001:db8:0:0::/64');
+    expect(ipKey('::1')).toBe('0:0:0:0::/64');
   });
 });
 
@@ -143,10 +209,12 @@ describe('acting on it, with no sign-in', () => {
     await recordCancellation(decl({ at: new Date('2022-12-31T23:00:00Z') }), h());
     await recordCancellation(decl({ at: new Date('2023-01-01T00:00:00Z') }), h());
     await recordCancellation(decl({ kind: 'extraordinary', reason: 'r', end: '2026-12-31' }), h({ user: { id: 7 } as never, outcome: 'cancelled', endsAt: ENDS }));
+    await recordCancellation(decl({ kind: 'extraordinary', reason: 'r', now: true }), h({ user: { id: 7 } as never, outcome: 'cancelled', endsAt: ENDS }));
     const rows = (await db().prepare('SELECT received_at, kind, reason, end_requested, user_id, outcome, ends_at FROM cancellations ORDER BY id').all()).results;
     expect(rows).toEqual([
       { received_at: '2023-01-01T00:00:00.000Z', kind: 'ordinary', reason: null, end_requested: null, user_id: null, outcome: 'no_account', ends_at: null },
       { received_at: at.toISOString(), kind: 'extraordinary', reason: 'r', end_requested: '2026-12-31', user_id: 7, outcome: 'cancelled', ends_at: ENDS },
+      { received_at: at.toISOString(), kind: 'extraordinary', reason: 'r', end_requested: 'now', user_id: 7, outcome: 'cancelled', ends_at: ENDS },
     ]);
   });
 });
@@ -162,10 +230,13 @@ describe('after the answer: the record, the confirmation and the notice', () => 
   };
   const toCustomer = () => (mail.sendMail.mock.calls as unknown as [string, string, string][]).filter(([to]) => to !== mail.OWNER);
 
-  it('tells Pavel of every declaration, even one for an unknown email, and emails no stranger', async () => {
+  // The receipt and its download stay the same for every email (no enumeration), so only Pavel's notice can say that
+  // nothing was found: if the person writes, he answers by hand.
+  it('tells Pavel of every declaration, marking one for an unknown email UNMATCHED, and emails no stranger', async () => {
     await processDeclaration(decl({ email: 'nobody@example.com' }));
-    expect(notice().subject).toBe('cancel: no_account: nobody@example.com');
-    expect(notice().text).toContain('Account: none under this email');
+    expect(notice().subject).toBe('cancel: no_account (UNMATCHED): nobody@example.com');
+    expect(notice().text).toContain('Account: UNMATCHED, none under this email');
+    expect(notice().text).toContain('TO DO: UNMATCHED: no account has this email');
     expect(toCustomer()).toEqual([]);
     expect((await db().prepare('SELECT outcome FROM cancellations').all()).results).toEqual([{ outcome: 'no_account' }]);
   });
@@ -215,6 +286,24 @@ describe('after the answer: the record, the confirmation and the notice', () => 
     stripe.cancelAt.mockResolvedValue(null);
     await processDeclaration(decl({ email: 'l@example.com', contract: 'lifetime' }));
     expect(notice().text).toContain('TO DO: Lifetime license');
+  });
+
+  // § 312k(5) and (4): "right away" for good cause is Pavel's decision, so the confirmation must not name an end as if
+  // it were decided. It may say the latest end, which Stripe has.
+  it('confirms an extraordinary "right away" without a false end: decided by hand, and written to them', () => {
+    const text = confirmationText(decl({ kind: 'extraordinary', now: true }), { user: null, outcome: 'cancelled', endsAt: ENDS, error: null });
+    expect(text).toContain('it ends on 2026-11-21 at 14:00:00 UTC at the latest');
+    expect(text).toContain('decide when it ends and what is refunded, and write to you');
+    expect(text).not.toContain('Your subscription is cancelled. It ends on');
+  });
+
+  // A date after the paid month: Stripe renews once more and bills the shortened last period. "Nothing is charged after
+  // that" alone would hide that charge.
+  it('says when one more, shortened charge comes before a later end date', () => {
+    const user = { id: 1, email: 'a@example.com', paid_through: '2026-11-21T14:00:00.000Z' } as never;
+    const later = confirmationText(decl({ end: '2026-12-31' }), { user, outcome: 'cancelled', endsAt: '2026-12-31T23:59:59.000Z', error: null });
+    expect(later).toContain('On 2026-11-21 at 14:00:00 UTC it is charged once more, only for the days up to that end. Nothing is charged after that.');
+    expect(confirmationText(decl(), { user, outcome: 'cancelled', endsAt: '2026-11-21T14:00:00.000Z', error: null })).toContain('and nothing is charged after that.');
   });
 
   it('still notifies Pavel when the record cannot be written', async () => {

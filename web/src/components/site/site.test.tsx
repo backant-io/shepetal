@@ -158,6 +158,18 @@ describe('legal pages', () => {
     expect(page('terms').replace(/\s+/g, ' ')).toContain('within 14 days of a lifetime purchase for a full refund');
   });
 
+  // What the code does, said where a customer reads it: a later end date on /cancel costs one more, shortened charge;
+  // "right away" for good cause is decided by hand; and our own purchase confirmation goes out by email (§ 356(6) Nr. 2 d).
+  it('say what a later end date and an extraordinary cancellation do, and that the purchase is confirmed by email', () => {
+    for (const p of ['refunds', 'terms']) {
+      const text = page(p).replace(/\s+/g, ' ');
+      expect(text, p).toMatch(/[Tt]he subscription then renews once more, and that last charge covers only the days up to your date/);
+      expect(text, p).toMatch(/end right away[.:] (It|it) stops renewing at once/);
+      expect(text, p).toMatch(/we confirm (this|both) by email to the address of your account, with what you bought and the price you paid/);
+      expect(text, p).not.toMatch(/receipt confirms/);
+    }
+  });
+
   // Directive 2011/83/EU Art. 6(1)(h) and (k): before the contract, the conditions, the time limit and the procedure
   // of the right of withdrawal, the model form, and when the right is lost. Missing, the period never starts
   // (§ 356(3) BGB) and runs for 12 months and 14 days (§ 356(4) BGB).

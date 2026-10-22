@@ -11,7 +11,7 @@ export default function TermsOfUse() {
       <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal">
         <h1 className="s-h2">Terms of Use</h1>
-        <p className="s-mono">Version 1.3. Last revised on October 22, 2026</p>
+        <p className="s-mono">Version 1.4. Last revised on October 22, 2026</p>
 
         <div className="s-prose">
           <p>
@@ -64,7 +64,10 @@ export default function TermsOfUse() {
             Cancel subscription. You can also cancel without signing in: choose{' '}
             <Link href="/cancel" prefetch={false} lang="de">Verträge hier kündigen</Link> at the bottom of any page.
             When you cancel, shepetal keeps working until the end of the month you have paid for, and there is no
-            further charge. If a renewal payment fails, shepetal stops working until the payment goes through; you can
+            further charge. Without signing in you can instead choose a later end date, at most three months after the
+            month you have paid for: the subscription then renews once more, and that last charge covers only the days
+            up to your date. For an extraordinary cancellation for good cause you can ask for it to end right away: it
+            stops renewing at once, and we decide when it ends and what is refunded and tell you by email. If a renewal payment fails, shepetal stops working until the payment goes through; you can
             update your card with Manage billing on your account page.
           </p>
           <p>
@@ -75,8 +78,9 @@ export default function TermsOfUse() {
             <strong>Delivery right away and your right of withdrawal.</strong> shepetal is digital content, delivered as
             soon as you pay. If you are a consumer in the European Union, the United Kingdom or another country with a
             right of withdrawal, you would normally have 14 days to withdraw from the purchase. At checkout you ask us to
-            deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. Your
-            receipt confirms this. The full withdrawal information and the model withdrawal form are in our{' '}
+            deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. After
+            you pay, we confirm this by email to the address of your account, with what you bought and the price you
+            paid. Your Stripe receipt says it too. The full withdrawal information and the model withdrawal form are in our{' '}
             <Link href="/refunds#withdrawal">refund policy</Link>.
           </p>
           <p>
