@@ -210,14 +210,18 @@ final class AccountTests: XCTestCase {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../..").standardized
         let makeApp = try String(contentsOf: root.appendingPathComponent("scripts/make-app.sh"), encoding: .utf8)
         XCTAssertTrue(makeApp.contains("SHEPETAL_DOMAIN=${SHEPETAL_DOMAIN:-\(Site.host)}\n"), "the feed's default domain is Site.host")
-        // #277: the repository goes private, so the app links to no GitHub page.
+        // #277 and Pavel, 22.10.26: the app is public and the repository is not, so nothing the app shows names GitHub,
+        // the source, a licence for shepetal's own code or a donation. scripts/make-dmg.sh checks the built app too.
+        XCTAssertFalse(makeApp.contains("MIT License"))
+        XCTAssertTrue(makeApp.contains("<key>NSHumanReadableCopyright</key><string>© 2026 BackAnt, Inc.</string>"))
+        let banned = ["github", "mit license", "open source", "open-source", "source code", "donate", "sponsor", "buymeacoffee"]
         let files = FileManager.default.enumerator(at: root.appendingPathComponent("Sources"), includingPropertiesForKeys: nil)?
             .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
         XCTAssertFalse(files.isEmpty)
         for f in files {
             for (n, line) in try String(contentsOf: f, encoding: .utf8).components(separatedBy: "\n").enumerated()
-            where line.contains("github.com") && !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
-                XCTFail("\(f.lastPathComponent):\(n + 1) links to GitHub")
+            where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                for b in banned where line.lowercased().contains(b) { XCTFail("\(f.lastPathComponent):\(n + 1) says \(b)") }
             }
         }
     }

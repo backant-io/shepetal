@@ -396,7 +396,6 @@ final class MenuModelTests: XCTestCase {
             ("Signed in as", "Text(account.summaryLine)", account),
             ("Sign out", "Button(\"Sign out\")", account),
             ("Check license now", "Button(\"Check license now\")", account),
-            ("Donate", "Section(\"Donate\") {\n                    ForEach(AppDelegate.donate", home),
             ("Recordings", "Picker(\"Recordings\"", settings),
             ("Open recordings folder", "Button(\"Open recordings folder\")", settings),
             ("Start at login", "Toggle(\"Start at login\", isOn: Binding(get: { model.loginItem.isOn }, set: { _ in model.toggleLogin() }))", settings),

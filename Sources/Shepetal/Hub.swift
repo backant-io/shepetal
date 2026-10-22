@@ -247,9 +247,6 @@ private struct HomeTab: View {
                     }
                 }
                 Section { Button("What's new…", action: model.openWhatsNew) }
-                Section("Donate") {
-                    ForEach(AppDelegate.donate, id: \.1) { title, url in Link(title, destination: URL(string: url)!) }
-                }
             }
             .formStyle(.grouped)
         }

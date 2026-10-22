@@ -512,7 +512,7 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 3. Choose Help center. Expected: https://shepetal.app/help opens in the browser. Until the help pages from #84 are merged and deployed, that URL is a 404 page: the item works, the page does not exist yet. Choose Send feedback…. Expected: a new mail to founder@backant.io with the subject "shepetal feedback".
 4. In System Settings > Privacy & Security > Accessibility, turn Shepetal off. Open the menu. Expected: "Permissions needed…" at the very top with a yellow mark; choosing it opens the Permissions window. Turn Shepetal back on: the line is gone the next time the menu opens.
 5. Signed out (Home > Sign out): the top of the menu has "Sign in to start your free trial…". With a test account 7 days or less from the end of its trial, or after it: "Get shepetal: $23.99 once or $0.99 a month…" instead. With more than 7 days left, or Yours forever, neither.
-6. Open shepetal and check that nothing left the app: Home has the account line with Sign out, the speech recognition line and the Donate links (each opens its page); Settings has Recordings, Open recordings folder, Start at login, Dictionary… and Permissions….
+6. Open shepetal and check that nothing left the app: Home has the account line with Sign out and the speech recognition line, and no Donate section; Settings has Recordings, Open recordings folder, Start at login, Dictionary… and Permissions….
 7. Without the speech model (move `~/Library/Application Support/FluidAudio/Models` aside and restart): the top of the menu has "Download on-device speech recognition (about 470 MB)" with a yellow mark. Choose it, then open the menu again while it downloads. Expected: no download item and no grey line, so a second download cannot start; Home's Speech recognition line reads "Downloading on-device speech recognition…". Turn Wi-Fi off during a download: "Speech recognition download failed: …" shows next to 🤫 (#239), Home reads "Download failed: …" and the download item is back in the menu. Move the folder back.
 
 ### M-NEW-1: what's new after an update (F111)
@@ -527,7 +527,7 @@ Setup: all three permissions granted, speech recognition loaded, the cleanup mod
 2. With all three permissions granted, quit Shepetal and open it again from Finder or Spotlight. Expected: only 🤫 appears. No Shepetal window opens.
 3. Open the 🤫 menu and choose Open shepetal. Expected: a window titled "shepetal", in lowercase, with Home, History, Dictionary, Meetings and Settings tabs comes to the front.
 4. Close it. Open `dist/Shepetal.app` again (Finder, Spotlight or `open dist/Shepetal.app`). Expected: the same window opens. No second 🤫 appears.
-5. Home: expected rows for speech recognition ("On-device speech recognition (standard engine)", no model name), the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions…. Each Donate link opens its page in the browser.
+5. Home: expected rows for speech recognition ("On-device speech recognition (standard engine)", no model name), the fn key ("Watched…" once Input Monitoring is on), and the missing permissions with Open Permissions….
 
 ### M-HUB-2: search and copy
 1. Dictate "Send the quarterly report today" and then "Call the dentist at 100% volume" into TextEdit (M-FN-1). Open History.

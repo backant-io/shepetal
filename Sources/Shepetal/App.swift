@@ -51,8 +51,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var liveText = LiveCaption(recorded: { [mic] in mic.recorder.snapshot(last: LiveText.windowSamples) },
                                             engine: { [weak self] in self?.engine }) { [weak self] in self?.indicator.status = Indicator.liveStatus($0) }
 
-    static let donate = [("Buy Me a Coffee", "https://buymeacoffee.com/sorcecoder")]
-
     init(allowPrompts: Bool, hintAtLaunch: Bool) {
         self.allowPrompts = allowPrompts
         self.hintAtLaunch = hintAtLaunch
