@@ -19,7 +19,25 @@ Done by Pavel on 22.10.26: backant's OAuth client has the redirect URI `https://
 
 ## 3. Stripe (Pavel, backant account, live mode)
 
-1. Create or update the products, prices, the PRODUCTHUNT code and the Billing Portal configuration (prints the IDs, changes nothing on a second run, archives the old $4.99 price):
+### 3a. Stripe Tax and the EU rules (Dashboard, before the live switch)
+
+**Decision (Pavel, 22.10.26): sell everywhere from day one.** Checkout is open in the EU and the UK while the non-Union OSS and UK VAT registrations are pending; `automatic_tax` stays on, and Stripe starts collecting the VAT by itself the moment each registration is added in Stripe (no code change, no deploy). EU and UK consumer sales made before that owe VAT that was not collected: Stripe Tax → Reports lists them by country, and Pavel settles them with the first OSS and UK returns (from BackAnt's margin, since the prices are tax-inclusive).
+
+1. **Tax settings.** Dashboard → Settings → Tax (or More → Tax → Settings):
+   - Origin (head office) address: live has San Francisco, CA. Set it to BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA, the Delaware registered address, as test mode has since 22.10.26 (Stripe uses it for US origin rules; Delaware has no sales tax). Keep San Francisco only if that is where BackAnt is run from.
+   - Default tax behavior: **Inclusive** (the prices include tax; `stripe-setup.mjs` sets it on each price too).
+   - Default product tax code: live has `txcd_10103001` (SaaS, business use) and test has `txcd_10202000`. shepetal does not depend on it: `stripe-setup.mjs` sets `txcd_10202000` (Downloadable Software, personal use) on both shepetal products, and tax-inclusive on each price, so live's `inferred_by_currency` default (which makes USD exclusive) never applies. Leave the account defaults as backant needs them.
+   - Turn Stripe Tax on (live).
+2. **EU VAT: non-Union OSS.** BackAnt, Inc. (a Delaware corporation, file number 10279385) has no EU establishment, so it registers once for the EU's non-Union One-Stop Shop (VoES) in one member state, then files one quarterly OSS return for all EU sales. Apply with that state's tax office (Germany: BZSt, "Online-Antrag VoES"; Ireland: ROS). Stripe can file it for you (Stripe Tax filing partners). When you have the OSS number: Dashboard → Tax → Registrations → Add → European Union → "Non-Union OSS" → the member state and the start date. Without that registration Stripe collects no EU VAT. There is no EU threshold for non-EU sellers: VAT is due from the first EU sale to a consumer.
+3. **UK, Switzerland, Norway and others.** The UK has no VAT threshold for sellers outside the UK: selling to UK consumers from day one means registering with HMRC (online, as a non-established taxable person) and adding the UK registration in Stripe (Tax → Registrations → United Kingdom). Switzerland and Norway have thresholds (CHF 100,000; NOK 50,000 worldwide sales into the country). Dashboard → Tax → Thresholds shows where sales approach a limit.
+4. **US sales tax.** Delaware has no sales tax. Register in another state only when its economic-nexus threshold is reached (most: $100,000 or 200 transactions a year). Dashboard → Tax → Registrations → turn on threshold monitoring (Stripe emails when a state nears its threshold); add each state registration there when you register with the state.
+5. **The consent checkbox needs the terms URL.** Dashboard → Settings → Business → Public details: Terms of service URL `https://shepetal.app/terms`, Privacy policy URL `https://shepetal.app/privacy`. Checkout refuses `consent_collection` without the terms URL. The checkbox text is shepetal's (the EU consent to delivery right away and the end of the 14-day withdrawal right), set per session in the code.
+6. **Receipts.** Dashboard → Settings → Customer emails: "Successful payments" and "Refunds" on. The receipt carries the purchase and the consent confirmation (the payment description); subscription invoices carry it in the footer. That is the confirmation on a durable medium the EU rules ask for.
+7. **Adaptive Pricing** (Settings → Payments → Adaptive Pricing) can stay on: EU buyers see the fixed euro price (`currency_options` EUR, tax inclusive); elsewhere Stripe converts the USD price.
+
+### 3b. Products, prices, the code and the webhook
+
+1. Create or update the products (with tax codes), the tax-inclusive USD and EUR prices, the PRODUCTHUNT code (USD and EUR amounts off) and the Billing Portal configuration (prints the IDs, changes nothing on a second run, archives the old prices):
 
    ```sh
    cd web && STRIPE_SECRET_KEY="$(aws ssm get-parameter --with-decryption --name /backant/WEB_STRIPE_SECRET_KEY --query Parameter.Value --output text)" node scripts/stripe-setup.mjs --live
@@ -116,6 +134,10 @@ curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$B/app/login?redirect_
 curl -s -X POST $B/api/app/token -H 'content-type: application/json' -d '{"code":"x","code_verifier":"x","redirect_uri":"shepetal://auth"}'   # 400 {"error":"invalid_grant"}
 curl -s -o /dev/null -w '%{http_code}\n' $B/api/license                  # 401
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/api/stripe/webhook -d '{}'   # 400
+curl -sI https://shepetal.backant.io/terms | grep -i '^location'         # https://shepetal.app/terms (301)
+curl -s https://shepetal.backant.io/api/license -o /dev/null -w '%{http_code}\n'   # 401: the old host's API still answers
+curl -s $B/appcast.xml | grep -c github                                  # 0
+curl -sI $B/download/Shepetal-<version>.dmg | grep -i '^content-disposition'   # attachment, from shepetal.app
 curl -s https://backant.io/ | grep -ci shepetal                         # 0: nothing about shepetal on backant.io
 curl -s https://backant.io/sitemap.xml | grep -ci shepetal              # 0
 ```
@@ -145,7 +167,7 @@ t = call('/api/app/token', dict(code=got['code'], code_verifier=v, redirect_uri=
 print('signed in as', t['email'])
 print('license', call('/api/license', tok=t['access_token']))        # trial, trial_ends_at = now + 30 days
 print('checkout', call('/api/checkout', {}, t['access_token'])['url'])  # https://checkout.stripe.com/...
-input('Pay in the browser (live, $23.99, or $4.99 with PRODUCTHUNT), then press Enter: ')
+input('Pay in the browser (live, $23.99 or €23.99 incl. VAT, $4.99 with PRODUCTHUNT; tick the consent box), then press Enter: ')
 print('license', call('/api/license', tok=t['access_token']))        # active, trial_ends_at null
 print('sign out', call('/api/app/revoke', {}, t['access_token']))    # {'ok': True}
 try: call('/api/license', tok=t['access_token']); print('FAIL: the revoked token still works')

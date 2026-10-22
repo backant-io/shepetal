@@ -45,6 +45,17 @@ export default function Refunds() {
             before the switch are not refunded.
           </p>
 
+          <h2>Your right of withdrawal</h2>
+          <p>
+            shepetal is digital content, delivered the moment you pay. In the European Union, the United Kingdom and
+            other places with a 14-day right of withdrawal, you ask at checkout for delivery right away and acknowledge
+            that this ends that right. Your receipt confirms it. The 14-day refund on the lifetime license above applies
+            anyway.
+          </p>
+
+          <h2>How refunds work</h2>
+          <p>We refund to the card you paid with. Your bank shows it within 5 to 10 business days.</p>
+
           <h2>Charged twice</h2>
           <p>
             If you pay twice for the same thing, for example a second lifetime license or a subscription next to a
@@ -53,7 +64,10 @@ export default function Refunds() {
           </p>
 
           <h2>Your rights</h2>
-          <p>This policy does not limit any refund right that the law where you live gives you.</p>
+          <p>
+            This policy does not limit any refund right that the law where you live gives you, including your rights if
+            shepetal is faulty.
+          </p>
 
           <h2>Contact</h2>
           <p>

@@ -58,7 +58,7 @@ npm test
 npm run type-check
 ```
 
-Put local values in `web/.env.development.local` for `npm run dev`, and in `web/.dev.vars` for `npm run preview` (the real Worker runtime, http://localhost:8787). Both use the same names: `AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. In `.dev.vars`, also set `AUTH_URL` and `NEXTAUTH_URL` to `http://localhost:8787`. Locally, use a Stripe test key: `STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-setup.mjs` creates the test prices, and `stripe listen --forward-to localhost:8787/api/stripe/webhook` gives the webhook secret.
+Put local values in `web/.env.development.local` for `npm run dev`, and in `web/.dev.vars` for `npm run preview` (the real Worker runtime, http://localhost:8787). Both use the same names: `AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `STRIPE_SECRET_KEY` and `STRIPE_WEBHOOK_SECRET`. In `.dev.vars`, also set `AUTH_URL` to `http://localhost:8787` (it overrides the address built from `SHEPETAL_DOMAIN`). Locally, use a Stripe test key: `STRIPE_SECRET_KEY=sk_test_… node scripts/stripe-setup.mjs` creates the test prices, and `stripe listen --forward-to localhost:8787/api/stripe/webhook` gives the webhook secret.
 
 **Never put values in `web/.env` or `web/.env.local`.** The OpenNext build copies those two files into the Worker bundle.
 

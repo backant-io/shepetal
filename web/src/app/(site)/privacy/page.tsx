@@ -15,7 +15,8 @@ export default function PrivacyPolicy() {
 
         <div className="s-prose">
           <p>
-            BackAnt, Inc., a Delaware corporation (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or
+            BackAnt, Inc., a Delaware corporation, 131 Continental Dr, Suite 305, Newark, DE 19713, USA (the
+            &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or
             &quot;our&quot;), makes shepetal, a dictation app for Mac, and runs this website at shepetal.app (the
             &quot;Site&quot;). The Site and the shepetal app together are the &quot;Service&quot;. This Privacy Policy explains what information we collect when you use the
             Service, how we use it and how we protect it. &quot;You&quot; refers to you, as a user of the Service.
@@ -44,8 +45,9 @@ export default function PrivacyPolicy() {
           </p>
           <h3>2. Purchases</h3>
           <p>
-            Payments are handled by Stripe. Your card details go straight to Stripe. We keep your Stripe customer ID and
-            receive the confirmation that you paid, the date of the payment and, for a subscription, its renewal date
+            Payments are handled by Stripe. Your card details go straight to Stripe, and so does the billing address (and
+            a VAT ID, if you give one) that Stripe uses to work out the sales tax or VAT. We keep your Stripe customer ID
+            and receive the confirmation that you paid, the date of the payment and, for a subscription, its renewal date
             and whether a renewal payment failed.
           </p>
           <h3>3. The app sign-in</h3>
@@ -91,7 +93,7 @@ export default function PrivacyPolicy() {
           </p>
           <p>
             We share information with the vendors that run parts of the Service for us, and only as far as they need it:
-            Google for sign-in, Stripe for payments, Cloudflare, which hosts the site and serves the installer
+            Google for sign-in, Stripe for payments and tax, Cloudflare, which hosts the site and serves the installer
             downloads, and PostHog, Inc. (United States) for the analytics above. They use it only at our direction.
           </p>
           <p>

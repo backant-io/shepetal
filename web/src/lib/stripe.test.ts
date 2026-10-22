@@ -2,7 +2,7 @@ import Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
-import { checkoutUrl, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
+import { checkoutUrl, CONFIRMATION, consentText, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
 import { SITE_URL } from './site';
 import { useTestDb } from './test-db';
 
@@ -32,7 +32,7 @@ afterEach(() => vi.restoreAllMocks());
 /** An empty Stripe list (auto-pagination), or one with these items. */
 const none = (...items: object[]) => ({ async *[Symbol.asyncIterator]() { yield* items; } });
 const event = (object: object, type = 'checkout.session.completed', id = `evt_${++evtN}`) =>
-  JSON.stringify({ id, object: 'event', type, data: { object } });
+  JSON.stringify({ id, object: 'event', type, created: Math.floor(Date.now() / 1000), data: { object } });
 const session = (over: object = {}) => ({
   id: 'cs_1',
   object: 'checkout.session',
@@ -91,6 +91,11 @@ describe('lifetime ($23.99 once)', () => {
     expect((await fresh()).status).toBe('trial');
   });
 
+  it('keeps when the buyer consented to delivery right away', async () => {
+    await send(event(session({ consent: { terms_of_service: 'accepted' } })));
+    expect((await fresh()).withdrawal_waived_at).toMatch(/^\d{4}-\d\d-\d\dT/);
+  });
+
   it('waits for a delayed payment to succeed before activating', async () => {
     await send(event(session({ payment_status: 'unpaid' })));
     expect((await fresh()).status).toBe('trial');
@@ -113,6 +118,16 @@ describe('lifetime ($23.99 once)', () => {
     // Stripe's own code field stays off: backant.io's codes on the shared account (some 100% off) must not apply.
     expect(params.allow_promotion_codes).toBeUndefined();
     expect(params.discounts).toBeUndefined();
+    // Stripe Tax, and the EU consent to delivery right away (which ends the 14-day withdrawal right).
+    expect(params).toMatchObject({
+      automatic_tax: { enabled: true },
+      customer_update: { address: 'auto', name: 'auto' },
+      tax_id_collection: { enabled: true },
+      consent_collection: { terms_of_service: 'required' },
+      custom_text: { terms_of_service_acceptance: { message: consentText('lifetime', SITE_URL) } },
+    });
+    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/delivered right away.*ends my 14-day right of withdrawal/);
+    expect(params.payment_intent_data?.description).toContain('ends the 14-day right of withdrawal');
     await send(event(session({ client_reference_id: params.client_reference_id, metadata: params.metadata })));
     expect((await fresh()).status).toBe('active');
   });
@@ -123,7 +138,7 @@ describe('lifetime ($23.99 once)', () => {
     await checkoutUrl(await fresh(), 'https://s', 'monthly');
     expect(getStripe().customers.create).toHaveBeenCalledTimes(1);
     expect(getStripe().customers.create).toHaveBeenCalledWith(
-      { email: 'a@example.com', metadata: { app: 'shepetal', user_id: String(user.id) } },
+      { email: 'a@example.com', metadata: { app: 'shepetal', user_id: String(user.id) }, invoice_settings: { footer: CONFIRMATION } },
       { idempotencyKey: `shepetal-customer-${user.id}-${user.trial_started_at}` },
     );
     expect(create.mock.calls.map((c) => (c[0] as Stripe.Checkout.SessionCreateParams).customer)).toEqual(['cus_1', 'cus_1']);
@@ -367,6 +382,8 @@ describe('subscription ($0.99 a month)', () => {
       subscription_data: { metadata: { app: 'shepetal', user_id: String(user.id) } },
     });
     expect(params.payment_intent_data).toBeUndefined();
+    expect(params).toMatchObject({ automatic_tax: { enabled: true }, consent_collection: { terms_of_service: 'required' } });
+    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/subscription to start right away.*cancel anytime/i);
     // backant.io's handler on the same account takes any subscription checkout's client_reference_id as its own client.
     expect(params.client_reference_id).toBeUndefined();
   });
