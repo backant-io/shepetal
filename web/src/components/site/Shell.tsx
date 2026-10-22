@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { USE_CASES, useCasePath } from '@/lib/use-cases';
 
 /** The "shepetal" wordmark in Bodoni Moda italic, as on the landing page. */
 export function Wordmark({ small = false }: { small?: boolean }) {
@@ -19,11 +20,19 @@ export function SiteHeader({ end }: { end?: React.ReactNode }) {
   );
 }
 
-/** The footer, as on the landing page: the wordmark, then Privacy · Terms · Refunds · Legal. */
+/** The footer, as on the landing page: the wordmark, the "Made for" pages, then Privacy · Terms · Refunds · Legal. */
 export function SiteFooter() {
   return (
     <footer className="s-foot">
       <Wordmark small />
+      <nav aria-label="Made for" className="s-mono s-foot-nav s-foot-for">
+        <span>Made for</span>
+        {USE_CASES.map((u) => (
+          <Link key={u.slug} href={useCasePath(u.slug)}>
+            {u.label}
+          </Link>
+        ))}
+      </nav>
       <nav aria-label="Legal" className="s-mono s-foot-nav">
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms</Link>

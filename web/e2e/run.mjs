@@ -325,6 +325,17 @@ async function main() {
     assert.match(missing.type ?? '', /^text\/html/);
     assert.match(missing.body, meta, 'the 404 page has the analytics meta');
     for (const path of ['/robots.txt', '/sitemap.xml']) await cached(path);
+    // The use-case pages (src/lib/use-cases.ts): prerendered, in the sitemap, the trial button carrying ?ref=for-<slug>.
+    const sitemapXml = (await cached('/sitemap.xml')).body;
+    for (const slug of ['developers', 'writers', 'rsi', 'adhd', 'privacy', 'meetings']) {
+      const body = (await cached(`/for/${slug}`)).body;
+      assert.ok(body.includes(`href="/install?ref=for-${slug}"`), `/for/${slug} links the trial with its ref`);
+      assert.ok(body.includes(`<link rel="canonical" href="https://shepetal.app/for/${slug}"/>`), `/for/${slug} canonical`);
+      assert.ok(sitemapXml.includes(`/for/${slug}</loc>`), `/for/${slug} is in the sitemap`);
+    }
+    await cached('/for/not-a-page', {}, 404);
+    const fromFor = (await cached('/install?ref=for-developers')).body;
+    assert.equal(unescape(fromFor.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=for-developers');
     const install = (await cached('/install?ref=x&utm_source=y')).body;
     assert.equal(unescape(install.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the refresh carries the attribution');
     assert.equal(install.match(/http-equiv="refresh"/gi)?.length, 1, 'one refresh only: a second, bare one (from React) is what browsers followed');
