@@ -13,15 +13,13 @@ export const metadata: Metadata = {
 /**
  * The moment after Download (the landing page's Try 30 days free and the account's Download button land here): the
  * download starts by itself, and the page says how to install an app macOS cannot verify. /download answers with the
- * installer, so the browser stays here. The page is static: worker.ts carries ?ref= and utm_* on to both /download
- * links, at the edge (withEdgeHtml).
+ * installer, so the browser stays here. The page is static: worker.ts adds the refresh that starts the download and
+ * carries ?ref= and utm_* on to it and to the link, at the edge (withEdgeHtml). React must not render that refresh.
  */
 export default function Install() {
   const download = '/download';
   return (
     <>
-      {/* React puts this in <head>: start the download a moment after the page shows. */}
-      <meta httpEquiv="refresh" content={`1;url=${download}`} />
       <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal s-install">
         <h1 className="s-h2">Thanks. Here’s how to install it.</h1>

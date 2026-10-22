@@ -58,8 +58,10 @@ describe('install help (the app is not notarized)', () => {
     const read = (p: string) => readFileSync(join(__dirname, '..', '..', 'app', '(site)', p, 'page.tsx'), 'utf8');
     expect(read('account')).toContain('href={`/install${from}`}');
     const install = read('install');
-    expect(install).toContain('<meta httpEquiv="refresh" content={`1;url=${download}`} />');
-    // static: worker.ts adds ?ref= and utm_* to both /download links at the edge (edge.test.ts)
+    // The refresh comes from worker.ts with ?ref= and utm_* (edge.test.ts). Rendered by React too, hydration added a
+    // bare second one that browsers followed, and the download lost its attribution.
+    expect(install).not.toMatch(/httpEquiv=["']refresh/i);
+    // static: worker.ts adds ?ref= and utm_* to the /download link at the edge
     expect(install).toContain("const download = '/download';");
     expect(install).not.toContain('searchParams');
     expect(install).toContain('<InstallSteps />');

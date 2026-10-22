@@ -327,6 +327,7 @@ async function main() {
     for (const path of ['/robots.txt', '/sitemap.xml']) await cached(path);
     const install = (await cached('/install?ref=x&utm_source=y')).body;
     assert.equal(unescape(install.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the refresh carries the attribution');
+    assert.equal(install.match(/http-equiv="refresh"/gi)?.length, 1, 'one refresh only: a second, bare one (from React) is what browsers followed');
     assert.equal(unescape(install.match(/<a href="(\/download[^"]*)"/)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the fallback link too');
     assert.match(install, /<meta name="robots" content="noindex"/, '/install stays out of search');
     const license = await fetch(`${BASE}/api/license`);

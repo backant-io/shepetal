@@ -31,13 +31,15 @@ describe('withEdgeHtml', () => {
     return { out: withEdgeHtml(res, env, new URL(url)), done };
   };
 
-  it('carries ?ref= and utm_* from /install on to both /download links, with analytics off too (e2e always sets a key)', () => {
+  it('adds the refresh that starts the download on /install, carrying ?ref= and utm_* to it and the link, with analytics off too', () => {
     const { out, done } = run('https://shepetal.app/install?ref=producthunt&utm_source=x.com&other=1', {});
     expect(done).toEqual([
-      'meta[http-equiv="refresh"] content=1;url=/download?ref=producthunt&utm_source=x.com',
+      'head + <meta http-equiv="refresh" content="1;url=/download?ref=producthunt&utm_source=x.com">',
       'a[href="/download"] href=/download?ref=producthunt&utm_source=x.com',
     ]);
     expect(out.headers.get('etag')).toBeNull();
+    // Without attribution the download still starts.
+    expect(run('https://shepetal.app/install', {}).done).toEqual(['head + <meta http-equiv="refresh" content="1;url=/download">']);
   });
 
   it('adds the analytics meta to every HTML page when the key is set, and drops the ETag of the page as built', () => {
@@ -47,7 +49,7 @@ describe('withEdgeHtml', () => {
   });
 
   it('leaves the page as built without a key and without attribution, and never touches what is not HTML', () => {
-    for (const url of ['https://shepetal.app/', 'https://shepetal.app/install', 'https://shepetal.app/install?ref=%3Cscript%3E']) {
+    for (const url of ['https://shepetal.app/', 'https://shepetal.app/faq?ref=x']) {
       const res = page();
       expect(run(url, {}, res).out).toBe(res);
     }
