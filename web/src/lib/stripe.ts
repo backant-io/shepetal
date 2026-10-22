@@ -1,4 +1,4 @@
-import Stripe from 'stripe';
+import type Stripe from 'stripe';
 import {
   activate,
   applySubscription,
@@ -15,24 +15,20 @@ import {
 } from './account';
 import { db } from './db';
 import { SITE_URL } from './site';
+import { StripeApiError, stripeApi, verifyWebhook } from './stripe-api';
 
 let stripe: Stripe | undefined;
 
 /**
- * backant's Stripe account (same STRIPE_SECRET_KEY as backant.io). Uses the fetch
- * client because this runs on a Worker. Verify webhooks with
- * stripe.webhooks.constructEventAsync(body, sig, STRIPE_WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider()).
+ * backant's Stripe account (same STRIPE_SECRET_KEY as backant.io), over fetch (lib/stripe-api.ts, API 2025-02-24.acacia):
+ * the SDK's setup alone took more CPU than a request gets on the Workers Free plan.
  */
 export function getStripe(): Stripe {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY is not set');
   // web/e2e only: STRIPE_API_BASE points a test key at the harness's fake Stripe API.
-  const fake = key.startsWith('sk_test_') && process.env.STRIPE_API_BASE ? new URL(process.env.STRIPE_API_BASE) : null;
-  stripe ??= new Stripe(key, {
-    apiVersion: '2025-02-24.acacia',
-    httpClient: Stripe.createFetchHttpClient(),
-    ...(fake && { protocol: 'http', host: fake.hostname, port: fake.port }),
-  });
+  const fake = key.startsWith('sk_test_') && process.env.STRIPE_API_BASE ? new URL(process.env.STRIPE_API_BASE).origin : null;
+  stripe ??= stripeApi(key, fake ?? 'https://api.stripe.com');
   return stripe;
 }
 
@@ -196,7 +192,7 @@ export async function checkoutUrl(user: User, base: string, plan: CheckoutPlan =
     );
   } catch (e) {
     // Stripe refuses a code that has ended or was used up, or meets a customer who has paid before.
-    if (promotion && e instanceof Stripe.errors.StripeInvalidRequestError) {
+    if (promotion && e instanceof StripeApiError && e.type === 'invalid_request_error') {
       throw new CodeError('code_not_applicable', /prior transactions|first.time/i.test(e.message) ? 'This code is for a first purchase.' : 'This code has ended.');
     }
     throw e;
@@ -310,7 +306,7 @@ async function refundOnce(paymentIntent: string, why: string): Promise<void> {
     );
   } catch (e) {
     // Run again after Stripe forgot the idempotency key (24 h): the refund is already there, nothing to do.
-    if (e instanceof Stripe.errors.StripeError && e.code === 'charge_already_refunded') return;
+    if (e instanceof StripeApiError && e.code === 'charge_already_refunded') return;
     throw e;
   }
 }
@@ -480,13 +476,7 @@ export async function handleWebhook(body: string, signature: string | null): Pro
   if (!secret) throw new Error('STRIPE_WEBHOOK_SECRET is not set');
   let event: Stripe.Event;
   try {
-    event = await getStripe().webhooks.constructEventAsync(
-      body,
-      signature ?? '',
-      secret,
-      undefined,
-      Stripe.createSubtleCryptoProvider(),
-    );
+    event = await verifyWebhook(body, signature, secret);
   } catch {
     return Response.json({ error: 'invalid signature' }, { status: 400 });
   }
