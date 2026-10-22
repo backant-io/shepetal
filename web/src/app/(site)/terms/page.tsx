@@ -11,7 +11,7 @@ export default function TermsOfUse() {
       <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal">
         <h1 className="s-h2">Terms of Use</h1>
-        <p className="s-mono">Version 1.2. Last revised on October 22, 2026</p>
+        <p className="s-mono">Version 1.4. Last revised on October 22, 2026</p>
 
         <div className="s-prose">
           <p>
@@ -30,15 +30,15 @@ export default function TermsOfUse() {
           </p>
           <p className="s-caps">
             Please be aware that section 11 contains provisions governing how to resolve disputes between you and
-            Company, including an agreement to arbitrate, a class action waiver and a jury trial waiver. Please read
-            section 11 carefully.
+            Company, including an agreement to arbitrate, which does not apply to consumers in the European Union, the
+            United Kingdom or Switzerland (section 13). Please read section 11 carefully.
           </p>
 
           <h2>1. Accounts</h2>
           <p>
             You sign in to the Service with your Google account (your &quot;Account&quot;). You are responsible for
             keeping your Account secure and for all activity that occurs under it, including on the Macs you connect to
-            it. Tell us immediately at <a href="mailto:founder@backant.io">founder@backant.io</a> if you suspect
+            it. Tell us immediately at <a href="mailto:support@shepetal.app">support@shepetal.app</a> if you suspect
             unauthorized use. You may ask us to delete your Account at any time.
           </p>
 
@@ -60,9 +60,15 @@ export default function TermsOfUse() {
           <p>
             <strong>Monthly subscription.</strong> $0.99 a month. Your subscription renews automatically every month, on
             the day of the month you subscribed, and we charge the payment method you gave until you cancel. You can
-            cancel anytime from your account page, under Manage subscription. When you cancel, shepetal keeps working
-            until the end of the month you have paid for, and there is no further charge. If a renewal payment fails,
-            shepetal stops working until the payment goes through; you can update your card under Manage subscription.
+            cancel anytime on your <Link href="/account" prefetch={false}>account page</Link>: under Settings, choose
+            Cancel subscription. You can also cancel without signing in: choose{' '}
+            <Link href="/cancel" prefetch={false} lang="de">Verträge hier kündigen</Link> at the bottom of any page.
+            When you cancel, shepetal keeps working until the end of the month you have paid for, and there is no
+            further charge. Without signing in you can instead choose a later end date, at most three months after the
+            month you have paid for: the subscription then renews once more, and that last charge covers only the days
+            up to your date. For an extraordinary cancellation for good cause you can ask for it to end right away: it
+            stops renewing at once, and we decide when it ends and what is refunded and tell you by email. If a renewal payment fails, shepetal stops working until the payment goes through; you can
+            update your card with Manage billing on your account page.
           </p>
           <p>
             <strong>Promotion codes.</strong> A promotion code applies only to the purchase it names, until the date it
@@ -72,12 +78,14 @@ export default function TermsOfUse() {
             <strong>Delivery right away and your right of withdrawal.</strong> shepetal is digital content, delivered as
             soon as you pay. If you are a consumer in the European Union, the United Kingdom or another country with a
             right of withdrawal, you would normally have 14 days to withdraw from the purchase. At checkout you ask us to
-            deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. Your
-            receipt confirms this.
+            deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. After
+            you pay, we confirm this by email to the address of your account, with what you bought and the price you
+            paid. Your Stripe receipt says it too. The full withdrawal information and the model withdrawal form are in our{' '}
+            <Link href="/refunds#withdrawal">refund policy</Link>.
           </p>
           <p>
             <strong>Refunds.</strong> The free trial lets you try shepetal before you pay. Even so, if shepetal does not
-            work for you, write to <a href="mailto:founder@backant.io">founder@backant.io</a> within 14 days of a lifetime
+            work for you, write to <a href="mailto:support@shepetal.app">support@shepetal.app</a> within 14 days of a lifetime
             purchase for a full refund; a refund ends the license. Monthly payments are not refunded for the part of a
             month you have already started, and cancelling stops every later charge. The full policy is on our{' '}
             <Link href="/refunds">refund policy</Link> page. This does not limit any right the law where you live gives
@@ -150,6 +158,8 @@ export default function TermsOfUse() {
             please contact our designated Copyright Agent: Pavel Hegler, 5214f Diamond Heights Boulevard, San Francisco,
             CA 94131, US, telephone (415) 969-2829, <a href="mailto:privacy@backant.io">privacy@backant.io</a>.
           </p>
+          {/* The Copyright Agent's details as designated with the US Copyright Office (17 U.S.C. § 512(c)(2)): change
+              them only together with that designation. */}
 
           <h2>11. Dispute resolution</h2>
           <p>
@@ -159,14 +169,23 @@ export default function TermsOfUse() {
           <p>
             30-day right to opt out: you have the right to opt out of this agreement to arbitrate by sending written
             notice within 30 days after first becoming subject to it to 5214f Diamond Heights Boulevard, San Francisco,
-            California 94131, or by email to <a href="mailto:founder@backant.io">founder@backant.io</a>.
+            California 94131, or by email to <a href="mailto:support@shepetal.app">support@shepetal.app</a>.
           </p>
 
           <h2>12. Contact</h2>
           <p>
             BackAnt, Inc., a Delaware corporation (file number 10279385), registered address 131 Continental Dr, Suite
             305, Newark, DE 19713, USA. Contact: Pavel Hegler, 5214f Diamond Heights Boulevard, San Francisco, California
-            94131. Telephone +1 (415) 969-2829. Email <a href="mailto:founder@backant.io">founder@backant.io</a>.
+            94131. Telephone +1 (415) 969-2829. Email <a href="mailto:support@shepetal.app">support@shepetal.app</a>.
+          </p>
+
+          <h2>13. Consumers</h2>
+          <p>
+            If you are a consumer, nothing in these Terms takes away a right that the mandatory consumer law of your
+            country gives you. If you live in the European Union, the United Kingdom or Switzerland, section 11 does not
+            apply to you, and you can go to the courts where you live. Sections 7 and 8 do not limit our liability for
+            death or personal injury caused by negligence, for fraud, intent or gross negligence, or your legal rights if
+            shepetal is faulty.
           </p>
           <p>
             See also our <Link href="/privacy">Privacy Policy</Link>.

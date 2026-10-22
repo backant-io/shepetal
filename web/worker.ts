@@ -2,12 +2,13 @@
 // worker. www.<SHEPETAL_DOMAIN> goes to the apex; the old host (shepetal.backant.io) moves every path, /api/* included,
 // to the domain with a 301 (src/lib/site.ts). Static files (the assets binding) are served before this runs.
 // The Workers Free plan gives a request 10 ms of CPU, and loading the Next server alone takes more: the releases and
-// the app's API calls are answered here, the prerendered pages by OpenNext's routing from their build-time copies
+// the app's API calls and the cancellation button are answered here, the prerendered pages by OpenNext's routing from their build-time copies
 // (open-next.config.ts). Everything else goes to Next.
 // Analytics are counted here, on the server (src/lib/server-analytics.ts): the page views and the app sign-in steps
 // of what OpenNext answered, sent in waitUntil after the answer. No analytics code runs in the browser.
 import { GET as license } from './src/app/api/license/route';
 import { POST as revoke } from './src/app/api/app/revoke/route';
+import { POST as cancel } from './src/app/api/cancel/route';
 import { POST as token } from './src/app/api/app/token/route';
 import { releaseRoute } from './src/lib/download';
 import { withEdgeHtml } from './src/lib/edge-html';
@@ -31,6 +32,8 @@ const NATIVE: Record<string, (req: Request) => Promise<Response>> = {
   'GET /api/license': license,
   'POST /api/app/token': token,
   'POST /api/app/revoke': revoke,
+  // The "Jetzt kündigen" button (/cancel): open to everyone, with no sign-in.
+  'POST /api/cancel': cancel,
 };
 
 export default {
