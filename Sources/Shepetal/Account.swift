@@ -1,10 +1,11 @@
 import AppKit
 import ShepetalCore
 
-/// Sign-in, the 30-day trial and the lifetime license in the running app. The license is checked at launch and
-/// then every 24 h, in the background, never while a dictation runs: a dictation that starts cancels a check in
-/// flight. The last good answer is cached in <data>/account.json, sealed with the token: a lifetime license then
-/// holds offline for good, a trial for 7 days.
+/// Sign-in, the 30-day trial, the lifetime license and the monthly subscription in the running app. The license is
+/// checked at launch and then every 24 h, in the background, never while a dictation runs: a dictation that starts
+/// cancels a check in flight. The last good answer is cached in <data>/account.json, sealed with the token: a
+/// lifetime license then holds offline for good, a subscription through its paid period (plus 14 days while it
+/// renews), a trial for 7 days.
 @MainActor
 final class Account: NSObject, ObservableObject {
     static let shared = Account(client: AccountClient(), tokens: .keychain(),
@@ -52,6 +53,8 @@ final class Account: NSObject, ObservableObject {
     private(set) var signInTask: Task<Void, Never>?
     private var signInRun = 0
     private var recheckUntil: Date?
+    /// After Manage subscription the plan is paid but may change (cancel, resume, new card): re-check anyway.
+    private var recheckPaid = false
     private var timer: Timer?
 
     init(client: AccountClient, tokens: TokenStore, stateURL: URL, required: Bool = true) {
@@ -86,7 +89,7 @@ final class Account: NSObject, ObservableObject {
     func tick() {
         refresh()
         guard signedIn else { return }
-        let recheck = recheckUntil.map { now() < $0 && access != .lifetime } ?? false
+        let recheck = recheckUntil.map { now() < $0 && (recheckPaid || !access.isPaid) } ?? false
         if recheck || AccountPolicy.checkDue(state: state, now: now()) { check() }
     }
 
@@ -137,7 +140,7 @@ final class Account: NSObject, ObservableObject {
         if signedOut {
             tokens.delete()
             token = nil
-            message = "Signed out on shepetal.backant.io. Sign in again."
+            message = "Signed out on \(Site.host). Sign in again."
         } else if case let .failure(error) = result {
             message = "Could not check the license: \(error.localizedDescription)"
         } else {
@@ -218,24 +221,32 @@ final class Account: NSObject, ObservableObject {
         refresh()
     }
 
-    /// Opens Stripe Checkout for the lifetime license, then re-checks every minute for an hour so the
-    /// purchase shows up without waiting a day.
+    /// Opens the plan choice on the site ($23.99 once or $0.99 a month, web/API.md: /account#plans), then
+    /// re-checks every minute for an hour so the purchase shows up without waiting a day.
     @objc func buy() {
+        guard signedIn else { return signIn() }
+        openURL(client.plansPage)
+        message = ""
+        recheckUntil = now().addingTimeInterval(3600)
+        recheckPaid = false
+    }
+
+    /// Manage subscription: the Stripe Billing Portal (cancel, resume, change the card). Re-checks for an hour
+    /// after, like Buy, so a cancel or a new card shows up here soon.
+    @objc func manage() {
         guard let token else { return signIn() }
-        message = "Opening checkout…"
+        message = "Opening Manage subscription…"
         Task { [client] in
             do {
-                openURL(try await client.checkout(token: token))
+                openURL(try await client.billingPortal(token: token))
                 message = ""
                 recheckUntil = now().addingTimeInterval(3600)
-            } catch let e as AccountError where e == .alreadyBought {
-                message = ""
-                check()  // bought already (another device, or before the re-check ran): show "Yours forever"
+                recheckPaid = true
             } catch let e as AccountError where e == .signedOut {
-                signOut()  // the token was revoked: offer Sign in again
-                message = "Signed out on shepetal.backant.io. Sign in again, then buy."
+                signOut()
+                message = "Signed out on \(Site.host). Sign in again."
             } catch {
-                message = "Checkout failed: \(error.localizedDescription)"
+                message = "Manage subscription did not open: \(error.localizedDescription)"
             }
         }
     }

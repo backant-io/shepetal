@@ -31,7 +31,8 @@ struct ShareStats: Equatable, Identifiable {
 
 @MainActor
 enum ShareCard {
-    nonisolated static let site = "https://shepetal.backant.io"
+    /// The site, from the one constant (`Site.base`), without a trailing slash.
+    nonisolated static let site = Site.base.absoluteString
     /// 600 × 315 pt at 2× is 1200 × 630 px, the size link previews and posts show uncropped.
     static let size = CGSize(width: 600, height: 315)
     static let scale: CGFloat = 2
