@@ -33,7 +33,13 @@ let failed = 0;
 
 async function open(ctx, url) {
   const page = await ctx.newPage();
-  await page.goto(url, { waitUntil: 'networkidle' });
+  for (let attempt = 1; ; attempt++) {
+    const res = await page.goto(url, { waitUntil: 'networkidle' });
+    // a remote preview can answer one request badly: load it again rather than measure an error page
+    if (!url.startsWith('http') || (res?.ok() && (await page.locator('.kc-track').count()) === 6)) break;
+    if (attempt === 3) throw new Error(`${url}: ${res?.status()} without the six chapters`);
+    await page.waitForTimeout(2000);
+  }
   await page.evaluate(() => document.fonts.ready);
   return page;
 }
