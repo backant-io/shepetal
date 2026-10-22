@@ -38,10 +38,12 @@ describe('the scroll timings: one table, exactly the design’s', () => {
 
   it('matches the approved design’s own build.mjs output byte for byte, so nothing is re-tuned', () => {
     const tracks = Object.keys(TRACK_LENGTH).length;
+    // The one change since the design (Pavel, 22.10.26): the trial button waits for the hero's words (.kc-ctarow).
     const ours =
       storyCss()
         .split('\n')
         .slice(0, -1 - tracks)
+        .filter((l) => !l.includes('.kc-ctarow'))
         .join('\n') + '\n';
     expect(ours).toBe(read('design/build-output.css'));
   });
@@ -54,13 +56,26 @@ describe('the scroll timings: one table, exactly the design’s', () => {
   });
 });
 
+describe('the hero (Pavel, 22.10.26)', () => {
+  it('shows the trial button only once the six words are written, and no "For Mac" beside it', () => {
+    const t = table();
+    const cta = t.anim.get('.kc-ctarow');
+    expect(cta).toEqual([expect.objectContaining({ k: 'kc-cta', t: 't0' })]);
+    // after the last word has fully landed (its window ends), and before the key is released
+    const lastWord = t.anim.get(`.kc-w${HERO_WORDS.length - 1} .kc-wi`)![0];
+    expect(cta![0].a).toBeGreaterThanOrEqual(lastWord.b);
+    expect(cta![0].b).toBeLessThanOrEqual(0.7);
+    const html = renderToStaticMarkup(<Story />);
+    expect(html).not.toMatch(/For Mac/);
+  });
+});
+
 describe('the landing page', () => {
   it('says the design’s texts, word for word and in order, as real text in the page', () => {
     const lines = [
       'Press one key.',
       HERO_WORDS.join(' '),
       'Try 30 days free',
-      'For Mac',
       'Works in every app.',
       ...['f0', 'f1', 'f2', 'f3', 'f4'].map((id) => FLOWS[id as keyof typeof FLOWS].text),
       'Instant.',
@@ -154,8 +169,9 @@ describe('the motion', () => {
       // fill is paint only, for the two LEDs
       if (props.includes('fill')) expect(['kc-led', 'kc-hold-led']).toContain(name);
       // visibility only hides the docked key while it is transparent anyway (before it docks, after it flies out),
-      // so the browser does not paint it: no layout, no visible change
-      if (props.includes('visibility')) expect(['kc-dockin', 'kc-dockout']).toContain(name);
+      // so the browser does not paint it: no layout, no visible change; and the trial button before it fades in, so
+      // nobody clicks or tabs to a button they cannot see
+      if (props.includes('visibility')) expect(['kc-dockin', 'kc-dockout', 'kc-cta']).toContain(name);
     }
   });
 
