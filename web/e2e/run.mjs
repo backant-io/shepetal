@@ -600,6 +600,39 @@ async function main() {
   assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 404, body: { error: 'no_subscription' } });
   const resumed = await app('POST', '/api/billing/resume', { token: accessToken });
   assert.equal(resumed.body.settings.subscription.status, 'active');
+
+  // § 312k BGB: "Verträge hier kündigen" in the footer leads to /cancel, a static page, and its Jetzt kündigen button
+  // cancels with no sign-in (no cookie, no token): the subscription stops at the end of the paid month at once.
+  await check('/cancel: the footer button, a static page, and Jetzt kündigen with no sign-in ends the subscription at period end, with a receipt to keep; the same receipt for an unknown email, which gets no account', async () => {
+    assert.match(await (await fetch(`${BASE}/terms`)).text(), /<a [^>]*href="\/cancel"[^>]*>Verträge hier kündigen<\/a>/, 'the footer carries the button');
+    const page = await fetch(`${BASE}/cancel`);
+    assert.equal(page.status, 200);
+    assert.equal(page.headers.get('x-opennext-cache'), 'HIT', '/cancel is served from the prerendered cache');
+    assert.match(await page.text(), /<button type="submit"[^>]*>Jetzt kündigen<\/button>/);
+    const press = (fields) =>
+      fetch(`${BASE}/api/cancel`, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE }, body: new URLSearchParams(fields) });
+    const sentAt = Date.now();
+    const res = await press({ kind: 'ordinary', reason: '', contract: 'monthly', end: 'asap', date: '', email: email.toUpperCase() });
+    const receipt = await res.text();
+    assert.equal(res.status, 200, receipt);
+    assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'self'/, 'worker.ts answers it, with the security headers');
+    assert.equal(calls('/v1/subscriptions/sub_e2e').at(-1)?.params.cancel_at_period_end, 'true', 'Stripe: cancel at period end');
+    const l = await app('GET', '/api/license', { token: accessToken });
+    assert.deepEqual([l.body.status, l.body.renews, l.body.paid_through], ['active', false, through], 'it works until the end of the paid month');
+    const stamp = receipt.match(/Sent with the Jetzt kündigen button on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC\./);
+    assert.ok(stamp && Math.abs(Date.parse(`${stamp[1]}T${stamp[2]}Z`) - sentAt) < 60_000, 'the receipt carries the time it was sent');
+    assert.match(receipt, /<a href="data:text\/plain;charset=utf-8,[^"]+" download="shepetal-cancellation-\d{4}-\d{2}-\d{2}\.txt">/, 'and a file to keep');
+    const other = 'nobody-e2e@example.com';
+    const stranger = await (await press({ email: other })).text();
+    const blank = (html, who) => html.replaceAll(who, '@').replaceAll(encodeURIComponent(who), '@').replace(/\d{4}-\d{2}-\d{2}( at |%20at%20)\d{2}(:|%3A)\d{2}(:|%3A)\d{2}/g, 'T');
+    assert.equal(blank(stranger, other), blank(receipt, email.toUpperCase()), 'the same page whether the email has an account or not');
+    assert.deepEqual(await d1(`SELECT count(*) FROM users WHERE email = '${other}'`), [[0]], 'no account is created');
+    assert.deepEqual(await d1('SELECT outcome FROM cancellations ORDER BY id'), [['cancelled_at_period_end'], ['no_account']], 'both are recorded');
+    const bad = await press({ email: '' });
+    await bad.text(); // an unread body leaves the socket behind (EPIPE on the next request)
+    assert.equal(bad.status, 400, 'the email is required');
+    assert.equal((await app('POST', '/api/billing/resume', { token: accessToken })).body.settings.subscription.status, 'active', 'Resume on /account undoes it');
+  });
   await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
     const t = await accountText();
     for (const s of ['$0.99 a month.', 'Monthly', 'Active', 'Next charge', 'Manage billing', 'Switch to lifetime', 'Cancel subscription', 'Cancel your subscription?', 'nothing is charged again'])

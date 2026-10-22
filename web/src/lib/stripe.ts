@@ -254,6 +254,17 @@ export async function setCancelAtPeriodEnd(user: User, cancel: boolean): Promise
 }
 
 /**
+ * POST /api/cancel with an end date after the paid time: the subscription renews until `at` (Unix seconds), then
+ * ends, with no proration. Stripe's webhook stores the end when it comes. False without a renewing subscription.
+ */
+export async function cancelAt(user: User, at: number): Promise<boolean> {
+  const id = renewingSubscription(user);
+  if (!id) return false;
+  await getStripe().subscriptions.update(id, { cancel_at: at, proration_behavior: 'none' });
+  return true;
+}
+
+/**
  * The next charge of a renewing subscription, for the settings card: amount in the smallest currency unit (99),
  * currency ("usd") and when (ISO). Null when nothing renews (lifetime, trial, cancelled, past due, ended). From the
  * account row; the amount is read from Stripe once if the row has none yet.

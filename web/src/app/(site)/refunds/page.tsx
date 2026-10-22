@@ -36,9 +36,10 @@ export default function Refunds() {
 
           <h2>Monthly subscription, $0.99 a month</h2>
           <p>
-            Cancel anytime on your <Link href="/account" prefetch={false}>account page</Link>, under Settings. shepetal keeps working until
-            the end of the month you have paid for, and nothing is charged again. A month you have already started is
-            not refunded.
+            Cancel anytime on your <Link href="/account" prefetch={false}>account page</Link>, under Settings. You can
+            also cancel without signing in: choose <Link href="/cancel" prefetch={false} lang="de">Verträge hier kündigen</Link>{' '}
+            at the bottom of any page. shepetal keeps working until the end of the month you have paid for, and nothing
+            is charged again. A month you have already started is not refunded.
           </p>
           <p>
             If you switch to the lifetime license, the subscription ends at once with no further charge. The months

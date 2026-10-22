@@ -201,7 +201,7 @@
 .kc-price { margin: 0; font-weight: 520; font-size: clamp(2.25rem, calc(4.2 * var(--u)), 7.5rem); line-height: 1; letter-spacing: -.04em; }
 .kc-price-line { margin: .6rem 0 0; font-size: 1.125rem; font-weight: 480; }
 .kc-foot { margin-top: clamp(5rem, calc(9 * var(--u)), 14rem); display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; padding: 1.4rem 0 1.6rem; border-top: 1px solid rgba(22,21,18,.22); }
-.kc-foot-nav { display: flex; gap: 1.5rem; }
+.kc-foot-nav { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; }
 .kc-foot-nav a { color: #161512; }
 
 @media (max-width: 760px) {

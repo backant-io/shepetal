@@ -97,6 +97,11 @@ export async function userById(id: number): Promise<User | null> {
   return db().prepare('SELECT * FROM users WHERE id = ?1').bind(id).first<User>();
 }
 
+/** The user for `email`, or null. Never creates one (upsertUser would, and start a trial). */
+export async function userByEmail(email: string): Promise<User | null> {
+  return db().prepare('SELECT * FROM users WHERE email = ?1').bind(email.trim().toLowerCase()).first<User>();
+}
+
 export async function userByCustomer(customer: string): Promise<User | null> {
   return db().prepare('SELECT * FROM users WHERE stripe_customer_id = ?1').bind(customer).first<User>();
 }
