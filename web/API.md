@@ -2,7 +2,7 @@
 
 The contract between this service and the shepetal apps. The apps are built against exactly this text: change both together. `web/e2e/run.mjs` drives it end to end.
 
-- Base URL https://shepetal.backant.io; the apps override it with SHEPETAL_ACCOUNT_URL.
+- Base URL https://shepetal.app, the one value SHEPETAL_DOMAIN in web/wrangler.toml; the apps override it with SHEPETAL_ACCOUNT_URL. The old host shepetal.backant.io still answers /api/* (released apps); its pages 301 to https://shepetal.app.
 
 ## App sign-in: OAuth for native apps with PKCE (RFC 8252, RFC 7636)
 
@@ -42,6 +42,7 @@ The app makes a code_verifier (43 to 128 characters from A-Z a-z 0-9 - . _ ~), i
 - POST /api/checkout (Bearer token or web session) with JSON {plan: "lifetime" | "monthly", code?: string}; no body or no plan is "lifetime". 200 {url} to a Stripe Checkout session:
   - lifetime: mode payment, the one-time $23.99 price (lookup_key shepetal_lifetime), client_reference_id = user id.
   - monthly: mode subscription, the $0.99 monthly price (lookup_key shepetal_monthly), subscription metadata {app: "shepetal", user_id}. No client_reference_id: backant.io's own handler treats a subscription checkout's client_reference_id as its client id.
+  - Both: Stripe Tax (automatic_tax; prices tax-inclusive, in USD and in EUR for EU buyers; tax codes txcd_10202000 lifetime, txcd_10103100 monthly; tax_id_collection for businesses; customer_update address and name auto). The EU consent: consent_collection terms_of_service required, the checkbox text asking for delivery right away and acknowledging the end of the 14-day withdrawal right, with links to /terms and /refunds; the webhook stores when it was given (users.withdrawal_waived_at), the receipt (payment description) and every invoice (customer invoice footer) confirm it.
   - Both: the user's own Stripe customer (created once per user, so a first_time_transaction code works once per user), metadata {app: "shepetal", user_id, plan}. The customer's other open shepetal Checkout sessions are expired first, so a second tab cannot pay twice.
   - code: a shepetal promotion code (its coupon has metadata app=shepetal; PRODUCTHUNT takes $19.00 off the lifetime price), put on the session as a discount. Stripe's own code field (allow_promotion_codes) stays off: the Stripe account is shared with backant.io, whose codes (several 100% off, none limited to a product) would otherwise work on shepetal. 400 {error:"code_lifetime_only"} for a code with the monthly plan, 400 {error:"invalid_code"} for any other code, 400 {error:"code_not_applicable", message} when Stripe refuses it (ended, used, or a customer who has paid before).
   - Success returns to /account?purchased=1, cancel to /account. 401 when signed out; 400 {error:"invalid_plan"}; 409 {error:"already_active"} once the lifetime license is bought; 409 {error:"already_subscribed"} for monthly while a subscription has not ended (active, past due, or cancelled to its period end). A subscriber may buy the lifetime license: the subscription then ends at once with no further charge (switch to lifetime, below).
@@ -66,6 +67,8 @@ The app makes a code_verifier (43 to 128 characters from A-Z a-z 0-9 - . _ ~), i
 
 ## Site
 
-- GET /download (signed in): 302 to the latest backant-io/shepetal GitHub release asset matching Shepetal-*.pkg, or a page saying it is coming soon if none exists.
+- GET /download (signed in): 302 to /download/<installer> (the latest release's Shepetal-<version>.dmg, else .pkg), or a page saying it is coming soon if none exists.
+- GET /download/<name>: the installer or its .sha256, streamed from the site (the Worker reads the release with GITHUB_TOKEN). Nothing a customer sees points at GitHub. 404 for any other name.
+- GET /appcast.xml: the Sparkle appcast of the latest release, its download URLs moved to https://shepetal.app/download/<name> (the EdDSA signatures cover the files, so updates still verify).
 - The trial starts at the user's first shepetal sign-in (web or app) and lasts 30 days, with no card. A lifetime license never expires.
 - GET /account#plans: the plan choice ($23.99 once or $0.99 a month), where the apps' Buy button lands. Subscribers get Manage subscription there. Each user is keyed by their Google account email, lowercased.

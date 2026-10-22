@@ -55,13 +55,29 @@ export async function checkoutUI(url, { code, shot, pay = true, returnTo } = {})
   await p.locator('#cardExpiry').fill('12 / 34');
   await p.locator('#cardCvc').fill('123');
   await p.locator('#billingName').fill('Test Buyer').catch(() => {});
-  if (await p.locator('#billingCountry').count()) await p.locator('#billingCountry').selectOption('US').catch(() => {});
-  if (await p.locator('#billingPostalCode').count()) await p.locator('#billingPostalCode').fill('94103').catch(() => {});
+  // A buyer in Berlin: Stripe Tax needs the full billing address, and shows the VAT inside the euro price.
+  if (await p.locator('#billingCountry').count()) await p.locator('#billingCountry').selectOption('DE').catch(() => {});
+  await p.waitForTimeout(500);
+  for (const [id, value] of [['#billingAddressLine1', 'Unter den Linden 1'], ['#billingPostalCode', '10117'], ['#billingLocality', 'Berlin']]) {
+    if (await p.locator(id).count()) await p.locator(id).fill(value).catch(() => {});
+  }
+  await p.waitForTimeout(2500);
   if (shot) await p.screenshot({ path: join(EVIDENCE, `${shot}-card.png`), fullPage: true });
+  // The EU consent to delivery right away: Stripe's required terms checkbox, with our text.
+  const consent = p.locator('#termsOfServiceConsentCheckbox');
+  // The input is styled over; a buyer clicks its box (the label's checkbox area), not the hidden input.
+  for (const target of [p.locator('label[for="termsOfServiceConsentCheckbox"] .Checkbox-StyledInput'), p.locator('.Checkbox-StyledInput').last(), consent]) {
+    if (await consent.isChecked()) break;
+    if (await target.count()) await target.first().click({ force: true, position: { x: 4, y: 4 } }).catch(() => {});
+  }
+  if (!(await consent.isChecked())) await consent.evaluate((el) => el.click());
+  if (!(await consent.isChecked())) throw new Error('the consent checkbox could not be ticked');
+  const withTax = await text(p);
+  if (shot) await p.screenshot({ path: join(EVIDENCE, `${shot}-consent.png`), fullPage: true });
   await p.locator('button[type="submit"]').click();
   await p.waitForURL((u) => u.href.startsWith(returnTo), { timeout: 60000 });
   await p.context().close();
-  return { codeResult, summary, codeField };
+  return { codeResult, summary: withTax, codeField };
 }
 
 /** The Billing Portal as a subscriber uses it: Cancel subscription, then confirm. */

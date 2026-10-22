@@ -8,7 +8,7 @@ const toml = readFileSync(new URL('../../wrangler.toml', import.meta.url), 'utf8
 // The domain is ONE value: SHEPETAL_DOMAIN in wrangler.toml. The Custom Domain route must name the same host.
 it('sets the domain once, in wrangler.toml, and the Custom Domain route matches it', () => {
   expect(wranglerDomain(toml)).toBe('shepetal.app');
-  expect(toml).toMatch(/routes = \[\{ pattern = "shepetal\.app", custom_domain = true \}\]/);
+  expect(toml).toMatch(/routes = \[\n  \{ pattern = "shepetal\.app", custom_domain = true \},/);
   expect(toml).not.toMatch(/^(AUTH_URL|NEXTAUTH_URL)\s*=/m);
   process.env.SHEPETAL_DOMAIN = wranglerDomain(toml);
   expect(siteOrigin()).toBe('https://shepetal.app');

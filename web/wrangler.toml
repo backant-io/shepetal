@@ -4,9 +4,13 @@ compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
 
 workers_dev = true
-# The Custom Domain. Its pattern must equal SHEPETAL_DOMAIN below (src/lib/site.test.ts checks it). The first
-# `npm run deploy` with this line attaches the domain: a GO step (GO-LIVE.md).
-routes = [{ pattern = "shepetal.app", custom_domain = true }]
+# The Custom Domains. The first must equal SHEPETAL_DOMAIN below (src/lib/site.test.ts checks it); the first
+# `npm run deploy` with it attaches the domain: a GO step (GO-LIVE.md). The old host stays attached: released apps
+# and the current Stripe webhook call its /api/*, and its pages 301 to SHEPETAL_DOMAIN (src/middleware.ts).
+routes = [
+  { pattern = "shepetal.app", custom_domain = true },
+  { pattern = "shepetal.backant.io", custom_domain = true },
+]
 
 [assets]
 directory = ".open-next/assets"

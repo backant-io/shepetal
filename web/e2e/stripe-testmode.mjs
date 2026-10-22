@@ -162,19 +162,31 @@ async function person(email) {
 }
 
 /** Pays an open Checkout session the way the hosted page does (Stripe's own `stripe trigger` fixtures use these calls). */
-async function pay(sessionId, { code, card = 'tok_visa', applyOnly = false } = {}) {
+const ADDRESSES = {
+  US: { line1: '354 Oyster Point Blvd', postal_code: '94080', city: 'South San Francisco', state: 'CA', country: 'US' },
+  DE: { line1: 'Unter den Linden 1', postal_code: '10117', city: 'Berlin', country: 'DE' },
+};
+async function pay(sessionId, { code, card = 'tok_visa', applyOnly = false, country = 'US', consent = true } = {}) {
   if (code) {
     const applied = await stripe('POST', `/v1/payment_pages/${sessionId}`, { promotion_code: code });
     if (applied.http !== 200) return { refused: applied.error?.message ?? `HTTP ${applied.status}` };
     if (applyOnly) return { due: applied.total_summary?.due };
   }
+  // The buyer's country, as the hosted page sends it once the address is typed: Stripe Tax works from it.
+  await stripe('POST', `/v1/payment_pages/${sessionId}`, { tax_region: { country } });
   const page = await stripe('GET', `/v1/payment_pages/${sessionId}`);
   const due = page.total_summary?.due ?? page.line_item_group?.total;
   assert.ok(Number.isInteger(due), `payment page ${page.http}: ${page.error?.message ?? Object.keys(page).slice(0, 12)}`);
-  const pm = await stripe('POST', '/v1/payment_methods', { type: 'card', card: { token: card }, billing_details: { email: 'buyer@example.com', name: 'Test Buyer', address: { line1: '354 Oyster Point Blvd', postal_code: '94080', city: 'South San Francisco', state: 'CA', country: 'US' } } });
-  const done = await stripe('POST', `/v1/payment_pages/${sessionId}/confirm`, { payment_method: pm.id, expected_amount: due });
+  const tax = (page.total_summary?.total_tax_amounts ?? []).map((t) => ({ amount: t.amount, inclusive: t.inclusive }));
+  const pm = await stripe('POST', '/v1/payment_methods', { type: 'card', card: { token: card }, billing_details: { email: 'buyer@example.com', name: 'Test Buyer', address: ADDRESSES[country] } });
+  const done = await stripe('POST', `/v1/payment_pages/${sessionId}/confirm`, {
+    payment_method: pm.id,
+    expected_amount: due,
+    ...(consent && { consent: { terms_of_service: 'accepted' } }),
+  });
+  if (!consent) return { refused: done.error?.message ?? `(!) HTTP ${done.http}` };
   assert.equal(done.http, 200, `confirm: ${done.error?.message}`);
-  return { due };
+  return { due, tax };
 }
 const sessionOf = (url) => url.match(/(cs_test_[A-Za-z0-9]+)/)[1];
 async function until(what, fn, ms = 60_000) {
@@ -211,7 +223,7 @@ try {
   let paid;
   if (UI) {
     const r = await UI.checkoutUI(co.body.url, { shot: '1-lifetime-producthunt', returnTo: BASE });
-    note(`Stripe Checkout in a headless browser: the page showed "${r.summary.match(/[^|]*\$19\.00 off[^|]*/)?.[0]?.trim()}" and total due ${due(r.summary)}; Stripe's own code field: ${r.codeField ? 'shown (!)' : 'none'}; paid with 4242 (screenshots 1-lifetime-producthunt*.png)`);
+    note(`Stripe Checkout in a headless browser: the page showed "${r.summary.match(/[^|]*19\.00 off[^|]*/)?.[0]?.trim()}" and total due ${due(r.summary)}; tax line "${r.summary.match(/[^|]*(VAT|tax)[^|]*/i)?.[0]?.trim()}"; Stripe's own code field: ${r.codeField ? 'shown (!)' : 'none'}; consent ticked; paid with 4242 (screenshots 1-lifetime-producthunt*.png)`);
     assert.equal(r.codeField, false);
   } else {
     paid = await pay(cs.id);
@@ -274,6 +286,30 @@ try {
   assert.equal(second.body.error, 'code_not_applicable');
 
   // ---- 3. Billing Portal and cancel.
+  // ---- Stripe Tax and the EU consent.
+  note('\n## Stripe Tax and the EU consent to delivery right away');
+  const eu = await person(`pricing-eu-${run}@example.com`);
+  co = await eu.call('POST', '/api/checkout', { plan: 'lifetime' });
+  const euCs = await stripe('GET', `/v1/checkout/sessions/${sessionOf(co.body.url)}`);
+  note(`session ${euCs.id}: automatic_tax ${show(euCs.automatic_tax?.enabled)}, consent_collection ${show(euCs.consent_collection)}, tax_id_collection ${show(euCs.tax_id_collection?.enabled)}`);
+  note(`consent text on the checkbox: "${euCs.custom_text?.terms_of_service_acceptance?.message}"`);
+  const noConsent = await pay(euCs.id, { country: 'DE', consent: false });
+  note(`paying without ticking it: refused: ${noConsent.refused}`);
+  assert.ok(noConsent.refused && !noConsent.refused.startsWith('(!)'));
+  const euPaid = await pay(euCs.id, { country: 'DE' });
+  await until('lifetime for the EU buyer', async () => (await eu.license()).plan === 'lifetime');
+  const euDone = await stripe('GET', `/v1/checkout/sessions/${euCs.id}`);
+  const euPi = await stripe('GET', `/v1/payment_intents/${euDone.payment_intent}`);
+  note(`a buyer in Berlin: paid ${euDone.amount_total} ${euDone.currency}, of which tax ${euDone.total_details.amount_tax} (19% German VAT, inside the price: ${show(euPaid.tax)}); consent ${show(euDone.consent)}; address ${euDone.customer_details?.address?.country}`);
+  note(`receipt description: "${euPi.description}"`);
+  assert.equal(euDone.amount_total, 2399, 'the buyer pays the price shown');
+  assert.ok(euDone.total_details.amount_tax > 0, 'VAT is inside the price');
+  const [ueu] = (await d1(`SELECT withdrawal_waived_at FROM users WHERE email = '${eu.email}'`)).rows;
+  note(`stored with the account: withdrawal_waived_at ${ueu.withdrawal_waived_at}`);
+  assert.ok(ueu.withdrawal_waived_at);
+  const custEu = await stripe('GET', `/v1/customers/${euDone.customer}`);
+  note(`invoice footer on the customer (every subscription invoice): "${custEu.invoice_settings?.footer}"`);
+
   // ---- Plan settings (GET /api/account/plan, cancel and resume through the API).
   note(`\n## Plan settings: the current plan, cancel at period end through the API (${b.email})`);
   const tr = await person(`pricing-t-${run}@example.com`);
