@@ -15,7 +15,7 @@ Do these in order. Steps marked **Pavel** need an account only Pavel has. Run ev
 
 Done by Pavel on 22.10.26: backant's OAuth client has the redirect URI `https://shepetal.app/api/auth/callback/google`, and the consent screen is verified for shepetal.app. Keep `https://backant.io/api/auth/callback/google` and `https://shepetal.backant.io/api/auth/callback/google` (the live site uses the latter until the deploy in step 5, and a rollback would again).
 
-`AUTH_URL` and `NEXTAUTH_URL` are no longer in `wrangler.toml`: the site sets both to `https://<SHEPETAL_DOMAIN>` (`src/lib/site.ts`), so sign-in always comes back to shepetal.app, whichever host it started on. The deploy in step 5 removes the old `AUTH_URL = https://shepetal.backant.io` vars from the live Worker. Check: `curl -s https://shepetal.app/api/auth/providers` shows `callbackUrl` `https://shepetal.app/api/auth/callback/google`. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, never Google's.
+`AUTH_URL` and `NEXTAUTH_URL` are no longer in `wrangler.toml`: without `AUTH_URL` the site builds every URL from `https://<SHEPETAL_DOMAIN>` (`src/lib/auth.ts` `siteUrl`), so sign-in always comes back to shepetal.app, whichever host it started on. The deploy in step 5 removes the old `AUTH_URL = https://shepetal.backant.io` vars from the live Worker. Check: `curl -s https://shepetal.app/api/auth/providers` shows `callbackUrl` `https://shepetal.app/api/auth/callback/google`. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, never Google's.
 
 ## 3. Stripe (Pavel, backant account, live mode)
 
@@ -129,6 +129,8 @@ CH=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM   # any 43-character challenge
 curl -sI $B/ | grep -iE '^(HTTP|strict-transport)'                       # 200, HSTS
 curl -sI $B/ | grep -io "form-action[^;]*"                                # includes shepetal: http://127.0.0.1:* (the consent form's redirect)
 curl -s $B/api/auth/providers                                           # callbackUrl https://shepetal.app/api/auth/callback/google
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $B/api/auth/callback/google   # 302 https://shepetal.app/login?error=Configuration (no sign-in started)
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $B/account      # 307 https://shepetal.app/login?next=%2Faccount
 curl -s -o /dev/null -w '%{http_code}\n' "$B/app/login?redirect_uri=https%3A%2F%2Fevil.com&state=x&code_challenge=$CH&code_challenge_method=S256"   # 400
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$B/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=x&code_challenge=$CH&code_challenge_method=S256"   # 307 https://accounts.google.com/...redirect_uri=https%3A%2F%2Fshepetal.app%2Fapi%2Fauth%2Fcallback%2Fgoogle...
 curl -s -X POST $B/api/app/token -H 'content-type: application/json' -d '{"code":"x","code_verifier":"x","redirect_uri":"shepetal://auth"}'   # 400 {"error":"invalid_grant"}

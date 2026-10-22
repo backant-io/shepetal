@@ -18,7 +18,7 @@ export default function Legal() {
             The <Link href="/impressum">legal notice (Impressum)</Link> names who runs shepetal and how to reach us. The{' '}
             <Link href="/terms">Terms of Use</Link>, the <Link href="/refunds">Refund Policy</Link> and the{' '}
             <Link href="/privacy">Privacy Policy</Link> are their own pages. Questions are answered in the{' '}
-            <Link href="/faq">FAQ</Link>, releases are in the <Link href="/changelog" prefetch={false}>changelog</Link>, and the press kit
+            <Link href="/faq">FAQ</Link>, releases are in the <a href="/changelog">changelog</a>, and the press kit
             is on the <Link href="/press">press page</Link>.
           </p>
 

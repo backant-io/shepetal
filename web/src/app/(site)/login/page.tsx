@@ -1,19 +1,12 @@
 import type { Metadata } from 'next';
-import { redirect } from 'next/navigation';
 import { SignIn } from '@/components/site/SignIn';
-import { auth } from '@/lib/auth';
-import { safeNext } from '@/lib/next-path';
 
 export const metadata: Metadata = { title: 'Sign in', robots: { index: false } };
 
-/** The sign-in page. next-auth sends errors here too (lib/auth.ts, pages.error). */
-export default async function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ next?: string; error?: string }>;
-}) {
-  const { next, error } = await searchParams;
-  const to = safeNext(next);
-  if (!error && (await auth())?.user?.email) redirect(to);
-  return <SignIn next={to} failed={!!error} />;
+/**
+ * The sign-in page, static. worker.ts sends a signed-in visit on to ?next=, and sets the form's return path and the
+ * failed line (?error=, where a failed Google sign-in lands) on the built page.
+ */
+export default function LoginPage() {
+  return <SignIn />;
 }

@@ -18,7 +18,6 @@ import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createWriteStream, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,8 +27,7 @@ const OUT = process.env.ACCOUNT_E2E_OUT ?? mkdtempSync(join(tmpdir(), 'shepetal-
 mkdirSync(OUT, { recursive: true });
 const BIN = join(WEB, 'node_modules/.bin');
 const STRIPE_CLI = process.env.STRIPE_CLI ?? 'stripe';
-const require = createRequire(join(WEB, 'package.json'));
-const { encode } = await import(require.resolve('next-auth/jwt'));
+const { seal } = await import('../src/lib/session.ts');
 const { chromium } = await import(process.env.PLAYWRIGHT_CORE ? join(process.env.PLAYWRIGHT_CORE, 'index.mjs') : 'playwright-core');
 const KEY = process.env.STRIPE_SECRET_KEY ?? '';
 assert.match(KEY, /^(sk|rk)_test_/, 'a Stripe TEST key only');
@@ -68,7 +66,6 @@ const envFile = join(OUT, 'account-test.env');
 const vars = {
   AUTH_SECRET,
   AUTH_URL: BASE,
-  NEXTAUTH_URL: BASE,
   GOOGLE_CLIENT_ID: 'test-client-id',
   GOOGLE_CLIENT_SECRET: 'test-client-secret',
   STRIPE_SECRET_KEY: KEY,
@@ -166,8 +163,8 @@ try {
   note(`# /account plan settings in Stripe TEST mode (web/e2e/account-testmode.mjs), ${new Date().toISOString()}`);
   note(`Worker ${BASE} (wrangler dev, local D1); webhooks via stripe listen; pages in chromium headless shell.`);
   const email = `settings-${randomBytes(3).toString('hex')}@example.com`;
-  const name = 'authjs.session-token';
-  const value = await encode({ token: { email, name: 'Test', sub: email }, secret: AUTH_SECRET, salt: name });
+  const name = 'shepetal-session'; // the web session as the Google callback seals it (http: no __Host- prefix)
+  const value = await seal(AUTH_SECRET, name, { e: email }, 3600);
   browser = await chromium.launch({ headless: true });
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'en-US' });
   await ctx.addCookies([{ name, value, url: BASE }]);

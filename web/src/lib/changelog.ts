@@ -79,3 +79,21 @@ export async function releasesOf(b: R2Bucket, limit = 30): Promise<Release[]> {
   }
   return out;
 }
+
+const day = (iso: string) => new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * The release list of /changelog as HTML (worker.ts puts it into the static page's [data-releases]), newest first,
+ * the first tagged Latest; before the first release, the line that says one is on its way. Every value is escaped.
+ */
+export function releasesHtml(list: Release[]): string {
+  if (!list.length) return '<div class="s-prose"><p>The first release is on its way. It will be listed here the day it ships.</p></div>';
+  const item = (r: Release, i: number) => {
+    const meta = [r.date && day(r.date), r.minimumSystem && `macOS ${r.minimumSystem} or later`].filter(Boolean).join(' · ');
+    const notes = r.notes.length ? `<ul class="s-release-notes">${r.notes.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : '';
+    const tag = i === 0 ? '<span class="s-mono s-release-tag">Latest</span>' : '';
+    return `<li><h2 class="s-release-title">${esc(r.version)}${tag}</h2><p class="s-mono">${esc(meta)}</p>${notes}</li>`;
+  };
+  return `<ol class="s-releases">${list.map(item).join('')}</ol>`;
+}

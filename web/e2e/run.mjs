@@ -10,9 +10,9 @@
 // Before that, /download and /appcast.xml against the local R2 bucket, before and after a release is put there the way
 // promote.sh does.
 //
-// Google is faked with a next-auth session cookie signed with the run's AUTH_SECRET, so the run
-// needs no Google account and no network except Google's OIDC discovery (for the sign-in redirect).
-// No real secret is read: every value is generated per run.
+// Google's token endpoint is faked too (GOOGLE_TOKEN_URL, honoured only on a local http run): the sign-in runs for real
+// up to Google's consent screen, which the run skips by calling the callback with a code, as Google would. So the run
+// needs no Google account and no network. No real secret is read: every value is generated per run.
 //
 //   npm run e2e                   # from web/
 //   E2E_SKIP_BUILD=1 npm run e2e  # reuse .open-next/ from the last build
@@ -24,7 +24,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { encode } from 'next-auth/jwt';
+import { seal } from '../src/lib/session.ts';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = join(WEB, 'node_modules', '.bin');
@@ -76,6 +76,10 @@ const fakeSub = {
   items: { object: 'list', data: [] },
 };
 const phEvents = [];
+// ---- Fake Google token endpoint: the code exchange of the sign-in. It signs in `googleAs` (an email), as Google
+// would after its consent screen, and keeps what it was sent.
+const googleCalls = [];
+let googleAs = null;
 const fakeStripe = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -86,6 +90,13 @@ const fakeStripe = createServer((req, res) => {
     if (req.method === 'POST' && url.pathname === '/i/v0/e/') {
       phEvents.push(JSON.parse(body));
       return res.end('{"status":"Ok"}');
+    }
+    if (req.method === 'POST' && url.pathname === '/google/token') {
+      googleCalls.push(Object.fromEntries(new URLSearchParams(body)));
+      const now = Math.floor(Date.now() / 1000);
+      const claims = { iss: 'https://accounts.google.com', aud: env.GOOGLE_CLIENT_ID, azp: env.GOOGLE_CLIENT_ID, sub: '1', email: googleAs, email_verified: true, iat: now, exp: now + 3600 };
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify({ access_token: 'ya29.e2e', id_token: `eyJhbGciOiJSUzI1NiJ9.${b64url(Buffer.from(JSON.stringify(claims)))}.c2ln` }));
     }
     stripeCalls.push({ method: req.method, path: url.pathname, params, auth: req.headers.authorization });
     res.setHeader('content-type', 'application/json');
@@ -137,15 +148,15 @@ const fakeStripe = createServer((req, res) => {
 
 // ---- Per-run configuration (never real secrets).
 const port = await freePort();
-// localhost, not 127.0.0.1: Next's NextURL rewrites 127.0.0.1 to localhost, so next-auth sees localhost.
+// localhost, not 127.0.0.1: Next's NextURL rewrites 127.0.0.1 to localhost.
 const BASE = `http://localhost:${port}`;
 await new Promise((r) => fakeStripe.listen(0, '127.0.0.1', r));
 const env = {
   AUTH_SECRET: randomBytes(32).toString('hex'),
   AUTH_URL: BASE,
-  NEXTAUTH_URL: BASE,
   GOOGLE_CLIENT_ID: 'e2e-client-id',
   GOOGLE_CLIENT_SECRET: 'e2e-client-secret',
+  GOOGLE_TOKEN_URL: `http://127.0.0.1:${fakeStripe.address().port}/google/token`,
   STRIPE_SECRET_KEY: 'sk_test_e2e',
   STRIPE_WEBHOOK_SECRET: `whsec_${randomBytes(24).toString('hex')}`,
   STRIPE_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
@@ -212,10 +223,12 @@ async function app(method, path, { token, json } = {}) {
     return { status: r.status, body: text };
   }
 }
-const sessionFor = async (email) => {
-  const name = 'authjs.session-token'; // http: no __Secure- prefix
-  return `${name}=${await encode({ token: { email, name: 'E2E', sub: email }, secret: env.AUTH_SECRET, salt: name })}`;
-};
+/** A web session for `email`, as the Google callback seals it (http: no __Host- prefix). */
+const sessionFor = async (email) => `shepetal-session=${await seal(env.AUTH_SECRET, 'shepetal-session', { e: email }, 3600)}`;
+const cookiesOf = (res) => res.headers.getSetCookie().filter((c) => !/Max-Age=0\b/.test(c)).map((c) => c.split(';')[0]).join('; ');
+const setCookie = (res, name) => res.headers.getSetCookie().find((c) => c.startsWith(`${name}=`));
+/** Google sends the browser back to the callback with a code and the state it was given (or ?error). */
+const callback = (query, cookie) => browse(`${BASE}/api/auth/callback/google?${query}`, cookie);
 
 /** SQL on the local D1 of the running worker (wrangler's local explorer). */
 async function d1(sql) {
@@ -335,6 +348,18 @@ async function main() {
     secure(license, '/api/license');
   });
 
+  // ---- /changelog is static; worker.ts fills its list from R2 on every visit (here: before the first promotion).
+  const releasesOn = async () => {
+    const r = await fetch(`${BASE}/changelog`);
+    assert.equal(r.status, 200);
+    assert.equal(r.headers.get('x-opennext-cache'), 'HIT', 'the page as built, no Next render');
+    assert.equal(r.headers.get('cache-control'), 'no-store');
+    return (await r.text()).match(/<div data-releases="">([\s\S]*?)<\/div><div class="s-prose"><p><a href="\/install">/)?.[1];
+  };
+  await check('/changelog before the first release: the line that says one is on its way', async () => {
+    assert.equal(await releasesOn(), '<div class="s-prose"><p>The first release is on its way. It will be listed here the day it ships.</p></div>');
+  });
+
   // ---- 0b. Download is open (sign-in happens in the app) and the Sparkle feed is on this site, both from the local R2
   // bucket: coming soon and an empty feed before the first promotion, then what latest.json names. staging/ is never served.
   await check('/download and /appcast.xml signed out: coming soon, then the promoted DMG (resumable) and its feed as stored; never sign-in', async () => {
@@ -349,7 +374,8 @@ async function main() {
     // What scripts/mac/promote.sh leaves in R2, and a staged build that was never promoted.
     const v = '0.0.1';
     const dmg = randomBytes(300_000);
-    const feed = `<?xml version="1.0"?>\n<rss version="2.0"><channel><item><enclosure url="${BASE}/download/${v}/Shepetal-${v}.dmg" length="${dmg.length}"/></item></channel></rss>\n`;
+    const notes = '<description><![CDATA[<ul><li>Fixes <b>&lt;script&gt;alert(1)&lt;/script&gt;</b> &amp; "quotes"</li></ul>]]></description>';
+    const feed = `<?xml version="1.0"?>\n<rss version="2.0"><channel><item>${notes}<enclosure url="${BASE}/download/${v}/Shepetal-${v}.dmg" length="${dmg.length}"/></item></channel></rss>\n`;
     const put = (key, data) => {
       writeFileSync(join(tmp, 'object'), data);
       wrangler(['r2', 'object', 'put', `shepetal-releases/${key}`, '--local', '--persist-to', state, '--file', join(tmp, 'object')]);
@@ -379,6 +405,11 @@ async function main() {
     }
   });
 
+  await check('/changelog after the promotion: the release, tagged Latest, with its notes escaped (no deploy needed)', async () => {
+    const list = await releasesOn();
+    assert.equal(list, '<ol class="s-releases"><li><h2 class="s-release-title">0.0.1<span class="s-mono s-release-tag">Latest</span></h2><p class="s-mono"></p><ul class="s-release-notes"><li>Fixes &#60;script&#62;alert(1)&#60;/script&#62; &#38; &#34;quotes&#34;</li></ul></li></ol>');
+  });
+
   // ---- 0c. Download is open: the landing page's main CTA, followed signed out, reaches the DMG with no sign-in on the way.
   await check('landing CTA signed out: Try 30 days free -> /install -> /download -> the DMG, no auth redirect', async () => {
     const html = await (await fetch(`${BASE}/`)).text();
@@ -393,45 +424,84 @@ async function main() {
     assert.match(dl.headers.get('location') ?? '', /^\/download\/[\d.]+\/Shepetal-[\d.]+\.dmg$/, 'straight to the DMG, not to sign-in');
   });
 
-  // ---- 1. Signed out, /app/login runs the Google sign-in and comes back to the same URL.
+  // ---- 1. Signed out, /app/login runs the Google sign-in (state and PKCE S256 in a one-time cookie) and comes back to
+  // the same URL. The fake Google's token endpoint signs in a new email: the callback creates the user (the trial
+  // starts) and sets the session.
+  const email = `e2e-${randomBytes(4).toString('hex')}@example.com`;
   const login = pkce();
   const out = await browse(login.url);
   const google = new URL(out.headers.get('location') ?? 'about:blank');
-  assert.equal(google.origin, 'https://accounts.google.com', `signed out goes to Google, got ${out.status} ${google}`);
-  assert.equal(google.searchParams.get('redirect_uri'), `${BASE}/api/auth/callback/google`);
-  const back = out.headers.getSetCookie().find((c) => c.startsWith('authjs.callback-url='));
-  assert.equal(decodeURIComponent(back?.split(';')[0].split('=')[1] ?? ''), login.url, 'after Google, next-auth returns to /app/login with the same query');
-  ok(`/app/login signed out: ${out.status} to Google with redirect_uri <AUTH_URL>/api/auth/callback/google, back to the same /app/login after`);
+  assert.equal(google.origin + google.pathname, 'https://accounts.google.com/o/oauth2/v2/auth', `signed out goes to Google, got ${out.status} ${google}`);
+  assert.equal(out.status, 307);
+  const asked = Object.fromEntries(google.searchParams);
+  assert.equal(asked.redirect_uri, `${BASE}/api/auth/callback/google`);
+  assert.deepEqual([asked.response_type, asked.client_id, asked.code_challenge_method, asked.prompt], ['code', env.GOOGLE_CLIENT_ID, 'S256', undefined]);
+  assert.match(asked.state ?? '', /^[A-Za-z0-9_-]{43}$/, 'a state');
+  assert.match(asked.code_challenge ?? '', /^[A-Za-z0-9_-]{43}$/, 'a PKCE challenge');
+  const oauth = setCookie(out, 'shepetal-oauth');
+  assert.match(oauth ?? '', /^shepetal-oauth=[A-Za-z0-9_-]+; Path=\/; Max-Age=600; HttpOnly; SameSite=Lax$/, `the one-time OAuth cookie: ${oauth}`);
+  // Another state, or no cookie: refused, nobody signed in.
+  for (const [why, r] of [['a state that is not the cookie’s', await callback(`code=e2e&state=${b64url(randomBytes(32))}`, cookiesOf(out))], ['no OAuth cookie', await callback(`code=e2e&state=${asked.state}`)]]) {
+    assert.deepEqual([r.status, r.headers.get('location')], [302, `${BASE}/login?error=Configuration`], why);
+    assert.equal(setCookie(r, 'shepetal-session'), undefined, why);
+  }
+  assert.equal(googleCalls.length, 0, 'no code was exchanged for a refused callback');
+  googleAs = email;
+  const signedIn = await callback(`code=e2e-code&state=${encodeURIComponent(asked.state)}&scope=email`, cookiesOf(out));
+  assert.deepEqual([signedIn.status, signedIn.headers.get('location')], [302, login.url], 'after Google, back to /app/login with the same query');
+  assert.match(setCookie(signedIn, 'shepetal-oauth') ?? '', /Max-Age=0/, 'the OAuth cookie is spent');
+  assert.match(setCookie(signedIn, 'shepetal-session') ?? '', /^shepetal-session=[A-Za-z0-9_-]+; Path=\/; Max-Age=2592000; HttpOnly; SameSite=Lax$/);
+  const exchange = googleCalls[0];
+  assert.deepEqual([exchange.grant_type, exchange.code, exchange.redirect_uri, exchange.client_id, exchange.client_secret], ['authorization_code', 'e2e-code', `${BASE}/api/auth/callback/google`, env.GOOGLE_CLIENT_ID, env.GOOGLE_CLIENT_SECRET]);
+  assert.equal(b64url(createHash('sha256').update(exchange.code_verifier).digest()), asked.code_challenge, 'the verifier matches the challenge Google was given');
+  const session = cookiesOf(signedIn);
+  const replay = await callback(`code=e2e-code&state=${encodeURIComponent(asked.state)}`, '');
+  assert.equal(replay.headers.get('location'), `${BASE}/login?error=Configuration`, 'the callback cannot be replayed without the spent cookie');
+  ok(`/app/login signed out: 307 to Google (redirect_uri <AUTH_URL>/api/auth/callback/google, state, S256); the callback refuses another state or no cookie, exchanges the code with the verifier, sets the session and returns to the same /app/login`);
 
   // ---- 1b. The sign-in page: one action, Continue with Google, as a real form.
-  await check('sign-in: /login and /account signed out show Continue with Google as a sign-in form', async () => {
-    for (const path of ['/login', '/account']) {
-      const r = await browse(`${BASE}${path}`);
-      const html = await r.text();
-      assert.equal(r.status, 200, `${path}: ${r.status}`);
-      assert.ok(html.includes('Sign in.') && html.includes('Continue with Google') && /<form[^>]*action=/.test(html), `${path} is the sign-in page`);
-    }
+  await check('sign-in: /login shows Continue with Google as a plain form returning to ?next=, the failed line on ?error; /account signed out goes to it', async () => {
+    const r = await browse(`${BASE}/login`);
+    const html = await r.text();
+    assert.equal(r.status, 200, `/login: ${r.status}`);
+    assert.ok(html.includes('Sign in.') && html.includes('Continue with Google'), '/login is the sign-in page');
+    assert.match(html, /<form class="s-form" action="\/api\/auth\/signin\/google\?callbackUrl=%2Faccount" method="post">/);
+    assert.match(html, /<p role="alert" class="s-alert" hidden="">Sign-in did not finish/, 'the failed line is hidden');
+    assert.equal(r.headers.get('cache-control'), 'private, no-store');
+    assert.equal(r.headers.get('x-opennext-cache'), 'HIT', 'the page as built, no Next render');
+    const failed = await (await browse(`${BASE}/login?error=AccessDenied&next=%2Fapp%2Flogin%3Fstate%3Dx`)).text();
+    assert.match(failed, /<p role="alert" class="s-alert">Sign-in did not finish/, '?error shows the failed line');
+    assert.match(failed, /action="\/api\/auth\/signin\/google\?callbackUrl=%2Fapp%2Flogin%3Fstate%3Dx"/, 'the form returns to ?next=');
+    const evil = await (await browse(`${BASE}/login?next=%2F%09%2Fevil.example`)).text();
+    assert.match(evil, /callbackUrl=%2Faccount"/, 'a ?next= that a browser reads as another site is refused');
+    const acct = await browse(`${BASE}/account?purchased=1`);
+    assert.deepEqual([acct.status, acct.headers.get('location')], [307, `${BASE}/login?next=%2Faccount%3Fpurchased%3D1`]);
   });
 
-  // ---- 2. Fake the Google sign-in: a next-auth JWT session cookie, as the callback would set it.
-  const email = `e2e-${randomBytes(4).toString('hex')}@example.com`;
-  const session = await sessionFor(email);
-  const me = await (await fetch(`${BASE}/api/auth/session`, { headers: { cookie: session } })).json();
-  assert.equal(me?.user?.email, email, 'the test session is accepted');
-  ok(`test session for ${email}`);
-  /** The account page as the signed-in user sees it, as text with the tags stripped. */
-  const accountText = async () => {
+  // ---- 2. The session the callback set is the web session: /api/account answers with it, and /account is the page.
+  const me = await fetch(`${BASE}/api/account`, { headers: { cookie: session } });
+  assert.equal(me.status, 200, `/api/account: ${me.status}`);
+  assert.equal((await me.json()).license?.email, email, 'the session is accepted');
+  assert.equal((await fetch(`${BASE}/api/account`)).status, 401);
+  ok(`signed in as ${email}: GET /api/account with the session, 401 without`);
+  /** What /account shows: the static page, then GET /api/account (the copy per plan is checked in account.test.tsx). */
+  const account = async () => {
     const r = await browse(`${BASE}/account`, session);
-    assert.equal(r.status, 200, `/account: ${r.status}`);
-    return (await r.text()).replace(/<!--.*?-->/g, '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+    assert.equal(r.status, 200, `/account: ${r.status} ${r.headers.get('location')}`);
+    assert.equal(r.headers.get('cache-control'), 'private, no-store');
+    assert.match(await r.text(), /<form class="s-form" action="\/api\/auth\/signout" method="post"><button type="submit" class="s-textbtn s-mono s-ink">Sign out<\/button><\/form>/);
+    const j = await fetch(`${BASE}/api/account`, { headers: { cookie: session } });
+    assert.equal(j.headers.get('cache-control'), 'no-store');
+    return j.json();
   };
-  await check('/account, trial: days left, the download, the email and the two plans; no subscription controls', async () => {
-    const t = await accountText();
-    for (const s of ['30 days left.', 'Download for Mac', 'Settings', email, 'Free trial', '$23.99', 'once. Yours forever.', '$0.99', 'a month.', 'Buy once', 'Subscribe'])
-      assert.ok(t.includes(s), `trial account shows ${s}`);
-    for (const s of ['Cancel subscription', 'Switch to lifetime', 'Manage billing']) assert.ok(!t.includes(s), `no ${s} on a trial`);
+  await check('/account, trial: 30 days left, the email, the two plans to choose from; no subscription controls; /login signed in goes there', async () => {
+    const { license, settings } = await account();
+    assert.deepEqual([license.status, license.plan, license.email, settings.trial?.days_left, settings.subscription], ['trial', 'trial', email, 30, null]);
+    assert.deepEqual(settings.actions, { cancel: false, resume: false, switch_to_lifetime: false, portal: false, choose_plan: true });
     const r = await browse(`${BASE}/login`, session);
-    assert.deepEqual([r.status, new URL(r.headers.get('location') ?? '', BASE).pathname], [307, '/account'], '/login signed in goes to the account');
+    assert.deepEqual([r.status, r.headers.get('location')], [307, `${BASE}/account`], '/login signed in goes to the account');
+    const next = await browse(`${BASE}/login?next=%2F.%2F%2Fevil.example`, session);
+    assert.equal(next.headers.get('location'), `${BASE}/account`, 'never to another site');
   });
 
   // ---- 3. Signed in, a GET shows the consent page and issues nothing; Continue (a POST) redirects
@@ -600,11 +670,21 @@ async function main() {
   assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 404, body: { error: 'no_subscription' } });
   const resumed = await app('POST', '/api/billing/resume', { token: accessToken });
   assert.equal(resumed.body.settings.subscription.status, 'active');
-  await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
-    const t = await accountText();
-    for (const s of ['$0.99 a month.', 'Monthly', 'Active', 'Next charge', 'Manage billing', 'Switch to lifetime', 'Cancel subscription', 'Cancel your subscription?', 'nothing is charged again'])
-      assert.ok(t.includes(s), `subscriber account shows ${s}`);
-    assert.ok(!t.includes('Buy once'), 'no plan choice while subscribed');
+  await check('/account, subscriber: active, next charge $0.99, Manage billing, Switch to lifetime, Cancel; no plan choice', async () => {
+    const { license, settings } = await account();
+    assert.deepEqual([license.plan, license.status, license.renews], ['subscription', 'active', true]);
+    assert.deepEqual([settings.subscription?.status, settings.subscription?.amount_display, settings.subscription?.next_billing_date], ['active', '$0.99', through]);
+    assert.deepEqual(settings.actions, { cancel: true, resume: false, switch_to_lifetime: true, portal: true, choose_plan: false });
+  });
+  await check('cookie-authenticated calls from the site: GET the portal link; a POST counts only with the site’s Origin (else 401)', async () => {
+    const link = await fetch(`${BASE}/api/billing/portal`, { redirect: 'manual', headers: { cookie: session } });
+    assert.deepEqual([link.status, link.headers.get('location')], [303, 'https://billing.stripe.com/p/session/test_e2e']);
+    const out = await fetch(`${BASE}/api/billing/portal`, { redirect: 'manual' });
+    assert.deepEqual([out.status, out.headers.get('location')], [303, `${BASE}/account`], 'signed out, the link goes to the account page');
+    const post = (origin, extra = {}) => fetch(`${BASE}/api/billing/portal`, { method: 'POST', headers: { cookie: session, 'content-type': 'application/json', ...(origin && { origin }), ...extra }, body: '{}' });
+    assert.equal((await post(BASE)).status, 200, 'from the site');
+    for (const [why, r] of [['cross-site', await post('https://evil.example')], ['no Origin', await post(null)], ['a malformed Authorization beside the cookie', await post(BASE, { authorization: 'Basic eDp4' })]])
+      assert.equal(r.status, 401, why);
   });
   const link = await fetch(`${BASE}/api/billing/portal`, { redirect: 'manual', headers: { authorization: `Bearer ${accessToken}` } });
   assert.deepEqual([link.status, link.headers.get('location')], [303, 'https://billing.stripe.com/p/session/test_e2e']);
@@ -633,10 +713,12 @@ async function main() {
   plan = await app('GET', '/api/account/plan', { token: accessToken });
   assert.deepEqual([plan.body.plan, plan.body.subscription, plan.body.actions.cancel], ['lifetime', null, false]);
   assert.deepEqual(await app('POST', '/api/checkout', { token: accessToken, json: {} }), { status: 409, body: { error: 'already_active' } });
-  await check('/account, lifetime: "Yours forever." and no subscription controls', async () => {
-    const t = await accountText();
-    for (const s of ['Yours forever.', 'Lifetime', 'Download for Mac']) assert.ok(t.includes(s), `lifetime account shows ${s}`);
-    for (const s of ['Cancel subscription', 'Switch to lifetime', 'Manage billing', 'Next charge', 'Buy once']) assert.ok(!t.includes(s), `no ${s} for lifetime`);
+  await check('/account, lifetime: lifetime with no subscription controls; checkout with the cookie from the site is 409, cross-site 401', async () => {
+    const { license, settings } = await account();
+    assert.deepEqual([license.plan, license.status, settings.plan, settings.subscription], ['lifetime', 'active', 'lifetime', null]);
+    assert.deepEqual(settings.actions, { cancel: false, resume: false, switch_to_lifetime: false, portal: true, choose_plan: false });
+    const buy = (origin) => fetch(`${BASE}/api/checkout`, { method: 'POST', headers: { cookie: session, 'content-type': 'application/json', ...(origin && { origin }) }, body: '{}' });
+    assert.deepEqual([(await buy(BASE)).status, (await buy('https://evil.example')).status, (await buy(null)).status], [409, 401, 401]);
   });
 
   ok(`switch to lifetime: mode payment, shepetal_lifetime, client_reference_id ${userId}; the paid webhook makes it lifetime and cancels the subscription now (no invoice, no proration); checkout is 409 after`);
@@ -709,8 +791,48 @@ async function main() {
     const to = new URL(r.headers.get('location') ?? 'about:blank');
     assert.equal(to.origin, 'https://accounts.google.com', `${r.status} ${to}`);
     assert.equal(to.searchParams.get('prompt'), 'select_account');
-    const back = r.headers.getSetCookie().find((c) => c.startsWith('authjs.callback-url='));
-    assert.equal(decodeURIComponent(back?.split(';')[0].split('=')[1] ?? ''), l.url);
+    googleAs = email;
+    const back = await callback(`code=e2e-switch&state=${encodeURIComponent(to.searchParams.get('state'))}`, cookiesOf(r));
+    assert.deepEqual([back.status, back.headers.get('location')], [302, l.url], 'back to the same /app/login');
+  });
+  await check('/app/login POST: Continue issues a code only for the account the page showed (403 if another signed in since)', async () => {
+    const before = await codes();
+    const l = pkce();
+    const page = await browse(l.url, session);
+    const other = await sessionFor(`other-${randomBytes(4).toString('hex')}@example.com`);
+    const jar = [other, ...page.headers.getSetCookie().map((c) => c.split(';')[0])].join('; ');
+    const r = await fetch(`${BASE}/app/login`, { method: 'POST', redirect: 'manual', headers: { cookie: jar, origin: BASE, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(formOf(await page.text())) });
+    assert.equal(r.status, 403);
+    assert.equal(await codes(), before);
+  });
+  await check('web sign-in and sign-out: plain POSTs from the site (303), 403 from another site; the session cookie goes', async () => {
+    const post = (path, origin, cookie) => fetch(`${BASE}${path}`, { method: 'POST', redirect: 'manual', headers: { ...(origin && { origin }), ...(cookie && { cookie }), 'content-type': 'application/x-www-form-urlencoded' }, body: '' });
+    const start = await post('/api/auth/signin/google?callbackUrl=%2Faccount%3Fpurchased%3D1', BASE);
+    const to = new URL(start.headers.get('location') ?? 'about:blank');
+    assert.deepEqual([start.status, to.origin, to.searchParams.get('code_challenge_method'), to.searchParams.get('prompt')], [303, 'https://accounts.google.com', 'S256', null]);
+    assert.match(to.searchParams.get('state') ?? '', /^[A-Za-z0-9_-]{43}$/);
+    assert.ok(setCookie(start, 'shepetal-oauth'), 'the one-time OAuth cookie');
+    googleAs = email;
+    const done = await callback(`code=e2e-web&state=${encodeURIComponent(to.searchParams.get('state'))}`, cookiesOf(start));
+    assert.equal(done.headers.get('location'), `${BASE}/account?purchased=1`, 'back to where the sign-in started');
+    for (const path of ['/api/auth/signin/google', '/api/auth/signout']) {
+      assert.equal((await post(path, 'https://evil.example')).status, 403, `${path} cross-site`);
+      assert.equal((await post(path, null)).status, 403, `${path} without Origin`);
+    }
+    const out = await post('/api/auth/signout', BASE, cookiesOf(done));
+    assert.deepEqual([out.status, out.headers.get('location')], [303, `${BASE}/`]);
+    assert.match(setCookie(out, 'shepetal-session') ?? '', /^shepetal-session=; Path=\/; Max-Age=0;/);
+  });
+  await check('nothing reaches the Next server: unknown /api/* (Auth.js leftovers included) is a native 404, a POST to a page 405', async () => {
+    for (const [method, path] of [['GET', '/api/auth/csrf'], ['GET', '/api/auth/session'], ['POST', '/api/auth/session'], ['GET', '/api/auth/signin'], ['GET', '/api/auth/signout'], ['GET', '/api/checkout'], ['HEAD', '/api/license']]) {
+      const r = await fetch(`${BASE}${path}`, { method, redirect: 'manual' });
+      assert.equal(r.status, 404, `${method} ${path}`);
+      assert.equal(r.headers.get('x-frame-options'), 'DENY', `${method} ${path} has the security headers`);
+    }
+    for (const path of ['/login', '/account', '/']) {
+      const r = await fetch(`${BASE}${path}`, { method: 'POST', redirect: 'manual', headers: { 'next-action': 'stale', origin: BASE }, body: '[]' });
+      assert.equal(r.status, 405, `POST ${path} (a server action from before the deploy)`);
+    }
   });
 
   // ---- 9. The redirect_uri allowlist and PKCE on the running Worker (more cases in app-login.test.ts).

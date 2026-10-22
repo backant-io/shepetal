@@ -2,11 +2,10 @@
 // The Worker on its three hostnames (src/lib/site.ts, worker.ts), on the real Worker runtime:
 //   shepetal.backant.io (the old host, called by released app builds): every path, /api/* included, is a 301 to the
 //     same path and query on SHEPETAL_DOMAIN;
-//   SHEPETAL_DOMAIN: served as it is, the Stripe webhook answers there, and next-auth's callback is on it;
+//   SHEPETAL_DOMAIN: served as it is, the Stripe webhook answers there, and Google's sign-in callback is on it;
 //   www.SHEPETAL_DOMAIN: a 301 to the apex.
 // `wrangler dev --local-upstream <host>` makes the Worker see each request as made to <host>, the way the custom
-// domain delivers it in production. No secrets: every value is generated per run, and nothing leaves the machine
-// except next-auth's Google discovery on /app/login.
+// domain delivers it in production. No secrets: every value is generated per run, and nothing leaves the machine.
 //
 //   node e2e/hosts.mjs                    # builds the Worker first (opennextjs-cloudflare build)
 //   E2E_SKIP_BUILD=1 node e2e/hosts.mjs   # reuses .open-next/
@@ -107,7 +106,11 @@ try {
     const sitemap = await (await get('/sitemap.xml')).text();
     const paths = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((m) => new URL(m[1]).pathname);
     assert.ok(paths.length >= 9, `the sitemap lists the public pages (${paths.length})`);
-    for (const path of [...paths, '/install', '/login', '/account', '/robots.txt', '/sitemap.xml']) {
+    // wrangler dev puts its own address in place of the upstream host (SITE) in a Location.
+    const account = await get('/account');
+    const signIn = new URL(loc(account) ?? 'about:blank');
+    assert.deepEqual([account.status, signIn.pathname + signIn.search], [307, '/login?next=%2Faccount'], '/account signed out goes to the sign-in page');
+    for (const path of [...paths, '/install', '/login', '/robots.txt', '/sitemap.xml']) {
       const r = await get(path);
       assert.equal(r.status, 200, path);
       const page = await r.text();
@@ -115,7 +118,7 @@ try {
       assert.doesNotMatch(page, /github/i, `${path} names GitHub`);
       assert.doesNotMatch(text, /MIT License|source code|open[- ]source/i, `${path} mentions the source code or its license`);
     }
-    ok(`${DOMAIN}: no page names GitHub, the source code, open source or the MIT License (${paths.length} sitemap pages and 5 more)`);
+    ok(`${DOMAIN}: no page names GitHub, the source code, open source or the MIT License (${paths.length} sitemap pages and 4 more); /account signed out is a 307 to sign in`);
   });
 
   await onHost(`www.${DOMAIN}`, async (get) => {

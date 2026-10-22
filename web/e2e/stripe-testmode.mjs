@@ -28,7 +28,6 @@ import { tmpdir } from 'node:os';
 import { dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { createRequire } from 'node:module';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TMP = process.env.STRIPE_E2E_OUT ?? mkdtempSync(join(tmpdir(), 'shepetal-stripe-'));
@@ -36,8 +35,7 @@ const OUT = TMP;
 process.env.STRIPE_E2E_OUT = TMP;
 const BIN = join(WEB, 'node_modules/.bin');
 const STRIPE_CLI = process.env.STRIPE_CLI ?? 'stripe';
-const require = createRequire(join(WEB, 'package.json'));
-const { encode } = await import(require.resolve('next-auth/jwt'));
+const { seal } = await import('../src/lib/session.ts');
 const KEY = process.env.STRIPE_SECRET_KEY ?? '';
 assert.match(KEY, /^(sk|rk)_test_/, 'a Stripe TEST key only');
 mkdirSync(OUT, { recursive: true });
@@ -92,8 +90,7 @@ writeFileSync(
   Object.entries({
     AUTH_SECRET,
     AUTH_URL: BASE,
-    NEXTAUTH_URL: BASE,
-    GOOGLE_CLIENT_ID: 'test-client-id',
+      GOOGLE_CLIENT_ID: 'test-client-id',
     GOOGLE_CLIENT_SECRET: 'test-client-secret',
     STRIPE_SECRET_KEY: KEY,
     STRIPE_WEBHOOK_SECRET: WHSEC,
@@ -140,11 +137,10 @@ async function d1(sql) {
   return { rows: rows.map((r) => Object.fromEntries(columns.map((c, i) => [c, r[i]]))) };
 }
 
-// ---- A signed-in person: a next-auth session cookie (Google faked), and an app token through the PKCE consent flow.
+// ---- A signed-in person: the web session cookie (Google faked), and an app token through the PKCE consent flow.
 const b64url = (b) => b.toString('base64url');
 async function person(email) {
-  const name = 'authjs.session-token';
-  const cookie = `${name}=${await encode({ token: { email, name: 'Test', sub: email }, secret: AUTH_SECRET, salt: name })}`;
+  const cookie = `shepetal-session=${await seal(AUTH_SECRET, 'shepetal-session', { e: email }, 3600)}`;
   const verifier = b64url(randomBytes(32));
   const q = new URLSearchParams({ redirect_uri: 'shepetal://auth', state: 'st', code_challenge: b64url(createHash('sha256').update(verifier).digest()), code_challenge_method: 'S256' });
   const page = await fetch(`${BASE}/app/login?${q}`, { headers: { cookie }, redirect: 'manual' });

@@ -12,6 +12,8 @@ function fakeRewriter(done: string[]) {
       h.element({
         append: (html: string) => done.push(`${selector} + ${html}`),
         setAttribute: (k: string, v: string) => done.push(`${selector} ${k}=${v}`),
+        removeAttribute: (k: string) => done.push(`${selector} -${k}`),
+        setInnerContent: (html: string, o: { html: boolean }) => done.push(`${selector} = ${html}${o.html ? '' : ' (text)'}`),
       });
       return this;
     }
@@ -25,10 +27,10 @@ const page = (etag = '"abc"') => new Response('<html><head></head></html>', { he
 
 describe('withEdgeHtml', () => {
   afterEach(() => vi.unstubAllGlobals());
-  const run = (url: string, env: { POSTHOG_KEY?: string; POSTHOG_HOST?: string }, res = page()) => {
+  const run = (url: string, env: { POSTHOG_KEY?: string; POSTHOG_HOST?: string }, res = page(), releases?: string) => {
     const done: string[] = [];
     vi.stubGlobal('HTMLRewriter', fakeRewriter(done));
-    return { out: withEdgeHtml(res, env, new URL(url)), done };
+    return { out: withEdgeHtml(res, env, new URL(url), releases), done };
   };
 
   it('adds the refresh that starts the download on /install, carrying ?ref= and utm_* to it and the link, with analytics off too', () => {
@@ -46,6 +48,26 @@ describe('withEdgeHtml', () => {
     const { out, done } = run('https://shepetal.app/faq', { POSTHOG_KEY: 'phc_x', POSTHOG_HOST: 'https://us.i.posthog.com' });
     expect(done).toEqual(['head + <meta name="shepetal-analytics" content="{&quot;key&quot;:&quot;phc_x&quot;,&quot;host&quot;:&quot;https://us.i.posthog.com&quot;}">']);
     expect(out.headers.get('etag')).toBeNull();
+  });
+
+  // /login is static: where the form returns to and the failed line are set per visit, as attributes only (hydration
+  // keeps attributes, and React would reset a hidden input's value to the build's).
+  it('/login: the form returns to ?next= (only a path on this site), the failed line shows on ?error, never cached', () => {
+    const { out, done } = run('https://shepetal.app/login?next=%2Fapp%2Flogin%3Fstate%3Da%2520b&error=AccessDenied', {});
+    expect(done).toEqual([
+      'form[action^="/api/auth/signin/google"] action=/api/auth/signin/google?callbackUrl=%2Fapp%2Flogin%3Fstate%3Da%2520b',
+      'p[role="alert"][hidden] -hidden',
+    ]);
+    expect(out.headers.get('cache-control')).toBe('private, no-store');
+    for (const evil of ['%2F%2Fevil.example', '%2F%09%2Fevil.example', 'https%3A%2F%2Fevil.example', '%2F..%2F%2Fevil.example'])
+      expect(run(`https://shepetal.app/login?next=${evil}`, {}).done, evil).toEqual(['form[action^="/api/auth/signin/google"] action=/api/auth/signin/google?callbackUrl=%2Faccount']);
+    expect(run('https://shepetal.app/account', {}).out.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('/changelog: the release list goes into its container as HTML, and the page is not cached', () => {
+    const { out, done } = run('https://shepetal.app/changelog', {}, page(), '<ol class="s-releases"></ol>');
+    expect(done).toEqual(['[data-releases] = <ol class="s-releases"></ol>']);
+    expect(out.headers.get('cache-control')).toBe('no-store');
   });
 
   it('leaves the page as built without a key and without attribution, and never touches what is not HTML', () => {
