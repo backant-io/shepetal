@@ -4,11 +4,12 @@ import { LicenseSummary } from '@/components/LicenseSummary';
 import { SiteHeader } from '@/components/site/Shell';
 import { SignIn } from '@/components/site/SignIn';
 import { licenseOf, planSettings, upsertUser } from '@/lib/account';
+import { attribution, attributionQuery } from '@/lib/analytics';
 import { auth, signOut } from '@/lib/auth';
 
 export const metadata: Metadata = { title: 'Your account', robots: { index: false } };
 
-type Query = { purchased?: string; cancelled?: string; portal?: string };
+type Query = { purchased?: string; cancelled?: string; portal?: string; [k: string]: string | undefined };
 
 /** The line on top after a round trip to Stripe. */
 function notice(q: Query, active: boolean, lifetime: boolean): string | null {
@@ -46,7 +47,9 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
   const now = Date.now();
   const license = licenseOf(user, now);
   const settings = planSettings(user, now);
-  const line = notice(await searchParams, license.status === 'active', license.plan === 'lifetime');
+  const q = await searchParams;
+  const line = notice(q, license.status === 'active', license.plan === 'lifetime');
+  const from = attributionQuery(attribution(new URLSearchParams(Object.entries(q).filter(([, v]) => typeof v === 'string') as [string, string][])));
 
   return (
     <>
@@ -63,7 +66,7 @@ export default async function AccountPage({ searchParams }: { searchParams: Prom
             <LicenseSummary license={license} now={now} amount={settings.subscription?.amount_display} />
             <div className="s-actions">
               {/* /install starts the download and shows how to install the app macOS cannot verify. */}
-              <a href="/install" className="s-btn">
+              <a href={`/install${from}`} className="s-btn">
                 Download for Mac
               </a>
               <span className="s-mono">macOS 14.4 or later, Apple silicon</span>

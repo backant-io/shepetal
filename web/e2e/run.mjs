@@ -75,12 +75,18 @@ const fakeSub = {
   metadata: {},
   items: { object: 'list', data: [] },
 };
+const phEvents = [];
 const fakeStripe = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
   req.on('end', () => {
     const url = new URL(req.url, 'http://x');
     const params = { ...Object.fromEntries(url.searchParams), ...Object.fromEntries(new URLSearchParams(req.method === 'GET' ? '' : body)) };
+    // The same server stands in for PostHog's capture API (POSTHOG_HOST); those calls are not Stripe's.
+    if (req.method === 'POST' && url.pathname === '/i/v0/e/') {
+      phEvents.push(JSON.parse(body));
+      return res.end('{"status":"Ok"}');
+    }
     stripeCalls.push({ method: req.method, path: url.pathname, params, auth: req.headers.authorization });
     res.setHeader('content-type', 'application/json');
     const route = `${req.method} ${url.pathname}`;
@@ -143,6 +149,8 @@ const env = {
   STRIPE_SECRET_KEY: 'sk_test_e2e',
   STRIPE_WEBHOOK_SECRET: `whsec_${randomBytes(24).toString('hex')}`,
   STRIPE_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
+  POSTHOG_KEY: 'phc_e2e',
+  POSTHOG_HOST: `http://127.0.0.1:${fakeStripe.address().port}`,
 };
 // An env file instead of --var keeps values out of `ps`, and replaces any developer .dev.vars.
 const envFile = join(tmp, 'e2e.env');
@@ -266,9 +274,9 @@ async function main() {
     assert.deepEqual(outside, [], 'no asset or link to another server');
     assert.match(res.headers.get('content-security-policy') ?? '', /font-src 'self' data:/);
     // The X card: a large image at an absolute URL, served as a static file.
-    assert.match(html, /<meta property="og:image" content="https:\/\/[^"]+\/og\.jpg"/);
+    assert.match(html, /<meta property="og:image" content="https:\/\/shepetal\.app\/og\/home\.jpg"/);
     assert.match(html, /<meta name="twitter:card" content="summary_large_image"/);
-    const og = await fetch(`${BASE}/og.jpg`);
+    const og = await fetch(`${BASE}/og/home.jpg`);
     assert.equal(og.status, 200);
     assert.match(og.headers.get('content-type') ?? '', /^image\/jpeg/);
     // The footer's Legal link carries the attribution and trademark notices the page no longer prints.
@@ -565,6 +573,40 @@ async function main() {
   });
 
   ok(`switch to lifetime: mode payment, shepetal_lifetime, client_reference_id ${userId}; the paid webhook makes it lifetime and cancels the subscription now (no invoice, no proration); checkout is 409 after`);
+
+  // ---- Analytics (POSTHOG_KEY set): the page carries the key for the cookieless page views, and the Worker sends
+  // download_served (with the version and ?ref=), appcast_check, license_first_call and checkout_completed, each
+  // tagged app=shepetal, under hashed ids, and never an email or an IP.
+  await check('analytics: the page gets the key; download_served (version, ref, utm), appcast_check, license_first_call and checkout_completed reach PostHog tagged app=shepetal, with no email or IP', async () => {
+    const html = await (await fetch(`${BASE}/`)).text();
+    assert.match(html, /<meta name="shepetal-analytics" content="\{&quot;key&quot;:&quot;phc_e2e&quot;,&quot;host&quot;:&quot;http:\/\/127\.0\.0\.1:\d+&quot;\}">/);
+    await fetch(`${BASE}/download?ref=producthunt&utm_source=e2e`, { redirect: 'manual' });
+    await fetch(`${BASE}/appcast.xml`, { headers: { 'user-agent': 'shepetal/0.0.3 Sparkle/2.6.4' } });
+    const find = async (event, also = () => true) => {
+      for (let i = 0; i < 40; i++) {
+        const e = phEvents.find((x) => x.event === event && also(x));
+        if (e) return e;
+        await sleep(100);
+      }
+      throw new Error(`no ${event} (got ${phEvents.map((x) => x.event).join(', ') || 'nothing'})`);
+    };
+    const dl = await find('download_served', (x) => x.properties.ref === 'producthunt');
+    assert.equal(dl.api_key, 'phc_e2e');
+    assert.match(dl.distinct_id, /^v_[0-9a-f]{32}$/);
+    assert.deepEqual([dl.properties.app, dl.properties.version, dl.properties.ref, dl.properties.utm_source, dl.properties.$process_person_profile], ['shepetal', '0.0.1', 'producthunt', 'e2e', false]);
+    const feed = await find('appcast_check', (x) => x.properties.app_version === '0.0.3');
+    assert.deepEqual([feed.properties.app, feed.properties.app_version], ['shepetal', '0.0.3']);
+    const install = await find('license_first_call');
+    assert.match(install.distinct_id, /^u_[0-9a-f]{32}$/);
+    assert.deepEqual([install.properties.app, install.properties.$set], ['shepetal', { app: 'shepetal' }]);
+    assert.equal(phEvents.filter((x) => x.event === 'license_first_call').length, 1, 'only the first license check is an install');
+    const monthly = await find('checkout_completed', (x) => x.properties.plan === 'monthly');
+    const paid = await find('checkout_completed', (x) => x.properties.plan === 'lifetime');
+    assert.deepEqual([paid.properties.app, paid.distinct_id, monthly.distinct_id], ['shepetal', install.distinct_id, install.distinct_id]);
+    assert.equal(phEvents.filter((x) => x.event === 'checkout_completed').length, 2, 'a redelivered checkout is not counted again');
+    const all = JSON.stringify(phEvents);
+    assert.ok(!all.includes(email) && !all.includes('127.0.0.1') && !all.includes('example.com'), 'no email or IP is sent');
+  });
 
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.
   await check('/app/login POST: no code without the CSRF token, with a wrong one, cross-site, or signed out', async () => {

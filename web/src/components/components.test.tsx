@@ -5,6 +5,9 @@ import { planLine, PlanSettings, statusLine } from './account/PlanSettings';
 import { changeRenewal, PlanPicker, startCheckout, startPortal } from './BuyButton';
 import { daysLeft, LicenseSummary, summaryOf } from './LicenseSummary';
 
+// SignInButton's server action calls next-auth, which the tests do not need
+vi.mock('@/lib/auth', () => ({ signIn: async () => undefined }));
+
 const json = (status: number, body: unknown) =>
   vi.fn<typeof fetch>(async () => new Response(JSON.stringify(body), { status }));
 
@@ -244,5 +247,21 @@ describe('/account plan settings', () => {
     expect(planLine(s)).toEqual({ value: 'Subscription ended', note: 'Ended on November 21, 2026.' });
     expect(html).toContain('id="plans"');
     expect(html).not.toContain('Cancel subscription');
+  });
+});
+
+describe('the trial sign-in carries where the visitor came from', async () => {
+  const { withAttribution } = await import('./SignInButton');
+  const form = (q: string) => {
+    const f = new FormData();
+    for (const [k, v] of new URLSearchParams(q)) f.append(k, v);
+    return f;
+  };
+  it('adds ?ref= and utm_* to the return path, before any fragment, and nothing else', () => {
+    expect(withAttribution('/account', form('ref=producthunt&utm_source=x'))).toBe('/account?ref=producthunt&utm_source=x');
+    expect(withAttribution('/account#plans', form('ref=hn'))).toBe('/account?ref=hn#plans');
+    expect(withAttribution('/account?purchased=1', form('ref=hn'))).toBe('/account?purchased=1&ref=hn');
+    expect(withAttribution('/account', form('next=//evil.example&ref=a b'))).toBe('/account');
+    expect(withAttribution('/account', null)).toBe('/account');
   });
 });

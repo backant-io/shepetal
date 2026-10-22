@@ -1,12 +1,9 @@
 import type { Metadata } from 'next';
+import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
 
-export const metadata: Metadata = {
-  title: 'Privacy Policy',
-  description: 'How shepetal handles your information. Your voice and your text stay on your Mac.',
-  alternates: { canonical: '/privacy' },
-};
+export const metadata: Metadata = pageMetadata('privacy', { title: 'Privacy Policy', description: 'How shepetal handles your information. Your voice and your text stay on your Mac.' });
 
 export default function PrivacyPolicy() {
   return (
@@ -14,13 +11,13 @@ export default function PrivacyPolicy() {
       <SiteHeader end={<Link href="/account">Account</Link>} />
       <main className="s-main s-legal">
         <h1 className="s-h2">Privacy Policy</h1>
-        <p className="s-mono">Last updated: October 20, 2026</p>
+        <p className="s-mono">Last updated: October 22, 2026</p>
 
         <div className="s-prose">
           <p>
-            Backant Inc. (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes shepetal, a
-            dictation app for Mac, and runs this website (the &quot;Site&quot;). The Site and the shepetal app together
-            are the &quot;Service&quot;. This Privacy Policy explains what information we collect when you use the
+            BackAnt, Inc., a Delaware corporation (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or
+            &quot;our&quot;), makes shepetal, a dictation app for Mac, and runs this website at shepetal.app (the
+            &quot;Site&quot;). The Site and the shepetal app together are the &quot;Service&quot;. This Privacy Policy explains what information we collect when you use the
             Service, how we use it and how we protect it. &quot;You&quot; refers to you, as a user of the Service.
           </p>
           <p>
@@ -62,12 +59,29 @@ export default function PrivacyPolicy() {
             such as your IP address, browser type and the time of a request, which we use to keep the Service running
             and secure.
           </p>
-          <h3>5. Children&apos;s privacy</h3>
+          <h3>5. Analytics</h3>
+          <p>
+            We count visits and a few product events with PostHog, without cookies and without storing anything in your
+            browser. For a page view, PostHog receives the page address, the referring site, your browser and device
+            type and, like any server you connect to, your IP address, which we do not use to find out who or where you
+            are. Each page view gets a new random id, so visits are not linked together. If your browser sends Do Not
+            Track or Global Privacy Control, the Site sends nothing.
+          </p>
+          <p>
+            Our server also records four events: a download of the app, the app&apos;s first license check after you
+            sign in, the app checking for updates, and a completed purchase. A download and an update check carry the
+            app version and the site that sent you (for example ?ref=producthunt), under an id made by hashing your IP
+            address and browser together with the date, so it changes every day and neither your IP address nor your
+            browser is sent or kept. A first license check and a purchase carry your plan, under an id made by hashing
+            your email address, which is not sent. The app itself sends no analytics, and nothing about what you
+            dictate ever leaves your Mac.
+          </p>
+          <h3>6. Children&apos;s privacy</h3>
           <p>
             The Service is not directed to anyone under the age of 13, and we do not knowingly collect information from
             anyone under 13. If we learn that we have, we will delete that information as soon as possible. If you
             believe we have collected such information, please contact us at{' '}
-            <a href="mailto:privacy@backant.io">privacy@backant.io</a>.
+            <a href="mailto:support@shepetal.app">support@shepetal.app</a>.
           </p>
 
           <h2>III. How we use and share information</h2>
@@ -77,8 +91,8 @@ export default function PrivacyPolicy() {
           </p>
           <p>
             We share information with the vendors that run parts of the Service for us, and only as far as they need it:
-            Google for sign-in, Stripe for payments, and Cloudflare, which hosts the site and serves the installer
-            downloads. They use it only at our direction.
+            Google for sign-in, Stripe for payments, Cloudflare, which hosts the site and serves the installer
+            downloads, and PostHog, Inc. (United States) for the analytics above. They use it only at our direction.
           </p>
           <p>
             We may share information with outside parties if we have a good-faith belief that access, use, preservation
@@ -103,7 +117,7 @@ export default function PrivacyPolicy() {
           <h2>V. Your rights</h2>
           <p>
             You can ask us for a copy of the information we hold about you, or ask us to correct or delete it, by
-            emailing <a href="mailto:privacy@backant.io">privacy@backant.io</a>. Deleting your account ends your trial
+            emailing <a href="mailto:support@shepetal.app">support@shepetal.app</a>. Deleting your account ends your trial
             or license on our side. Everything shepetal stored on your Mac stays there until you delete it.
           </p>
 
@@ -122,8 +136,10 @@ export default function PrivacyPolicy() {
 
           <h2>VIII. Contact us</h2>
           <p>
-            If you have any questions about this Privacy Policy, email us at{' '}
-            <a href="mailto:privacy@backant.io">privacy@backant.io</a>.
+            The controller of your information is BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA
+            (see the <Link href="/impressum">legal notice</Link>). We have not appointed a data protection officer. If
+            you have any questions about this Privacy Policy, email us at{' '}
+            <a href="mailto:support@shepetal.app">support@shepetal.app</a>.
           </p>
         </div>
       </main>

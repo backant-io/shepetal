@@ -141,6 +141,18 @@ export function StoryMotion() {
       rafS = requestAnimationFrame(sync);
     };
 
+    // ?ref=<site> and utm_* of this visit ride along with the trial's sign-in, on to /account and the download
+    const params = new URLSearchParams(window.location.search);
+    for (const name of ['ref', 'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content']) {
+      const value = params.get(name);
+      if (!value || !/^[\w.+-]{1,64}$/.test(value)) continue;
+      root.querySelectorAll<HTMLFormElement>('form.kc-form').forEach((form) => {
+        const input = document.createElement('input');
+        Object.assign(input, { type: 'hidden', name, value });
+        form.appendChild(input);
+      });
+    }
+
     const key = root.querySelector('.kc-key');
     key?.addEventListener('click', press);
     window.addEventListener('resize', onResize);

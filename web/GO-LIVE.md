@@ -55,6 +55,16 @@ npx wrangler secret put STRIPE_WEBHOOK_SECRET   # paste the whsec_ value from st
 npm run deploy
 ```
 
+Analytics (backant's PostHog project, US cloud; off until this is set). The key goes in as a secret, straight from SSM, never printed. `POSTHOG_HOST` is already `https://us.i.posthog.com` in `wrangler.toml`; check that SSM agrees:
+
+```sh
+export AWS_PROFILE=backant AWS_REGION=eu-central-1
+aws ssm get-parameter --name /backant/production/NEXT_PUBLIC_POSTHOG_HOST --query Parameter.Value --output text   # https://us.i.posthog.com
+aws ssm get-parameter --with-decryption --name /backant/production/NEXT_PUBLIC_POSTHOG_KEY --query Parameter.Value --output text | npx wrangler secret put POSTHOG_KEY
+```
+
+The project is shared with backant, so every shepetal event and person carries `app = shepetal`: filter on it in PostHog. Server events: `download_served` (version, ref, utm_*), `appcast_check` (= active, app_version), `license_first_call` (= install, plan) and `checkout_completed` (= paid, plan, amount). Page views come from the browser, cookieless (memory persistence), with `$geoip_disable`. To check after the deploy: `curl -s https://shepetal.app/ | grep -c shepetal-analytics` is 1, and the events show up in PostHog's activity view with `app = shepetal`. To turn analytics off: `npx wrangler secret delete POSTHOG_KEY`.
+
 If any of the four secrets is missing from the list, set it without printing it:
 
 ```sh

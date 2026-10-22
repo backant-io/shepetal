@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
-import { shepetalDomain } from './domain.config.mjs';
+import { shepetalDomain, wranglerVar } from './domain.config.mjs';
 
 // Gives `next dev` the D1 binding from wrangler.toml (local D1 in .wrangler/).
 initOpenNextCloudflareForDev();
@@ -20,7 +20,8 @@ const securityHeaders = [
       "img-src 'self' data: https: blob:",
       // The brand fonts are self-hosted (src/brand/fonts).
       "font-src 'self' data:",
-      "connect-src 'self'",
+      // PostHog (src/components/Analytics.tsx), only its ingestion host
+      `connect-src 'self' ${new URL(wranglerVar('POSTHOG_HOST')).origin}`,
       "frame-src 'self'",
       "frame-ancestors 'none'",
       // shepetal: and the loopback: where the /app/login consent form redirects with the code.

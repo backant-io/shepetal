@@ -17,6 +17,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | `src/lib/account.ts` | `upsertUser`, `getLicense`, `licenseOf` (the trial rule, tested in `account.test.ts`) |
 | `src/lib/stripe.ts` | `getStripe()`, checkout per plan, the Billing Portal, the webhook |
 | `scripts/stripe-setup.mjs` | finds or creates the Stripe objects and prints their IDs |
+| `src/lib/analytics.ts`, `src/components/Analytics.tsx` | PostHog (backant's project, US cloud), cookieless, every event tagged `app=shepetal`; off unless the `POSTHOG_KEY` secret is set. Server events from the Worker: `download_served`, `appcast_check`, `license_first_call`, `checkout_completed` |
 | `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |
 | `src/app/(story)/page.tsx`, `src/components/story/` | the landing page: the approved "full scroll story". `choreography.ts` is the design's one table of scroll timings and writing windows (ported from its build.mjs); `story.generated.css` is generated from it (native CSS scroll timelines plus the paused-animation fallback that `StoryMotion.tsx` drives with `--p`) |
 | `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
