@@ -330,6 +330,22 @@ async function main() {
     assert.match(missing.type ?? '', /^text\/html/);
     assert.match(missing.body, meta, 'the 404 page has the analytics meta');
     for (const path of ['/robots.txt', '/sitemap.xml']) await cached(path);
+    // The comparison pages (src/lib/compare.ts): prerendered, in the sitemap, the trial button carrying its ?ref=.
+    const sitemapXml = (await cached('/sitemap.xml')).body;
+    for (const [path, ref] of [
+      ['/compare/wispr-flow', 'compare-wispr-flow'],
+      ['/compare/superwhisper', 'compare-superwhisper'],
+      ['/compare/macwhisper', 'compare-macwhisper'],
+      ['/compare/apple-dictation', 'compare-apple-dictation'],
+      ['/offline-dictation-mac', 'seo-offline'],
+      ['/private-dictation-mac', 'seo-private'],
+    ]) {
+      const body = (await cached(path)).body;
+      assert.ok(body.includes(`href="/install?ref=${ref}"`), `${path} links the trial with its ref`);
+      assert.ok(body.includes(`<link rel="canonical" href="https://shepetal.app${path}"/>`), `${path} canonical`);
+      assert.ok(sitemapXml.includes(`${path}</loc>`), `${path} is in the sitemap`);
+    }
+    await cached('/compare/not-a-page', {}, 404);
     const install = (await cached('/install?ref=x&utm_source=y')).body;
     assert.equal(unescape(install.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the refresh carries the attribution');
     assert.equal(install.match(/http-equiv="refresh"/gi)?.length, 1, 'one refresh only: a second, bare one (from React) is what browsers followed');
