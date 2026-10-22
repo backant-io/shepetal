@@ -267,7 +267,7 @@ try {
   assert.notEqual(direct.http, 200);
   if (UI) {
     const r = await UI.checkoutUI(co.body.url, { shot: '2-monthly', returnTo: BASE });
-    note(`paid in the Checkout page: total due ${due(r.summary)}; Stripe's code field: ${r.codeField ? 'shown (!)' : 'none'}`);
+    note(`paid in the Checkout page: total due ${due(r.summary)}; tax line "${r.summary.match(/[^|]*(VAT|tax)[^|]*/i)?.[0]?.trim()}"; Stripe's code field: ${r.codeField ? 'shown (!)' : 'none'}`);
     assert.equal(r.codeField, false);
   } else {
     paid = await pay(cs.id);

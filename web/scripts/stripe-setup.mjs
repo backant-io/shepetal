@@ -10,10 +10,11 @@
 //   - product "Shepetal" (metadata app=shepetal, plan=lifetime, tax code downloadable software) with a one-time price,
 //     lookup_key shepetal_lifetime.
 //     A product with metadata app=shepetal and no plan (the first $4.99 product) becomes this product.
-//   - product "Shepetal Monthly" (metadata app=shepetal, plan=monthly, tax code SaaS by download) with a monthly price,
+//   - product "Shepetal Monthly" (metadata app=shepetal, plan=monthly, tax code downloadable software) with a monthly price,
 //     lookup_key shepetal_monthly.
 //   - both prices tax-inclusive (Stripe Tax takes the VAT or sales tax out of the price, so the buyer pays the price
-//     shown), in USD with a EUR price for EU buyers (currency_options).
+//     shown), in USD with a EUR price for EU buyers (currency_options). Set per price, so the account's default
+//     (live: inferred_by_currency, which makes USD exclusive) never applies.
 //   - coupon (id shepetal_producthunt_2): an amount off in USD and in EUR, once, applies_to the lifetime product only.
 //   - promotion code PRODUCTHUNT for that coupon: first_time_transaction, an expiry date. An active PRODUCTHUNT of an
 //     older shepetal coupon is deactivated first.
@@ -53,7 +54,9 @@ const cfg = {
   site: `https://${domain}`,
 };
 if (!['inclusive', 'exclusive'].includes(cfg.taxBehavior)) fail('TAX_BEHAVIOR must be inclusive or exclusive');
-const TAX_CODES = { lifetime: 'txcd_10202000', monthly: 'txcd_10103100' }; // as src/lib/stripe.ts TAX_CODES
+// Both products: Downloadable Software, personal use (the app is downloaded and runs on the Mac; buyers are consumers).
+// Set per product, so the account's default (live: txcd_10103001, SaaS business use) never applies. As src/lib/stripe.ts.
+const TAX_CODES = { lifetime: 'txcd_10202000', monthly: 'txcd_10202000' };
 if (!Number.isFinite(cfg.expires)) fail('PH_EXPIRES is not a date');
 if (cfg.centsOff >= cfg.lifetimeCents) fail('PH_CENTS_OFF must be less than LIFETIME_CENTS');
 

@@ -93,8 +93,11 @@ export const consentText = (plan: CheckoutPlan, origin: string) =>
 /** On receipts and invoices: the confirmation of that consent, on a durable medium. */
 export const CONFIRMATION = 'Delivered right away at your request. You acknowledged that this ends the 14-day right of withdrawal.';
 
-/** Stripe Tax codes: downloadable software (the lifetime license) and SaaS delivered by download (the subscription). */
-export const TAX_CODES: Record<CheckoutPlan, string> = { lifetime: 'txcd_10202000', monthly: 'txcd_10103100' };
+/**
+ * Stripe Tax code of both products: txcd_10202000, Downloadable Software, personal use (shepetal is downloaded and runs
+ * on the Mac, and its buyers are consumers). Set on the products by stripe-setup.mjs, never left to the account default.
+ */
+export const TAX_CODES: Record<CheckoutPlan, string> = { lifetime: 'txcd_10202000', monthly: 'txcd_10202000' };
 
 /** A code the buyer typed that cannot be used: the reason, for the API's 400. */
 export class CodeError extends Error {
