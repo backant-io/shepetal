@@ -27,7 +27,7 @@ const QAS: QA[] = [
         <p>
           Your words go where you put them: into the app you dictate into. shepetal itself sends no text and no
           analytics. To sign in it uses your Google email, and it checks your license once a day. The details are in
-          the <Link href="/privacy">Privacy Policy</Link>.
+          the <Link href="/privacy" prefetch={false}>Privacy Policy</Link>.
         </p>
       </>
     ),
@@ -100,7 +100,7 @@ const QAS: QA[] = [
       <p>
         Yes. Write to <a href="mailto:support@shepetal.app">support@shepetal.app</a> within 14 days of buying the
         lifetime license for a full refund. A subscription stops charging the moment you cancel. The whole policy is
-        on the <Link href="/refunds">refunds page</Link>.
+        on the <Link href="/refunds" prefetch={false}>refunds page</Link>.
       </p>
     ),
     text: 'Yes. Write to support@shepetal.app within 14 days of buying the lifetime license for a full refund. A subscription stops charging the moment you cancel.',

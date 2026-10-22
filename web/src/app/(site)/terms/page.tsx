@@ -81,14 +81,14 @@ export default function TermsOfUse() {
             deliver right away, and you acknowledge that your right of withdrawal ends when the delivery starts. After
             you pay, we confirm this by email to the address of your account, with what you bought and the price you
             paid. Your Stripe receipt says it too. The full withdrawal information and the model withdrawal form are in our{' '}
-            <Link href="/refunds#withdrawal">refund policy</Link>.
+            <Link href="/refunds#withdrawal" prefetch={false}>refund policy</Link>.
           </p>
           <p>
             <strong>Refunds.</strong> The free trial lets you try shepetal before you pay. Even so, if shepetal does not
             work for you, write to <a href="mailto:support@shepetal.app">support@shepetal.app</a> within 14 days of a lifetime
             purchase for a full refund; a refund ends the license. Monthly payments are not refunded for the part of a
             month you have already started, and cancelling stops every later charge. The full policy is on our{' '}
-            <Link href="/refunds">refund policy</Link> page. This does not limit any right the law where you live gives
+            <Link href="/refunds" prefetch={false}>refund policy</Link> page. This does not limit any right the law where you live gives
             you, including your rights if shepetal is faulty.
           </p>
 
@@ -188,7 +188,7 @@ export default function TermsOfUse() {
             shepetal is faulty.
           </p>
           <p>
-            See also our <Link href="/privacy">Privacy Policy</Link>.
+            See also our <Link href="/privacy" prefetch={false}>Privacy Policy</Link>.
           </p>
         </div>
       </main>

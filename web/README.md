@@ -80,6 +80,7 @@ Local Google sign-in only works if `http://localhost:3000/api/auth/callback/goog
 | `node e2e/stripe-testmode.mjs` | both plans and the plan settings API against the real Stripe test API (`STRIPE_SECRET_KEY=sk_test_…`) |
 | `node e2e/account-testmode.mjs` | the plan settings on /account in a headless browser, in Stripe test mode: subscribe, Manage billing, cancel at period end, resume, switch to lifetime |
 | `node e2e/hosts.mjs` | the Worker on its three hostnames: on `shepetal.backant.io` every path, `/api/*` included, is a 301 to `SHEPETAL_DOMAIN`; the Stripe webhook answers on the domain; `www` is a 301 to the apex; Google's callback is on the domain |
+| `node e2e/install-browser.mjs` | in a headless browser against a running Worker (`BASE`): `/install?ref=x&utm_source=y` navigates by itself to `/download?ref=x&utm_source=y` (aborted, so nothing downloads), and links ask for no prefetch but still navigate |
 | `node e2e/design-match.mjs` | the landing page against the design's reference frames (1440×900 and 390×844), an optional sweep against its standalone preview (`SWEEP=1`), and the check that the key never covers text. Viewport-sized captures only |
 
 The browser tests use `playwright-core` from `PLAYWRIGHT_CORE` and a chromium headless shell from `PLAYWRIGHT_BROWSERS_PATH`: no window, no focus, no clipboard.
@@ -113,6 +114,7 @@ The `routes` in `wrangler.toml` attach the custom domains `shepetal.app`, `www.s
 - **Stripe on Workers:** `getStripe()` already uses the fetch HTTP client. To verify the webhook, read the raw body with `req.text()`, then call `stripe.webhooks.constructEventAsync(body, sig, process.env.STRIPE_WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider())`.
 - **Emails:** `upsertUser` lowercases emails. Store the email from the row it returns.
 - **Downloads:** `/download`, `/download/<v>/<file>` and `/appcast.xml` (API.md) read the R2 bucket `shepetal-releases` (binding `RELEASES`) and never another server. LATEST is `latest.json` there, written only by `scripts/mac/promote.sh <v> --latest` after it has checked the files. Never add `public/appcast.xml`: it would shadow the route. To try it locally, put files with `npx wrangler r2 object put shepetal-releases/releases/<v>/<file> --local --file <file>` and `latest.json` the same way.
+- **Worker requests:** the Workers Free plan allows 100,000 Worker requests a day for the whole Cloudflare account, shared with its other Workers; over it, every Worker on the account fails until 00:00 UTC. Static files (`_next/static`, fonts, images) do not count; pages, RSC payloads, `/install`, `/download` and the DMG do. So every `<Link>` has `prefetch={false}` (site.test.tsx checks it; Next has no setting for the whole site): a prefetch is one or more RSC requests per link in view, and a click costs one request anyway. A visit from `/` through Try 30 days free to the download is 4 Worker requests: `/`, `/install`, `/download`, the DMG.
 - **Copy:** never name the speech model or any AI model in site copy, metadata or alt text. Write "on-device speech recognition".
 
 ## Email

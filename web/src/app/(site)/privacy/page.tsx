@@ -26,7 +26,7 @@ export default function PrivacyPolicy() {
           <h2>I. Who is responsible</h2>
           <p>
             The controller of your data is BackAnt, Inc., a Delaware corporation, 131 Continental Dr, Suite 305, Newark,
-            DE 19713, USA (see the <Link href="/impressum">legal notice</Link>). For anything about your data, including
+            DE 19713, USA (see the <Link href="/impressum" prefetch={false}>legal notice</Link>). For anything about your data, including
             your rights below, write to <a href="mailto:support@shepetal.app">support@shepetal.app</a>. We have not
             appointed a data protection officer.
           </p>
@@ -221,7 +221,7 @@ export default function PrivacyPolicy() {
 
           <h2>X. Children</h2>
           <p>
-            The Service is for adults: our <Link href="/terms">Terms of Use</Link> require you to be at least 18. We do
+            The Service is for adults: our <Link href="/terms" prefetch={false}>Terms of Use</Link> require you to be at least 18. We do
             not knowingly collect information from anyone under 18. If we learn that we have, we will delete it as soon
             as possible. If you believe we have, please contact us at{' '}
             <a href="mailto:support@shepetal.app">support@shepetal.app</a>.
