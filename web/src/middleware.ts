@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 /**
- * One canonical host: https://<SHEPETAL_DOMAIN>. A page asked for on another host the Worker answers (the old host
- * shepetal.backant.io, kept attached in wrangler.toml so released apps and the current Stripe webhook keep working)
+ * One canonical host: https://<SHEPETAL_DOMAIN>. A page asked for on another host the Worker answers (the old
+ * one, kept attached in wrangler.toml so released apps and the current Stripe webhook keep working)
  * moves there with a 301. /api/* answers on every host. A local run (AUTH_URL set) and *.workers.dev are left alone.
  */
 export function middleware(req: NextRequest) {
