@@ -1,0 +1,40 @@
+<!doctype html>
+<!-- Link previews in the site's system, 1200 x 630: concrete-white ground, ink, the Bodoni Moda wordmark, an Archivo
+     headline, a Fragment Mono line and the orange fn key. og/pages.mjs renders one per page into public/og/ from
+     ?title=…&sub=… (no price and no steps on a preview). -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: 'Archivo'; font-weight: 400 600; src: url('../public/fonts/archivo-latin.woff2') format('woff2'); }
+  @font-face { font-family: 'Bodoni Moda'; font-style: italic; font-weight: 400 500; src: url('../public/fonts/bodoni-moda-italic-latin.woff2') format('woff2'); }
+  @font-face { font-family: 'Fragment Mono'; src: url('../public/fonts/fragment-mono-latin.woff2') format('woff2'); }
+  * { margin: 0; box-sizing: border-box; }
+  html, body { width: 1200px; height: 630px; overflow: hidden; }
+  body { position: relative; background: #E6E4DE; color: #161512; font-family: 'Archivo', sans-serif; -webkit-font-smoothing: antialiased; }
+  .mark { position: absolute; left: 64px; top: 52px; font: italic 500 46px/1 'Bodoni Moda', serif; letter-spacing: -.01em; }
+  h1 { position: absolute; left: 64px; top: 168px; width: 760px; font-weight: 520; font-size: 84px; line-height: .97; letter-spacing: -.043em; text-wrap: balance; }
+  h1.long { font-size: 72px; width: 700px; }
+  .sub { position: absolute; left: 64px; bottom: 120px; width: 640px; font-weight: 520; font-size: 30px; line-height: 1.2; letter-spacing: -.02em; color: #57544E; }
+  .url { position: absolute; left: 64px; bottom: 54px; font: 18px/1 'Fragment Mono', monospace; color: #57544E; }
+  .key { position: absolute; right: -70px; bottom: -40px; width: 520px; transform: rotate(-4deg); }
+  .caret { display: inline-block; width: 5px; height: .82em; margin-left: .06em; background: #FF4F12; vertical-align: -.06em; }
+</style>
+</head>
+<body>
+  <div class="mark">shepetal</div>
+  <h1 id="t"></h1>
+  <p class="sub" id="s"></p>
+  <div class="url" id="u">shepetal.app</div>
+  <img class="key" src="../public/press/shepetal-fn-key.png" alt="">
+  <script>
+    const q = new URLSearchParams(location.search);
+    const t = document.getElementById('t');
+    t.textContent = q.get('title') || '';
+    if ((q.get('title') || '').length > 34) t.className = 'long';
+    t.insertAdjacentHTML('beforeend', '<span class="caret"></span>');
+    document.getElementById('s').textContent = q.get('sub') || '';
+    if (q.get('host')) document.getElementById('u').textContent = q.get('host') + (q.get('path') || '');
+  </script>
+</body>
+</html>

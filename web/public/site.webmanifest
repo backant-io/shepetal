@@ -1,0 +1,25 @@
+{
+  "name": "shepetal",
+  "short_name": "shepetal",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    },
+    {
+      "src": "/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "theme_color": "#E6E4DE",
+  "background_color": "#E6E4DE",
+  "display": "standalone"
+}

@@ -1,0 +1,60 @@
+name = "shepetal-web"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+# worker.ts: the host rules (www and the old host, src/lib/site.ts), then OpenNext's worker (.open-next/worker.js).
+main = "worker.ts"
+
+workers_dev = true
+# Custom domains: the site's domain (SHEPETAL_DOMAIN below), its www (301 to the apex), and the old host, which
+# released app builds call (every path there, /api/* included, is a 301 to the same path on the domain).
+# `wrangler deploy` attaches them and creates their DNS records: that is a GO step (GO-LIVE.md). site.test.ts checks
+# that these three match SHEPETAL_DOMAIN.
+routes = [
+  { pattern = "shepetal.app", custom_domain = true },
+  { pattern = "www.shepetal.app", custom_domain = true },
+  { pattern = "shepetal.backant.io", custom_domain = true },
+]
+
+[assets]
+directory = ".open-next/assets"
+binding = "ASSETS"
+
+# worker.ts keys its cache of the prerendered pages by version, so a deploy never serves an old page.
+[version_metadata]
+binding = "CF_VERSION_METADATA"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "shepetal"
+database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
+migrations_dir = "migrations"
+
+# The Mac releases (src/lib/download.ts): CI stages them, scripts/mac/promote.sh publishes them and writes latest.json.
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "shepetal-releases"
+
+[vars]
+# The site's one domain (https only). Auth callbacks (AUTH_URL), Stripe's success, cancel and portal return URLs,
+# metadata, OG, canonical URLs and the sitemap are all built from it (src/lib/site.ts, domain.config.mjs).
+SHEPETAL_DOMAIN = "shepetal.app"
+# Analytics (src/lib/analytics.ts): backant's PostHog project on the US cloud. The project key is a secret set at GO
+# (POSTHOG_KEY, from SSM /backant/production/NEXT_PUBLIC_POSTHOG_KEY); without it analytics are off.
+POSTHOG_HOST = "https://us.i.posthog.com"
+# Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
+# and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
+# scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and
+# STRIPE_PORTAL_CONFIG override the lookups if ever needed.
+
+# Secrets: wrangler secret put AUTH_SECRET
+#          wrangler secret put GOOGLE_CLIENT_ID
+#          wrangler secret put GOOGLE_CLIENT_SECRET
+#          wrangler secret put STRIPE_SECRET_KEY
+#          wrangler secret put STRIPE_WEBHOOK_SECRET
+# For local runs, put the same names in .dev.vars (see README.md).
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+persist = true
+invocation_logs = true
