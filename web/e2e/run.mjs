@@ -670,7 +670,7 @@ async function main() {
   assert.deepEqual(await app('POST', '/api/billing/cancel', { token: accessToken }), { status: 404, body: { error: 'no_subscription' } });
   const resumed = await app('POST', '/api/billing/resume', { token: accessToken });
   assert.equal(resumed.body.settings.subscription.status, 'active');
-  await check('/account, subscriber: active, next charge $0.99, Manage billing, Switch to lifetime, Cancel; no plan choice', async () => {
+  await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
     const { license, settings } = await account();
     assert.deepEqual([license.plan, license.status, license.renews], ['subscription', 'active', true]);
     assert.deepEqual([settings.subscription?.status, settings.subscription?.amount_display, settings.subscription?.next_billing_date], ['active', '$0.99', through]);
