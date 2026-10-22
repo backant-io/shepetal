@@ -16,6 +16,11 @@ export REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-1} UPDATES=${UPDATES:-1}  # the release 
 APP=dist/Shepetal.app
 [ "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" = "$VERSION" ] ||
   { echo "$APP is not version $VERSION: rebuild it without SKIP_APP=1" >&2; exit 2; }
+# The app is public and the repository is not (Pavel, 22.10.26): its Info.plist and its own strings name no GitHub page
+# and no licence for shepetal's code. FluidAudio's own log text links its issues; that dependency's line is the exception.
+LEAKS=$({ cat "$APP/Contents/Info.plist"; strings -a "$APP/Contents/MacOS/Shepetal"; } |
+  grep -iE 'github|MIT License|open.?source|source code|sponsor' | grep -v 'github\.com/FluidInference/FluidAudio/issues/' || true)
+[ -z "$LEAKS" ] || { printf '%s names GitHub, the source or a licence:\n%s\n' "$APP" "$LEAKS" >&2; exit 1; }
 
 W=.cache/dmg
 rm -rf "$W"; mkdir -p "$W"

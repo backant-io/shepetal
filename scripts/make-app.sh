@@ -22,6 +22,7 @@
 #                                  without signing in. SHEPETAL_REQUIRE_SIGNIN=1|0 overrides it when the app starts.
 #   UPDATES=1 ...                  Sparkle auto-updates: writes SUFeedURL and SUPublicEDKey (make-dmg.sh does).
 #                                  Without it the app never updates itself, so a release never replaces a dev build.
+#   SHEPETAL_DOMAIN=<host> ...     with UPDATES=1, the feed is https://<host>/appcast.xml (default below)
 #   TIMESTAMP=1 ...                a secure timestamp on every signature (notarization needs it; needs the network)
 #   EXPECT_DR=<file> ...           fail unless the app's designated requirement is exactly the one in <file>
 #
@@ -42,12 +43,16 @@ REQUIRE_SIGNIN=${REQUIRE_SIGNIN:-$ZIP}
 # mac-release environment's SPARKLE_ED_PRIVATE_KEY; it is never committed (docs/install-and-update.md 3).
 # A release dry run without that key passes a throwaway one (its DMG can never update).
 SPARKLE_PUBLIC_KEY=${SPARKLE_PUBLIC_KEY:-aXU+sm8y+UDKwB2M7DxhacVN/BAgTqMsHq2rMc3fibs=}
+# The one place the update domain lives. release.sh and mac-release.yml read the feed URL back from the built app
+# for the appcast's download URLs, so the DMG is served from the same site. Every shipped build keeps it.
+SHEPETAL_DOMAIN=${SHEPETAL_DOMAIN:-shepetal.app}
+[[ $SHEPETAL_DOMAIN =~ ^[a-z0-9.-]+$ ]] || { echo "SHEPETAL_DOMAIN must be a bare host name: $SHEPETAL_DOMAIN" >&2; exit 2; }
 case ${UPDATES:-0} in
-  1) UPDATE_KEYS="<key>SUFeedURL</key><string>https://shepetal.backant.io/appcast.xml</string>
+  1) UPDATE_KEYS="<key>SUFeedURL</key><string>https://$SHEPETAL_DOMAIN/appcast.xml</string>
   <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
   <key>SUEnableAutomaticChecks</key><true/>
   <key>SUScheduledCheckInterval</key><integer>86400</integer>
-  <key>SUAutomaticallyUpdate</key><true/>"; UPDATES_NOTE="updates on" ;;
+  <key>SUAllowsAutomaticUpdates</key><false/>"; UPDATES_NOTE="updates on" ;;
   0) UPDATE_KEYS=''; UPDATES_NOTE="updates off" ;;
   *) echo "UPDATES must be 1 or 0" >&2; exit 2 ;;
 esac
@@ -122,7 +127,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
   <key>NSMicrophoneUsageDescription</key><string>Shepetal listens while you hold fn and turns your speech into text on this Mac. Audio never leaves it.</string>
   <key>NSAudioCaptureUsageDescription</key><string>Shepetal records the other people in a meeting so it can transcribe it on this Mac. Audio never leaves it.</string>
-  <key>NSHumanReadableCopyright</key><string>MIT License</string>
+  <key>NSHumanReadableCopyright</key><string>© 2026 BackAnt, Inc.</string>
   $SIGNIN_KEY
   $UPDATE_KEYS
 </dict>

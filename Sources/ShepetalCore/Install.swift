@@ -22,9 +22,9 @@ public struct Activity: Equatable {
     }
 }
 
-/// When a downloaded update may install (docs/install-and-update.md 3): never during work, and only once fn has been
-/// left alone for 20 minutes (Wispr Flow's rule, docs/re/app-architecture.md 9). A manual Install and Relaunch only
-/// waits for the work to end.
+/// When a found update may be offered (docs/install-and-update.md 3): never during work, and a scheduled find only once
+/// fn has been left alone for 20 minutes (Wispr Flow's rule, docs/re/app-architecture.md 9). A manual check, and the
+/// relaunch after Install Now, only wait for the work to end.
 public enum UpdateGate {
     public static let quiet: TimeInterval = 20 * 60
 
@@ -39,11 +39,35 @@ public enum UpdateGate {
 
     /// Next to 🤫 when Sparkle gives up on an update (`SPUUpdaterDelegate.updater(_:didAbortWithError:)`): a failed
     /// download, a bad signature, a failed install. Never a menu status line. A check that finds nothing or cannot
-    /// read the feed stays quiet (a manual check shows Sparkle's own alert), and so does the user's own cancel.
+    /// read the feed stays quiet here (after a manual check `SparkleUpdater` says so), and so does the user's own cancel.
     public static func failure(code: Int, _ description: String) -> String? {
         guard (2000..<5000).contains(code), ![4007, 4008].contains(code) else { return nil }  // SUInstallationCanceledError, …AuthorizeLater
         return "Update failed: \(description)"
     }
+}
+
+/// Ask first (Pavel, 22.10.26): a found update waits for a yes on the card, which is never up while Shepetal works.
+/// A scheduled find shows once fn has been quiet for 20 minutes, a manual one as soon as the work ends, and a card
+/// that work took down comes back only when `UpdateGate` allows it again. Pure, so tests drive the clock.
+public struct UpdatePrompt: Equatable {
+    public static let text = "A new version of shepetal is ready. Install now?"
+    /// The found version, nil when nothing waits for an answer.
+    public var version: String?
+    public var found: Date?
+    /// Check for Updates… found it, or was clicked while it waits.
+    public var manual = false
+    public private(set) var showing = false
+
+    public init() {}
+
+    /// Whether the card is up now.
+    public mutating func update(_ a: Activity, now: Date) -> Bool {
+        showing = version != nil && UpdateGate.allows(a, now: now, manual: manual || showing)
+        return showing
+    }
+
+    /// A day-old answerless find is dropped, so a pulled release is never installed from a stale prompt.
+    public func expired(now: Date) -> Bool { found.map { now.timeIntervalSince($0) > 86_400 } ?? false }
 }
 
 /// The first-run window (docs/install-and-update.md 2): permissions, then sign-in when the build needs it and the user

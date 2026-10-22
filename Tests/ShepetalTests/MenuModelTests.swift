@@ -74,7 +74,7 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(top(MenuState(access: .signedOut, signingIn: true)).map(\.title), ["Cancel sign-in"],
                        "a sheet stuck in a browser can be closed from the menu")
 
-        let buy = ["Get shepetal for $4.99…"]
+        let buy = ["Get shepetal: $23.99 once or $0.99 a month…"]
         XCTAssertEqual(top(MenuState(access: .trial(daysLeft: 30))).map(\.title), [], "no nagging early in the trial")
         XCTAssertEqual(top(MenuState(access: .trial(daysLeft: 8))).map(\.title), [])
         XCTAssertEqual(top(MenuState(access: .trial(daysLeft: 7))).map(\.title), buy, "from 7 days left")
@@ -83,6 +83,11 @@ final class MenuModelTests: XCTestCase {
         XCTAssertEqual(top(MenuState(access: .expired)).first?.action, .buy)
         XCTAssertEqual(top(MenuState(access: .lifetime)), [])
         XCTAssertEqual(top(MenuState(access: .unchecked)), [], "Check license now is on Home")
+        // The plans: a subscriber has nothing to buy; an ended subscription buys again; a failed payment is fixed on Home.
+        XCTAssertEqual(top(MenuState(access: .subscription(paidThrough: Date() + 86_400, renews: true))), [])
+        XCTAssertEqual(top(MenuState(access: .subscription(paidThrough: Date() + 86_400, renews: false))), [])
+        XCTAssertEqual(top(MenuState(access: .subscriptionEnded)).map(\.title), buy)
+        XCTAssertEqual(top(MenuState(access: .paymentFailed)), [], "Manage subscription is on Home")
 
         XCTAssertEqual(top(MenuState(canDownloadEngine: true)).map(\.action), [.download])
         XCTAssertEqual(top(MenuState(canDownloadEngine: false)), [],
@@ -90,7 +95,7 @@ final class MenuModelTests: XCTestCase {
 
         let groups = MenuModel.groups(busy)
         XCTAssertEqual(groups[0].map(\.title), ["Permissions needed…", "Download on-device speech recognition (about 470 MB)",
-                                                 "Download cleanup model (about 1.3 GB)", "Get shepetal for $4.99…"],
+                                                 "Download cleanup model (about 1.3 GB)", "Get shepetal: $23.99 once or $0.99 a month…"],
                        "every contextual item is in the first group")
         XCTAssertEqual(groups[1].first?.title, "Stop meeting recording", "then the menu as usual")
     }
@@ -268,8 +273,8 @@ final class MenuModelTests: XCTestCase {
         // With Sparkle the item is always there and enabled: a click while Sparkle downloads says so instead.
         XCTAssertTrue(try AppSource.code("Install.swift").contains("var canCheckForUpdates: Bool { true }"))
 
-        // A scheduled check that found an update while automatic install is off renames the item instead of opening a
-        // window at a random moment; the menu keeps its length.
+        // A found update that waits for Install Now renames the item instead of opening a window at a random moment;
+        // the menu keeps its length.
         let found = MenuModel.groups(MenuState(canCheckForUpdates: true, checkForUpdatesTitle: "Update to 0.2.1…"))
         XCTAssertTrue(found.joined().contains { $0.title == "Update to 0.2.1…" && $0.action == .checkForUpdates })
         XCTAssertEqual(found.joined().count, MenuModel.groups(MenuState(canCheckForUpdates: true)).joined().count)
@@ -375,7 +380,7 @@ final class MenuModelTests: XCTestCase {
             XCTAssertTrue(ModelNameTests.offending("\"\(t)\"").isEmpty, "model name in \(t)")
         }
         XCTAssertTrue(everything.contains("Open shepetal") && everything.contains("Quit shepetal"))
-        XCTAssertEqual(MenuModel.helpCenter.absoluteString, "https://shepetal.backant.io/help")
+        XCTAssertEqual(MenuModel.helpCenter.absoluteString, "https://shepetal.app/help")
         XCTAssertEqual(MenuModel.feedback.scheme, "mailto")
     }
 
@@ -391,7 +396,6 @@ final class MenuModelTests: XCTestCase {
             ("Signed in as", "Text(account.summaryLine)", account),
             ("Sign out", "Button(\"Sign out\")", account),
             ("Check license now", "Button(\"Check license now\")", account),
-            ("Donate", "Section(\"Donate\") {\n                    ForEach(AppDelegate.donate", home),
             ("Recordings", "Picker(\"Recordings\"", settings),
             ("Open recordings folder", "Button(\"Open recordings folder\")", settings),
             ("Start at login", "Toggle(\"Start at login\", isOn: Binding(get: { model.loginItem.isOn }, set: { _ in model.toggleLogin() }))", settings),

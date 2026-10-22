@@ -192,11 +192,6 @@ final class HubModel: ObservableObject {
         restore()
         objectWillChange.send()
     }
-
-    var automaticallyInstalls: Bool {
-        get { updater?.automaticallyInstalls ?? false }
-        set { updater?.automaticallyInstalls = newValue; objectWillChange.send() }
-    }
 }
 
 private struct HubView: View {
@@ -252,9 +247,6 @@ private struct HomeTab: View {
                     }
                 }
                 Section { Button("What's new…", action: model.openWhatsNew) }
-                Section("Donate") {
-                    ForEach(AppDelegate.donate, id: \.1) { title, url in Link(title, destination: URL(string: url)!) }
-                }
             }
             .formStyle(.grouped)
         }
@@ -364,7 +356,6 @@ private struct SettingsTab: View {
             MyVoiceSection(url: model.pipeline.voiceFile, cleanup: { [weak model] in model?.pipeline.cleanup })  // F38
             EmailSection()  // F36: the signature
             AppFormatSection(history: model.pipeline.history)  // F33
-            if model.updater != nil { Toggle("Install updates automatically", isOn: $model.automaticallyInstalls) }
             LabeledContent("Version", value: Self.version)
             UninstallSection(blocker: model.uninstallBlocker)  // last and quiet: never clicked by accident
         }

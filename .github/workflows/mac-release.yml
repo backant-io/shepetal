@@ -2,14 +2,18 @@
 # - provenance (no secrets, no repo code): the v*-mac tag is annotated and its commit is on main;
 # - build (no secrets): the guard and an ad-hoc DMG (scripts/mac/release.sh --unsigned), never from a cache;
 # - sign (mac-release: Developer ID and notary key; no repo code): codesign, notarytool and stapler, inline;
-# - appcast (mac-release: SPARKLE_ED_PRIVATE_KEY; no repo code): Sparkle's own generate_appcast, pinned by checksum;
-# - verify (no secrets): the appcast's signature against the key inside the app (scripts/mac/verify-update.swift);
-# - draft (contents: write; no repo code): a DRAFT release. Pavel tries the DMG, writes the notes and publishes it
-#   (a full release); publishing is what switches /download and the update feed.
+# - appcast (mac-release: SPARKLE_ED_PRIVATE_KEY; no repo code): Sparkle's own generate_appcast, pinned by checksum,
+#   with the download URL on the site in the app's SUFeedURL (https://<domain>/download/<v>/), never GitHub;
+# - verify (no secrets): the appcast's signature against the key inside the app (scripts/mac/verify-update.swift),
+#   the app's SUFeedURL, the enclosure URL the site serves, and the .sha256;
+# - stage (mac-release: the R2 token; no repo code): uploads the three files to R2 staging/<v>/, which is never
+#   served. Pavel tries the DMG and publishes it with scripts/mac/promote.sh <v> --latest (docs/install-and-update.md
+#   3); that is what switches /download and the update feed. No GitHub release is made.
 # A tag's commit brings its own copy of this file, so the provenance job only catches a mistaken tag. Against a
 # malicious one, the tag ruleset and Pavel's review on the mac-release environment are what hold.
 # A PR that touches the release path, or a manual run: release.sh --dry-run with no secrets, then the sign, appcast
-# and verify steps below (the same YAML anchors), signed ad-hoc with a throwaway Sparkle key; kept for 3 days.
+# and verify steps below (the same YAML anchors), signed ad-hoc with a throwaway Sparkle key, then promote.sh against
+# a throwaway local R2. The verified files are kept for 3 days.
 name: Mac release
 on:
   push:
@@ -61,7 +65,7 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     permissions:
-      contents: read  # the previous release's appcast, for the guard
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
@@ -73,7 +77,6 @@ jobs:
       - run: scripts/mac/release.sh --unsigned
         env:
           TAG: ${{ github.ref_name }}
-          GH_TOKEN: ${{ github.token }}
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: unsigned
@@ -175,7 +178,6 @@ jobs:
           hdiutil attach "$DMG" -nobrowse -readonly -noautoopen -mountpoint "$MNT" -quiet
           spctl -a -vv -t exec "$MNT/Shepetal.app"
           hdiutil detach "$MNT" -quiet
-          (cd signed && shasum -a 256 "Shepetal-$VERSION.dmg" > "Shepetal-$VERSION.dmg.sha256")
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: signed
@@ -195,7 +197,6 @@ jobs:
     permissions: {}
     env:
       VERSION: ${{ needs.provenance.outputs.version }}
-      TAG: ${{ github.ref_name }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
@@ -220,14 +221,21 @@ jobs:
           printf '%s' "$SPARKLE_ED_PRIVATE_KEY" > "$RUNNER_TEMP/sparkle.key"
           echo "SPARKLE_KEY_FILE=$RUNNER_TEMP/sparkle.key" >> "$GITHUB_ENV"
       - &appcast
-        name: The appcast, signed after stapling (stapling changes the file)
+        name: The appcast and the .sha256, from the stapled DMG (stapling changes the file)
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/archives"
-          cp "signed/Shepetal-$VERSION.dmg" "$RUNNER_TEMP/archives/"
+          DMG=signed/Shepetal-$VERSION.dmg MNT=$RUNNER_TEMP/feed
+          mkdir -p "$RUNNER_TEMP/archives" "$MNT"
+          # The download URL is on the site in the app's SUFeedURL, so the domain lives only in make-app.sh. It must
+          # be absolute: generate_appcast turns a path-only prefix into "///download/...".
+          hdiutil attach "$DMG" -nobrowse -readonly -noautoopen -mountpoint "$MNT" -quiet
+          FEED=$(plutil -extract SUFeedURL raw "$MNT/Shepetal.app/Contents/Info.plist")
+          hdiutil detach "$MNT" -quiet
+          cp "$DMG" "$RUNNER_TEMP/archives/"
           "$RUNNER_TEMP/sparkle/bin/generate_appcast" --ed-key-file "$SPARKLE_KEY_FILE" --maximum-deltas 0 \
-            --download-url-prefix "https://github.com/backant-io/shepetal/releases/download/$TAG/" \
+            --download-url-prefix "${FEED%appcast.xml}download/$VERSION/" \
             -o signed/appcast.xml "$RUNNER_TEMP/archives"
+          (cd signed && shasum -a 256 "Shepetal-$VERSION.dmg" > "Shepetal-$VERSION.dmg.sha256")  # the bytes just signed
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: release
@@ -265,28 +273,41 @@ jobs:
           swift scripts/mac/verify-update.swift signed/appcast.xml "$DMG" "$RUNNER_TEMP/Info.plist"
           BUILD=$(plutil -extract CFBundleVersion raw "$RUNNER_TEMP/Info.plist")
           grep -q "<sparkle:version>$BUILD</sparkle:version>" signed/appcast.xml || { echo "::error::appcast.xml is not for build $BUILD"; exit 1; }
+          (cd signed && shasum -a 256 -c "Shepetal-$VERSION.dmg.sha256")
+          # An app without SUFeedURL (UPDATES=0) never updates. The DMG's URL must be the one the site serves.
+          FEED=$(plutil -extract SUFeedURL raw "$RUNNER_TEMP/Info.plist") || { echo "::error::the app has no SUFeedURL (built without UPDATES=1)"; exit 1; }
+          [[ $FEED == https://*/appcast.xml ]] || { echo "::error::SUFeedURL $FEED is not https://<domain>/appcast.xml"; exit 1; }
+          URL=${FEED%appcast.xml}download/$VERSION/Shepetal-$VERSION.dmg
+          grep -qF "url=\"$URL\"" signed/appcast.xml || { echo "::error::the appcast does not offer $URL, the URL the site serves"; exit 1; }
+          if grep -qi github signed/appcast.xml; then echo "::error::the appcast names GitHub"; exit 1; fi
 
-  draft:
+  stage:
     needs: [provenance, verify]
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    permissions:
-      contents: write  # the draft release
+    timeout-minutes: 15
+    environment: mac-release  # the R2 token; Pavel approves each run
+    permissions: {}
     env:
       VERSION: ${{ needs.provenance.outputs.version }}
-      TAG: ${{ github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333  # v8.0.2
         with:
           name: release
           path: signed
-      - name: Draft release (never published here)
+      - name: The verified files to R2 staging/<v>/ (never served; Pavel publishes them with scripts/mac/promote.sh)
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required  # the AWS CLI's default checksums can trip up R2
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
         run: |
           set -euo pipefail
-          gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --verify-tag --title "Shepetal $VERSION for Mac" \
-            --notes "Draft. Try the DMG, write the notes, then click Publish release (a full release, not a pre-release)." \
-            "signed/Shepetal-$VERSION.dmg" "signed/Shepetal-$VERSION.dmg.sha256" signed/appcast.xml
+          : "${AWS_ACCESS_KEY_ID:?is not set in the mac-release environment}" "${AWS_SECRET_ACCESS_KEY:?}" "${R2_ENDPOINT:?}"
+          for f in "Shepetal-$VERSION.dmg" "Shepetal-$VERSION.dmg.sha256" appcast.xml; do
+            aws s3 cp "signed/$f" "s3://shepetal-releases/staging/$VERSION/$f" --endpoint-url "$R2_ENDPOINT" --no-progress
+          done
 
   dry-run:
     if: github.event_name != 'push'
@@ -323,8 +344,7 @@ jobs:
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7.0.2
         with:
           name: mac-release-dry-run
-          path: |
-            dist/*.dmg
-            dist/*.sha256
-            dist/appcast.xml
+          path: signed/  # the files the steps above verified
+          if-no-files-found: error
           retention-days: 3
+      - run: scripts/mac/test-promote.sh signed  # promote.sh against a throwaway local R2, with the files just verified

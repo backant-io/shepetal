@@ -50,8 +50,8 @@ struct MenuState {
 /// (only with an updater), the last text, input, help, quit. Everything else is in the shepetal window (Home and
 /// Settings).
 enum MenuModel {
-    static let helpCenter = URL(string: "https://shepetal.backant.io/help")!
-    /// The contact address on shepetal.backant.io (web/ terms page); the site has no feedback page.
+    static let helpCenter = Site.base.appendingPathComponent("help")
+    /// The contact address on the site's terms page; the site has no feedback page.
     static let feedback = URL(string: "mailto:founder@backant.io?subject=shepetal%20feedback")!
     static let pastMeetingsShown = 8
     /// Buy shows from this many trial days left, and after the trial.
@@ -88,15 +88,16 @@ enum MenuModel {
         return e + account(s.access, signingIn: s.signingIn)
     }
 
-    /// Sign in while signed out; Buy near the end of the trial and after it. The rest is on Home.
+    /// Sign in while signed out; Buy (the plan choice on the site) near the end of the trial and after a trial or
+    /// a subscription ends. A failed payment is fixed on Home, under Manage subscription. The rest is on Home.
     static func account(_ access: Access, signingIn: Bool) -> [MenuEntry] {
-        let buy = [MenuEntry(title: "Get shepetal for $4.99…", action: .buy)]
+        let buy = [MenuEntry(title: AccountText.buyMenu, action: .buy)]
         switch access {
         case .signedOut where signingIn: return [MenuEntry(title: "Cancel sign-in", action: .cancelSignIn)]
         case .signedOut: return [MenuEntry(title: "Sign in to start your free trial…", action: .signIn)]
         case let .trial(days): return days <= buyFromDaysLeft ? buy : []
-        case .expired: return buy
-        case .lifetime, .unchecked: return []
+        case .expired, .subscriptionEnded: return buy
+        case .lifetime, .subscription, .paymentFailed, .unchecked: return []
         }
     }
 

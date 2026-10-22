@@ -41,10 +41,10 @@ final class AccountTests: XCTestCase {
 
     func testLoginURL() throws {
         let p = PKCE(verifier: "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", state: "st4te")
-        let url = AppLogin.loginURL(base: URL(string: "https://shepetal.backant.io")!, pkce: p)
+        let url = AppLogin.loginURL(base: URL(string: "https://shepetal.app")!, pkce: p)
         let c = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         XCTAssertEqual(c.scheme, "https")
-        XCTAssertEqual(c.host, "shepetal.backant.io")
+        XCTAssertEqual(c.host, "shepetal.app")
         XCTAssertEqual(c.path, "/app/login")
         let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
         XCTAssertEqual(q, ["redirect_uri": "shepetal://auth", "state": "st4te",
@@ -91,7 +91,7 @@ final class AccountTests: XCTestCase {
     }
 
     func testOnlyWebPagesAreOpened() {
-        XCTAssertTrue(AccountClient.isWebPage(URL(string: "https://shepetal.backant.io/app/login")!))
+        XCTAssertTrue(AccountClient.isWebPage(URL(string: "https://shepetal.app/app/login")!))
         XCTAssertTrue(AccountClient.isWebPage(URL(string: "http://localhost:3000/app/login")!))
         XCTAssertFalse(AccountClient.isWebPage(URL(string: "http://evil.example/app/login")!))
         XCTAssertFalse(AccountClient.isWebPage(URL(string: "file:///System/Applications/Calculator.app")!))
@@ -119,6 +119,26 @@ final class AccountTests: XCTestCase {
         reply = (200, ["status": "expired", "trial_ends_at": "2026-10-01T00:00:00Z", "email": "a@example.com"])
         guard case let .license(expired) = try await client.license(token: "tok-1") else { return XCTFail() }
         XCTAssertEqual(expired.status, .expired)
+
+        // The plans (web/API.md): lifetime, subscription, trial. A service from before them sends no plan.
+        XCTAssertNil(active.subscription, "no plan field: active is the lifetime license")
+        reply = (200, ["status": "active", "plan": "lifetime", "trial_ends_at": NSNull(), "paid_through": NSNull(),
+                       "renews": false, "payment_failed": false, "email": "a@example.com"])
+        guard case let .license(lifetime) = try await client.license(token: "tok-1") else { return XCTFail() }
+        XCTAssertEqual(lifetime.plan, .lifetime)
+        reply = (200, ["status": "active", "plan": "subscription", "trial_ends_at": NSNull(), "paid_through": "2026-11-21T21:30:21.000Z",
+                       "renews": true, "payment_failed": false, "email": "a@example.com"])
+        guard case let .license(monthly) = try await client.license(token: "tok-1") else { return XCTFail() }
+        let through = ISO8601DateFormatter().date(from: "2026-11-21T21:30:21Z")!
+        XCTAssertEqual(monthly.subscription, Subscription(paidThrough: through, renews: true, paymentFailed: false))
+        XCTAssertEqual(monthly.plan, .subscription(paidThrough: through, renews: true))
+        reply = (200, ["status": "expired", "plan": "subscription", "trial_ends_at": "2026-08-31T00:00:00.000Z",
+                       "paid_through": "2026-10-21T21:30:40.000Z", "renews": true, "payment_failed": true, "email": "a@example.com"])
+        guard case let .license(failed) = try await client.license(token: "tok-1") else { return XCTFail() }
+        XCTAssertEqual(failed.subscription?.paymentFailed, true)
+        XCTAssertNil(failed.plan, "a lapsed subscription pays for nothing")
+        reply = (200, ["status": "active", "plan": "subscription", "trial_ends_at": NSNull(), "renews": true, "email": "a@example.com"])
+        do { _ = try await client.license(token: "tok-1"); XCTFail("an active subscription needs its paid-through date") } catch {}
 
         reply = (401, ["error": "unauthorized"])
         let signedOut = try await client.license(token: "tok-1")
@@ -151,9 +171,66 @@ final class AccountTests: XCTestCase {
         }
     }
 
+    func testBuyOpensThePlanChoiceAndManageOpensTheBillingPortal() async throws {
+        XCTAssertEqual(client.plansPage.absoluteString, server.url.absoluteString + "/account#plans")
+        XCTAssertEqual(AccountClient(base: AccountClient.defaultBase).plansPage.absoluteString, "https://shepetal.app/account#plans")
+
+        server.handler = { _ in (200, ["url": "https://billing.stripe.com/p/session/test_1"]) }
+        let url = try await client.billingPortal(token: "tok-1")
+        XCTAssertEqual(url.absoluteString, "https://billing.stripe.com/p/session/test_1")
+        XCTAssertEqual(server.requests.last?.method, "POST")
+        XCTAssertEqual(server.requests.last?.path, "/api/billing/portal")
+        XCTAssertEqual(server.requests.last?.headers["authorization"], "Bearer tok-1")
+        server.handler = { _ in (401, ["error": "unauthorized"]) }
+        do { _ = try await client.billingPortal(token: "tok-1"); XCTFail("401 must throw") } catch let e as AccountError {
+            XCTAssertEqual(e, .signedOut)
+        }
+        server.handler = { _ in (200, ["url": "javascript:alert(1)"]) }
+        do { _ = try await client.billingPortal(token: "tok-1"); XCTFail("only web pages are opened") } catch {}
+    }
+
+    /// The site address is one constant (`Site.base`): no source line names another shepetal host.
+    func testTheSiteAddressIsOneConstant() throws {
+        let sources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../Sources").standardized
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" } ?? []
+        XCTAssertFalse(files.isEmpty)
+        for f in files {
+            for (n, line) in try String(contentsOf: f, encoding: .utf8).components(separatedBy: "\n").enumerated()
+            where line.contains("shepetal.backant.io") && !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                XCTFail("\(f.lastPathComponent):\(n + 1) names the old host; use Site.base")
+            }
+            let text = try String(contentsOf: f, encoding: .utf8)
+            XCTAssertFalse(text.contains("\"https://shepetal.app") && f.lastPathComponent != "Account.swift", "\(f.lastPathComponent) writes the address itself")
+        }
+    }
+
+    /// Updates come from the same site as the account: every shipped build keeps its SUFeedURL for good (make-app.sh).
+    func testTheUpdateFeedIsOnTheSiteAndNoSourceLinksToGitHub() throws {
+        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../..").standardized
+        let makeApp = try String(contentsOf: root.appendingPathComponent("scripts/make-app.sh"), encoding: .utf8)
+        XCTAssertTrue(makeApp.contains("SHEPETAL_DOMAIN=${SHEPETAL_DOMAIN:-\(Site.host)}\n"), "the feed's default domain is Site.host")
+        // #277 and Pavel, 22.10.26: the app is public and the repository is not, so nothing the app shows names GitHub,
+        // the source, a licence for shepetal's own code or a donation. scripts/make-dmg.sh checks the built app too.
+        XCTAssertFalse(makeApp.contains("MIT License"))
+        XCTAssertTrue(makeApp.contains("<key>NSHumanReadableCopyright</key><string>© 2026 BackAnt, Inc.</string>"))
+        let banned = ["github", "mit license", "open source", "open-source", "source code", "donate", "sponsor", "buymeacoffee"]
+        let files = FileManager.default.enumerator(at: root.appendingPathComponent("Sources"), includingPropertiesForKeys: nil)?
+            .compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" } ?? []
+        XCTAssertFalse(files.isEmpty)
+        for f in files {
+            for (n, line) in try String(contentsOf: f, encoding: .utf8).components(separatedBy: "\n").enumerated()
+            where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                for b in banned where line.lowercased().contains(b) { XCTFail("\(f.lastPathComponent):\(n + 1) says \(b)") }
+            }
+        }
+    }
+
     func testBaseURLDefaultsToTheServiceAndHonorsTheOverride() {
         unsetenv("SHEPETAL_ACCOUNT_URL")
-        XCTAssertEqual(AccountClient().base.absoluteString, "https://shepetal.backant.io")
+        XCTAssertEqual(AccountClient().base.absoluteString, "https://shepetal.app")
+        XCTAssertEqual(AccountClient.defaultBase, Site.base, "one constant")
+        XCTAssertEqual(Site.host, "shepetal.app")
         setenv("SHEPETAL_ACCOUNT_URL", "http://127.0.0.1:9", 1)
         defer { unsetenv("SHEPETAL_ACCOUNT_URL") }
         XCTAssertEqual(AccountClient().base.absoluteString, "http://127.0.0.1:9")
@@ -193,7 +270,20 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(Access.trial(daysLeft: 1).summary, "Trial, 1 day left")
         XCTAssertEqual(Access.lifetime.summary, "Yours forever")
         XCTAssertEqual(Access.signedOut.blockedHint, "Sign in with Google to start your free 30-day trial")
-        XCTAssertEqual(Access.expired.blockedHint, "Trial ended: get Shepetal for $4.99")
+        XCTAssertEqual(Access.expired.blockedHint, "Trial ended. Pick a plan to keep shepetal.")
+        XCTAssertEqual(Access.subscriptionEnded.blockedHint, "Your subscription ended. Pick a plan to keep shepetal.")
+        XCTAssertEqual(Access.paymentFailed.blockedHint, "Payment failed. Update your card in Manage subscription.")
+        let nov21 = Date() + 30 * 86_400  // a renewal date ahead
+        XCTAssertEqual(Access.subscription(paidThrough: nov21, renews: true).summary, "$0.99 a month, renews \(AccountText.day(nov21))")
+        XCTAssertEqual(Access.subscription(paidThrough: nov21, renews: false).summary, "Yours until \(AccountText.day(nov21))")
+        XCTAssertNil(Access.subscription(paidThrough: nov21, renews: true).blockedHint)
+        XCTAssertEqual(Access.subscription(paidThrough: Date() - 86_400, renews: true).summary, "$0.99 a month",
+                       "offline past the date, the renewal is not confirmed yet: no date that has gone by")
+        XCTAssertEqual(AccountText.buy, "$23.99 once or $0.99 a month")
+        for text in [AccountText.buy, AccountText.buyMenu, AccountText.trialEnded, AccountText.subscriptionEnded, AccountText.paymentFailed] {
+            XCTAssertFalse(text.contains("4.99") && !text.contains("23.99"), "the retired price: \(text)")
+            XCTAssertFalse(text.contains("!"), "bold, never loud: \(text)")
+        }
         XCTAssertNil(Access.lifetime.blockedHint)
         XCTAssertNil(Access.trial(daysLeft: 2).blockedHint)
     }
@@ -218,16 +308,37 @@ final class AccountTests: XCTestCase {
         XCTAssertEqual(AccountPolicy.access(token: token, state: refunded, now: now), .expired)
     }
 
-    /// The 7-day offline grace is for trials only (and a cached "expired", which dictates either way).
-    func testTrialsKeepTheSevenDayOfflineGrace() {
-        let ends = now + 20 * day
-        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 7 * day), now: now),
-                       .trial(daysLeft: 20), "exactly 7 days still counts")
-        let trial = state(.trial, ends: ends, checkedAgo: 7 * day - 60)
-        XCTAssertEqual(AccountPolicy.access(token: token, state: trial, now: now), .trial(daysLeft: 20), "6.9 days offline still works")
-        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 7 * day + 1), now: now), .unchecked)
-        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: ends, checkedAgo: 8 * day), now: now), .unchecked)
+    /// Pavel, 22.10.26: a trial works offline until its own end date, the one the service sealed, however long the Mac
+    /// has been offline. Past that date it stops, as before; a cached "expired" still asks for a check after 7 days.
+    func testATrialWorksOfflineUntilItsEndDate() {
+        // Day 20 of 30, offline since sign-in: it still dictates, with the days left counted from the sealed end.
+        let day20 = state(.trial, ends: now + 10 * day, checkedAgo: 20 * day)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: day20, now: now), .trial(daysLeft: 10))
+        XCTAssertTrue(AccountPolicy.access(token: token, state: day20, now: now).allowsDictation, "day 20 offline dictates")
+        for ago in [7 * day + 1, 8 * day, 29 * day] {
+            XCTAssertTrue(AccountPolicy.access(token: token, state: state(.trial, ends: now + 1, checkedAgo: ago), now: now).allowsDictation,
+                          "\(ago / day) days offline, before the end")
+        }
+        // Past its end it does not, offline for long or not.
+        for ago in [day, 31 * day] {
+            let ended = AccountPolicy.access(token: token, state: state(.trial, ends: now - 1, checkedAgo: ago), now: now)
+            XCTAssertFalse(ended.allowsDictation, "a trial past its end, checked \(ago / day) days ago")
+        }
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: now - 1, checkedAgo: day), now: now), .expired)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.trial, ends: now, checkedAgo: day), now: now), .expired,
+                       "the end itself is past")
+        // The end date is sealed: moved out, even offline inside the real trial, it grants nothing.
+        var pushed = day20
+        pushed.license?.trialEndsAt = now + 300 * day
+        XCTAssertEqual(AccountPolicy.access(token: token, state: pushed, now: now), .unchecked, "edited trial end")
+        var revived = state(.trial, ends: now - 1, checkedAgo: 31 * day)
+        revived.license?.trialEndsAt = now + day
+        XCTAssertFalse(AccountPolicy.access(token: token, state: revived, now: now).allowsDictation, "an ended trial edited back to life")
         XCTAssertEqual(AccountPolicy.access(token: token, state: state(.expired, checkedAgo: 8 * day), now: now), .unchecked)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: state(.expired, checkedAgo: 6 * day), now: now), .expired)
+
+        let ends = now + 20 * day
+        let trial = state(.trial, ends: ends, checkedAgo: 7 * day - 60)
 
         // A failed check keeps the cached license and the time of the last good one.
         let (failed, out) = AccountPolicy.apply(.failure(URLError(.notConnectedToInternet)), to: trial, now: now, token: token)
@@ -289,6 +400,97 @@ final class AccountTests: XCTestCase {
     /// Seals already in account.json must keep verifying in every later build and on every macOS: a change here
     /// leaves each lifetime user who is offline at the update unable to dictate. The expected values were computed
     /// outside Swift (Python hmac over the documented bytes). Change the format only with a migration.
+    // MARK: the subscription
+
+    private func monthly(through: Date, renews: Bool = true, failed: Bool = false, status: LicenseStatus = .active,
+                         checkedAgo: TimeInterval = 0) -> AccountState {
+        AccountState(license: License(status: status, trialEndsAt: status == .active ? nil : now - 40 * day, email: "a@example.com",
+                                      subscription: Subscription(paidThrough: through, renews: renews, paymentFailed: failed)),
+                     lastGoodCheck: now - checkedAgo, lastAttempt: now - checkedAgo).sealed(with: token)
+    }
+
+    /// $0.99 a month: it works while paid. Offline, a renewing one keeps working 14 days past its paid-through
+    /// date, so "Works offline" holds across a renewal the app has not heard about; the next check moves the date.
+    func testASubscriptionWorksThroughItsPaidPeriodPlusFourteenDaysOffline() {
+        let through = now + 10 * day
+        let sub = Access.subscription(paidThrough: through, renews: true)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: monthly(through: through), now: now), sub)
+        XCTAssertTrue(sub.allowsDictation)
+        XCTAssertTrue(sub.isPaid)
+        XCTAssertTrue(sub.canManage)
+        // 20 days offline, inside the paid period: the trial's 7-day limit does not apply.
+        XCTAssertEqual(AccountPolicy.access(token: token, state: monthly(through: through, checkedAgo: 20 * day), now: now), sub)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: monthly(through: through), now: through + 13 * day), sub,
+                       "13 days past the paid period, offline, still works")
+        XCTAssertEqual(AccountPolicy.access(token: token, state: monthly(through: through), now: through + 14 * day), .unchecked,
+                       "14 days past it needs a check")
+        // Online, the daily check renews it: the cache moves to the next period.
+        let renewed = AccountPolicy.apply(.success(.license(License(status: .active, trialEndsAt: nil, email: "a@example.com",
+                                                                    subscription: Subscription(paidThrough: through + 30 * day, renews: true)))),
+                                          to: monthly(through: through), now: through + day, token: token).0
+        XCTAssertEqual(AccountPolicy.access(token: token, state: renewed, now: through + 20 * day),
+                       .subscription(paidThrough: through + 30 * day, renews: true))
+        XCTAssertTrue(AccountPolicy.checkDue(state: monthly(through: through, checkedAgo: day), now: now), "checked every 24 h")
+    }
+
+    /// Cancelled, it works until its period ends, and not a day longer offline.
+    func testACancelledSubscriptionWorksUntilItsPeriodEnds() {
+        let through = now + 3 * day
+        let cancelled = monthly(through: through, renews: false)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: cancelled, now: now), .subscription(paidThrough: through, renews: false))
+        XCTAssertEqual(AccountPolicy.access(token: token, state: cancelled, now: through - 1), .subscription(paidThrough: through, renews: false))
+        XCTAssertEqual(AccountPolicy.access(token: token, state: cancelled, now: through), .subscriptionEnded)
+        XCTAssertFalse(Access.subscriptionEnded.allowsDictation)
+        // The service's answer after the end says the same.
+        let ended = monthly(through: through, renews: false, status: .expired, checkedAgo: 0)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: ended, now: now), .subscriptionEnded)
+    }
+
+    func testAFailedRenewalStopsDictationUntilTheCardWorks() {
+        let failed = monthly(through: now - 60, failed: true, status: .expired)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: failed, now: now), .paymentFailed)
+        XCTAssertFalse(Access.paymentFailed.allowsDictation)
+        XCTAssertTrue(Access.paymentFailed.canManage, "Manage subscription is where the card is changed")
+        // A lapsed subscription inside the first 30 days leaves the trial running, as the service says.
+        let inTrial = AccountState(license: License(status: .trial, trialEndsAt: now + 9 * day, email: "a@example.com",
+                                                    subscription: Subscription(paidThrough: now - day, renews: true, paymentFailed: true)),
+                                   lastGoodCheck: now, lastAttempt: now).sealed(with: token)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: inTrial, now: now), .trial(daysLeft: 9))
+    }
+
+    /// The subscription's dates are sealed too: pushing paid_through out, turning renews on or clearing a failed
+    /// payment in account.json grants nothing.
+    func testAnEditedSubscriptionGrantsNothing() throws {
+        let through = now + 2 * day
+        let sealed = monthly(through: through, renews: false)
+        let edits: [(inout AccountState) -> Void] = [
+                     { [day] in $0.license?.subscription?.paidThrough = through + 365 * day },
+                     { $0.license?.subscription?.renews = true },
+                     { $0.license?.subscription = nil },  // a subscription edited into the lifetime license
+                     { $0.license?.subscription?.paymentFailed = true }]
+        for edit in edits {
+            var s = sealed
+            edit(&s)
+            XCTAssertEqual(AccountPolicy.access(token: token, state: s, now: now), .unchecked)
+        }
+        var failed = monthly(through: now - 60, failed: true, status: .expired)
+        failed.license?.subscription?.paymentFailed = false
+        failed.license?.status = .active
+        XCTAssertEqual(AccountPolicy.access(token: token, state: failed, now: now), .unchecked)
+
+        // Through the file: a sealed subscription survives the round trip.
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shepetal-account-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("account.json")
+        let answered = AccountPolicy.apply(.success(.license(License(status: .active, trialEndsAt: nil, email: "a@example.com",
+                                                                     subscription: Subscription(paidThrough: through.addingTimeInterval(0.4), renews: true)))),
+                                           to: AccountState(), now: now + 0.6, token: token).0
+        try answered.save(url)
+        XCTAssertEqual(AccountPolicy.access(token: token, state: AccountState.load(url), now: now),
+                       .subscription(paidThrough: AccountState.load(url).license!.subscription!.paidThrough!, renews: true))
+    }
+
     func testTheSealFormatNeverChanges() {
         let paid = AccountState(license: License(status: .active, trialEndsAt: nil, email: "a@example.com"), lastGoodCheck: now)
         XCTAssertEqual(paid.sealed(with: token).seal, "XhSFAd/JP4hbmdANIb7wJOOgp6Bt+2GvA/Nh5a0AtaY=")
@@ -296,6 +498,11 @@ final class AccountTests: XCTestCase {
                                  lastGoodCheck: now - day, lastAttempt: now)
         XCTAssertEqual(trial.sealed(with: token).seal, "ZjjVYOW2XSAw+w40UTo5IcFU1+VPDkIf51i1DO03rWg=",
                        "lastAttempt is not sealed: a failed check keeps the seal")
+        // v2, a subscription: computed outside Swift too (Python hmac over the documented bytes).
+        let sub = AccountState(license: License(status: .active, trialEndsAt: nil, email: "a@example.com",
+                                                subscription: Subscription(paidThrough: now + 30 * day, renews: true, paymentFailed: false)),
+                               lastGoodCheck: now)
+        XCTAssertEqual(sub.sealed(with: token).seal, "okdVTdbwttmflV/zvnbZxW67+ufZtzW+Rep0+7TuWU4=")
     }
 
     func testUnauthorizedSignsOutAndClearsTheCache() {

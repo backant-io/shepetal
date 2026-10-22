@@ -4,7 +4,8 @@ import Foundation
 import FoundationNetworking
 #endif
 
-// Google sign-in, free trial and lifetime license against the account service (web/API.md on feat/web).
+// Google sign-in, free trial, the lifetime license and the monthly subscription against the account service
+// (web/API.md on feat/web).
 // These calls are the app's only network use: sign-in, the license check and checkout. Nothing here
 // runs during dictation, and audio and text never go through it.
 
@@ -69,26 +70,48 @@ public enum AppLogin {
 
 public enum LicenseStatus: String, Codable, Sendable { case trial, active, expired }
 
+/// The monthly subscription in a license answer (plan "subscription" in web/API.md).
+public struct Subscription: Codable, Equatable, Sendable {
+    /// The end of the last paid period. It works until then.
+    public var paidThrough: Date?
+    /// It charges again at paidThrough. False once cancelled: it ends at paidThrough.
+    public var renews: Bool
+    /// The last renewal could not be charged: the card needs updating (Manage subscription).
+    public var paymentFailed: Bool
+
+    public init(paidThrough: Date?, renews: Bool, paymentFailed: Bool = false) {
+        self.paidThrough = paidThrough; self.renews = renews; self.paymentFailed = paymentFailed
+    }
+}
+
 /// GET /api/license
 public struct License: Codable, Equatable, Sendable {
     public var status: LicenseStatus
     public var trialEndsAt: Date?
     public var email: String
+    /// Set when the service says plan "subscription"; nil for the lifetime license, the trial, and a service
+    /// from before the plans (whose "active" is the lifetime license).
+    public var subscription: Subscription?
 
-    public init(status: LicenseStatus, trialEndsAt: Date?, email: String) {
-        self.status = status; self.trialEndsAt = trialEndsAt; self.email = email
+    public init(status: LicenseStatus, trialEndsAt: Date?, email: String, subscription: Subscription? = nil) {
+        self.status = status; self.trialEndsAt = trialEndsAt; self.email = email; self.subscription = subscription
     }
 
-    /// What was paid for, nil for a trial or an expired license. The service has one paid kind today: "active",
-    /// the one-time purchase that never expires (web/API.md), so it is the lifetime plan.
-    public var plan: Plan? { status == .active ? .lifetime : nil }
+    /// What is paid for now, nil for a trial or an expired license (an ended subscription included).
+    public var plan: Plan? {
+        guard status == .active else { return nil }
+        guard let sub = subscription else { return .lifetime }
+        // An active subscription always has a paid-through date (the client refuses one without); without it, nothing is paid.
+        return .subscription(paidThrough: sub.paidThrough ?? .distantPast, renews: sub.renews)
+    }
 }
 
-/// A paid plan. A subscription would add `case subscription(paidThrough: Date)` from the license answer, and
-/// `AccountPolicy.access` has to say how long it holds offline: the switch there does not compile until it does.
+/// A paid plan. `AccountPolicy.access` says how long each holds offline.
 public enum Plan: Equatable, Sendable {
-    /// Bought once: works offline for good.
+    /// Bought once ($23.99): works offline for good.
     case lifetime
+    /// $0.99 a month, paid until `paidThrough`. Renewing, it holds offline 14 days past that; cancelled, it ends then.
+    case subscription(paidThrough: Date, renews: Bool)
 }
 
 public enum LicenseReply: Equatable, Sendable {
@@ -108,8 +131,17 @@ public struct AccountError: LocalizedError, Equatable {
     public static let alreadyBought = AccountError("You already own Shepetal", status: 409)
 }
 
+/// shepetal's site and account service: ONE constant for every address the app opens or calls (sign-in, license,
+/// plans, the Billing Portal, the help center, the share card). The old host shepetal.backant.io keeps answering /api/*,
+/// so released builds keep working.
+public enum Site {
+    public static let base = URL(string: "https://shepetal.app")!
+    /// "shepetal.app", for messages.
+    public static var host: String { base.host ?? "shepetal.app" }
+}
+
 public struct AccountClient: Sendable {
-    public static let defaultBase = URL(string: "https://shepetal.backant.io")!
+    public static let defaultBase = Site.base
     public let base: URL
     private let session: URLSession
 
@@ -129,7 +161,7 @@ public struct AccountClient: Sendable {
                                             json: ["code": code, "code_verifier": verifier, "redirect_uri": AppLogin.redirectURI])
         let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
         guard status == 200, let token = body["access_token"] as? String, !token.isEmpty else {
-            if let e = body["error"] as? String { throw AccountError("Sign-in failed on shepetal.backant.io (\(e))", status: status) }
+            if let e = body["error"] as? String { throw AccountError("Sign-in failed on \(Site.host) (\(e))", status: status) }
             throw Self.unexpected(status)
         }
         return (token, body["email"] as? String ?? "")
@@ -143,10 +175,36 @@ public struct AccountClient: Sendable {
               let s = (body["status"] as? String).flatMap(LicenseStatus.init(rawValue:)) else { throw Self.unexpected(status) }
         let ends = (body["trial_ends_at"] as? String).flatMap(Self.parseDate)
         if s == .trial, ends == nil { throw AccountError("The account service sent a trial without an end date") }
-        return .license(License(status: s, trialEndsAt: ends, email: body["email"] as? String ?? ""))
+        var sub: Subscription?
+        if body["plan"] as? String == "subscription" {
+            let through = (body["paid_through"] as? String).flatMap(Self.parseDate)
+            if s == .active, through == nil { throw AccountError("The account service sent a subscription without a paid-through date") }
+            sub = Subscription(paidThrough: through, renews: body["renews"] as? Bool ?? false,
+                               paymentFailed: body["payment_failed"] as? Bool ?? false)
+        }
+        return .license(License(status: s, trialEndsAt: ends, email: body["email"] as? String ?? "", subscription: sub))
     }
 
-    /// The Stripe Checkout page for the lifetime license.
+    /// POST /api/billing/portal: the Stripe Billing Portal, where a subscriber cancels, resumes or changes the card.
+    public func billingPortal(token: String) async throws -> URL {
+        let (status, data) = try await send("POST", "/api/billing/portal", token: token, json: [:])
+        if status == 401 { throw AccountError.signedOut }
+        guard status == 200, let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let s = body["url"] as? String, let url = URL(string: s), AccountClient.isWebPage(url)
+        else { throw Self.unexpected(status) }
+        return url
+    }
+
+    /// The plan choice on the site ($23.99 once or $0.99 a month), where Buy goes. Signing in there uses the
+    /// browser's own session, so the app sends no token in the address.
+    public var plansPage: URL {
+        var c = URLComponents(url: base.appendingPathComponent("/account"), resolvingAgainstBaseURL: false)!
+        c.fragment = "plans"
+        return c.url!
+    }
+
+    /// The Stripe Checkout page for the lifetime license (POST /api/checkout with no plan). The app opens
+    /// `plansPage` instead, so the buyer picks the plan; this stays for the API contract.
     public func checkout(token: String) async throws -> URL {
         let (status, data) = try await send("POST", "/api/checkout", token: token, json: [:])
         if status == 401 { throw AccountError.signedOut }
@@ -195,15 +253,37 @@ public enum Access: Equatable, Sendable {
     case signedOut
     case trial(daysLeft: Int)
     case lifetime
+    /// The monthly plan, paid until `paidThrough`; `renews` false once cancelled.
+    case subscription(paidThrough: Date, renews: Bool)
     case expired
-    /// Signed in, but no license the service confirmed: none yet, a trial not checked in the last 7 days, or a cache
-    /// whose seal does not match.
+    /// A subscription that ran out: cancelled, or its renewal was not paid and Stripe gave up.
+    case subscriptionEnded
+    /// The renewal could not be charged. Dictation is off until the card works.
+    case paymentFailed
+    /// Signed in, but no license the service confirmed: none yet, an expired license or ended subscription not checked
+    /// in the last 7 days, or a cache whose seal does not match.
     case unchecked
 
     public var allowsDictation: Bool {
         switch self {
-        case .trial, .lifetime: true
-        case .signedOut, .expired, .unchecked: false
+        case .trial, .lifetime, .subscription: true
+        case .signedOut, .expired, .subscriptionEnded, .paymentFailed, .unchecked: false
+        }
+    }
+
+    /// A paid plan is in force (nothing to buy).
+    public var isPaid: Bool {
+        switch self {
+        case .lifetime, .subscription: true
+        default: false
+        }
+    }
+
+    /// The Billing Portal has something for this user: a subscription to cancel, resume or fix.
+    public var canManage: Bool {
+        switch self {
+        case .subscription, .paymentFailed: true
+        default: false
         }
     }
 
@@ -213,7 +293,13 @@ public enum Access: Equatable, Sendable {
         case .signedOut: "Not signed in"
         case let .trial(days): "Trial, \(days) \(days == 1 ? "day" : "days") left"
         case .lifetime: "Yours forever"
+        case let .subscription(through, renews):
+            // Past the date while renewing: offline, the renewal is not confirmed yet, so no date that has gone by.
+            !renews ? "Yours until \(AccountText.day(through))"
+                : through > Date() ? "$0.99 a month, renews \(AccountText.day(through))" : "$0.99 a month"
         case .expired: "Trial ended"
+        case .subscriptionEnded: "Subscription ended"
+        case .paymentFailed: "Payment failed"
         case .unchecked: "License not checked"
         }
     }
@@ -221,9 +307,11 @@ public enum Access: Equatable, Sendable {
     /// The text next to 🤫 when fn is pressed while dictation is off.
     public var blockedHint: String? {
         switch self {
-        case .trial, .lifetime: nil
+        case .trial, .lifetime, .subscription: nil
         case .signedOut: AccountText.signIn
         case .expired: AccountText.trialEnded
+        case .subscriptionEnded: AccountText.subscriptionEnded
+        case .paymentFailed: AccountText.paymentFailed
         case .unchecked: "Connect to the internet so Shepetal can check your license"
         }
     }
@@ -231,8 +319,19 @@ public enum Access: Equatable, Sendable {
 
 public enum AccountText {
     public static let signIn = "Sign in with Google to start your free 30-day trial"
-    public static let trialEnded = "Trial ended: get Shepetal for $4.99"
-    public static let buy = "Get Shepetal for $4.99 (lifetime, updates included)"
+    public static let trialEnded = "Trial ended. Pick a plan to keep shepetal."
+    public static let subscriptionEnded = "Your subscription ended. Pick a plan to keep shepetal."
+    public static let paymentFailed = "Payment failed. Update your card in Manage subscription."
+    /// Buy on Home: opens the plan choice on the site.
+    public static let buy = "$23.99 once or $0.99 a month"
+    /// The 🤫 menu item that opens the plan choice.
+    public static let buyMenu = "Get shepetal: $23.99 once or $0.99 a month…"
+    public static let manage = "Manage subscription"
+
+    /// "Nov 21", in the user's language and time zone.
+    public static func day(_ d: Date) -> String {
+        d.formatted(.dateTime.month(.abbreviated).day())
+    }
 }
 
 /// What is cached between launches (account.json in the data dir). The token itself is in the Keychain.
@@ -268,11 +367,17 @@ public struct AccountState: Codable, Equatable, Sendable {
     /// still matches after a round trip through the file. The bytes are built by hand rather than with JSONEncoder,
     /// so an OS update that changes the encoder's output cannot break every seal; `AccountTests` pins them. The
     /// email comes last because it is the only field that can contain a newline.
+    /// v1 is a license without a subscription, as every build before the plans sealed it, so those caches keep
+    /// verifying. v2 adds the subscription's paid-through date, renews and payment failed, so none can be edited.
     private var sealedBytes: Data {
         let iso = ISO8601DateFormatter()
-        let fields = ["shepetal-license-v1", license?.status.rawValue ?? "", license?.trialEndsAt.map(iso.string) ?? "",
-                      lastGoodCheck.map(iso.string) ?? "", license?.email ?? ""]
-        return Data(fields.joined(separator: "\n").utf8)
+        let common = [license?.status.rawValue ?? "", license?.trialEndsAt.map(iso.string) ?? "", lastGoodCheck.map(iso.string) ?? ""]
+        var fields = ["shepetal-license-v1"] + common
+        if let sub = license?.subscription {
+            fields = ["shepetal-license-v2"] + common
+                + ["subscription", sub.paidThrough.map(iso.string) ?? "", sub.renews ? "1" : "0", sub.paymentFailed ? "1" : "0"]
+        }
+        return Data((fields + [license?.email ?? ""]).joined(separator: "\n").utf8)
     }
 
     public static func load(_ url: URL) -> AccountState {
@@ -298,8 +403,12 @@ public struct AccountState: Codable, Equatable, Sendable {
 }
 
 public enum AccountPolicy {
-    /// A trial stays valid this long without reaching the service. A lifetime license has no limit.
+    /// A cached "expired" or ended subscription is believed this long without reaching the service, then the app asks
+    /// for a check. A trial holds until its end date and a lifetime license for good, whatever this says.
     public static let offlineGrace: TimeInterval = 7 * 86_400
+    /// A renewing subscription holds this long past its paid-through date without a check, so "Works offline"
+    /// stays true across a renewal the app has not heard about yet.
+    public static let subscriptionOfflineGrace: TimeInterval = 14 * 86_400
     public static let checkEvery: TimeInterval = 86_400
     /// After a failed check, try again this much later.
     public static let retryAfterFailure: TimeInterval = 3_600
@@ -310,12 +419,23 @@ public enum AccountPolicy {
         guard let license = state.license, state.isSealed(with: token) else { return .unchecked }
         switch license.plan {
         case .lifetime?: return .lifetime  // "Yours forever" and "Works offline", however long it is offline (#254)
-        case nil: break  // a trial or an expired license: the offline grace below
+        case let .subscription(through, renews)?:
+            // Paid up: it works, online or not. Renewing, the renewal the app has not seen yet gets 14 more days
+            // offline; the daily check moves paidThrough as soon as the Mac is online. Cancelled, it ends on time.
+            if now < through || (renews && now < through + subscriptionOfflineGrace) {
+                return .subscription(paidThrough: through, renews: renews)
+            }
+            return renews ? .unchecked : .subscriptionEnded
+        case nil: break  // a trial or an expired license
+        }
+        // A trial works offline until its own end date (Pavel, 22.10.26), however long ago the last check was. The date
+        // is the service's, sealed with the token above, so an edited one grants nothing. Past it, the rules below.
+        if license.status == .trial, let end = license.trialEndsAt, end > now {
+            return .trial(daysLeft: Int((end.timeIntervalSince(now) / 86_400).rounded(.up)))
         }
         guard let checked = state.lastGoodCheck, now.timeIntervalSince(checked) <= offlineGrace else { return .unchecked }
-        // The cached end date counts even offline: a trial does not outlive its end by staying offline.
-        guard license.status == .trial, let end = license.trialEndsAt, end > now else { return .expired }
-        return .trial(daysLeft: Int((end.timeIntervalSince(now) / 86_400).rounded(.up)))
+        if let sub = license.subscription { return sub.paymentFailed ? .paymentFailed : .subscriptionEnded }
+        return .expired
     }
 
     /// A check is due at launch (no attempt yet), 24 h after the last good one, or an hour after a failed one.
@@ -327,7 +447,7 @@ public enum AccountPolicy {
     }
 
     /// Folds a check result into the cache. A 401 signs out (the caller drops the token); a failed
-    /// check keeps the cached license, so a trial's 7-day grace counts from the last good check. An answer is
+    /// check keeps the cached license and the time of the last good check. An answer is
     /// sealed with `token`, the one the check was sent with.
     public static func apply(_ result: Result<LicenseReply, Error>, to state: AccountState, now: Date,
                              token: String) -> (AccountState, signedOut: Bool) {

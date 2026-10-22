@@ -1,8 +1,9 @@
 import ShepetalCore
 import SwiftUI
 
-/// The Account section at the top of Home: who is signed in and the trial days left or "Yours forever", or the
-/// sign-in call to action, and why dictation is off and how to fix it.
+/// The Account section at the top of Home: who is signed in and the plan (trial days left, "Yours forever", the
+/// subscription's next date), or the sign-in call to action, and why dictation is off and how to fix it. Buy opens
+/// the plan choice on the site; Manage subscription opens the Stripe Billing Portal.
 struct AccountSection: View {
     @ObservedObject var account = Account.shared
 
@@ -18,9 +19,14 @@ struct AccountSection: View {
                 }
             case .trial:
                 Button(AccountText.buy) { account.buy() }
-            case .expired:
+            case .expired, .subscriptionEnded:
                 Button(AccountText.buy) { account.buy() }
                 Button("Check license now") { account.checkNow() }
+            case .paymentFailed:
+                Button(AccountText.manage) { account.manage() }.buttonStyle(.borderedProminent)
+                Button("Check license now") { account.checkNow() }
+            case .subscription:
+                Button(AccountText.manage) { account.manage() }
             case .unchecked:
                 Button("Check license now") { account.checkNow() }
             case .lifetime:

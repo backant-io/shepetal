@@ -1,7 +1,8 @@
 #!/bin/bash
 # The Mac release (docs/install-and-update.md 4): guard → build and sign with the hardened runtime → DMG → notarize →
 # staple → Sparkle appcast (generate_appcast) → check the appcast against the key inside the built app. It never
-# publishes anything: .github/workflows/mac-release.yml makes a DRAFT release from dist/, and Pavel publishes it.
+# publishes anything: .github/workflows/mac-release.yml uploads the checked files to R2's staging/<v>/, which is
+# never served, and Pavel publishes them with scripts/mac/promote.sh (docs/install-and-update.md 3).
 #
 #   TAG=v0.2.0-mac scripts/mac/release.sh   the release by hand on main (Pavel, when CI is down)
 #   scripts/mac/release.sh --dry-run        everything that needs no credential; VERSION defaults to 0.0.0
@@ -10,7 +11,7 @@
 #                                           notarizes and makes the appcast inline, in jobs of their own (#227).
 #
 # Credentials, from the environment (CI) or this Mac's login Keychain. A missing one makes it a dry run that says
-# what it skipped; dist/release.env then says MODE=dry-run and the workflow makes no draft.
+# what it skipped; dist/release.env then says MODE=dry-run.
 #   Developer ID   SIGN_IDENTITY, or the first "Developer ID Application" identity in the keychain
 #   notarytool     NOTARY_KEY_FILE + NOTARY_KEY_ID + NOTARY_ISSUER_ID, or the keychain profile shepetal-notary
 #                  (NOTARY_PROFILE overrides the name)
@@ -25,25 +26,23 @@ skip() { SKIPPED+=("$1"); echo "DRY RUN: $1" >&2; }
 W=.cache/release
 rm -rf "$W"; mkdir -p "$W" dist
 
-# 1. The guard: tag format, a full clone, on main, version and build above the newest published Mac release.
+# 1. The guard: tag format, a full clone, on main. The version and build are checked against LATEST (the release
+# /download and /appcast.xml serve) by scripts/mac/promote.sh, when it is published.
 TAG=${TAG:-v${VERSION:-0.0.0}-mac}
 BUILD=$(git rev-list --count HEAD)
 GUARD=(--tag "$TAG" --build "$BUILD")
 if [ "$DRY_RUN" = 1 ]; then
   GUARD+=(--main "")
-else
-  PREV=$(gh release list --limit 100 --json tagName,isDraft,isPrerelease --jq \
-    '[.[] | select((.isDraft or .isPrerelease) | not) | select(.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-mac$"))][0].tagName // ""')
-  if [ -n "$PREV" ]; then
-    gh release download "$PREV" --pattern appcast.xml --dir "$W/previous"
-    GUARD+=(--previous "$W/previous/appcast.xml")
-  fi
 fi
 export VERSION; VERSION=$(python3 scripts/mac/release_guard.py "${GUARD[@]}")
 echo "Release $VERSION, build $BUILD"
+export UPDATES=1  # a release always has the feed and the key, whatever the caller's environment says
+# The app must carry the build number the guard checked: Sparkle compares CFBundleVersion, never the version.
+built() { local b; b=$(plutil -extract CFBundleVersion raw dist/Shepetal.app/Contents/Info.plist)
+  [ "$b" = "$BUILD" ] || { echo "dist/Shepetal.app is build $b, but the guard checked build $BUILD" >&2; exit 1; }; }
 
 if [ "$UNSIGNED" = 1 ]; then  # the committed Sparkle key, signed ad-hoc whatever this Mac's keychain holds
-  unset SPARKLE_PUBLIC_KEY; SIGN_IDENTITY=- scripts/make-dmg.sh
+  unset SPARKLE_PUBLIC_KEY; SIGN_IDENTITY=- scripts/make-dmg.sh; built
   printf 'MODE=unsigned\nTAG=%s\nVERSION=%s\nBUILD=%s\n' "$TAG" "$VERSION" "$BUILD" > dist/release.env
   exit 0
 fi
@@ -71,7 +70,7 @@ else
   skip "Sparkle signing with a throwaway key, in the app and the appcast: this DMG can never update"
 fi
 
-scripts/make-dmg.sh
+scripts/make-dmg.sh; built
 DMG=dist/Shepetal-$VERSION.dmg
 APP=dist/Shepetal.app
 
@@ -101,10 +100,13 @@ elif [ "$DRY_RUN" = 0 ]; then
 fi
 
 # 4. The appcast, signed AFTER stapling (stapling changes the file), then checked against the key inside the app.
+# Its download URL is on the app's own feed site (https://<SHEPETAL_DOMAIN>/download/<v>/), so the domain lives
+# only in make-app.sh. It must be absolute: generate_appcast turns a path-only prefix into "///download/...".
 mkdir -p "$W/archives"; rm -f dist/appcast.xml  # one item: this release
 cp "$DMG" "$W/archives/"
+FEED=$(plutil -extract SUFeedURL raw "$APP/Contents/Info.plist")
 "$SPARKLE/generate_appcast" ${KEY[@]+"${KEY[@]}"} --maximum-deltas 0 \
-  --download-url-prefix "https://github.com/backant-io/shepetal/releases/download/$TAG/" -o dist/appcast.xml "$W/archives"
+  --download-url-prefix "${FEED%appcast.xml}download/$VERSION/" -o dist/appcast.xml "$W/archives"
 swift scripts/mac/verify-update.swift dist/appcast.xml "$DMG" "$APP/Contents/Info.plist"
 grep -q "<sparkle:version>$BUILD</sparkle:version>" dist/appcast.xml || { echo "appcast.xml is not for build $BUILD" >&2; exit 1; }
 

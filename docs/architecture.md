@@ -42,7 +42,7 @@ No code is shared across platforms yet. Each platform implements the same rules 
 ## Per-platform shells
 
 **Mac** (`Sources/Shepetal/`, built into `dist/Shepetal.app` by `scripts/make-app.sh`):
-- `App.swift`: the menu-bar item and the hourly retention sweep. `Menu.swift` builds the 🤫 menu from a pure `MenuModel` (contextual items, meetings, the window, updates, paste last and Recent, input, help, Quit); the other settings and the Donate links are in the window (`Hub.swift`).
+- `App.swift`: the menu-bar item and the hourly retention sweep. `Menu.swift` builds the 🤫 menu from a pure `MenuModel` (contextual items, meetings, the window, updates, paste last and Recent, input, help, Quit); the other settings are in the window (`Hub.swift`).
 - `Indicator.swift`: borderless, non-activating `NSPanel`, 18 pt, 8 pt from the bottom-left corner, on all Spaces, click-through.
 - `FnTap.swift`: listen-only `CGEventTap` for fn (63, flagsChanged), re-enabled when macOS disables it. The Globe key's extra keycode 179 key events are ignored.
 - `Audio.swift`: `AVAudioEngine` capture, resampled to 16 kHz mono.
