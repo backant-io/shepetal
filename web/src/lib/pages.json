@@ -23,6 +23,14 @@
     "priority": 0.6,
     "freq": "weekly"
   },
+  "waitlist": {
+    "path": "/waitlist",
+    "title": "Windows, Linux and iPhone.",
+    "sub": "shepetal is for Mac today. Leave your email to hear when it comes to yours.",
+    "updated": "2026-10-22",
+    "priority": 0.5,
+    "freq": "monthly"
+  },
   "press": {
     "path": "/press",
     "title": "Press.",

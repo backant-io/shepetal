@@ -15,7 +15,9 @@ export function withEdgeHtml(res: Response, env: { POSTHOG_KEY?: string; POSTHOG
   const { key, host } = analyticsConfig(env);
   const q = url.pathname === '/install' ? attributionQuery(attribution(url.searchParams)) : '';
   const install = url.pathname === '/install';
-  if (!key && !install) return res;
+  // A signed link is base64url and a dot, so it needs no escaping either.
+  const t = url.pathname === '/waitlist/unsubscribe' ? url.searchParams.get('t')?.match(/^[\w-]{1,1000}\.[\w-]{43}$/)?.[0] : undefined;
+  if (!key && !install && !t) return res;
   const html = new HTMLRewriter();
   if (key) {
     const content = JSON.stringify({ key, host }).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
@@ -26,6 +28,7 @@ export function withEdgeHtml(res: Response, env: { POSTHOG_KEY?: string; POSTHOG
     html.on('head', { element: (head) => void head.append(`<meta http-equiv="refresh" content="1;url=/download${q}">`, { html: true }) });
     if (q) html.on('a[href="/download"]', { element: (a) => void a.setAttribute('href', `/download${q}`) });
   }
+  if (t) html.on('input[name="t"]', { element: (input) => void input.setAttribute('value', t) });
   const out = html.transform(res);
   out.headers.delete('etag');
   return out;

@@ -114,6 +114,18 @@
 .s-prose .s-step-title { margin: 0; }
 .s-faq section + section { margin-top: .5rem; }
 
+/* Waitlist: the form, with the account page's field and label; checkboxes in the ink, the one orange the button */
+.s-wl { display: grid; justify-items: start; gap: 1.75rem; margin-top: 3rem; }
+.s-wl .s-field { max-width: 26rem; }
+.s-input-plain { text-transform: none; letter-spacing: 0; }
+.s-wl-set { display: grid; gap: .7rem; margin: 0; padding: 0; border: 0; }
+.s-wl-set legend { margin-bottom: .7rem; padding: 0; }
+.s-check { display: flex; align-items: baseline; gap: .75rem; font-size: 1.0625rem; line-height: 1.4; cursor: pointer; }
+.s-check input { flex: none; width: 1.1rem; height: 1.1rem; margin: 0; transform: translateY(.18em); accent-color: var(--ink); }
+.s-check input:focus-visible { outline: 2px solid #FF4F12; outline-offset: 3px; }
+.s-waitlist .s-small { margin-top: 2.5rem; }
+.s-waitlist .s-prose .s-wl { margin-top: 1.5rem; }
+
 /* changelog */
 .s-releases { list-style: none; margin: 3rem 0 0; padding: 0; border-top: 1px solid var(--rule); }
 .s-releases > li { padding: 1.6rem 0; border-bottom: 1px solid var(--rule); }

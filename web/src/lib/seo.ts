@@ -7,7 +7,7 @@ import { SITE_URL } from './site';
  * `sub`), their place in the sitemap, and their metadata. No price and no steps on a preview.
  */
 type Page = { path: string; title: string; sub: string; updated: string; priority: number; freq: 'weekly' | 'monthly' | 'yearly' };
-export const PAGES = pagesJson as Record<'home' | 'faq' | 'changelog' | 'press' | 'refunds' | 'privacy' | 'terms' | 'impressum' | 'legal', Page>;
+export const PAGES = pagesJson as Record<'home' | 'faq' | 'changelog' | 'waitlist' | 'press' | 'refunds' | 'privacy' | 'terms' | 'impressum' | 'legal', Page>;
 
 export type PageKey = keyof typeof PAGES;
 

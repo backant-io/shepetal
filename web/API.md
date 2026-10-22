@@ -72,3 +72,20 @@ The app makes a code_verifier (43 to 128 characters from A-Z a-z 0-9 - . _ ~), i
 - GET /appcast.xml: the Sparkle feed the Mac app checks (its SUFeedURL). LATEST's `releases/<v>/appcast.xml` passed through as `application/xml; charset=utf-8`, `public, max-age=300`. Before the first promotion, an empty feed (`<channel/>`, `no-cache`), which Sparkle reads as no update.
 - The trial starts at the user's first shepetal sign-in (web or app) and lasts 30 days, with no card. A lifetime license never expires.
 - GET /account#plans: the plan choice ($23.99 once or $0.99 a month), where the apps' Buy button lands. Subscribers get Manage subscription there. Each user is keyed by their Google account email, lowercased.
+
+## Waitlist (the website, not the apps)
+
+Answered by worker.ts without Next (src/lib/waitlist.ts). The pages are static: /waitlist, and after it /waitlist/thanks, /waitlist/check, /waitlist/confirmed, /waitlist/unsubscribe, /waitlist/unsubscribed and /waitlist/link.
+
+- POST /api/waitlist (form-encoded, the /waitlist form): email, platform (windows, linux or iphone, one or more) and consent=yes.
+  - 403 unless the Origin header is the site's origin.
+  - 303 to /waitlist/check for a missing or bad email, no known platform, or no consent. Nothing is stored.
+  - Otherwise 303 to /waitlist/thanks, the same answer for a new, pending, confirmed, unsubscribed or throttled address and when the database fails. The confirmation email goes out after the answer.
+  - Throttle: at most 10 signups an hour from one IP address (more are dropped); at most one confirmation email per address per 30 minutes.
+  - A new or pending address stores the choice and gets a confirmation email. A confirmed or unsubscribed one keeps its stored choice until the new link is clicked; a confirmed one choosing the same platforms gets no email.
+  - With WAITLIST_EMAILS anything but "on", the email is written to the log instead of sent.
+- GET /api/waitlist/confirm?t=<signed>: the link in the email (HMAC-SHA256 under AUTH_SECRET, 7 days). 303 to /waitlist/confirmed, or /waitlist/link for a bad, changed or old link, or one sent before the address unsubscribed.
+- GET /api/waitlist/unsubscribe?t=<signed>: 303 to /waitlist/unsubscribe?t=…, the page with the button (worker.ts puts t into its form). A GET never unsubscribes: link checkers open every link.
+- POST /api/waitlist/unsubscribe: t in the form (the button: 303 to /waitlist/unsubscribed) or in the URL with the body List-Unsubscribe=One-Click (RFC 8058, from a mail app, no Origin needed: 200). An unsubscribe link does not expire.
+- Every email carries `List-Unsubscribe: <https://shepetal.app/api/waitlist/unsubscribe?t=…>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`.
+- Daily at 03:17 UTC (wrangler.toml [triggers]), a row that is not confirmed and subscribed is deleted 29 days after its last signup.

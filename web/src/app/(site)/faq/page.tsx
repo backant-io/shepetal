@@ -105,8 +105,13 @@ const QAS: QA[] = [
   },
   {
     q: 'Is there shepetal for Windows, Linux or iPhone?',
-    a: <p>Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready.</p>,
-    text: 'Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready.',
+    a: (
+      <p>
+        Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they
+        are ready. <Link href="/waitlist">Join the waitlist</Link> to hear when yours is out.
+      </p>
+    ),
+    text: 'Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready. Join the waitlist to hear when yours is out.',
   },
   {
     q: 'Can I use it on more than one Mac?',

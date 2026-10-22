@@ -48,6 +48,20 @@ describe('withEdgeHtml', () => {
     expect(out.headers.get('etag')).toBeNull();
   });
 
+  // The unsubscribe page is static; the link's signed token reaches its form only here.
+  it('puts the signed ?t= into the unsubscribe form on /waitlist/unsubscribe, and nothing that is not a signed token', () => {
+    const t = `${'a'.repeat(20)}.${'B'.repeat(43)}`;
+    const { out, done } = run(`https://shepetal.app/waitlist/unsubscribe?t=${t}`, {});
+    expect(done).toEqual([`input[name="t"] value=${t}`]);
+    expect(out.headers.get('etag')).toBeNull();
+    for (const bad of ['%22%3E%3Cscript%3E', `${t}x`, 'abc', '']) {
+      const res = page();
+      expect(run(`https://shepetal.app/waitlist/unsubscribe?t=${bad}`, {}, res).out, bad).toBe(res);
+    }
+    const res = page();
+    expect(run(`https://shepetal.app/faq?t=${t}`, {}, res).out).toBe(res);
+  });
+
   it('leaves the page as built without a key and without attribution, and never touches what is not HTML', () => {
     for (const url of ['https://shepetal.app/', 'https://shepetal.app/faq?ref=x']) {
       const res = page();
