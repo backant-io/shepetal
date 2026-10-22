@@ -6,7 +6,7 @@
 
 @property --p { syntax: '<number>'; inherits: true; initial-value: 0; }
 @property --don { syntax: '<number>'; inherits: true; initial-value: 0; }
-@property --pulse { syntax: '<number>'; inherits: true; initial-value: 1; }
+@property --pulse { syntax: '<number>'; inherits: false; initial-value: 1; }
 .kc { --signal: #FF4F12; --ink: #161512; --ink2: #57544E; --led-off: #4a1d0a; --led-on: #FFF6EC; --travel: 26px; --gut: clamp(1rem, calc(3.4 * var(--u)), 6.0rem);
   /* one relative unit: 1vw, but never taller than the window allows, so the composition keeps its proportions */
   --u: min(1vw, 1.6vh);
@@ -94,12 +94,12 @@
 .kd-art { display: block; width: 100%; height: auto; overflow: visible; }
 .kd-k-led { fill: var(--led-off); }
 .kd-ks-d { opacity: 0; }
-.kd-k-glow { opacity: calc(var(--don) * var(--pulse)); }
-.kc-dock { animation: kc-pulse 1.25s ease-in-out infinite; }
+/* The glow breathes on its own element: an inherited --pulse on .kc-dock restyled the whole key every frame. */
+.kd-k-glow { opacity: calc(var(--don) * var(--pulse)); animation: kc-pulse 1.25s ease-in-out infinite; }
 .kc-dock-in { transform-origin: 0 0; }
 @keyframes kc-pulse { 0%, 100% { --pulse: .35; } 50% { --pulse: 1; } }
-@keyframes kc-dockin { 0% { opacity: 0; transform: translate(var(--kx, 0px), var(--ky, 0px)) scale(var(--ks, 10)); } .4% { opacity: 1; transform: translate(var(--kx, 0px), var(--ky, 0px)) scale(var(--ks, 10)); animation-timing-function: cubic-bezier(.6,0,.2,1); } 100% { opacity: 1; transform: none; } }
-@keyframes kc-dockout { 0% { opacity: 1; transform: none; } 100% { opacity: 0; transform: translateY(140%); } }
+@keyframes kc-dockin { 0% { opacity: 0; visibility: hidden; transform: translate(var(--kx, 0px), var(--ky, 0px)) scale(var(--ks, 10)); } .4% { opacity: 1; visibility: visible; transform: translate(var(--kx, 0px), var(--ky, 0px)) scale(var(--ks, 10)); animation-timing-function: cubic-bezier(.6,0,.2,1); } 100% { opacity: 1; transform: none; } }
+@keyframes kc-dockout { 0% { opacity: 1; visibility: visible; transform: none; } 100% { opacity: 0; visibility: hidden; transform: translateY(140%); } }
 @keyframes kc-hold { 0% { transform: translateY(0); animation-timing-function: cubic-bezier(.55,0,.9,.55); } 10% { transform: translateY(var(--travel)); animation-timing-function: cubic-bezier(.2,.6,.4,1); } 15% { transform: translateY(calc(var(--travel) * .86)); } 20%, 88% { transform: translateY(var(--travel)); animation-timing-function: cubic-bezier(.2,.9,.3,1); } 95% { transform: translateY(calc(var(--travel) * -.12)); } 100% { transform: translateY(0); } }
 @keyframes kc-hold-led { 0%, 9% { fill: var(--led-off); } 10%, 90% { fill: var(--led-on); } 91%, 100% { fill: var(--led-off); } }
 @keyframes kc-hold-shR { 0% { opacity: 1; } 10%, 90% { opacity: 0; } 97%, 100% { opacity: 1; } }

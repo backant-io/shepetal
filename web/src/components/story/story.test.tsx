@@ -150,11 +150,14 @@ describe('the motion', () => {
       const props = [...body.matchAll(/([a-z-]+)\s*:/g)].map((m) => m[1]);
       for (const p of props)
         expect(
-          ['transform', 'opacity', 'transform-origin', 'animation-timing-function', '--p', '--don', '--pulse', 'fill'],
+          ['transform', 'opacity', 'transform-origin', 'animation-timing-function', '--p', '--don', '--pulse', 'fill', 'visibility'],
           `${name}: ${p}`,
         ).toContain(p);
       // fill is paint only, for the two LEDs
       if (props.includes('fill')) expect(['kc-led', 'kc-hold-led']).toContain(name);
+      // visibility only hides the docked key while it is transparent anyway (before it docks, after it flies out),
+      // so the browser does not paint it: no layout, no visible change
+      if (props.includes('visibility')) expect(['kc-dockin', 'kc-dockout']).toContain(name);
     }
   });
 
