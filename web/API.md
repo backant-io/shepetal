@@ -2,7 +2,7 @@
 
 The contract between this service and the shepetal apps. The apps are built against exactly this text: change both together. `web/e2e/run.mjs` drives it end to end.
 
-- Base URL https://shepetal.app (SHEPETAL_DOMAIN in wrangler.toml); the apps override it with SHEPETAL_ACCOUNT_URL. The old host, https://shepetal.backant.io, which released builds call, answers every /api/* route directly (never a redirect); its /app/login, /appcast.xml and pages are a 301 to the same path and query on https://shepetal.app. https://www.shepetal.app is a 301 to the apex.
+- Base URL https://shepetal.app (SHEPETAL_DOMAIN in wrangler.toml); the apps override it with SHEPETAL_ACCOUNT_URL. The old host, https://shepetal.backant.io, which released builds call, is a 301 to the same path and query on https://shepetal.app for every path, /api/* included. https://www.shepetal.app is a 301 to the apex.
 
 ## App sign-in: OAuth for native apps with PKCE (RFC 8252, RFC 7636)
 

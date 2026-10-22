@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // The Worker on its three hostnames (src/lib/site.ts, worker.ts), on the real Worker runtime:
-//   shepetal.backant.io (the old host, called by every released app build): /api/* answers directly, never with a
-//     redirect; pages, /app/login (with its query) and /appcast.xml are a 301 to the same path on SHEPETAL_DOMAIN;
-//   SHEPETAL_DOMAIN: served as it is, and next-auth's callback is on it;
+//   shepetal.backant.io (the old host, called by released app builds): every path, /api/* included, is a 301 to the
+//     same path and query on SHEPETAL_DOMAIN;
+//   SHEPETAL_DOMAIN: served as it is, the Stripe webhook answers there, and next-auth's callback is on it;
 //   www.SHEPETAL_DOMAIN: a 301 to the apex.
 // `wrangler dev --local-upstream <host>` makes the Worker see each request as made to <host>, the way the custom
 // domain delivers it in production. No secrets: every value is generated per run, and nothing leaves the machine
@@ -68,18 +68,12 @@ const loc = (r) => r.headers.get('location');
 
 try {
   await onHost(LEGACY, async (get) => {
-    for (const [method, path, body] of [['GET', '/api/license'], ['POST', '/api/checkout', '{"plan":"lifetime"}'], ['GET', '/api/account/plan'], ['POST', '/api/billing/cancel']]) {
-      const r = await get(path, { method, body, headers: { authorization: 'Bearer not-a-token', 'content-type': 'application/json' } });
-      assert.equal(r.status, 401, `${method} ${path} on the old host answers itself`);
-      assert.equal(loc(r), null);
+    for (const [method, path, body] of [['GET', '/api/license?v=0.2.2'], ['POST', '/api/checkout', '{"plan":"lifetime"}'], ['GET', '/api/account/plan'],
+      ['POST', '/api/billing/cancel'], ['POST', '/api/app/token', '{}'], ['POST', '/api/stripe/webhook', '{}'], ['GET', '/api/auth/providers']]) {
+      const r = await get(path, { method, body, headers: { authorization: 'Bearer not-a-token', 'content-type': 'application/json', 'stripe-signature': 't=1,v1=00' } });
+      assert.deepEqual([r.status, loc(r)], [301, `${SITE}${path}`], `${method} ${path} on the old host`);
     }
-    const token = await get('/api/app/token', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
-    assert.deepEqual([token.status, (await token.json()).error], [400, 'invalid_request']);
-    const hook = await get('/api/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': 't=1,v1=00' }, body: '{}' });
-    assert.equal(hook.status, 400, 'the webhook answers on the old host (bad signature)');
-    const providers = await (await get('/api/auth/providers')).json();
-    assert.equal(providers.google.callbackUrl, `${SITE}/api/auth/callback/google`, 'Google comes back to the domain, whichever host asked');
-    ok(`${LEGACY}: /api/* answers directly (license, checkout, account/plan, billing/cancel 401; app/token 400; the webhook 400), never a redirect; next-auth's callback is ${SITE}/api/auth/callback/google`);
+    ok(`${LEGACY}: /api/* (license, checkout, account/plan, billing/cancel, app/token, the Stripe webhook, auth) is a 301 to ${SITE}, query kept`);
 
     const q = '?redirect_uri=shepetal%3A%2F%2Fauth&state=a%20%26b&code_challenge=Bcf0yvSXgLJmUFx3HlAqtTQnYWgJmxzU6E8N9q5PQ5w&code_challenge_method=S256';
     const login = await get(`/app/login${q}`);
@@ -96,6 +90,8 @@ try {
   await onHost(DOMAIN, async (get) => {
     for (const path of ['/', '/login', '/privacy', '/terms', '/legal']) assert.equal((await get(path)).status, 200, path);
     assert.equal((await get('/api/license')).status, 401);
+    const hook = await get('/api/stripe/webhook', { method: 'POST', headers: { 'stripe-signature': 't=1,v1=00' }, body: '{}' });
+    assert.deepEqual([hook.status, loc(hook)], [400, null], 'the Stripe webhook answers on the domain itself (bad signature), no redirect');
     const html = await (await get('/')).text();
     assert.match(html, new RegExp(`<link rel="canonical" href="${SITE.replace(/\./g, '\\.')}/?"`), 'the canonical URL is on the domain');
     assert.ok(!html.includes(LEGACY), 'the page never names the old host');
@@ -103,7 +99,7 @@ try {
     const login = await get(`/app/login${q}`);
     assert.equal(login.status, 307);
     assert.ok(decodeURIComponent(loc(login)).includes(`redirect_uri=${SITE}/api/auth/callback/google`), 'Google sign-in with the callback on the domain');
-    ok(`${DOMAIN}: pages 200, /api/* answers, the canonical URL and Google's callback are on ${SITE}`);
+    ok(`${DOMAIN}: pages 200, /api/* and the Stripe webhook answer, the canonical URL and Google's callback are on ${SITE}`);
 
     // Pavel's rule: nothing public discloses the source code, its license or where it is hosted. Every page in the
     // sitemap plus the pages it leaves out, as the Worker renders them; the font and emoji license files are

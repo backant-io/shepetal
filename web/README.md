@@ -4,7 +4,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 
 ## Architecture
 
-- **Runtime:** Next.js 16 (App Router), built with `@opennextjs/cloudflare` and served by its own Cloudflare Worker, `shepetal-web`. `worker.ts` is the entry: it applies the host rules (`src/lib/site.ts`: www to the apex; on the old host `shepetal.backant.io`, `/api/*` answers directly and the rest is a 301 to the domain), then hands over to OpenNext's worker. The custom domains are attached at launch (GO-LIVE.md, step 5).
+- **Runtime:** Next.js 16 (App Router), built with `@opennextjs/cloudflare` and served by its own Cloudflare Worker, `shepetal-web`. `worker.ts` is the entry: it applies the host rules (`src/lib/site.ts`: www to the apex; the old host `shepetal.backant.io` is a 301 to the domain for every path, `/api/*` included), then hands over to OpenNext's worker. The custom domains are attached at launch (GO-LIVE.md, step 5).
 - **Sign-in:** next-auth v5 with Google, JWT sessions and no adapter, the same setup as backant.io. Cookies are host-only, so a shepetal session never reaches backant.io.
 - **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens`, `app_codes` and `stripe_events`, and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
 - **Payments:** Stripe Checkout in backant's Stripe account: the lifetime price (lookup_key `shepetal_lifetime`, mode payment) or the monthly price (`shepetal_monthly`, mode subscription), both with promotion codes. `scripts/stripe-setup.mjs` creates the products, prices, the PRODUCTHUNT code and the Billing Portal configuration, in test or live mode. The webhook at `/api/stripe/webhook` stores the lifetime license or the subscription; `/api/billing/portal` opens the Stripe Billing Portal.
@@ -79,7 +79,7 @@ Local Google sign-in only works if `http://localhost:3000/api/auth/callback/goog
 | `npm run e2e` | the real Worker (`wrangler dev`, a fresh local D1) with a fake Stripe API: sign-in, the app login, checkout per plan, the webhooks, and /account for a trial user, a subscriber and a lifetime owner |
 | `node e2e/stripe-testmode.mjs` | both plans and the plan settings API against the real Stripe test API (`STRIPE_SECRET_KEY=sk_test_…`) |
 | `node e2e/account-testmode.mjs` | the plan settings on /account in a headless browser, in Stripe test mode: subscribe, Manage billing, cancel at period end, resume, switch to lifetime |
-| `node e2e/hosts.mjs` | the Worker on its three hostnames: on `shepetal.backant.io` `/api/*` answers directly and pages, `/app/login` and `/appcast.xml` are a 301 to `SHEPETAL_DOMAIN`; `www` is a 301 to the apex; Google's callback is on the domain |
+| `node e2e/hosts.mjs` | the Worker on its three hostnames: on `shepetal.backant.io` every path, `/api/*` included, is a 301 to `SHEPETAL_DOMAIN`; the Stripe webhook answers on the domain; `www` is a 301 to the apex; Google's callback is on the domain |
 | `node e2e/design-match.mjs` | the landing page against the design's reference frames (1440×900 and 390×844), an optional sweep against its standalone preview (`SWEEP=1`), and the check that the key never covers text. Viewport-sized captures only |
 
 The browser tests use `playwright-core` from `PLAYWRIGHT_CORE` and a chromium headless shell from `PLAYWRIGHT_BROWSERS_PATH`: no window, no focus, no clipboard.

@@ -1,6 +1,6 @@
 # Going live: shepetal.app
 
-The site's domain is `SHEPETAL_DOMAIN` in `wrangler.toml` [vars] (`shepetal.app`); every URL the site builds comes from it (`src/lib/site.ts`). The Worker also keeps answering on the old host, `shepetal.backant.io`, which every released app build calls: there `/api/*` answers directly, and pages, `/app/login` (with its query) and `/appcast.xml` are a 301 to the same path on shepetal.app. `www.shepetal.app` is a 301 to the apex. `web/e2e/hosts.mjs` tests all three hosts on the Worker runtime.
+The site's domain is `SHEPETAL_DOMAIN` in `wrangler.toml` [vars] (`shepetal.app`); every URL the site builds comes from it (`src/lib/site.ts`). The old host, `shepetal.backant.io`, is no longer a site: every path there, `/api/*` included, is a 301 to the same path and query on shepetal.app. `www.shepetal.app` is a 301 to the apex. `web/e2e/hosts.mjs` tests all three hosts on the Worker runtime.
 
 Do these in order. Steps marked **Pavel** need an account only Pavel has. Run every command from `web/` on `main`, with wrangler logged in to Hegler Technologies (`npx wrangler whoami`) and `AWS_PROFILE=backant`. No command here prints a secret.
 
@@ -43,7 +43,7 @@ Done by Pavel on 22.10.26: backant's OAuth client has the redirect URI `https://
    cd web && STRIPE_SECRET_KEY="$(aws ssm get-parameter --with-decryption --name /backant/WEB_STRIPE_SECRET_KEY --query Parameter.Value --output text)" node scripts/stripe-setup.mjs --live
    ```
    The script sets the Billing Portal's return URL and its privacy and terms links from SHEPETAL_DOMAIN (`https://shepetal.app/account`, `/privacy`, `/terms`).
-2. Move shepetal's webhook endpoint (we_1USl5ADrjgXysMQjYGGaUepu, today `https://shepetal.backant.io/api/stripe/webhook`) to the domain. Its id and signing secret stay the same, so `STRIPE_WEBHOOK_SECRET` does not change. Do this **after** step 5, once https://shepetal.app answers. Until then the old URL keeps working, because `/api/*` answers on the old host:
+2. Move shepetal's webhook endpoint (we_1USl5ADrjgXysMQjYGGaUepu, today `https://shepetal.backant.io/api/stripe/webhook`) to the domain. Its id and signing secret stay the same, so `STRIPE_WEBHOOK_SECRET` does not change. Do this **right after** step 5, once `curl -s -o /dev/null -w '%{http_code}\n' -X POST https://shepetal.app/api/stripe/webhook -d '{}'` prints 400. From step 5 on, the old URL is a 301, and Stripe does not follow redirects: deliveries fail until the endpoint points at the domain. Stripe retries a failed delivery for up to 3 days, so nothing is lost if the move follows the deploy:
 
    ```sh
    stripe webhook_endpoints update we_1USl5ADrjgXysMQjYGGaUepu --live \
@@ -53,7 +53,7 @@ Done by Pavel on 22.10.26: backant's OAuth client has the redirect URI `https://
      -d "enabled_events[]=invoice.paid" -d "enabled_events[]=invoice.payment_failed" -d "enabled_events[]=charge.refunded"
    ```
 
-   Do not touch backant's own endpoint or its secret.
+   Then resend any delivery that failed in between from the endpoint's page in the Dashboard. Do not touch backant's own endpoint or its secret.
 3. Copy that endpoint's signing secret (`whsec_…`) for step 4 if it is not set yet.
 
 Both sites share this Stripe account, so each webhook sees the other's events. shepetal acts only on sessions and subscriptions with `metadata.app = "shepetal"` and answers everything else 200. backant's handler acts on every `mode=subscription` checkout that has a `client_reference_id`, so shepetal's subscription checkouts carry none (the user id is in metadata), and backant finds no client for shepetal's Stripe customers on subscription events. Filtering `metadata.app = "shepetal"` out in backant's handler as well is the safe follow-up.
@@ -123,7 +123,7 @@ O=https://shepetal.backant.io
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/                # 301 https://shepetal.app/
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$O/app/login?state=x"   # 301 https://shepetal.app/app/login?state=x
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/appcast.xml     # 301 https://shepetal.app/appcast.xml
-curl -s -o /dev/null -w '%{http_code}\n' $O/api/license                     # 401, never a redirect (released apps)
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/api/license       # 301 https://shepetal.app/api/license
 curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://www.shepetal.app/terms   # 301 https://shepetal.app/terms
 CH=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM   # any 43-character challenge
 curl -sI $B/ | grep -iE '^(HTTP|strict-transport)'                       # 200, HSTS
@@ -135,7 +135,7 @@ curl -s -X POST $B/api/app/token -H 'content-type: application/json' -d '{"code"
 curl -s -o /dev/null -w '%{http_code}\n' $B/api/license                  # 401
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/api/stripe/webhook -d '{}'   # 400
 curl -sI https://shepetal.backant.io/terms | grep -i '^location'         # https://shepetal.app/terms (301)
-curl -s https://shepetal.backant.io/api/license -o /dev/null -w '%{http_code}\n'   # 401: the old host's API still answers
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' -X POST https://shepetal.backant.io/api/stripe/webhook   # 301 https://shepetal.app/api/stripe/webhook (Stripe itself calls the domain, step 3.2)
 curl -s $B/appcast.xml | grep -c github                                  # 0
 curl -sI $B/download/Shepetal-<version>.dmg | grep -i '^content-disposition'   # attachment, from shepetal.app
 curl -s https://backant.io/ | grep -ci shepetal                         # 0: nothing about shepetal on backant.io

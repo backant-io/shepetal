@@ -5,8 +5,8 @@ compatibility_flags = ["nodejs_compat"]
 main = "worker.ts"
 
 workers_dev = true
-# Custom domains: the site's domain (SHEPETAL_DOMAIN below), its www (301 to the apex), and the old host, which every
-# released app build calls (/api/* answers there directly; pages, /app/login and /appcast.xml 301 to the domain).
+# Custom domains: the site's domain (SHEPETAL_DOMAIN below), its www (301 to the apex), and the old host, which
+# released app builds call (every path there, /api/* included, is a 301 to the same path on the domain).
 # `wrangler deploy` attaches them and creates their DNS records: that is a GO step (GO-LIVE.md). site.test.ts checks
 # that these three match SHEPETAL_DOMAIN.
 routes = [

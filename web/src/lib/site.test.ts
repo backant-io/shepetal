@@ -40,16 +40,14 @@ describe('hosts', () => {
     expect(moved(at(`www.${SHEPETAL_DOMAIN}`, '/api/license'))).toEqual([301, `${SITE_URL}/api/license`]);
   });
 
-  it('answers /api/* directly on the old host, never with a redirect, so released app builds keep working', () => {
-    for (const path of ['/api/license', '/api/checkout', '/api/app/token', '/api/app/revoke', '/api/billing/portal', '/api/stripe/webhook', '/api/auth/session', '/api'])
-      expect(at(LEGACY_HOST, path)).toBeNull();
-  });
-
-  it('moves pages, /app/login (with its query) and /appcast.xml from the old host to the domain with a 301', () => {
+  // The old host is no longer a site: nothing answers there, so nothing (the Stripe webhook included) can keep
+  // depending on it unnoticed.
+  it('moves every path on the old host, /api/* included, to the same path and query on the domain with a 301', () => {
     const q = '?redirect_uri=shepetal%3A%2F%2Fauth&state=a%20b&code_challenge=xyz&code_challenge_method=S256';
     expect(moved(at(LEGACY_HOST, `/app/login${q}`))).toEqual([301, `${SITE_URL}/app/login${q}`]);
-    expect(moved(at(LEGACY_HOST, '/appcast.xml'))).toEqual([301, `${SITE_URL}/appcast.xml`]);
-    for (const path of ['/', '/account', '/login', '/privacy', '/download', '/apiary'])
+    expect(moved(at(LEGACY_HOST, '/api/license?v=0.2.2'))).toEqual([301, `${SITE_URL}/api/license?v=0.2.2`]);
+    for (const path of ['/', '/account', '/login', '/privacy', '/download', '/apiary', '/appcast.xml', '/api', '/api/license', '/api/checkout',
+      '/api/app/token', '/api/app/revoke', '/api/billing/portal', '/api/stripe/webhook', '/api/auth/session', '/api/auth/callback/google'])
       expect(moved(at(LEGACY_HOST, path))).toEqual([301, `${SITE_URL}${path}`]);
   });
 });

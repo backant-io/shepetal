@@ -9,23 +9,23 @@ export const SITE_URL = `https://${SHEPETAL_DOMAIN}`;
 
 /**
  * The host the site lived on before, called by every released app build (API base URL, sign-in, update feed).
- * The Worker keeps answering there: see hostRedirect.
+ * It is no longer a site: every request there is a 301 to SHEPETAL_DOMAIN (see hostRedirect).
  */
 export const LEGACY_HOST = 'shepetal.backant.io';
 
 /**
  * Where a request on another host than SHEPETAL_DOMAIN goes (the custom Worker entry, worker.ts, asks before Next):
  * - www.<domain>: 301 to the apex, same path and query;
- * - the legacy host: /api/* answers directly (never a redirect: old builds' HTTP clients may not follow one, or may
- *   drop the Authorization header or the POST body when they do); everything else (pages, /app/login with its query,
- *   /appcast.xml) is a 301 to the same path and query on SHEPETAL_DOMAIN;
+ * - the legacy host: every path, /api/* included, is a 301 to the same path and query on SHEPETAL_DOMAIN (Pavel,
+ *   22.10.26). Stripe does not follow redirects, so its webhook endpoint must point at the domain itself; old app
+ *   builds may drop the Authorization header on the cross-host redirect (accepted: installing a current build fixes it);
  * - any other host (the domain itself, workers.dev previews, localhost): null, served as it is.
  */
 export function hostRedirect(url: URL, domain: string = SHEPETAL_DOMAIN): Response | null {
   const host = url.hostname.toLowerCase();
   const to = () => Response.redirect(`https://${domain}${url.pathname}${url.search}`, 301);
   if (host === `www.${domain}`) return to();
-  if (host === LEGACY_HOST) return url.pathname === '/api' || url.pathname.startsWith('/api/') ? null : to();
+  if (host === LEGACY_HOST) return to();
   return null;
 }
 
