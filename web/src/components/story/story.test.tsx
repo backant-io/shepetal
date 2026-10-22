@@ -106,8 +106,9 @@ describe('the landing page', () => {
     expect(html.match(/<h1\b/g)).toHaveLength(1);
     expect(html.match(/<h2\b/g)).toHaveLength(6);
     expect(html).toContain('aria-label="Press the fn key"');
-    // Try 30 days free, twice: a link to the install guide, which starts the download. Download is open: no sign-in form.
-    expect(html.match(/<a class="kc-cta[^"]*" href="\/install">Try 30 days free<\/a>/g)).toHaveLength(2);
+    // Try 30 days free, twice: a link to the install guide, which starts the download, with the Mac glyph in front
+    // (decorative, so the link's name stays the words). Download is open: no sign-in form.
+    expect(html.match(/<a class="kc-cta[^"]*" href="\/install"><svg class="kc-cta-mac"[^>]*aria-hidden="true"[^>]*>.*?<\/svg>Try 30 days free<\/a>/g)).toHaveLength(2);
     expect(html).not.toMatch(/<form\b/);
   });
 
