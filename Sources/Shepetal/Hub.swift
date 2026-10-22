@@ -19,13 +19,12 @@ final class Hub {
          openPermissions: @escaping () -> Void, loginItem: LoginItem, openDictionary: @escaping () -> Void,
          restoreFnKey: @escaping () -> Void, meetingStore: MeetingStoring = InMemoryMeetingStore(),
          input: HubInput = .none,
-         updater: SparkleUpdater? = nil, uninstallBlocker: @escaping () -> String? = { nil },
+         uninstallBlocker: @escaping () -> String? = { nil },
          openWhatsNew: @escaping () -> Void = {}, notices: @escaping () -> [NoticeLog.Notice] = { [] }) {
         model = HubModel(pipeline: pipeline, engine: engine, status: status, retention: retention,
                          setRetention: setRetention, openPermissions: openPermissions, loginItem: loginItem,
                          openDictionary: openDictionary, restoreFnKey: restoreFnKey, openWhatsNew: openWhatsNew,
                          notices: notices)
-        model.updater = updater
         model.uninstallBlocker = uninstallBlocker
         meetings = MeetingsModel(store: meetingStore)
         dictionary = DictionaryModel(url: pipeline.dictionary, editAsText: openDictionary)
@@ -99,7 +98,6 @@ final class HubModel: ObservableObject {
     let openWhatsNew: () -> Void  // the release notes (F111)
     let notices: () -> [NoticeLog.Notice]  // what 🤫 showed, newest first (F100)
     private let restore: () -> Void
-    var updater: SparkleUpdater?
     var uninstallBlocker: () -> String? = { nil }
 
     @Published var query = "" { didSet { reload() } }
