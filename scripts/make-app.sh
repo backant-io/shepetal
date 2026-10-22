@@ -47,7 +47,7 @@ case ${UPDATES:-0} in
   <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
   <key>SUEnableAutomaticChecks</key><true/>
   <key>SUScheduledCheckInterval</key><integer>86400</integer>
-  <key>SUAutomaticallyUpdate</key><true/>"; UPDATES_NOTE="updates on" ;;
+  <key>SUAllowsAutomaticUpdates</key><false/>"; UPDATES_NOTE="updates on" ;;
   0) UPDATE_KEYS=''; UPDATES_NOTE="updates off" ;;
   *) echo "UPDATES must be 1 or 0" >&2; exit 2 ;;
 esac
