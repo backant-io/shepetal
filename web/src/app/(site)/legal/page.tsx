@@ -16,6 +16,13 @@ export default function Legal() {
         <h1 className="s-h2">Legal</h1>
 
         <div className="s-prose">
+          <h2>Who we are</h2>
+          <p>
+            The <Link href="/impressum">legal notice (Impressum)</Link> names who runs shepetal and how to reach us. The{' '}
+            <Link href="/terms">Terms of Use</Link>, the <Link href="/refunds">Refund Policy</Link> and the{' '}
+            <Link href="/privacy">Privacy Policy</Link> are their own pages.
+          </p>
+
           <h2>Fonts</h2>
           <p>
             Archivo, Bodoni Moda and Fragment Mono are under the SIL Open Font License 1.1:{' '}

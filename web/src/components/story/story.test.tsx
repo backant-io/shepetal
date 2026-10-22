@@ -21,6 +21,14 @@ const text = html
   .replace(/&amp;/g, '&')
   .replace(/\s+/g, ' ');
 
+describe('landmarks', () => {
+  it('puts the whole story in one <main>, with real headings', () => {
+    expect(html).toContain('<main class="kc">');
+    expect(html.match(/<main\b/g)).toHaveLength(1);
+    expect(html).toMatch(/<h1\b/);
+  });
+});
+
 describe('the scroll timings: one table, exactly the design’s', () => {
   it('writes story.generated.css from the table (run node scripts/story-css.mjs after a change)', () => {
     expect(read('story.generated.css')).toBe(
@@ -81,6 +89,7 @@ describe('the landing page', () => {
       'a month.',
       'Privacy',
       'Terms',
+      'Refunds',
       'Legal',
     ];
     let at = 0;

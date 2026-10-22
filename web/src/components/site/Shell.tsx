@@ -19,7 +19,7 @@ export function SiteHeader({ end }: { end?: React.ReactNode }) {
   );
 }
 
-/** The footer, as on the landing page: the wordmark, then Privacy · Terms · Legal. */
+/** The footer, as on the landing page: the wordmark, then Privacy · Terms · Refunds · Legal. */
 export function SiteFooter() {
   return (
     <footer className="s-foot">
@@ -27,6 +27,7 @@ export function SiteFooter() {
       <nav aria-label="Legal" className="s-mono s-foot-nav">
         <Link href="/privacy">Privacy</Link>
         <Link href="/terms">Terms</Link>
+        <Link href="/refunds">Refunds</Link>
         <Link href="/legal">Legal</Link>
       </nav>
     </footer>

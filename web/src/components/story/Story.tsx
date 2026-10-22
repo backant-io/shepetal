@@ -318,6 +318,7 @@ function TryIt() {
         <nav aria-label="Legal" className="kc-mono kc-foot-nav">
           <a href="/privacy">Privacy</a>
           <a href="/terms">Terms</a>
+          <a href="/refunds">Refunds</a>
           <a href="/legal">Legal</a>
         </nav>
       </footer>
@@ -328,7 +329,7 @@ function TryIt() {
 /** The landing page: the approved full scroll story, chapter by chapter. */
 export function Story() {
   return (
-    <div className="kc">
+    <main className="kc">
       <Hero />
       <Corner />
       <EveryApp />
@@ -338,7 +339,7 @@ export function Story() {
       <TheName />
       <TryIt />
       <StoryMotion />
-    </div>
+    </main>
   );
 }
 

@@ -41,6 +41,17 @@ describe('where a sign-in returns to', () => {
   });
 });
 
+describe('footer', () => {
+  it('reads Privacy · Terms · Refunds · Legal, on the landing page and on every other page', async () => {
+    const { SiteFooter } = await import('./Shell');
+    const links = (html: string) => [...html.matchAll(/<nav aria-label="Legal"[\s\S]*?<\/nav>/g)][0][0].match(/href="[^"]+"/g);
+    const want = ['href="/privacy"', 'href="/terms"', 'href="/refunds"', 'href="/legal"'];
+    expect(links(renderToStaticMarkup(<SiteFooter />))).toEqual(want);
+    const { Story } = await import('@/components/story/Story');
+    expect(links(renderToStaticMarkup(<Story />))).toEqual(want);
+  });
+});
+
 describe('legal pages', () => {
   const page = (p: string) => readFileSync(join(__dirname, '..', '..', 'app', '(site)', p, 'page.tsx'), 'utf8');
 
@@ -61,8 +72,21 @@ describe('legal pages', () => {
       );
   });
 
+  it('have a legal notice with the placeholders for Pavel’s details, linked from /legal', () => {
+    const impressum = page('impressum');
+    for (const p of ['[COMPANY]', '[ADDRESS]', '[REPRESENTATIVE]', '[REGISTRATION]']) expect(impressum).toContain(p);
+    expect(page('legal')).toContain('href="/impressum"');
+  });
+
+  it('have a refund policy that says what the terms and the payment code do', () => {
+    const refunds = page('refunds').replace(/\s+/g, ' ');
+    for (const s of ['30 days of shepetal, free', 'within 14 days of the purchase', '$23.99 once', '$0.99 a month', 'Cancel anytime', 'nothing is charged again', 'switch to the lifetime license'])
+      expect(refunds).toContain(s);
+    expect(page('terms').replace(/\s+/g, ' ')).toContain('within 14 days of a lifetime purchase for a full refund');
+  });
+
   it('use the site’s header, type and prose', () => {
-    for (const p of ['privacy', 'terms', 'legal']) {
+    for (const p of ['privacy', 'terms', 'legal', 'impressum', 'refunds']) {
       const src = page(p);
       expect(src).toContain('<SiteHeader');
       expect(src).toContain('className="s-prose"');
