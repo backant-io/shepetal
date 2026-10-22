@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { appcast, download, file, latest } from './download';
+import { appcast, download, file, latest, releaseRoute } from './download';
 
 // The release bucket as R2 behaves for what download.ts asks: get/head by key, a range only as {offset, length} inside
 // the object (R2 throws otherwise). It records every key read, so a test can prove staging/ is never touched.
@@ -156,6 +156,29 @@ describe('/download/<version>/<file> serves promoted files only, and resumes', (
     // The sha256 and the appcast of a promoted version are served too (promote.sh smoke-tests an unlisted feed).
     expect(await (await file(b, get(), '0.2.0', 'Shepetal-0.2.0.dmg.sha256')).text()).toBe('abc  Shepetal-0.2.0.dmg\n');
     expect(await (await file(b, get(), '0.2.0', 'appcast.xml')).text()).toBe(FEED);
+  });
+});
+
+describe('releaseRoute: the release paths worker.ts serves before Next', () => {
+  // Through OpenNext a 22 MB DMG ran out of the Free plan's 10 ms of CPU and ended early (error 1102), so worker.ts
+  // serves exactly these paths from R2 itself and must hand everything else on to Next.
+  const at = (path: string, method = 'GET') => new Request(`https://shepetal.app${path}`, { method });
+  const LATEST = { 'latest.json': '{"version":"0.2.0","build":745}' };
+
+  it('serves /download, the release files and /appcast.xml from R2', async () => {
+    const b = released(LATEST);
+    expect((await releaseRoute(b, at('/download?ref=x')))?.headers.get('location')).toBe('/download/0.2.0/Shepetal-0.2.0.dmg');
+    expect(new Uint8Array(await (await releaseRoute(b, at('/download/0.2.0/Shepetal-0.2.0.dmg')))!.arrayBuffer())).toEqual(DMG);
+    expect(await (await releaseRoute(b, at('/appcast.xml')))!.text()).toBe(FEED);
+    expect((await releaseRoute(b, at('/download/0.2.0/Shepetal-0.2.0.dmg', 'HEAD')))?.status).toBe(200);
+  });
+
+  it('hands every other path and method on to Next', async () => {
+    const b = released(LATEST);
+    for (const path of ['/', '/install', '/downloads', '/download/0.2.0', '/download/0.2.0/x/y', '/api/license', '/appcast.xml/x']) {
+      expect(await releaseRoute(b, at(path))).toBeNull();
+    }
+    expect(await releaseRoute(b, at('/download', 'POST'))).toBeNull();
   });
 });
 

@@ -1,4 +1,5 @@
 import { getCloudflareContext } from '@opennextjs/cloudflare';
+import { attribution, track, visitorId } from './analytics';
 
 // The Mac releases live in the R2 bucket shepetal-releases (binding RELEASES), served from this site only:
 //   staging/<v>/…   CI uploads, never served
@@ -83,4 +84,30 @@ export async function appcast(b: R2Bucket, req: Request): Promise<Response> {
   const res = await serve(b, `releases/${v}/appcast.xml`, req, 'public, max-age=300');
   if (res.ok) res.headers.set('content-type', 'application/xml; charset=utf-8');
   return res;
+}
+
+/** The app's version from Sparkle's user agent ("shepetal/0.3.0 Sparkle/2.6.4"). */
+const appVersion = (ua: string | null) => ua?.match(/^shepetal\/([\w.+-]{1,32})/i)?.[1];
+
+/**
+ * GET /download, /download/<v>/<file> and /appcast.xml, or null for any other request. worker.ts serves these before
+ * OpenNext (the Next routes call this too): a 22 MB DMG streamed through Next's layers ran out of the Workers Free
+ * plan's 10 ms of CPU and ended early (error 1102). A served download counts as download_served (the version, ?ref=,
+ * utm_*), each feed check as appcast_check (= active, the app's version).
+ */
+export async function releaseRoute(b: R2Bucket, req: Request): Promise<Response | null> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return null;
+  const url = new URL(req.url);
+  if (url.pathname === '/download') {
+    const res = await download(b);
+    const version = res.status === 302 ? res.headers.get('location')?.split('/')[2] : undefined;
+    if (version) await track('download_served', visitorId(req), { version, ...attribution(url.searchParams) });
+    return res;
+  }
+  if (url.pathname === '/appcast.xml') {
+    await track('appcast_check', visitorId(req), { app_version: appVersion(req.headers.get('user-agent')) });
+    return appcast(b, req);
+  }
+  const m = url.pathname.match(/^\/download\/([^/]+)\/([^/]+)$/);
+  return m ? file(b, req, m[1], m[2]) : null;
 }

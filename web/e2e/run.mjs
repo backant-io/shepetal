@@ -334,7 +334,7 @@ async function main() {
   // ---- 0c. Download is open: the landing page's main CTA, followed signed out, reaches the DMG with no sign-in on the way.
   await check('landing CTA signed out: Try 30 days free -> /install -> /download -> the DMG, no auth redirect', async () => {
     const html = await (await fetch(`${BASE}/`)).text();
-    const cta = html.match(/<a class="kc-cta[^"]*" href="([^"]+)">Try 30 days free<\/a>/)?.[1];
+    const cta = html.match(/<a class="kc-cta[^"]*" href="([^"]+)">(?:<svg[^>]*>.*?<\/svg>)?Try 30 days free<\/a>/)?.[1];
     assert.equal(cta, '/install', 'the main CTA');
     const install = await fetch(`${BASE}${cta}?ref=e2e`, { redirect: 'manual' });
     assert.equal(install.status, 200, `/install: ${install.status} ${install.headers.get('location')}`);
