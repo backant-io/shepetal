@@ -103,7 +103,10 @@
   .s-hero, .s-acct { grid-template-columns: minmax(0, 1fr); padding-top: 3rem; }
   .s-h1 { font-size: clamp(2.2rem, calc(10.4 * var(--u)), 6.0rem); }
   .s-row { grid-template-columns: minmax(0, 1fr); row-gap: .35rem; padding: .85rem 0; }
-  .s-plans { grid-template-columns: minmax(0, 1fr); }
+  .s-plans { column-gap: 2rem; }
+  .s-price { font-size: clamp(2rem, calc(9 * var(--u)), 3rem); }
+  .s-plan .s-btn { padding: 1rem 1.2rem; }
+  .s-plan .s-btn-line { padding: .8rem 1rem; }
   .s-legal { padding-top: 3rem; }
 }
 @media (prefers-reduced-motion: reduce) {
