@@ -294,7 +294,8 @@ async function main() {
   // ---- 0a. The Workers Free plan gives a request 10 ms of CPU, and a React render or loading the Next server takes more.
   // So the prerendered pages, their RSC payloads, the not-found page, robots and the sitemap are served from the build's
   // copies (x-opennext-cache: HIT: the Next server never ran), and /api/license by worker.ts itself, each with the
-  // security headers; worker.ts adds what depends on the request (the analytics meta, /install's attribution).
+  // security headers; worker.ts adds what depends on the request (/install's attribution) and nothing else: no
+  // analytics meta, no analytics script (page views are counted on the server).
   await check('fast paths: pages, RSC and segment prefetches, the 404 page, robots and the sitemap from the prerendered cache with the security headers; /install carries ?ref= on; /api/license 401 from worker.ts with them too', async () => {
     const secure = (r, what) => {
       assert.equal(r.headers.get('strict-transport-security'), 'max-age=31536000; includeSubDomains; preload', what);
@@ -311,19 +312,19 @@ async function main() {
       secure(r, what);
       return { type: r.headers.get('content-type'), body: await r.text() };
     };
-    const meta = /<meta name="shepetal-analytics" content="\{&quot;key&quot;:&quot;phc_e2e&quot;/;
-    for (const path of ['/', '/faq']) assert.match((await cached(path)).body, meta, path);
+    const tracker = /shepetal-analytics|posthog/i;
+    for (const path of ['/', '/faq']) assert.doesNotMatch((await cached(path)).body, tracker, path);
     // A page OpenNext served from its copy is kept in the data center's cache (worker.ts), one entry per body.
     const again = await fetch(`${BASE}/`);
     assert.equal(again.headers.get('cf-cache-status'), 'HIT', 'the second / comes from the cache');
     secure(again, '/ from the cache');
-    assert.match(await again.text(), meta, 'the analytics meta is added to the cached page too');
+    assert.doesNotMatch(await again.text(), tracker, 'the cached page has no analytics meta either');
     assert.equal((await cached('/', { rsc: '1' })).type, 'text/x-component', 'the RSC payload of a cached page is its own entry');
     assert.equal((await cached('/faq', { rsc: '1' })).type, 'text/x-component');
     assert.equal((await cached('/faq', { rsc: '1', 'next-router-prefetch': '1', 'next-router-segment-prefetch': '/_tree' })).type, 'text/x-component');
     const missing = await cached('/perf-probe-not-found', {}, 404);
     assert.match(missing.type ?? '', /^text\/html/);
-    assert.match(missing.body, meta, 'the 404 page has the analytics meta');
+    assert.doesNotMatch(missing.body, tracker, 'the 404 page has no analytics meta');
     for (const path of ['/robots.txt', '/sitemap.xml']) await cached(path);
     const install = (await cached('/install?ref=x&utm_source=y')).body;
     assert.equal(unescape(install.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the refresh carries the attribution');
@@ -641,14 +642,41 @@ async function main() {
 
   ok(`switch to lifetime: mode payment, shepetal_lifetime, client_reference_id ${userId}; the paid webhook makes it lifetime and cancels the subscription now (no invoice, no proration); checkout is 409 after`);
 
-  // ---- Analytics (POSTHOG_KEY set): the page carries the key for the cookieless page views, and the Worker sends
-  // download_served (with the version and ?ref=), appcast_check, license_first_call and checkout_completed, each
-  // tagged app=shepetal, under hashed ids, and never an email or an IP.
-  await check('analytics: the page gets the key; download_served (version, ref, utm), appcast_check, license_first_call and checkout_completed reach PostHog tagged app=shepetal, with no email or IP', async () => {
-    const html = await (await fetch(`${BASE}/`)).text();
-    assert.match(html, /<meta name="shepetal-analytics" content="\{&quot;key&quot;:&quot;phc_e2e&quot;,&quot;host&quot;:&quot;http:\/\/127\.0\.0\.1:\d+&quot;\}">/);
-    await fetch(`${BASE}/download?ref=producthunt&utm_source=e2e`, { redirect: 'manual' });
+  // ---- Analytics (POSTHOG_KEY set), all from the Worker, none in the browser: $pageview for a browser's GET of a page
+  // (not for RSC, prefetches, bots or the API), download_served (with the version and ?ref=, not for HEAD or bots),
+  // appcast_check, license_first_call, checkout_completed and the app sign-in funnel, each tagged app=shepetal, under
+  // hashed ids (the daily v_ id the same for a page view and a download), and never an email, an IP or a full referrer.
+  await check('analytics on the server: no script or meta in the page; $pageview, download_served (version, ref, utm), appcast_check, license_first_call, checkout_completed and app_login_* reach PostHog tagged app=shepetal, with no email, IP or full referrer', async () => {
+    const browser = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    const ua = { 'user-agent': browser };
+    const res = await fetch(`${BASE}/faq?ref=e2e-page&utm_source=e2e&state=private`, { headers: { ...ua, referer: 'https://news.example.org/item?id=4242' } });
+    const html = await res.text();
+    assert.doesNotMatch(html, /shepetal-analytics|posthog/i, 'no analytics meta or script in the page');
+    assert.match(res.headers.get('content-security-policy') ?? '', /connect-src 'self';/, 'the page may connect to the site only');
+    // The browser chunks the page loads carry no PostHog either.
+    for (const src of [...html.matchAll(/<script[^>]*src="(\/_next\/[^"]+)"/g)].map((m) => m[1])) {
+      assert.doesNotMatch(await (await fetch(`${BASE}${src}`)).text(), /posthog/i, src);
+    }
+    // What a browser's router and bots send: none of it is a page view.
+    await (await fetch(`${BASE}/faq?ref=e2e-rsc`, { headers: { ...ua, rsc: '1' } })).text();
+    await (await fetch(`${BASE}/faq?ref=e2e-prefetch`, { headers: { ...ua, rsc: '1', 'next-router-prefetch': '1' } })).text();
+    await (await fetch(`${BASE}/faq?ref=e2e-bot`, { headers: { 'user-agent': 'Slackbot-LinkExpanding 1.0' } })).text();
+    await (await fetch(`${BASE}/faq?ref=e2e-head`, { method: 'HEAD', headers: ua })).text();
+    await fetch(`${BASE}/download?ref=producthunt&utm_source=e2e`, { redirect: 'manual', headers: ua });
+    await fetch(`${BASE}/download?ref=e2e-head`, { method: 'HEAD', redirect: 'manual', headers: ua });
+    await fetch(`${BASE}/download?ref=e2e-bot`, { redirect: 'manual', headers: { 'user-agent': 'facebookexternalhit/1.1' } });
     await fetch(`${BASE}/appcast.xml`, { headers: { 'user-agent': 'shepetal/0.0.3 Sparkle/2.6.4' } });
+    // The app opens /app/login in a browser (signed in: the consent page), and the user presses Continue.
+    const l = pkce();
+    const page = await fetch(`${l.url}&app_version=0.0.3`, { redirect: 'manual', headers: { ...ua, cookie: session, 'sec-fetch-site': 'none' } });
+    assert.equal(page.status, 200, `consent page: ${page.status}`);
+    const jar = [session, ...page.headers.getSetCookie().map((c) => c.split(';')[0])].join('; ');
+    landing(await fetch(`${BASE}/app/login`, {
+      method: 'POST',
+      redirect: 'manual',
+      headers: { ...ua, cookie: jar, origin: BASE, 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(formOf(await page.text())),
+    }), MAC);
     const find = async (event, also = () => true) => {
       for (let i = 0; i < 40; i++) {
         const e = phEvents.find((x) => x.event === event && also(x));
@@ -657,10 +685,20 @@ async function main() {
       }
       throw new Error(`no ${event} (got ${phEvents.map((x) => x.event).join(', ') || 'nothing'})`);
     };
+    const view = await find('$pageview', (x) => x.properties.ref === 'e2e-page');
+    assert.match(view.distinct_id, /^v_[0-9a-f]{32}$/);
+    assert.deepEqual(
+      [view.properties.app, view.properties.path, view.properties.$current_url, view.properties.$referring_domain, view.properties.utm_source, view.properties.$device_type, view.properties.$os, view.properties.$geoip_disable],
+      ['shepetal', '/faq', `${BASE}/faq?ref=e2e-page&utm_source=e2e`, 'news.example.org', 'e2e', 'Desktop', 'Mac OS X', true],
+    );
     const dl = await find('download_served', (x) => x.properties.ref === 'producthunt');
     assert.equal(dl.api_key, 'phc_e2e');
-    assert.match(dl.distinct_id, /^v_[0-9a-f]{32}$/);
+    assert.equal(dl.distinct_id, view.distinct_id, 'the page view and the download are the same visitor that day');
     assert.deepEqual([dl.properties.app, dl.properties.version, dl.properties.ref, dl.properties.utm_source, dl.properties.$process_person_profile], ['shepetal', '0.0.1', 'producthunt', 'e2e', false]);
+    const opened = await find('app_login_opened', (x) => x.properties.app_version === '0.0.3');
+    const consented = await find('app_login_consented', (x) => x.distinct_id === opened.distinct_id);
+    assert.match(opened.distinct_id, /^v_[0-9a-f]{32}$/, 'the app sign-in is counted under the anonymous visitor, never the account');
+    assert.deepEqual([opened.properties.client, opened.properties.signed_in, consented.properties.client, consented.distinct_id], ['app', true, 'app', opened.distinct_id]);
     const feed = await find('appcast_check', (x) => x.properties.app_version === '0.0.3');
     assert.deepEqual([feed.properties.app, feed.properties.app_version], ['shepetal', '0.0.3']);
     const install = await find('license_first_call');
@@ -671,8 +709,12 @@ async function main() {
     const paid = await find('checkout_completed', (x) => x.properties.plan === 'lifetime');
     assert.deepEqual([paid.properties.app, paid.distinct_id, monthly.distinct_id], ['shepetal', install.distinct_id, install.distinct_id]);
     assert.equal(phEvents.filter((x) => x.event === 'checkout_completed').length, 2, 'a redelivered checkout is not counted again');
+    await sleep(500); // what should not be counted has had the same time to arrive
+    const refs = phEvents.map((x) => x.properties.ref).filter(Boolean);
+    for (const r of ['e2e-rsc', 'e2e-prefetch', 'e2e-bot', 'e2e-head']) assert.ok(!refs.includes(r), `${r} is not counted`);
+    assert.equal(phEvents.filter((x) => x.event === '$pageview' && x.properties.ref === 'e2e-page').length, 1, 'one page view per page');
     const all = JSON.stringify(phEvents);
-    assert.ok(!all.includes(email) && !all.includes('127.0.0.1') && !all.includes('example.com'), 'no email or IP is sent');
+    for (const leak of [email, '127.0.0.1', 'example.com', '4242', 'private', 'Chrome/131', l.state]) assert.ok(!all.includes(leak), `${leak} is not sent`);
   });
 
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.

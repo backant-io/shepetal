@@ -38,7 +38,7 @@ bucket_name = "shepetal-releases"
 # The site's one domain (https only). Auth callbacks (AUTH_URL), Stripe's success, cancel and portal return URLs,
 # metadata, OG, canonical URLs and the sitemap are all built from it (src/lib/site.ts, domain.config.mjs).
 SHEPETAL_DOMAIN = "shepetal.app"
-# Analytics (src/lib/analytics.ts): backant's PostHog project on the US cloud. The project key is a secret set at GO
+# Analytics (src/lib/analytics.ts, all server-side): backant's PostHog project on the US cloud. The project key is a secret set at GO
 # (POSTHOG_KEY, from SSM /backant/production/NEXT_PUBLIC_POSTHOG_KEY); without it analytics are off.
 POSTHOG_HOST = "https://us.i.posthog.com"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
