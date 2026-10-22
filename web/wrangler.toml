@@ -25,6 +25,11 @@ database_name = "shepetal"
 database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
 migrations_dir = "migrations"
 
+# The Mac releases (src/lib/download.ts): CI stages them, scripts/mac/promote.sh publishes them and writes latest.json.
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "shepetal-releases"
+
 [vars]
 # The site's one domain (https only). Auth callbacks (AUTH_URL), Stripe's success, cancel and portal return URLs,
 # metadata, OG, canonical URLs and the sitemap are all built from it (src/lib/site.ts, domain.config.mjs).

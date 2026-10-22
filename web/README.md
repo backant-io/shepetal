@@ -20,6 +20,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |
 | `src/app/(story)/page.tsx`, `src/components/story/` | the landing page: the approved "full scroll story". `choreography.ts` is the design's one table of scroll timings and writing windows (ported from its build.mjs); `story.generated.css` is generated from it (native CSS scroll timelines plus the paused-animation fallback that `StoryMotion.tsx` drives with `--p`) |
 | `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
+| `src/lib/download.ts` | `/download`, the release files and `/appcast.xml`, from the R2 bucket `shepetal-releases` |
 | `src/app/api/` | the API routes in API.md |
 
 ## What comes from backant.io
@@ -108,7 +109,7 @@ The `routes` in `wrangler.toml` attach the custom domains `shepetal.app`, `www.s
 
 - **Stripe on Workers:** `getStripe()` already uses the fetch HTTP client. To verify the webhook, read the raw body with `req.text()`, then call `stripe.webhooks.constructEventAsync(body, sig, process.env.STRIPE_WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider())`.
 - **Emails:** `upsertUser` lowercases emails. Store the email from the row it returns.
-- **`/download`:** the GitHub API allows 60 unauthenticated calls an hour per IP, and Worker egress IPs are shared. Cache the latest-release lookup, for example with `fetch(url, { cf: { cacheTtl: 300 } })`.
+- **Downloads:** `/download`, `/download/<v>/<file>` and `/appcast.xml` (API.md) read the R2 bucket `shepetal-releases` (binding `RELEASES`) and never another server. LATEST is `latest.json` there, written only by `scripts/mac/promote.sh <v> --latest` after it has checked the files. Never add `public/appcast.xml`: it would shadow the route. To try it locally, put files with `npx wrangler r2 object put shepetal-releases/releases/<v>/<file> --local --file <file>` and `latest.json` the same way.
 - **Copy:** never name the speech model or any AI model in site copy, metadata or alt text. Write "on-device speech recognition".
 
 ## Preview

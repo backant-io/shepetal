@@ -107,7 +107,7 @@ export default function TermsOfUse() {
 
           <h2>6. Third-party links</h2>
           <p>
-            The Service may contain links to third-party websites and services, such as Stripe and GitHub. They are not
+            The Service may contain links to third-party websites and services, such as Stripe. They are not
             under the control of Company, and Company is not responsible for them.
           </p>
 

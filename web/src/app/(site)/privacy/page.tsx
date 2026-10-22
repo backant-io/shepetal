@@ -77,7 +77,7 @@ export default function PrivacyPolicy() {
           </p>
           <p>
             We share information with the vendors that run parts of the Service for us, and only as far as they need it:
-            Google for sign-in, Stripe for payments, Cloudflare for hosting and GitHub, which serves the installer
+            Google for sign-in, Stripe for payments, and Cloudflare, which hosts the site and serves the installer
             downloads. They use it only at our direction.
           </p>
           <p>
