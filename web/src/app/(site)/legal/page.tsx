@@ -41,7 +41,7 @@ export default function Legal() {
           <h2>Trademarks</h2>
           <p>Mac and macOS are trademarks of Apple Inc., registered in the U.S. and other countries and regions.</p>
 
-          <p>© 2026 Backant Inc.</p>
+          <p>© 2026 BackAnt, Inc.</p>
         </div>
       </main>
     </>

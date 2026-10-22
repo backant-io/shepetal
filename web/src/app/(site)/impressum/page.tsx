@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   alternates: { canonical: '/impressum' },
 };
 
-// [COMPANY], [ADDRESS], [REPRESENTATIVE] and [REGISTRATION] are Pavel's details, filled in before launch.
+// The seller's details from Pavel's legal records (22.10.26). backant.io itself never mentions shepetal.
 export default function Impressum() {
   return (
     <>
@@ -20,24 +20,29 @@ export default function Impressum() {
         <div className="s-prose">
           <h2>Provider</h2>
           <p>
-            [COMPANY]
+            BackAnt, Inc., a Delaware corporation
             <br />
-            [ADDRESS]
+            131 Continental Dr, Suite 305
+            <br />
+            Newark, DE 19713
+            <br />
+            USA
           </p>
+          <p>This is the office of our registered agent.</p>
 
           <h2>Represented by</h2>
-          <p>[REPRESENTATIVE]</p>
+          <p>Pavel Hegler</p>
 
           <h2>Register</h2>
-          <p>[REGISTRATION]</p>
+          <p>Delaware Secretary of State, file number 10279385</p>
 
           <h2>Contact</h2>
           <p>
-            Email: <a href="mailto:founder@backant.io">founder@backant.io</a>
+            Email: <a href="mailto:support@shepetal.app">support@shepetal.app</a>
           </p>
 
           <h2>Responsible for the content</h2>
-          <p>[REPRESENTATIVE], [ADDRESS]</p>
+          <p>Pavel Hegler, at the address above</p>
 
           <h2>Consumer disputes</h2>
           <p>

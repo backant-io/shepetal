@@ -72,9 +72,11 @@ describe('legal pages', () => {
       );
   });
 
-  it('have a legal notice with the placeholders for Pavel’s details, linked from /legal', () => {
+  it('have a legal notice that names the seller, linked from /legal', () => {
     const impressum = page('impressum');
-    for (const p of ['[COMPANY]', '[ADDRESS]', '[REPRESENTATIVE]', '[REGISTRATION]']) expect(impressum).toContain(p);
+    for (const p of ['BackAnt, Inc., a Delaware corporation', '131 Continental Dr, Suite 305', 'Newark, DE 19713', 'Pavel Hegler', 'file number 10279385', 'support@shepetal.app'])
+      expect(impressum).toContain(p);
+    expect(impressum).not.toMatch(/\[(COMPANY|ADDRESS|REPRESENTATIVE|REGISTRATION)\]/);
     expect(page('legal')).toContain('href="/impressum"');
   });
 

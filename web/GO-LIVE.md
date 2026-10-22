@@ -11,14 +11,11 @@ Do these in order. Steps marked **Pavel** need an account only Pavel has. Run ev
 3. #70 (Mac sign-in with PKCE) can merge any time: its sign-in gate is off unless the app bundle has `ShepetalRequiresSignIn` = true. Turn that key on in the release build only after step 6 passes.
 4. backant-io/backant-mcp #84 only adds a test, and shepetal does not depend on it. Merging it to `main` starts the `Deploy to Production` workflow for backant.io, which has failed on its last 3 runs (since 2026-09-11). Merge it whenever backant's deploy is healthy. backant.io needs no change, config or redeploy for shepetal.
 
-## 2. Google OAuth (Pavel)
+## 2. Google OAuth (done)
 
-Google Cloud Console → APIs & Services → Credentials → backant's OAuth client (the ID in SSM `/backant/WEB_GOOGLE_CLIENT_ID`):
+Done by Pavel on 22.10.26: backant's OAuth client has the redirect URI `https://shepetal.app/api/auth/callback/google`, and the consent screen is verified for shepetal.app. Keep `https://backant.io/api/auth/callback/google` and `https://shepetal.backant.io/api/auth/callback/google` (the live site uses the latter until the deploy in step 5, and a rollback would again).
 
-- Authorized redirect URIs: **add** `https://shepetal.app/api/auth/callback/google`. Keep `https://backant.io/api/auth/callback/google`, and keep `https://shepetal.backant.io/api/auth/callback/google` if it is there (the live site uses it until the deploy in step 5, and a rollback would again).
-- OAuth consent screen → Branding → Authorized domains: **add** `shepetal.app`. If Google asks to verify it, verify it in Google Search Console with the TXT record it gives, added in Cloudflare → shepetal.app → DNS (a TXT record does not conflict with the custom domains).
-- Nothing else. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, not Google's: never add them to Google. No JavaScript origin is needed (server-side code flow). Sign-in always comes back to shepetal.app, whichever host it started on (AUTH_URL is built from SHEPETAL_DOMAIN).
-- The consent screen shows backant's app name.
+`AUTH_URL` and `NEXTAUTH_URL` are no longer in `wrangler.toml`: the site sets both to `https://<SHEPETAL_DOMAIN>` (`src/lib/site.ts`), so sign-in always comes back to shepetal.app, whichever host it started on. The deploy in step 5 removes the old `AUTH_URL = https://shepetal.backant.io` vars from the live Worker. Check: `curl -s https://shepetal.app/api/auth/providers` shows `callbackUrl` `https://shepetal.app/api/auth/callback/google`. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, never Google's.
 
 ## 3. Stripe (Pavel, backant account, live mode)
 

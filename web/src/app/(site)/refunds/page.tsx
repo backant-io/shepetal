@@ -20,7 +20,7 @@ export default function Refunds() {
 
         <div className="s-prose">
           <p>
-            This policy is part of our <Link href="/terms">Terms of Use</Link>. shepetal is sold by [COMPANY] (see the{' '}
+            This policy is part of our <Link href="/terms">Terms of Use</Link>. shepetal is sold by BackAnt, Inc. (see the{' '}
             <Link href="/impressum">legal notice</Link>).
           </p>
 
@@ -33,7 +33,7 @@ export default function Refunds() {
           <h2>Lifetime license, $23.99 once</h2>
           <p>
             If shepetal does not work for you, write to{' '}
-            <a href="mailto:founder@backant.io">founder@backant.io</a> within 14 days of the purchase, from the email of
+            <a href="mailto:support@shepetal.app">support@shepetal.app</a> within 14 days of the purchase, from the email of
             your account, for a full refund. The license ends when the refund is made.
           </p>
 
@@ -60,7 +60,7 @@ export default function Refunds() {
 
           <h2>Contact</h2>
           <p>
-            Email <a href="mailto:founder@backant.io">founder@backant.io</a> with the email of your account and the date
+            Email <a href="mailto:support@shepetal.app">support@shepetal.app</a> with the email of your account and the date
             of the payment.
           </p>
         </div>
