@@ -15,7 +15,8 @@ export default function PrivacyPolicy() {
 
       <div className="prose-legal mt-12">
         <p>
-          Backant Inc. (the &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes shepetal, a
+          BackAnt, Inc., a Delaware corporation, 131 Continental Dr, Suite 305, Newark, DE 19713, USA (the
+          &quot;Company&quot;, &quot;we&quot;, &quot;us&quot; or &quot;our&quot;) makes shepetal, a
           dictation app for Mac, and runs this website (the &quot;Site&quot;). The Site and the
           shepetal app together are the &quot;Service&quot;. This Privacy Policy explains what information we collect
           when you use the Service, how we use it and how we protect it. &quot;You&quot; refers to you, as a user of the

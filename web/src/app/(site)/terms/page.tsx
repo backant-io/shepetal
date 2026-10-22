@@ -16,7 +16,8 @@ export default function TermsOfUse() {
       <div className="prose-legal mt-12">
         <p>
           This website (the &quot;Site&quot;) and the shepetal app (together, the
-          &quot;Service&quot;) belong to Backant Inc. (&quot;Company&quot;, &quot;us&quot;, &quot;our&quot; and
+          &quot;Service&quot;) belong to BackAnt, Inc., a Delaware corporation (Delaware file number 10279385), 131 Continental
+          Dr, Suite 305, Newark, DE 19713, USA (&quot;Company&quot;, &quot;us&quot;, &quot;our&quot; and
           &quot;we&quot;). Certain features of the Service may be subject to additional guidelines, terms or rules,
           which will be posted on the Site in connection with such features and are incorporated by reference into
           these Terms.
@@ -164,8 +165,9 @@ export default function TermsOfUse() {
 
         <h2>12. Contact</h2>
         <p>
-          Pavel Hegler, Backant Inc., 5214f Diamond Heights Boulevard, San Francisco, California 94131. Telephone +1
-          (415) 969-2829. Email <a href="mailto:founder@backant.io">founder@backant.io</a>.
+          BackAnt, Inc., a Delaware corporation (file number 10279385), registered address 131 Continental Dr, Suite 305,
+          Newark, DE 19713, USA. Contact: Pavel Hegler, 5214f Diamond Heights Boulevard, San Francisco, California
+          94131. Telephone +1 (415) 969-2829. Email <a href="mailto:founder@backant.io">founder@backant.io</a>.
         </p>
         <p>
           See also our <Link href="/privacy">Privacy Policy</Link>.
