@@ -78,7 +78,6 @@ function Hero() {
 
           <div className="kc-ctarow">
             <TryButton />
-            <span className="kc-mono">For Mac</span>
           </div>
         </div>
 

@@ -67,6 +67,8 @@
 .kc a:focus-visible { outline: 2px solid #FF4F12; outline-offset: 3px; }
 @keyframes kc-in { 0% { opacity: 0; transform: translateY(.4em); animation-timing-function: cubic-bezier(.2,.7,.2,1); } 100% { opacity: 1; transform: none; } }
 @keyframes kc-pop { 0% { opacity: 0; } 100% { opacity: 1; } }
+/* kc-in, plus hidden until it starts: an unseen button can be neither clicked nor focused */
+@keyframes kc-cta { 0% { opacity: 0; visibility: hidden; transform: translateY(.4em); animation-timing-function: cubic-bezier(.2,.7,.2,1); } .1% { visibility: visible; } 100% { opacity: 1; visibility: visible; transform: none; } }
 @keyframes kc-out { 0% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes kc-cut { 0% { opacity: 1; transform: translateX(0); } 20% { opacity: 1; transform: translateX(.6rem); animation-timing-function: cubic-bezier(.5,0,.8,.4); } 100% { opacity: 0; transform: translateX(9rem); } }
 @keyframes kc-shrink { 0% { opacity: 1; transform: scaleX(1); } 100% { opacity: 1; transform: scaleX(0); } }

@@ -150,6 +150,8 @@ export function table(): Table {
     for (const k of ['wx', 'wy', 'wi', 'wo']) add(`.kc-w${i} .kc-${k}`, `kc-${k}`, 't0', ...W(i));
   const land = [0, 1, 2, 3, 4, 5].map((i) => r3(W(i)[0] + 0.9 * (W(i)[1] - W(i)[0])));
   land.forEach((l, i) => carets.push([`kc-w${i}`, l, land[i + 1] ?? 9]));
+  // the trial button shows only once the last word has landed, before the key lets go
+  add('.kc-ctarow', 'kc-cta', 't0', 0.66, 0.7);
   add('.kc-stagekey', 'kc-out', 't0', 0.8, 0.802);
   add('.kc-dock-in', 'kc-dockin', 't0', 0.8, 0.98);
   add('.kc-dock-out', 'kc-dockout', 't5', 0, 0.5, 'entry');
