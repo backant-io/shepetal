@@ -356,7 +356,7 @@ async function main() {
     }
     await cached('/for/not-a-page', {}, 404);
     const fromFor = (await cached('/install?ref=for-developers')).body;
-    assert.equal(unescape(fromFor.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=for-developers');
+    assert.equal(fromFor.match(/location\.replace\("([^"]+)"\)/)?.[1], '/download?ref=for-developers', 'the download from a /for page carries its ref');
     const install = (await cached('/install?ref=x&utm_source=y')).body;
     assert.equal(install.match(/location\.replace\("([^"]+)"\)/)?.[1], '/download?ref=x&utm_source=y', 'the script that starts the download carries the attribution');
     assert.equal(install.match(/location\.replace\(/g)?.length, 1, 'one download starter only: a second, bare one (from React) is what browsers followed');
