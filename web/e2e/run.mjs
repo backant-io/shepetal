@@ -729,6 +729,24 @@ async function main() {
     for (let i = 0; i < 6; i++) flood.push((await press({ email: other })).status);
     assert.ok(flood.includes(429), `over the limit: ${flood}`);
   });
+  // WAITLIST = "off" in wrangler.toml until Pavel approves: no form, no link, and the routes store nothing.
+  await check('waitlist off: /waitlist and its signup pages 404 with no form, FAQ and sitemap leave it out, POST /api/waitlist and the confirm link 404 and store nothing', async () => {
+    for (const p of ['/waitlist', '/waitlist/thanks', '/waitlist/check', '/waitlist/confirmed']) {
+      const res = await fetch(`${BASE}${p}`);
+      assert.equal(res.status, 404, p);
+      assert.doesNotMatch(await res.text(), /name="consent"|action="\/api\/waitlist"/, p);
+    }
+    assert.doesNotMatch(await (await fetch(`${BASE}/faq`)).text(), /href="\/waitlist"/);
+    assert.doesNotMatch(await (await fetch(`${BASE}/sitemap.xml`)).text(), /\/waitlist/);
+    const post = await fetch(`${BASE}/api/waitlist`, {
+      method: 'POST', redirect: 'manual',
+      headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE },
+      body: new URLSearchParams({ email: 'e2e-waitlist@example.com', platform: 'linux', consent: 'yes' }),
+    });
+    assert.equal(post.status, 404);
+    assert.equal((await fetch(`${BASE}/api/waitlist/confirm?t=x.${'A'.repeat(43)}`, { redirect: 'manual' })).status, 404);
+    assert.deepEqual(await d1("SELECT COUNT(*) AS n FROM waitlist"), [[0]]);
+  });
   await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
     const t = await accountText();
     for (const s of ['$0.99 a month.', 'Monthly', 'Active', 'Next charge', 'Manage billing', 'Switch to lifetime', 'Cancel subscription', 'Cancel your subscription?', 'nothing is charged again'])

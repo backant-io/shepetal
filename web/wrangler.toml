@@ -55,6 +55,12 @@ SHEPETAL_DOMAIN = "shepetal.app"
 # Analytics (src/lib/analytics.ts, all server-side): backant's PostHog project on the US cloud. The project key is a secret set at GO
 # (POSTHOG_KEY, from SSM /backant/production/NEXT_PUBLIC_POSTHOG_KEY); without it analytics are off.
 POSTHOG_HOST = "https://us.i.posthog.com"
+# The waitlist for Windows, Linux and iPhone (src/lib/waitlist-config.ts). "off" until Pavel approves: no form, no
+# link to it, not in the sitemap, and POST /api/waitlist and the confirmation link answer 404 and store nothing.
+# "on" (with migrations/0008_waitlist.sql applied and the SES_* secrets below set) shows the form and sends the
+# confirmation emails through Amazon SES. It is read at build time too (next.config.ts): change it, then build.
+WAITLIST = "off"
+
 # The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. Only "on" sends; anything
 # else logs what each cron run would send. Needs migration 0006 and the SES secrets below. Switch it here, commit and
 # deploy (README.md): a change in the dashboard is undone by the next deploy.
@@ -71,6 +77,7 @@ LIFECYCLE_EMAILS = "on"
 #          wrangler secret put STRIPE_WEBHOOK_SECRET
 # Optional, the § 312k confirmation email to customers through Amazon SES (README.md), and needed for the trial
 # emails (LIFECYCLE_EMAILS): without all three, none is sent.
+#   The waitlist's confirmation emails (src/lib/waitlist.ts) need them too, once WAITLIST is "on".
 #          wrangler secret put SES_ACCESS_KEY_ID
 #          wrangler secret put SES_SECRET_ACCESS_KEY
 #          wrangler secret put SES_REGION
@@ -79,6 +86,7 @@ LIFECYCLE_EMAILS = "on"
 # The trial emails (src/lib/lifecycle.ts, worker.ts scheduled): every 5 minutes, at most 5 per run (1,440 a day), so a
 # run stays inside the Workers Free plan's 10 ms of CPU. This file is the source of truth: a cron changed in the
 # dashboard is undone by the next deploy.
+# The 03:15 UTC run also deletes the waitlist rows that are not confirmed, 29 days after their last signup (worker.ts).
 [triggers]
 crons = ["*/5 * * * *"]
 

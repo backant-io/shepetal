@@ -1,6 +1,6 @@
 import type { NextConfig } from 'next';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
-import { shepetalDomain } from './domain.config.mjs';
+import { shepetalDomain, wranglerVar } from './domain.config.mjs';
 import { securityHeaders } from './security-headers.mjs';
 
 // Gives `next dev` the D1 binding from wrangler.toml (local D1 in .wrangler/).
@@ -10,7 +10,8 @@ const nextConfig: NextConfig = {
   // Pin the root: stray lockfiles in parent folders otherwise become the workspace root.
   outputFileTracingRoot: __dirname,
   // The site's one domain (wrangler.toml [vars]), inlined for what is built ahead of time: metadata, OG, the sitemap.
-  env: { SHEPETAL_DOMAIN: shepetalDomain() },
+  // WAITLIST likewise: off, the waitlist pages are built as 404s and the FAQ and the sitemap leave it out.
+  env: { SHEPETAL_DOMAIN: shepetalDomain(), WAITLIST: wranglerVar('WAITLIST') },
   // No experimental.inlineCss: it puts the CSS in the page twice (a <style> and the RSC payload), 49.8 KB gzip
   // against 24.9 KB plus a cacheable stylesheet, and Lighthouse mobile scored one point lower with it.
   async headers() {
