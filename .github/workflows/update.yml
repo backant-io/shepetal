@@ -45,7 +45,7 @@ jobs:
           key: swiftpm-update-${{ hashFiles('Package.resolved') }}
           restore-keys: swiftpm-update-
       - run: brew install uv
-      - name: Sparkle's tools and sparkle-cli, the version in Package.swift, checked against the release's SHA-256
+      - name: Sparkle's tools, the version in Package.swift, checked against the release's SHA-256
         run: |
           set -euo pipefail
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/sparkle.tar.xz" \
@@ -54,6 +54,21 @@ jobs:
           mkdir -p "$RUNNER_TEMP/sparkle"
           tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
           ls "$RUNNER_TEMP/sparkle" "$RUNNER_TEMP/sparkle/bin"
+      - name: sparkle-cli (not in the release tarball), built from the Sparkle checkout Package.resolved pins
+        run: |
+          set -euo pipefail
+          swift package resolve
+          SRC=$(find .build/checkouts -maxdepth 1 -iname sparkle | head -1)
+          PIN=$(python3 -c 'import json; print(next(p["state"]["revision"] for p in json.load(open("Package.resolved"))["pins"] if p["identity"] == "sparkle"))')
+          [ "$(git -C "$SRC" rev-parse HEAD)" = "$PIN" ] || { echo "::error::$SRC is not at the pinned $PIN"; exit 1; }
+          echo "Sparkle $(git -C "$SRC" describe --tags 2>/dev/null || true) at $PIN"
+          xcodebuild -project "$SRC/Sparkle.xcodeproj" -list
+          xcodebuild -project "$SRC/Sparkle.xcodeproj" -target sparkle-cli -configuration Release \
+            SYMROOT="$RUNNER_TEMP/sparkle-build" CODE_SIGN_IDENTITY=- build -quiet
+          CLI_APP=$(find "$RUNNER_TEMP/sparkle-build" -name sparkle.app -maxdepth 3 -type d | head -1)
+          [ -x "$CLI_APP/Contents/MacOS/sparkle" ] || { echo "::error::no sparkle.app in $RUNNER_TEMP/sparkle-build"; exit 1; }
+          ditto "$CLI_APP" "$RUNNER_TEMP/sparkle/bin/sparkle.app"
+          "$RUNNER_TEMP/sparkle/bin/sparkle.app/Contents/MacOS/sparkle" --help || true
       - name: The test-only feed and build overrides never reach a release build
         run: |
           set -uo pipefail

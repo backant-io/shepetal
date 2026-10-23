@@ -21,8 +21,8 @@ preferences):
    `sign_update` must produce the same signature and length (EdDSA is deterministic), and
    `verify-update.swift` checks it against the key inside the built app. `python3 -m http.server` serves the feed and
    the DMG at `download/<v>/`, the layout of the site.
-4. N goes into a temp Applications folder; Sparkle's own `sparkle-cli` (`sparkle.app` from the pinned Sparkle 2.10.0
-   release tarball) runs non-interactively against that bundle. Passes when the installed app is build N+1, version
+4. N goes into a temp Applications folder; Sparkle's own `sparkle-cli` (`sparkle.app`, built with xcodebuild from the Sparkle 2.10.0
+   checkout Package.resolved pins, because the release tarball does not ship it) runs non-interactively against that bundle. Passes when the installed app is build N+1, version
    0.0.2, the DMG came from the local feed, and `codesign --verify --deep --strict` accepts it.
 5. N again, and the served DMG replaced by a copy with one byte flipped (same length, same appcast, same signature).
    Passes when the DMG was downloaded, sparkle-cli printed a signature error and N is still installed.

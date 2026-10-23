@@ -3,7 +3,8 @@
 # Sparkle's own sparkle-cli updates it to N+1 from a local feed, a DMG with one flipped byte is refused, and an
 # appcast offering a lower build installs nothing. Ad-hoc signed, with a throwaway Sparkle key made here.
 #
-#   CI=true scripts/mac/update-test.sh <sparkle-dir>   <sparkle-dir>: Sparkle's release tarball, extracted
+#   CI=true scripts/mac/update-test.sh <sparkle-dir>   <sparkle-dir>: Sparkle's release tarball, extracted, with
+#                                                       bin/sparkle.app (sparkle-cli) built from the same version
 #   PORT=8765 ...                                       the local feed's port
 #
 # It resets io.backant.shepetal's preferences and Sparkle's caches, so it refuses to run outside CI.
