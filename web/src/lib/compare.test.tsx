@@ -7,7 +7,7 @@ import { SiteFooter } from '@/components/site/Shell';
 import { ComparePage, GuidePage } from '@/components/site/Compare';
 import { TRY as STORY_TRY } from '@/components/story/Story';
 import { SITE_URL } from './site';
-import { COMPARISONS, GUIDES, ROWS, TRY, comparisonMetadata, guideMetadata } from './compare';
+import { COMPARISONS, GUIDES, ROWS, TRY, comparisonMetadata, factsOf, formatDate, guideMetadata } from './compare';
 
 const WEB = join(__dirname, '..', '..');
 const SITE = join(WEB, 'src', 'app', '(site)');
@@ -43,11 +43,21 @@ const NAMES = /Wispr Flow|Superwhisper|MacWhisper|Apple Dictation/g;
 /** An "as of" date, the one number on these pages that is not shepetal's. */
 const AS_OF = /as of \d{1,2} (January|February|March|April|May|June|July|August|September|October|November|December) \d{4}/g;
 
+/** Each other app's own sites: a fact's source is one of these, never a review or a reseller. */
+const OWN: Record<string, string[]> = {
+  'wispr-flow': ['wisprflow.ai'],
+  superwhisper: ['superwhisper.com'],
+  macwhisper: ['www.macwhisper.com'],
+  'apple-dictation': ['support.apple.com', 'www.apple.com'],
+};
+
+/** The text shepetal writes itself: the page without the other apps' facts (table cells with a source, the sources list). */
+const ours = (html: string) => html.replace(/<section class="s-cmp-sources"[\s\S]*?<\/section>/g, ' ').replace(/<td>(?:(?!<\/td>)[\s\S])*?s-cmp-src[\s\S]*?<\/td>/g, ' ');
+
 /** What a reader sees: the page text and the metadata. */
-const words = (p: (typeof PAGES_)[number]) => {
+const words = (p: (typeof PAGES_)[number], only: (html: string) => string = (h) => h) => {
   const m = p.meta();
-  const page = p
-    .html()
+  const page = only(p.html())
     .replace(/<[^>]+>/g, ' ')
     .replace(/&#x27;|&#39;/g, "'")
     .replace(/&quot;/g, '"')
@@ -118,11 +128,15 @@ describe('comparison pages', () => {
 
   it('give every fact about another app its public source and an "as of" date', () => {
     for (const c of COMPARISONS) {
-      expect(Object.keys(c.facts).sort(), c.slug).toEqual(ROWS.map((r) => r.key).sort());
-      for (const f of Object.values(c.facts)) {
+      for (const k of Object.keys(c.facts)) expect(ROWS.map((r) => r.key), c.slug).toContain(k);
+      expect(factsOf(c).length, c.slug).toBeGreaterThanOrEqual(5);
+      for (const f of factsOf(c)) {
         expect(f.sources.length, `${c.slug}: ${f.text}`).toBeGreaterThan(0);
-        for (const u of f.sources) expect(u, c.slug).toMatch(/^https:\/\/[^/]+\.[a-z]+/);
-        expect(f.asOf).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        for (const u of f.sources) expect(OWN[c.slug], `${c.slug}: ${u}`).toContain(new URL(u).hostname);
+        for (const u of f.sources) expect(u, c.slug).toMatch(/^https:\/\//);
+        // checked in October 2026, and never in the future
+        expect(f.asOf, `${c.slug}: ${f.text}`).toMatch(/^2026-10-\d{2}$/);
+        expect(f.asOf <= c.updated).toBe(true);
       }
       for (const p of [...c.pickOther, ...c.pickShepetal]) expect(Boolean(p.source), p.text).toBe(Boolean(p.asOf));
     }
@@ -130,13 +144,31 @@ describe('comparison pages', () => {
     for (const p of PAGES_) {
       const h = p.html();
       const rows = [...h.matchAll(/<tr data-row="[^"]+">([\s\S]*?)<\/tr>/g)].map((m) => m[1]);
-      expect(rows.length, p.slug).toBe(p.path.startsWith('/compare/') ? ROWS.length : COMPARISONS.length);
+      expect(rows.length, p.slug).toBe(p.path.startsWith('/compare/') ? factsOf(COMPARISONS.find((c) => p.path.endsWith(c.slug))!).length : COMPARISONS.length);
       for (const r of rows) {
         const cells = [...r.matchAll(/<td>([\s\S]*?)<\/td>/g)].map((m) => m[1]);
         const theirs = p.path.startsWith('/compare/') ? cells.slice(1) : cells;
         for (const cell of theirs) {
           expect(cell, p.slug).toMatch(/<a href="https:\/\/[^"]+" rel="nofollow noopener"/);
           expect(cell, p.slug).toMatch(/as of <time dateTime="\d{4}-\d{2}-\d{2}">\d{1,2} [A-Z][a-z]+ \d{4}<\/time>/);
+        }
+      }
+    }
+  });
+
+  it('list every fact about another app under Sources, with the full address of each source and the day it was checked', () => {
+    for (const p of PAGES_) {
+      const h = p.html();
+      const list = h.match(/<section class="s-cmp-sources"[\s\S]*?<\/section>/)?.[0] ?? '';
+      expect(list, p.slug).toContain('>Sources</h2>');
+      const apps = p.path.startsWith('/compare/') ? COMPARISONS.filter((c) => p.path.endsWith(`/${c.slug}`)) : COMPARISONS;
+      for (const c of apps) {
+        const items = [...(list.match(new RegExp(`<ul data-sources="${c.slug}">([\\s\\S]*?)</ul>`))?.[1] ?? '').matchAll(/<li data-fact="([^"]+)">([\s\S]*?)<\/li>/g)];
+        expect(items.map((m) => m[1]), `${p.slug}: ${c.slug}`).toEqual(factsOf(c).map((f) => f.key));
+        for (const [i, f] of factsOf(c).entries()) {
+          const li = items[i][2];
+          for (const u of f.sources) expect(li, `${c.slug} ${f.key}`).toContain(`<a href="${u}" rel="nofollow noopener">${u}</a>`);
+          expect(li, `${c.slug} ${f.key}`).toContain(`checked <time dateTime="${f.asOf}">${formatDate(f.asOf)}</time>.`);
         }
       }
     }
@@ -157,7 +189,8 @@ describe('comparison pages', () => {
       // the names and the source links' hostnames (wisprflow.ai) aside
       const unnamed = t.replace(NAMES, ' ').replace(/\b[\w.-]+\.(ai|com)\b/g, ' ');
       expect(unnamed.match(/\bAI\b|artificial intelligence|neural|\bmodels?\b|\bwhisper\b|parakeet|nvidia|openai|\bgpt|llama|canary|wav2vec|vosk|deepgram|gemini|claude|anthropic|ollama|\bS1\b/i)?.[0], p.slug).toBeUndefined();
-      expect(t, p.slug).not.toMatch(/\b(may|might|maybe|perhaps|could|probably|likely|should|arguably|generally|usually)\b/i);
+      expect(t, p.slug).not.toMatch(/\b(may|might|maybe|perhaps|could|probably|likely|should|arguably|generally|usually|typically|roughly|about|around|up to|approximately)\b/i);
+      expect(t, p.slug).not.toContain('—');
       expect(t, p.slug).not.toContain('!');
       expect(t, p.slug).not.toMatch(/Shepetal|SHEPETAL/);
       expect(t, p.slug).not.toMatch(/\b(better than|worse|slow(er)?|clunky|bad|poor|inferior|unlike|spy|leaks?|unsafe|insecure|best)\b/i);
@@ -165,12 +198,12 @@ describe('comparison pages', () => {
     }
   });
 
-  it('publish no number but the trial, the two prices, macOS 14.4, the 25 languages, the approved claims and the "as of" dates', () => {
-    const allowed = new Set(['30', '23.99', '0.99', '14.4', '25', '100%', '4x']);
+  it('write no number of shepetal’s own but the trial, the two prices, macOS 14, the 25 languages, 24 hours, the approved claims and the dates', () => {
+    const allowed = new Set(['30', '23.99', '0.99', '14', '25', '24', '100%', '4x']);
     for (const p of PAGES_) {
-      const t = words(p);
+      const t = words(p, ours);
       for (const n of t.replace(AS_OF, ' ').match(/\d[\d.,]*(%|x\b)?/g) ?? []) expect(allowed.has(n.replace(/[.,]$/, '')), `${p.slug}: ${n}`).toBe(true);
-      expect(t.match(AS_OF)?.length, p.slug).toBeGreaterThan(0);
+      expect(words(p).match(AS_OF)?.length, p.slug).toBeGreaterThan(0);
       // the claims only word for word
       for (const m of t.match(/100%[^.]*\./g) ?? []) expect(m).toBe('100% private.');
       expect(t.match(/100% private\. \S+ \S+ \S+\./g)?.every((m) => m === '100% private. Your data is yours.') ?? true).toBe(true);

@@ -345,6 +345,8 @@ async function main() {
       assert.ok(body.includes(`href="/install?ref=${ref}"`), `${path} links the trial with its ref`);
       assert.ok(body.includes(`<link rel="canonical" href="https://shepetal.app${path}"/>`), `${path} canonical`);
       assert.ok(sitemapXml.includes(`${path}</loc>`), `${path} is in the sitemap`);
+      assert.match(body, /<h2 id="s-cmp-sources">Sources<\/h2>/, `${path} lists its sources`);
+      assert.match(body, /checked <time dateTime="2026-10-\d{2}">/, `${path} dates its sources`);
     }
     await cached('/compare/not-a-page', {}, 404);
     const install = (await cached('/install?ref=x&utm_source=y')).body;

@@ -31,7 +31,7 @@ export function SiteFooter() {
       <nav aria-label="Compare" className="s-mono s-foot-nav s-foot-cmp">
         <span>Compare</span>
         {COMPARE_LINKS.map((c) => (
-          <Link key={c.href} href={c.href}>
+          <Link key={c.href} href={c.href} prefetch={false}>
             {c.label}
           </Link>
         ))}

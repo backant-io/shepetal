@@ -8,9 +8,11 @@ import {
   comparePath,
   compareRef,
   comparison,
+  factsOf,
   formatDate,
   guide,
   sourceLabel,
+  type Comparison,
   type Fact,
   type Pick,
 } from '@/lib/compare';
@@ -69,6 +71,34 @@ function PickList({ title, picks }: { title: string; picks: Pick[] }) {
   );
 }
 
+/** Every fact about another app again, with the full address of its source and the day it was checked. */
+function SourceList({ apps }: { apps: Comparison[] }) {
+  return (
+    <section className="s-cmp-sources" aria-labelledby="s-cmp-sources">
+      <h2 id="s-cmp-sources">Sources</h2>
+      {apps.map((c) => (
+        <ul key={c.slug} data-sources={c.slug}>
+          {factsOf(c).map((f) => (
+            <li key={f.key} data-fact={f.key}>
+              {apps.length > 1 ? `${c.name}, ` : ''}
+              {f.label}: {f.text}{' '}
+              {f.sources.map((u) => (
+                <span key={u}>
+                  <a href={u} rel="nofollow noopener">
+                    {u}
+                  </a>
+                  ,{' '}
+                </span>
+              ))}
+              checked <time dateTime={f.asOf}>{formatDate(f.asOf)}</time>.
+            </li>
+          ))}
+        </ul>
+      ))}
+    </section>
+  );
+}
+
 /** The price, the trial and the button again, as on the use-case pages. */
 function Try({ refName }: { refName: string }) {
   return (
@@ -90,7 +120,7 @@ function Try({ refName }: { refName: string }) {
         <TryButton refName={refName} />
       </div>
       <p className="s-small s-for-more">
-        More in the <Link href="/faq">FAQ</Link> and the <Link href="/privacy">Privacy Policy</Link>.
+        More in the <Link href="/faq" prefetch={false}>FAQ</Link> and the <Link href="/privacy" prefetch={false}>Privacy Policy</Link>.
       </p>
     </section>
   );
@@ -122,23 +152,30 @@ export function ComparePage({ slug }: { slug: string }) {
                 </tr>
               </thead>
               <tbody>
-                {ROWS.map((r) => (
-                  <tr key={r.key} data-row={r.key}>
-                    <th scope="row">{r.label}</th>
-                    <td>{SHEPETAL[r.key]}</td>
-                    <FactCell f={c.facts[r.key]} />
-                  </tr>
-                ))}
+                {ROWS.map((r) => {
+                  const f = c.facts[r.key];
+                  return (
+                    f && (
+                      <tr key={r.key} data-row={r.key}>
+                        <th scope="row">{r.label}</th>
+                        <td>{SHEPETAL[r.key]}</td>
+                        <FactCell f={f} />
+                      </tr>
+                    )
+                  );
+                })}
               </tbody>
             </table>
           </div>
           <p className="s-cmp-note">
-            What {c.name} offers, in the words of its own pages, linked. shepetal is not affiliated with {c.name}.
+            What {c.name} offers, in the words of its own pages, linked, with the day each was checked. shepetal is not affiliated with {c.name}.
           </p>
 
           <h2>When to pick which</h2>
           <PickList title={`Pick ${c.name} if`} picks={c.pickOther} />
           <PickList title="Pick shepetal if" picks={c.pickShepetal} />
+
+          <SourceList apps={[c]} />
         </div>
 
         <Try refName={ref} />
@@ -192,11 +229,12 @@ export function GuidePage({ slug }: { slug: string }) {
                 {COMPARISONS.map((c) => (
                   <tr key={c.slug} data-row={c.slug}>
                     <th scope="row">
-                      <Link href={comparePath(c.slug)}>{c.name}</Link>
+                      <Link href={comparePath(c.slug)} prefetch={false}>{c.name}</Link>
                     </th>
-                    {cols.map((r) => (
-                      <FactCell key={r.key} f={c.facts[r.key]} />
-                    ))}
+                    {cols.map((r) => {
+                      const f = c.facts[r.key];
+                      return f ? <FactCell key={r.key} f={f} /> : <td key={r.key}>Not on its pages.</td>;
+                    })}
                   </tr>
                 ))}
               </tbody>
@@ -207,6 +245,8 @@ export function GuidePage({ slug }: { slug: string }) {
           <h2>When to pick which</h2>
           <p>{g.others}</p>
           <p>Pick shepetal if you want on-device processing and nothing else. shepetal has no cloud processing.</p>
+
+          <SourceList apps={COMPARISONS} />
         </div>
 
         <Try refName={g.ref} />
