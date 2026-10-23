@@ -49,23 +49,27 @@ struct MyVoiceSection: View {
     }
 
     var body: some View {
-        Section {
-            TextField("How your text should read", text: $model.preferences,
-                      prompt: Text("For example: never use exclamation marks, use contractions"), axis: .vertical)
-                .lineLimit(2...4)
+        SHRowGroup("My voice") {
+            SHContentRow("Preferences") {
+                TextField("How your text should read", text: $model.preferences,
+                          prompt: Text("For example: never use exclamation marks, use contractions"), axis: .vertical)
+                    .lineLimit(2...4)
+                    .textFieldStyle(.shField)
+            }
             ForEach(0..<MyVoice.maxSamples, id: \.self) { i in
-                TextField("Writing sample \(i + 1)", text: $model.samples[i], prompt: Text("Something you wrote yourself"), axis: .vertical)
-                    .lineLimit(2...6)
+                SHContentRow("Sample \(i + 1)") {
+                    TextField("Writing sample \(i + 1)", text: $model.samples[i], prompt: Text("Something you wrote yourself"), axis: .vertical)
+                        .lineLimit(2...6)
+                        .textFieldStyle(.shField)
+                }
             }
-            HStack {
-                Button("Save", action: model.save).disabled(model.draft == model.saved)
-                if !model.message.isEmpty { Text(model.message).font(.caption).foregroundStyle(.red) }
+            SHContentRow("") {
+                if !model.message.isEmpty { SHErrorLine(model.message) }
+            } action: {
+                Button("Save", action: model.save).buttonStyle(.keycap(.secondary, .sm)).disabled(model.draft == model.saved)
             }
-        } header: {
-            Text("My voice")
         } footer: {
-            Text("With the cleanup model on, every dictation then goes through it, on this Mac, and is written to match: punctuation, capital letters, contractions and line breaks. It never adds, drops or swaps a word you said; when it tries, you get the text without My voice. Up to \(MyVoice.limit) characters each. Clear every field and save to turn it off. Your style for the app still applies after it.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text("With the cleanup model on, every dictation then goes through it, on this Mac, and is written to match: punctuation, capital letters, contractions and line breaks. It never adds, drops or swaps a word you said; when it tries, you get the text without My voice. \(MyVoice.limit) characters at most in each field. Clear every field and save to turn it off. Your style for the app still applies after it.")
         }
     }
 }

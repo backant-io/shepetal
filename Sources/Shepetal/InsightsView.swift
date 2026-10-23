@@ -11,13 +11,16 @@ struct InsightsSection: View {
 
     var body: some View {
         if let i = model.insights {
-            Section("Insights") {
-                Text(InsightsFormat.streak(i.streak)).bold()
-                Heatmap(days: i.days, labels: model.labels)
-                ForEach(InsightsFormat.card(i), id: \.title) { LabeledContent($0.title, value: $0.value) }
+            SHRowGroup("Insights") {
+                SHRow("Streak", title: InsightsFormat.streak(i.streak))
+                SHContentRow("26 weeks") {
+                    Heatmap(days: i.days, labels: model.labels)
+                        .alignmentGuide(.firstTextBaseline) { $0[.top] + 11 }  // the label on the first row of squares
+                }
+                ForEach(InsightsFormat.card(i), id: \.title) { SHRow($0.title, title: $0.value) }
             }
         }
-        if !model.problem.isEmpty { Text(model.problem).font(.caption).foregroundStyle(.orange) }
+        if !model.problem.isEmpty { SHErrorLine(model.problem) }
     }
 }
 
@@ -60,6 +63,7 @@ final class InsightsModel: ObservableObject {
 private struct Heatmap: View {
     let days: [Insights.Day]
     let labels: [String]
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(alignment: .top, spacing: 3) {
@@ -68,8 +72,8 @@ private struct Heatmap: View {
                     ForEach(0..<7, id: \.self) { row in
                         let i = week * 7 + row
                         if i < days.count {
-                            RoundedRectangle(cornerRadius: 2)
-                                .fill(InsightsFormat.color(days[i].level))
+                            RoundedRectangle(cornerRadius: SH.radiusXs, style: .continuous)
+                                .fill(InsightsFormat.color(days[i].level, scheme))
                                 .frame(width: 11, height: 11)
                                 .help(labels[i])
                                 .accessibilityLabel(labels[i])
@@ -114,7 +118,9 @@ enum InsightsFormat {
         return "\(f.string(from: d.date)): \(d.words.formatted()) \(d.words == 1 ? "word" : "words")"
     }
 
-    static func color(_ level: Int) -> Color {
-        level == 0 ? Color.secondary.opacity(0.15) : Color.accentColor.opacity([0.3, 0.5, 0.75, 1][min(level, 4) - 1])
+    /// Ink on the ground, never signal (nothing static is orange): a faint square for no words, then four steps
+    /// of sh-text up to full ink.
+    static func color(_ level: Int, _ scheme: ColorScheme) -> Color {
+        SH.text(scheme).opacity(level == 0 ? 0.08 : [0.3, 0.5, 0.75, 1][min(level, 4) - 1])
     }
 }
