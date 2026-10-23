@@ -4,7 +4,7 @@
 // The Workers Free plan gives a request 10 ms of CPU, and loading the Next server alone takes more: the releases,
 // sign-in, the account, checkout, the webhook, the app's API calls, the cancellation button and the waitlist are
 // answered here, the prerendered pages by OpenNext's routing from their build-time copies (open-next.config.ts).
-// Nothing reaches the Next server. The trial emails' cron (scheduled) and their unsubscribe link are answered here too
+// Nothing reaches the Next server. The cron (scheduled) and the trial emails' unsubscribe link are answered here too
 // (src/lib/lifecycle.ts). Analytics are counted here, on the server (src/lib/server-analytics.ts): the page views and
 // the app sign-in steps, sent in waitUntil after the answer. No analytics code runs in the browser.
 import { GET as license } from './src/app/api/license/route';
@@ -115,8 +115,9 @@ export default {
     }));
   },
 
-  // The Cron Trigger (wrangler.toml [triggers], every 5 minutes): the trial emails, at most 5 a run. No Next here.
-  // Once a day, on the 03:15 UTC run, also the waitlist sweep: rows that are not confirmed go 29 days after their last
+  // The Cron Trigger (wrangler.toml [triggers], once a day at 03:15 UTC while the trial emails are off): the trial
+  // emails (LIFECYCLE_EMAILS "off": nothing sent), at most 5 a run. No Next here.
+  // On the 03:15 UTC run, also the waitlist sweep: rows that are not confirmed go 29 days after their last
   // signup, so the privacy policy's 30 days hold. It runs with the waitlist off too: rows from a time it was on still go.
   async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runLifecycle(env));

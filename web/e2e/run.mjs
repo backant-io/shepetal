@@ -8,7 +8,8 @@
 // for a token, license = trial, checkout per plan = a Stripe Checkout URL, signed webhooks for the
 // subscription (paid, failed, cancelled), the Billing Portal, then the lifetime license. Then the redirect_uri and PKCE rules.
 // Before that, /download and /appcast.xml against the local R2 bucket, before and after a release is put there the way
-// promote.sh does. Last, the trial emails: the Cron Trigger against a fake SES, and the unsubscribe link they carry.
+// promote.sh does. Last, the trial emails (off in wrangler.toml; switched on here so the code stays tested): the Cron
+// Trigger against a fake SES, and the unsubscribe link they carry.
 //
 // Google's token endpoint is faked too (GOOGLE_TOKEN_URL, honoured only on a local http run): the sign-in runs for real
 // up to Google's consent screen, which the run skips by calling the callback with a code, as Google would. So the run
@@ -530,14 +531,16 @@ async function main() {
   assert.equal(replay.headers.get('location'), `${BASE}/login?error=Configuration`, 'the callback cannot be replayed without the spent cookie');
   ok(`/app/login signed out: 307 to Google (redirect_uri <AUTH_URL>/api/auth/callback/google, state, S256); the callback refuses another state or no cookie, exchanges the code with the verifier, sets the session and returns to the same /app/login`);
 
-  // ---- 1b. The sign-in page: one action, Continue with Google, as a real form.
+  // ---- 1b. The sign-in page: one action, Continue with Google, as a real form. No checkbox: no trial emails are sent.
   await check('sign-in: /login shows Continue with Google as a plain form returning to ?next=, the failed line on ?error; /account signed out goes to it', async () => {
     const r = await browse(`${BASE}/login`);
     const html = await r.text();
     assert.equal(r.status, 200, `/login: ${r.status}`);
     assert.ok(html.includes('Sign in.') && html.includes('Continue with Google'), '/login is the sign-in page');
     assert.match(html, /<form class="s-form" action="\/api\/auth\/signin\/google\?callbackUrl=%2Faccount" method="post">/);
-    assert.ok(html.includes('<input type="checkbox" name="trial_emails" value="yes"/> Send me three short emails about my trial.'), '/login: the unticked trial emails box');
+    assert.ok(!html.includes('type="checkbox"') && !/trial_emails|trial-emails|emails about my trial/.test(html), '/login: no trial emails box (none are sent)');
+    const privacy = await (await fetch(`${BASE}/privacy`)).text();
+    assert.ok(!/id="trial-emails"|Emails about your trial|emails about your trial/.test(privacy), '/privacy: no trial emails section');
     assert.match(html, /<p role="alert" class="s-alert" hidden="">Sign-in did not finish/, 'the failed line is hidden');
     assert.equal(r.headers.get('cache-control'), 'private, no-store');
     assert.equal(r.headers.get('x-opennext-cache'), 'HIT', 'the page as built, no Next render');
@@ -1047,16 +1050,17 @@ async function main() {
     for (const leak of [email, '127.0.0.1', 'example.com', '4242', 'private', 'Chrome/131', l.state]) assert.ok(!all.includes(leak), `${leak} is not sent`);
   });
 
-  // ---- 7b. The trial emails box on the consent page: unticked by default, and only a tick records the opt-in.
-  await check('/app/login: the trial emails box is unticked; Continue without it records nothing, with it the time of the opt-in', async () => {
+  // ---- 7b. The consent page asks nothing about trial emails, and nothing records an opt-in, not even a posted field.
+  await check('/app/login: no trial emails box; Continue records no opt-in, even with trial_emails=yes posted', async () => {
     const optIn = async () => (await d1(`SELECT trial_emails_at FROM users WHERE email = '${email}'`))[0][0];
     await d1(`UPDATE users SET trial_emails_at = NULL WHERE email = '${email}'`);
     const html = await (await browse(pkce().url, session)).text();
-    assert.ok(html.includes('<input type="checkbox" name="trial_emails" value="yes"> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a>'), 'the box and its words');
+    assert.ok(html.includes('<button type="submit">Continue</button>'), 'the consent page');
+    assert.ok(!html.includes('type="checkbox"') && !/trial_emails|trial-emails|emails about my trial/.test(html), 'no trial emails box');
     landing(await consent(pkce().url, session), MAC);
-    assert.equal(await optIn(), null, 'unticked: no opt-in');
+    assert.equal(await optIn(), null, 'no opt-in');
     landing(await consent(pkce().url, session, { fields: { trial_emails: 'yes' } }), MAC);
-    assert.match(String(await optIn()), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, 'ticked: the time of the opt-in');
+    assert.equal(await optIn(), null, 'a posted trial_emails=yes records nothing');
   });
 
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.
@@ -1125,7 +1129,7 @@ async function main() {
     assert.deepEqual([out.status, out.headers.get('location')], [303, `${BASE}/`]);
     assert.match(setCookie(out, 'shepetal-session') ?? '', /^shepetal-session=; Path=\/; Max-Age=0;/);
   });
-  await check('web sign-in: the trial emails box on /login, unticked records nothing, ticked records the time of the opt-in', async () => {
+  await check('web sign-in: records no trial emails opt-in, with or without a posted trial_emails=yes', async () => {
     const optIn = async () => (await d1(`SELECT trial_emails_at FROM users WHERE email = '${email}'`))[0][0];
     const signIn = async (body) => {
       const start = await fetch(`${BASE}/api/auth/signin/google?callbackUrl=%2Faccount`, { method: 'POST', redirect: 'manual', headers: { origin: BASE, 'content-type': 'application/x-www-form-urlencoded' }, body });
@@ -1136,11 +1140,9 @@ async function main() {
     };
     await d1(`UPDATE users SET trial_emails_at = NULL WHERE email = '${email}'`);
     await signIn('');
-    assert.equal(await optIn(), null, 'unticked: no opt-in');
-    await signIn('trial_emails=on');
-    assert.equal(await optIn(), null, 'only the value the box posts counts');
+    assert.equal(await optIn(), null, 'no opt-in');
     await signIn('trial_emails=yes');
-    assert.match(String(await optIn()), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, 'ticked: the time of the opt-in');
+    assert.equal(await optIn(), null, 'a posted trial_emails=yes records nothing');
   });
   await check('nothing reaches the Next server: unknown /api/* (Auth.js leftovers included) is a native 404, a POST to a page 405', async () => {
     for (const [method, path] of [['GET', '/api/auth/csrf'], ['GET', '/api/auth/session'], ['POST', '/api/auth/session'], ['GET', '/api/auth/signin'], ['GET', '/api/auth/signout'], ['GET', '/api/checkout'], ['HEAD', '/api/license']]) {
@@ -1238,7 +1240,8 @@ async function main() {
     assert.equal((await app('POST', '/api/checkout', { token: accessToken, json: {} })).status, 401);
   });
 
-  // ---- 11. The trial emails: the Cron Trigger (wrangler dev --test-scheduled) sends through the fake SES.
+  // ---- 11. The trial emails (LIFECYCLE_EMAILS on for this run only): the Cron Trigger (wrangler dev --test-scheduled)
+  // sends through the fake SES, to the rows this test inserts with trial_emails_at set.
   const cron = async () => {
     const before = sesCalls.length;
     const r = await fetch(`${BASE}/__scheduled?cron=${encodeURIComponent('*/5 * * * *')}`);

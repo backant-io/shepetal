@@ -5,7 +5,6 @@ import { safeNext } from './next-path';
 import { same, seal, unb64url, unseal } from './session';
 import { SITE_URL } from './site';
 import { bearer, randomSecret, userForToken } from './tokens';
-import { optedIn, recordTrialEmailsOptIn } from './trial-emails';
 
 // Sign-in with Google (backant's OAuth client), answered by worker.ts without Next: an OpenID Connect code flow with
 // PKCE S256 and a state bound to a sealed, one-time cookie, then the site's own session cookie (src/lib/session.ts).
@@ -84,10 +83,9 @@ export async function requestUser(req: Request): Promise<User | null> {
 
 /**
  * Starts Google sign-in: a fresh state and PKCE verifier, sealed into the one-time OAuth cookie with where to return
- * (`next`, a path on this site) and whether the trial emails box was ticked (`trialEmails`, recorded by
- * googleCallback once the user row exists), and a redirect to Google. prompt=select_account shows the account chooser.
+ * (`next`, a path on this site), and a redirect to Google. prompt=select_account shows the account chooser.
  */
-export async function startGoogle(next: string, status: number, prompt?: 'select_account', trialEmails = false): Promise<Response> {
+export async function startGoogle(next: string, status: number, prompt?: 'select_account'): Promise<Response> {
   const state = randomSecret();
   const verifier = randomSecret();
   const q = new URLSearchParams({
@@ -100,18 +98,16 @@ export async function startGoogle(next: string, status: number, prompt?: 'select
     code_challenge_method: 'S256',
     ...(prompt && { prompt }),
   });
-  const cookie = setCookie(OAUTH, await sealFor(OAUTH, { s: state, v: verifier, n: safeNext(next), ...(trialEmails && { t: 1 }) }, OAUTH_S), OAUTH_S);
+  const cookie = setCookie(OAUTH, await sealFor(OAUTH, { s: state, v: verifier, n: safeNext(next) }, OAUTH_S), OAUTH_S);
   return new Response(null, { status, headers: { location: `${GOOGLE_AUTH}?${q}`, 'cache-control': 'no-store', 'set-cookie': cookie } });
 }
 
 /**
- * POST /api/auth/signin/google from the sign-in page's form: ?callbackUrl is where to return, and the posted form
- * carries the trial emails box (lib/trial-emails.ts), unticked unless the visitor ticked it. 303 to Google.
+ * POST /api/auth/signin/google from the sign-in page's form: ?callbackUrl is where to return. 303 to Google.
  */
 export async function signInPost(req: Request): Promise<Response> {
   if (!sameOrigin(req)) return text('Forbidden', 403);
-  const form = await req.formData().catch(() => null);
-  return startGoogle(new URL(req.url).searchParams.get('callbackUrl') ?? '/account', 303, undefined, optedIn(form));
+  return startGoogle(new URL(req.url).searchParams.get('callbackUrl') ?? '/account', 303);
 }
 
 /** POST /api/auth/signout from the account page: the session cookie goes, then the landing page. */
@@ -166,7 +162,7 @@ export function idTokenClaims(jwt: unknown, clientId: string, now = Date.now()):
  * GET /api/auth/callback/google, the redirect URI registered at Google. The OAuth cookie is spent on every outcome.
  * Its state must match (constant time); the code is exchanged with the client secret and the PKCE verifier; the
  * id_token's claims are checked, and the email must be verified. The first sign-in creates the user and starts the
- * trial (upsertUser; later sign-ins keep trial_started_at); a tick in the trial emails box is recorded. Then the session cookie and a 302 to where the sign-in
+ * trial (upsertUser; later sign-ins keep trial_started_at). Then the session cookie and a 302 to where the sign-in
  * started. Every failure is a 302 to /login?error=<code>, logged with the code and a short fixed cause (the token
  * endpoint's HTTP status, or an exception's class name) only.
  */
@@ -205,7 +201,6 @@ export async function googleCallback(req: Request): Promise<Response> {
     const email = typeof claims.email === 'string' ? claims.email.trim() : '';
     if (!email || claims.email_verified !== true) return fail('AccessDenied', 'email missing or not verified');
     const user = await upsertUser(email); // the first shepetal sign-in starts the 30-day trial
-    if (o.t === 1) await recordTrialEmailsOptIn(user.email); // the trial emails box, ticked on /login
     const session = setCookie(SESSION, await sealFor(SESSION, { e: user.email }, SESSION_S), SESSION_S);
     return redirectTo(safeNext(typeof o.n === 'string' ? o.n : null), 302, spent, session);
   } catch (e) {

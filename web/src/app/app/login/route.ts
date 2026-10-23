@@ -3,7 +3,6 @@ import { consentPage, issueCode, loginQuery, parseLogin } from '@/lib/app-login'
 import { sameOrigin, sealFor, sessionEmail, setCookie, startGoogle, unsealFrom } from '@/lib/auth';
 import { same } from '@/lib/session';
 import { randomSecret } from '@/lib/tokens';
-import { optedIn, recordTrialEmailsOptIn } from '@/lib/trial-emails';
 
 // /app/login (API.md): the apps open it in ASWebAuthenticationSession or the browser. Answered by worker.ts (no Next).
 // GET: Google sign-in if needed, then a consent page. Only the consent POST issues a code, so a
@@ -46,7 +45,6 @@ export async function POST(req: Request) {
   if (!email) return text('Signed out: start again from the app', 401);
   if (kept.e !== email) return text('Forbidden', 403); // another account signed in since the page was shown
   const user = await upsertUser(email); // first sign-in starts the trial
-  if (optedIn(fields)) await recordTrialEmailsOptIn(user.email); // the consent page's unticked trial emails box
   return new Response(null, {
     status: 302,
     headers: { location: await issueCode(user.email, login), 'cache-control': 'no-store', 'set-cookie': setCookie(CSRF, '', 0) },

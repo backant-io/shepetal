@@ -66,6 +66,9 @@ describe('with WAITLIST on', () => {
     const privacy = renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'privacy', 'page.tsx'))).default());
     for (const must of ['id="waitlist"', 'one purpose only', 'double opt-in', 'Art. 6(1)(a) GDPR', 'withdraw', 'deletes your address at once', 'within 30 days', 'and the waitlist emails'])
       expect(privacy, must).toContain(must);
+    // No trial emails are sent, so the policy has no section on them and the waitlist is III.8.
+    expect(privacy).toContain('<h3 id="waitlist">8. The waitlist</h3>');
+    expect(privacy).not.toMatch(/id="trial-emails"|about your trial|about my trial|ticked the box|section III\.9|section 8\)/i);
     expect(renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'waitlist', 'page.tsx'))).default())).toContain(
       'We only use your email to tell you when shepetal comes to a platform you chose.',
     );
@@ -171,7 +174,7 @@ describe('the waitlist copy', () => {
       privacy.match(/<h3 id="waitlist">[\s\S]*?(?=<div class="s-box">)/)![0],
       privacy.match(/<li>The waitlist:[^<]*<\/li>/)![0],
       privacy.match(/The waitlist needs[^.]*\./)![0],
-      privacy.match(/and the waitlist emails \(section III\.9\)/)![0],
+      privacy.match(/and the waitlist emails \(section III\.8\)/)![0],
     ].map(visibleText).join(' ');
     for (const [where, text] of Object.entries(texts)) expect(copyProblems(text), `${where}: ${text}`).toEqual([]);
     expect(texts.privacy).toContain('one purpose only');

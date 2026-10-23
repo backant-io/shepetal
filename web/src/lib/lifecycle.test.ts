@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { copyFor, render, type Kind } from './lifecycle-copy';
 import { BATCH, compose, due, eligible, runLifecycle, unsubscribeRoute, unsubscribeUrl, verifyUnsubscribe, type LifecycleEnv } from './lifecycle';
@@ -419,5 +420,15 @@ describe('the branded HTML', () => {
       [...copyFor('day25').paragraphs, '--', `You get this email because you asked for emails about your shepetal trial. It is one of three. Unsubscribe at any time, free of charge: ${UNSUB}`, 'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA'].join('\n\n') + '\n',
     );
     expect(text).not.toContain('Choose a plan');
+  });
+});
+
+// No sign-in asks for the opt-in any more, so the trial emails are off: the switch is "off", and the only cron is the
+// daily waitlist sweep (worker.ts), so no run sends one.
+describe('wrangler.toml', () => {
+  const toml = readFileSync(new URL('../../wrangler.toml', import.meta.url), 'utf8');
+  it('ships the trial emails off, with the cron once a day for the waitlist sweep only', () => {
+    expect(toml).toMatch(/^LIFECYCLE_EMAILS = "off"$/m);
+    expect(toml.match(/^crons = .*$/gm)).toEqual(['crons = ["15 3 * * *"]']);
   });
 });
