@@ -499,7 +499,8 @@ private struct HistoryTab: View {
             VStack(alignment: .leading, spacing: SH.space2) {
                 HStack(alignment: .top, spacing: SH.space5) {
                     Text("Search").shText(SH.label).foregroundStyle(SH.textMuted)
-                        .frame(width: SH.rowLabel, minHeight: SH.controlMd, alignment: .leading)
+                        .frame(width: SH.rowLabel, alignment: .leading)
+                        .frame(minHeight: SH.controlMd)
                         .accessibilityHidden(true)
                     // Show archived goes under the field when the column is too narrow for both.
                     ViewThatFits(in: .horizontal) {
