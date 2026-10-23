@@ -673,7 +673,7 @@ private struct SettingsTab: View {
             }
             LabeledContent("Transcripts") { TranscriptRetentionPicker(store: meetings) }  // F81
             LabeledContent("Folder") { Button("Open recordings folder") { NSWorkspace.shared.open(Paths.audio) } }
-            LabeledContent("Export") { DataExportButton(history: model.pipeline.history, meetings: meetings) }
+            DataExportButton(history: model.pipeline.history, meetings: meetings)  // its own row
             LabeledContent("Indicator") {
                 Toggle("Creator mode: show “\(Indicator.creatorLabel)” next to the indicator while recording", isOn: $creatorMode)
                 HubHelp("For screen recordings and streams, so viewers see when you dictate.")
