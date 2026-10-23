@@ -124,38 +124,53 @@ final class IndicatorTests: XCTestCase {
         for n in indicator.notices.newestFirst { XCTAssertFalse(n.text.contains("pier"), n.text) }
     }
 
+    /// design/ui README, The indicator states: recording a full signal ring, hands-free a signal ring with a gap at
+    /// the top (told apart by shape), writing an ink ring that pulses (color and motion), an error a note (no ring,
+    /// the label). The state is named in words for VoiceOver.
     func testModeRings() throws {
         let indicator = make()
-        var colors: [Indicator.Mode: CGColor] = [:]
-        for mode: Indicator.Mode in [.recording, .handsFree, .processing, .error] {
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let expected: [(Indicator.Mode, Indicator.Ring, String)] = [
+            (.recording, .recording, "Recording"), (.handsFree, .handsFree, "Hands-free"), (.processing, .writing, "Writing"),
+            (.error, .none, "A note"), (.idle, .none, "Ready"),
+        ]
+        for (mode, ring, name) in expected {
             indicator.set(mode)
-            let layer = try XCTUnwrap(indicator.emoji.layer)
-            XCTAssertEqual(layer.borderWidth, 2, "\(mode)")
-            colors[mode] = try XCTUnwrap(layer.borderColor, "\(mode)")
-            XCTAssertEqual(layer.animation(forKey: "pulse") != nil, mode == .processing, "only processing pulses: \(mode)")
+            XCTAssertEqual(indicator.emoji.ring, ring, "\(mode)")
+            XCTAssertEqual(indicator.stateName, name, "\(mode)")
+            XCTAssertEqual(indicator.emoji.accessibilityLabel(), name, "\(mode)")
+            XCTAssertEqual(indicator.emoji.ringView.layer?.animation(forKey: "pulse") != nil, ring == .writing && !reduce,
+                           "only writing pulses: \(mode)")
         }
-        let distinct = Set(colors.values.map { $0.components?.map { Int($0 * 255) } ?? [] })
-        XCTAssertEqual(distinct.count, 4, "each state needs its own colour")
-        indicator.set(.idle)
-        XCTAssertEqual(indicator.emoji.layer?.borderWidth, 0)
-        XCTAssertNil(indicator.emoji.layer?.animation(forKey: "pulse"))
+        XCTAssertEqual(IndicatorRing.color(.recording)?.name, "sh-state-recording")
+        XCTAssertEqual(IndicatorRing.color(.handsFree)?.name, "sh-state-hands-free")
+        XCTAssertEqual(IndicatorRing.color(.writing)?.name, "sh-state-writing")
+        XCTAssertNil(IndicatorRing.color(.none))
+        // Recording and hands-free share signal orange, so the shape tells them apart: hands-free has a gap at the top.
+        let bounds = NSRect(x: 0, y: 0, width: Indicator.size, height: Indicator.size)
+        let full = try XCTUnwrap(IndicatorRing.path(.recording, in: bounds)).bounds
+        let gap = try XCTUnwrap(IndicatorRing.path(.handsFree, in: bounds)).bounds
+        XCTAssertLessThan(gap.maxY, full.maxY - 0.1, "the gap is at the top")
+        XCTAssertEqual(gap.minY, full.minY, accuracy: 0.01)
+        XCTAssertNil(IndicatorRing.path(.none, in: bounds))
+        indicator.set(.error)
+        indicator.show("Mic is off", seconds: 5)
+        XCTAssertEqual(indicator.emoji.accessibilityLabel(), "A note")
     }
 
-    /// Pavel's decision (1): the red ring shows the whole time a meeting records, through dictation and errors too.
+    /// Pavel's decision (1): the recording ring shows the whole time a meeting records, through dictation and errors too.
     func testMeetingKeepsTheRingRedUntilItStops() throws {
         let indicator = make()
         indicator.meeting = true
-        let red = NSColor.systemRed.cgColor
         for mode: Indicator.Mode in [.idle, .recording, .handsFree, .processing, .error, .idle] {
             indicator.set(mode)
-            let layer = try XCTUnwrap(indicator.emoji.layer)
-            XCTAssertEqual(layer.borderWidth, 2, "\(mode)")
-            XCTAssertEqual(layer.borderColor, red, "red while the meeting records: \(mode)")
+            XCTAssertEqual(indicator.emoji.ring, .recording, "recording while the meeting records: \(mode)")
+            XCTAssertNil(indicator.emoji.ringView.layer?.animation(forKey: "pulse"), "\(mode)")
         }
-        indicator.set(.error)
+        indicator.set(.processing)
         indicator.meeting = false
-        XCTAssertNotEqual(indicator.emoji.layer?.borderColor, red, "the dictation state shows again once it stops")
+        XCTAssertEqual(indicator.emoji.ring, .writing, "the dictation state shows again once it stops")
         indicator.set(.idle)
-        XCTAssertEqual(indicator.emoji.layer?.borderWidth, 0)
+        XCTAssertEqual(indicator.emoji.ring, .none)
     }
 }
