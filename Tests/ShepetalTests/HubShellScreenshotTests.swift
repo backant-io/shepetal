@@ -174,6 +174,15 @@ final class HubShellScreenshotTests: XCTestCase {
             window.contentView?.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
         }
+        if ProcessInfo.processInfo.environment["SHEPETAL_DUMP_VIEWS"] != nil || true {
+            func dump(_ v: NSView, _ depth: Int) {
+                guard depth < 14 else { return }
+                print(String(repeating: "  ", count: depth) + "\(type(of: v)) \(v.frame) hidden=\(v.isHidden) layer=\(v.layer.map { "\($0.frame)" } ?? "-")")
+                for s in v.subviews { dump(s, depth + 1) }
+            }
+            print("VIEWS for \(window.title) \(size)")
+            if let f = window.contentView?.superview { dump(f, 0) }
+        }
         XCTAssertFalse(window.isVisible, "a screenshot must not put the window on screen")
         XCTAssertNil(NSApp.keyWindow, "a screenshot must not make a window key")
         let frame = try XCTUnwrap(window.contentView?.superview, "the window has no theme frame")
