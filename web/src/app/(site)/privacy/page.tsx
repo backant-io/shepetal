@@ -137,29 +137,9 @@ export default function PrivacyPolicy() {
             cancellations (§&nbsp;312k of the German Civil Code), and Art. 6(1)(f) GDPR, our legitimate interest in being
             able to prove them.
           </p>
-          <h3 id="trial-emails">8. Emails about your trial</h3>
-          <p>
-            If you tick &quot;Send me three short emails about my trial.&quot; when you sign in, on the Site or in the
-            app, we send you three emails: a welcome when your trial starts, a tip on day 3,
-            and on day 25 the note that your free trial ends in 5 days, with our prices. The day 25 email goes only to
-            you while you are still on the free trial. Without the tick we send you none of them.
-          </p>
-          <p>
-            For these emails we use your email address, the date your trial started, the time you ticked the box, which
-            of the emails we sent and when, the message id Amazon SES gives each of them, and, if you unsubscribe, the
-            time you did. Amazon Web Services (SES) sends the emails for us, as our processor. Legal basis: Art. 6(1)(a)
-            GDPR, your consent.
-          </p>
-          <p>
-            You can withdraw your consent at any time, free of charge and with effect for the future, through the
-            unsubscribe link in every one of these emails, or by writing to{' '}
-            <a href="mailto:support@shepetal.app">support@shepetal.app</a>. Withdrawing does not make the emails sent
-            before unlawful. Receipts and confirmations of what you buy or cancel still come.
-          </p>
-
           {waitlistOn() && (
             <>
-              <h3 id="waitlist">9. The waitlist</h3>
+              <h3 id="waitlist">8. The waitlist</h3>
               <p>
                 When you join the waitlist for Windows, Linux or iPhone, we store your email address, the platforms you
                 chose, the words of the box you ticked, and when you signed up and when you confirmed. Of your IP
@@ -195,10 +175,8 @@ export default function PrivacyPolicy() {
               legal claims.
             </p>
             <p>
-              The emails about your trial (section 8) go out only with your consent, and you can withdraw it at any
-              time, with effect for the future, through the link in every one of them or by writing to us (Art. 7(3)
-              GDPR). You can also object at any time to the use of your data for direct marketing, without giving a
-              reason, and we then stop using it for that (Art. 21(2) and (3) GDPR).
+              You can also object at any time to the use of your data for direct marketing, without giving a reason,
+              and we then stop using it for that (Art. 21(2) and (3) GDPR).
             </p>
           </div>
 
@@ -210,8 +188,8 @@ export default function PrivacyPolicy() {
           <ul>
             <li>Cloudflare, Inc. (United States): hosting, the database, file storage, request logs, email forwarding and the emails that tell us of a cancellation.</li>
             <li>
-              Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7), and the emails about your trial you asked for (section III.8)
-              {waitlistOn() && ', and the waitlist emails (section III.9)'}.
+              Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7)
+              {waitlistOn() && ', and the waitlist emails (section III.8)'}.
             </li>
             <li>Stripe, Inc. (United States): payments and tax. Stripe also uses payment data as its own controller, for example to prevent fraud and to meet its legal duties.</li>
             <li>PostHog, Inc. (United States): the analytics above.</li>
@@ -255,7 +233,6 @@ export default function PrivacyPolicy() {
             <li>Analytics: PostHog keeps events for as long as our PostHog plan does, 1 year on its free plan and 7 years on its paid plans. A profile stays until we delete it.</li>
             <li>Payment and tax records: as long as tax law requires, up to 10 years.</li>
             <li>Email to us: up to 3 years after the end of the year of our last exchange.</li>
-            <li>Emails about your trial: the time you ticked the box, and the record of which emails we sent, when and with which message id, until you ask us to delete your account. Our record of your unsubscribe, so that no further email goes out: until you ask us to delete your account, or until you tick the box again.</li>
             {waitlistOn() && (
               <li>
                 The waitlist: an unconfirmed address is deleted within 30 days of its last signup. A confirmed address
@@ -271,8 +248,7 @@ export default function PrivacyPolicy() {
             You need a Google account and its email address to have an account and to use the app: without them we
             cannot give you a trial or a license. To buy, Stripe needs your payment and billing details, which the law
             also requires for tax. To cancel without signing in, we need the email of your account to find your
-            contract. The emails about your trial are up to you: without the tick you get none, and everything else works
-            the same.{waitlistOn() && ' The waitlist needs your email address, and you give it to us only if you want to join.'} Analytics are not needed for anything: the Service works the same without them. No analytics script
+            contract.{waitlistOn() && ' The waitlist needs your email address, and you give it to us only if you want to join.'} Analytics are not needed for anything: the Service works the same without them. No analytics script
             runs in your browser. The server events in section III.5 do not depend on your browser, but you can object
             to them (see the box in section III).
           </p>
