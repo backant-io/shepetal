@@ -140,6 +140,7 @@
 .s-cmp-src a { margin-right: .6rem; }
 .s-cmp .s-prose .s-cmp-note { margin-top: 1rem; font-size: .9375rem; color: var(--ink2); }
 .s-cmp .s-prose h3 + ul { margin-top: .5rem; }
+.s-cmp-line { display: block; }
 .s-cmp-sources ul { font-size: .9375rem; color: var(--ink2); overflow-wrap: anywhere; }
 
 /* changelog */

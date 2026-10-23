@@ -7,7 +7,7 @@ import { SiteFooter } from '@/components/site/Shell';
 import { ComparePage, GuidePage } from '@/components/site/Compare';
 import { TRY as STORY_TRY } from '@/components/story/Story';
 import { SITE_URL } from './site';
-import { COMPARISONS, GUIDES, ROWS, TRY, comparisonMetadata, factsOf, formatDate, guideMetadata } from './compare';
+import { CLAIMS, COMPARISONS, GUIDES, ROWS, TRY, comparisonMetadata, factsOf, formatDate, guideMetadata } from './compare';
 
 const WEB = join(__dirname, '..', '..');
 const SITE = join(WEB, 'src', 'app', '(site)');
@@ -195,6 +195,20 @@ describe('comparison pages', () => {
       expect(t, p.slug).not.toMatch(/Shepetal|SHEPETAL/);
       expect(t, p.slug).not.toMatch(/\b(better than|worse|slow(er)?|clunky|bad|poor|inferior|unlike|spy|leaks?|unsafe|insecure|best)\b/i);
       expect(t, p.slug).not.toMatch(/git[h]ub\.com|backant\.io/i);
+    }
+  });
+
+  it('keep Pavel’s voice: each approved claim on a line of its own, plain headings, none of the shapes he cuts', () => {
+    for (const p of PAGES_) {
+      const h = ours(p.html());
+      const t = words(p, ours);
+      for (const c of CLAIMS) expect(t.split(c).length, `${p.slug}: ${c}`).toBe(h.split(`<span class="s-cmp-line">${c}</span>`).length);
+      expect(h.match(/<h[1-3][^>]*>[^<]*\.<\/h[1-3]>/)?.[0], p.slug).toBeUndefined();
+      expect(t, p.slug).not.toContain('?');
+      expect(
+        t.match(/\bnot an?\b|rather than|instead of|does not|doesn’t|has no|on purpose|intentional|for the record|at the time of writing|nothing else|essentially|fundamentally|worth noting|seamless|empower|unlock|leverage|game changer|cutting edge|revolutioni[sz]e|the future of|excited to/i)?.[0],
+        p.slug,
+      ).toBeUndefined();
     }
   });
 

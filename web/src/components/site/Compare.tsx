@@ -17,6 +17,21 @@ import {
   type Pick,
 } from '@/lib/compare';
 
+/** A text from src/lib/compare.ts: each "\n" starts a line of its own, so an approved claim stands alone. */
+function Lines({ text }: { text: string }) {
+  const lines = text.split('\n');
+  if (lines.length === 1) return <>{text}</>;
+  return (
+    <>
+      {lines.map((l) => (
+        <span key={l} className="s-cmp-line">
+          {l}
+        </span>
+      ))}
+    </>
+  );
+}
+
 /** The trial button: the install guide, which starts the download. ?ref= tells /download which page sent the visitor. */
 function TryButton({ refName }: { refName: string }) {
   return (
@@ -57,7 +72,7 @@ function PickList({ title, picks }: { title: string; picks: Pick[] }) {
       <ul>
         {picks.map((p) => (
           <li key={p.text}>
-            {p.text}
+            <Lines text={p.text} />
             {p.source && p.asOf && (
               <>
                 {' '}
@@ -104,7 +119,7 @@ function Try({ refName }: { refName: string }) {
   return (
     <section className="s-for-try" aria-labelledby="s-for-try">
       <h2 id="s-for-try" className="s-h2">
-        30 days free.
+        30 days free
       </h2>
       <div className="s-plans">
         <div className="s-plan">
@@ -120,7 +135,7 @@ function Try({ refName }: { refName: string }) {
         <TryButton refName={refName} />
       </div>
       <p className="s-small s-for-more">
-        More in the <Link href="/faq" prefetch={false}>FAQ</Link> and the <Link href="/privacy" prefetch={false}>Privacy Policy</Link>.
+        If you have more questions, the <Link href="/faq" prefetch={false}>FAQ</Link> and the <Link href="/privacy" prefetch={false}>Privacy Policy</Link> answer them.
       </p>
     </section>
   );
@@ -135,7 +150,9 @@ export function ComparePage({ slug }: { slug: string }) {
       <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal s-for s-cmp">
         <h1 className="s-h2">{c.h1}</h1>
-        <p className="s-lede">{c.lede}</p>
+        <p className="s-lede">
+          <Lines text={c.lede} />
+        </p>
         <div className="s-actions s-for-cta">
           <TryButton refName={ref} />
         </div>
@@ -158,7 +175,9 @@ export function ComparePage({ slug }: { slug: string }) {
                     f && (
                       <tr key={r.key} data-row={r.key}>
                         <th scope="row">{r.label}</th>
-                        <td>{SHEPETAL[r.key]}</td>
+                        <td>
+                          <Lines text={SHEPETAL[r.key]} />
+                        </td>
                         <FactCell f={f} />
                       </tr>
                     )
@@ -168,10 +187,10 @@ export function ComparePage({ slug }: { slug: string }) {
             </table>
           </div>
           <p className="s-cmp-note">
-            What {c.name} offers, in the words of its own pages, linked, with the day each was checked. shepetal is not affiliated with {c.name}.
+            Every line on {c.name} here comes from its own pages, and each one links the page and the day we checked it. shepetal is independent of {c.name} and of the company that makes it.
           </p>
 
-          <h2>When to pick which</h2>
+          <h2>Which to pick</h2>
           <PickList title={`Pick ${c.name} if`} picks={c.pickOther} />
           <PickList title="Pick shepetal if" picks={c.pickShepetal} />
 
@@ -193,7 +212,9 @@ export function GuidePage({ slug }: { slug: string }) {
       <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal s-for s-cmp">
         <h1 className="s-h2">{g.h1}</h1>
-        <p className="s-lede">{g.lede}</p>
+        <p className="s-lede">
+          <Lines text={g.lede} />
+        </p>
         <div className="s-actions s-for-cta">
           <TryButton refName={g.ref} />
         </div>
@@ -202,7 +223,9 @@ export function GuidePage({ slug }: { slug: string }) {
           {g.sections.map((s) => (
             <section key={s.title}>
               <h2>{s.title}</h2>
-              <p>{s.text}</p>
+              <p>
+                <Lines text={s.text} />
+              </p>
             </section>
           ))}
 
@@ -223,7 +246,9 @@ export function GuidePage({ slug }: { slug: string }) {
                 <tr>
                   <th scope="row">shepetal</th>
                   {cols.map((r) => (
-                    <td key={r.key}>{SHEPETAL[r.key]}</td>
+                    <td key={r.key}>
+                      <Lines text={SHEPETAL[r.key]} />
+                    </td>
                   ))}
                 </tr>
                 {COMPARISONS.map((c) => (
@@ -240,11 +265,13 @@ export function GuidePage({ slug }: { slug: string }) {
               </tbody>
             </table>
           </div>
-          <p className="s-cmp-note">What each app offers, in the words of its own pages, linked. shepetal is not affiliated with any of them.</p>
+          <p className="s-cmp-note">
+            Every line on the other apps here comes from their own pages, and each one links the page and the day we checked it. shepetal is independent of all of them.
+          </p>
 
-          <h2>When to pick which</h2>
+          <h2>Which to pick</h2>
           <p>{g.others}</p>
-          <p>Pick shepetal if you want on-device processing and nothing else. shepetal has no cloud processing.</p>
+          <p>Pick shepetal if you want every dictation processed on your Mac, which is the only way shepetal works.</p>
 
           <SourceList apps={COMPARISONS} />
         </div>

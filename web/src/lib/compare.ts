@@ -14,13 +14,17 @@ export type RowKey = 'processing' | 'offline' | 'platforms' | 'price' | 'languag
 
 export const ROWS: { key: RowKey; label: string }[] = [
   { key: 'processing', label: 'On-device or cloud' },
-  { key: 'offline', label: 'Offline use' },
+  { key: 'offline', label: 'Offline' },
   { key: 'platforms', label: 'Platforms' },
-  { key: 'price', label: 'Pricing' },
+  { key: 'price', label: 'Price' },
   { key: 'languages', label: 'Languages' },
-  { key: 'meetings', label: 'Meeting transcription' },
-  { key: 'anyApp', label: 'Works in any app' },
+  { key: 'meetings', label: 'Meetings' },
+  { key: 'anyApp', label: 'In any app' },
 ];
+
+/** The approved claims (brand/voice.md), word for word. On these pages each one stands on a line of its own: a "\n" in
+ * any text below starts a new line (Lines in Compare.tsx). */
+export const CLAIMS = ['100% private. Your data is yours.', 'Works offline.', 'Instant.', '4x faster than typing.', 'Works in every app.', 'Meetings, transcribed on your Mac.'];
 
 /**
  * shepetal's side of every table, each line true of the Mac app in Sources/ and the prices in web/: speech recognition on
@@ -29,20 +33,23 @@ export const ROWS: { key: RowKey; label: string }[] = [
  * (Inserter.swift, SecureInput.swift), and no meeting transcription in the app yet.
  */
 export const SHEPETAL: Record<RowKey, string> = {
-  processing: 'On-device processing. Your voice never leaves your Mac.',
-  offline: 'Works offline. Online once, to download speech recognition.',
-  platforms: 'Mac. macOS 14 or later.',
-  price: '$23.99 once. Yours forever. Or $0.99 a month. 30 days free.',
-  languages: '25 European languages on a Mac with Apple silicon. English on an Intel Mac.',
-  meetings: 'No.',
-  anyApp: 'Works in every app. Where an app blocks paste, your words wait on the clipboard.',
+  processing: 'On your Mac, and your voice stays there.',
+  offline: 'Works offline.\nYou go online once, to download speech recognition.',
+  platforms: 'Mac, with macOS 14 or later.',
+  price: '$23.99 once. Yours forever.\n$0.99 a month.\nYou can try it free for 30 days.',
+  languages: '25 European languages on a Mac with Apple silicon, and English on an Intel Mac.',
+  meetings: 'Not in shepetal yet.',
+  anyApp: 'Works in every app.\nWhen an app blocks paste, your words wait for you on the clipboard.',
 };
 
 /** A fact about another app: what its own public page says, the page, and the day it was read. */
 export type Fact = { text: string; sources: string[]; asOf: string };
 
-/** A line of "when to pick which"; `source` when it states something the table does not. */
+/** A line of "which to pick"; `source` when it states something the table does not. */
 export type Pick = { text: string; source?: string; asOf?: string };
+
+/** Pick shepetal for on-device processing: the same line on every page. */
+const ON_DEVICE = 'You want every dictation processed on your Mac, which is the only way shepetal works.';
 
 export type Comparison = {
   slug: string;
@@ -91,9 +98,9 @@ export const COMPARISONS: Comparison[] = [
     slug: 'wispr-flow',
     name: 'Wispr Flow',
     title: 'shepetal vs Wispr Flow',
-    description: 'shepetal and Wispr Flow side by side: on-device or cloud processing, offline use, platforms, prices, languages and meetings, each fact with its source.',
-    h1: 'shepetal or Wispr Flow.',
-    lede: 'Both put your words in any app. shepetal processes your voice on your Mac. Wispr Flow processes it in the cloud.',
+    description: 'See how shepetal and Wispr Flow compare on where your voice is processed, offline use, platforms, price, languages and meetings, with a source for each fact.',
+    h1: 'shepetal or Wispr Flow',
+    lede: 'You want to speak and have your words land in the app you are working in, and both apps do that for you. shepetal turns your voice into text on your Mac, and Wispr Flow sends it to the cloud and transcribes it there.',
     facts: {
       processing: fact('In the cloud. Its privacy page: “Transcription always happens in the cloud.”', WISPR.privacy),
       offline: fact('No offline transcription. Its privacy page says each dictation is sent to its servers and transcribed there.', WISPR.privacy),
@@ -104,14 +111,14 @@ export const COMPARISONS: Comparison[] = [
       anyApp: fact('Yes. Its pricing page: “Speech-to-text in any app.”', WISPR.pricing),
     },
     pickOther: [
-      { text: 'You dictate on Windows, iOS or Android as well as on your Mac.' },
-      { text: 'You speak a language outside shepetal’s 25 European languages.' },
-      { text: 'You want a free plan to keep, or plans for a team.' },
+      { text: 'You also dictate on Windows, iOS or Android and want the same app there as on your Mac.' },
+      { text: 'You speak a language outside the 25 European languages shepetal knows on a Mac with Apple silicon.' },
+      { text: 'You want a free plan you can keep using, or plans for your team.' },
     ],
     pickShepetal: [
-      { text: 'Your voice has to stay on your Mac. 100% private. Your data is yours.' },
-      { text: 'You dictate where there is no internet. Works offline.' },
-      { text: 'You want to pay once. $23.99 once. Yours forever.' },
+      { text: 'You want your voice to stay on your Mac the whole time.\n100% private. Your data is yours.' },
+      { text: 'You dictate in places where you have no internet, like on a plane or a train.\nWorks offline.' },
+      { text: 'You want to pay once and keep it.\n$23.99 once. Yours forever.' },
     ],
     updated: ASOF,
   },
@@ -119,9 +126,9 @@ export const COMPARISONS: Comparison[] = [
     slug: 'superwhisper',
     name: 'Superwhisper',
     title: 'shepetal vs Superwhisper',
-    description: 'shepetal and Superwhisper side by side: on-device or cloud processing, offline use, platforms, prices, languages and meetings, each fact with its source.',
-    h1: 'shepetal or Superwhisper.',
-    lede: 'Both work in any app, and both work offline. shepetal processes on your Mac only. Superwhisper also offers cloud processing.',
+    description: 'See how shepetal and Superwhisper compare on where your voice is processed, offline use, platforms, price, languages and meetings, with a source for each fact.',
+    h1: 'shepetal or Superwhisper',
+    lede: 'Both apps put your words into the app you are working in and both work offline. shepetal processes your voice on your Mac every time, and Superwhisper lets you choose between your device and the cloud.',
     facts: {
       processing: fact('On your device or in the cloud, your choice. Its docs say that with on-device processing, nothing you say leaves your device.', SUPERWHISPER.intro),
       offline: fact('Yes. Its docs say on-device transcription works without an internet connection, and other processing of your text needs the internet.', SUPERWHISPER.intro),
@@ -132,14 +139,14 @@ export const COMPARISONS: Comparison[] = [
       anyApp: fact('Yes. Its docs: “clean, formatted text in any app.”', SUPERWHISPER.intro),
     },
     pickOther: [
-      { text: 'You want cloud processing as an option.' },
-      { text: 'You dictate on Windows, iOS or Android as well as on your Mac.' },
-      { text: 'You want a free plan to keep.' },
+      { text: 'You want the cloud as an option for processing.' },
+      { text: 'You also dictate on Windows, iOS or Android and want the same app there as on your Mac.' },
+      { text: 'You want a free plan you can keep using.' },
     ],
     pickShepetal: [
-      { text: 'You want on-device processing and nothing else. shepetal has no cloud processing.' },
-      { text: 'You want to pay by the month. $0.99 a month.' },
-      { text: 'You want to pay once. $23.99 once. Yours forever.' },
+      { text: ON_DEVICE },
+      { text: 'You want to pay by the month.\n$0.99 a month.' },
+      { text: 'You want to pay once and keep it.\n$23.99 once. Yours forever.' },
     ],
     updated: ASOF,
   },
@@ -147,9 +154,9 @@ export const COMPARISONS: Comparison[] = [
     slug: 'macwhisper',
     name: 'MacWhisper',
     title: 'shepetal vs MacWhisper',
-    description: 'shepetal and MacWhisper side by side: on-device or cloud processing, offline use, platforms, prices, languages and meetings, each fact with its source.',
-    h1: 'shepetal or MacWhisper.',
-    lede: 'Both process your voice on your Mac. MacWhisper also transcribes files and meetings. shepetal is made for dictation in every app.',
+    description: 'See how shepetal and MacWhisper compare on where your voice is processed, offline use, platforms, price, languages and meetings, with a source for each fact.',
+    h1: 'shepetal or MacWhisper',
+    lede: 'Both apps process your voice on your Mac. MacWhisper also transcribes files and meetings, and shepetal is made for dictating into whatever app you are working in.',
     facts: {
       processing: fact('On your Mac, or in the cloud with services you connect.', MACWHISPER),
       offline: fact('Yes. Its site: “Process sensitive content locally without data ever leaving your Mac.”', MACWHISPER),
@@ -160,13 +167,13 @@ export const COMPARISONS: Comparison[] = [
       anyApp: fact('Yes. Its site: dictation “lets you use your voice in any app.”', MACWHISPER),
     },
     pickOther: [
-      { text: 'You transcribe recorded files as well as dictate.', source: MACWHISPER, asOf: ASOF },
-      { text: 'You want remote services as an option.' },
-      { text: 'You want a free version to keep.' },
+      { text: 'You also want to transcribe recordings you already have.', source: MACWHISPER, asOf: ASOF },
+      { text: 'You want to connect remote services for processing.' },
+      { text: 'You want a free version you can keep using.' },
     ],
     pickShepetal: [
-      { text: 'You want on-device processing and nothing else. shepetal has no cloud processing.' },
-      { text: 'You want to choose between paying once and $0.99 a month.' },
+      { text: ON_DEVICE },
+      { text: 'You want to choose between paying once and paying by the month.\n$23.99 once. Yours forever.\n$0.99 a month.' },
     ],
     updated: ASOF,
   },
@@ -174,9 +181,9 @@ export const COMPARISONS: Comparison[] = [
     slug: 'apple-dictation',
     name: 'Apple Dictation',
     title: 'shepetal vs Apple Dictation',
-    description: 'shepetal and Apple Dictation side by side: on-device or server processing, offline use, platforms, languages and where it works, each fact with its source.',
-    h1: 'shepetal or Apple Dictation.',
-    lede: 'Apple Dictation is part of macOS, and it works anywhere you type. shepetal processes every request on your Mac.',
+    description: 'See how shepetal and Apple Dictation compare on where your voice is processed, offline use, platforms, languages and which apps it works in, each with a source.',
+    h1: 'shepetal or Apple Dictation',
+    lede: 'Apple Dictation comes with macOS and works anywhere you can type, so you already have it on your Mac. shepetal also puts your words into any app you type in, and it processes every dictation on your Mac.',
     facts: {
       processing: fact(
         'On your Mac or on Apple’s servers. Its privacy page says Keyboard Settings show whether dictation is processed on your device; otherwise, Apple’s servers process it.',
@@ -190,12 +197,12 @@ export const COMPARISONS: Comparison[] = [
       anyApp: fact('Yes. Its guide: “anywhere you can type it.”', APPLE.dictation),
     },
     pickOther: [
-      { text: 'You want nothing to install. It is part of macOS.' },
-      { text: 'You dictate on your iPhone too.' },
+      { text: 'You want to use what is already on your Mac, because Apple Dictation is part of macOS.' },
+      { text: 'You also dictate on your iPhone and want the same dictation there.' },
     ],
     pickShepetal: [
-      { text: 'You want every request processed on your Mac. shepetal has no cloud processing.' },
-      { text: 'You want the recording of what you said kept on your Mac, next to its text.' },
+      { text: ON_DEVICE },
+      { text: 'You want to keep the recording of what you said on your Mac, next to the text it became.' },
     ],
     updated: ASOF,
   },
@@ -233,15 +240,15 @@ export const GUIDES: Guide[] = [
     label: 'Offline dictation',
     ref: 'seo-offline',
     title: 'Offline dictation for Mac',
-    description: 'Dictation on your Mac with no internet: shepetal processes speech on your Mac. How it compares with Wispr Flow, Superwhisper, MacWhisper and Apple Dictation.',
-    h1: 'Dictate with no internet.',
-    lede: 'shepetal recognizes speech on your Mac. Works offline. Dictate on a plane, on a train, anywhere with no signal.',
+    description: 'Dictate with no internet, because shepetal processes speech on your Mac, and see how Wispr Flow, Superwhisper, MacWhisper and Apple Dictation compare.',
+    h1: 'Dictate offline',
+    lede: 'Works offline.\nYou are on a plane or a train with no signal and you still want to answer that email. shepetal recognizes your speech on your Mac, so you just keep dictating.',
     sections: [
-      { title: 'Online once', text: 'shepetal downloads speech recognition once. After that, it needs no internet to dictate.' },
+      { title: 'Online once', text: 'shepetal downloads speech recognition once, and after that you can dictate with no internet at all.' },
     ],
     columns: ['processing', 'offline'],
     others:
-      'Superwhisper and MacWhisper also work offline, with on-device processing. Apple’s guide for macOS Sonoma 14 says Apple Dictation works offline on a Mac with Apple silicon, for supported languages. Wispr Flow transcribes in the cloud.',
+      'Superwhisper and MacWhisper also work offline when they process on your device. Apple’s guide for macOS Sonoma 14 says Apple Dictation works offline on a Mac with Apple silicon for supported languages, and Wispr Flow transcribes in the cloud.',
     updated: ASOF,
   },
   {
@@ -249,17 +256,17 @@ export const GUIDES: Guide[] = [
     label: 'Private dictation',
     ref: 'seo-private',
     title: 'Private dictation on Mac: on-device or cloud',
-    description: 'Which Mac dictation apps keep your voice on your Mac? shepetal, Wispr Flow, Superwhisper, MacWhisper and Apple Dictation, with each fact linked to its source.',
-    h1: 'Keep your voice on your Mac.',
-    lede: '100% private. Your data is yours. shepetal processes your voice on your Mac, and it never leaves it.',
+    description: 'See which Mac dictation apps keep your voice on your Mac: shepetal, Wispr Flow, Superwhisper, MacWhisper and Apple Dictation, each fact linked to its source.',
+    h1: 'Keep your voice on your Mac',
+    lede: '100% private. Your data is yours.\nYou dictate things that are private to you, and shepetal processes your voice on your Mac, where it stays.',
     sections: [
-      { title: 'What stays on your Mac', text: 'Your voice is processed on your Mac. Your recordings and history stay in your user folder. Recordings can be deleted after 24 hours, if you choose.' },
-      { title: 'What leaves it', text: 'shepetal downloads speech recognition once. It sends no voice, no text and no analytics.' },
-      { title: 'Your words go where you put them', text: 'Into the app you dictate into. Works in every app.' },
+      { title: 'On your Mac', text: 'Your voice is processed on your Mac, and your recordings and history stay in your user folder. If you choose “Delete recordings after 24 hours”, shepetal takes care of that for you.' },
+      { title: 'Online once', text: 'shepetal goes online once, to download speech recognition, and that is the only time it uses the internet.' },
+      { title: 'Your words', text: 'Your words land in the app you are dictating into.\nWorks in every app.' },
     ],
     columns: ['processing', 'offline'],
     others:
-      'MacWhisper and Superwhisper offer on-device processing, with remote or cloud processing as an option. Apple Dictation processes on your Mac or on Apple’s servers, and Keyboard Settings show which. Wispr Flow transcribes in the cloud.',
+      'MacWhisper and Superwhisper process on your device and give you remote or cloud processing as an option. Apple Dictation processes on your Mac or on Apple’s servers and Keyboard Settings show you which one, and Wispr Flow transcribes in the cloud.',
     updated: ASOF,
   },
 ];
