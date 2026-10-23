@@ -74,7 +74,8 @@ jobs:
           if sandbox-exec -p "$NO_NETWORK" curl -sS -m 10 -o /dev/null https://example.com; then
             echo "::error::curl reached example.com under the deny-network profile"; exit 1
           fi
-          CLEANUP=rules LANGUAGES=skip sandbox-exec -p "$NO_NETWORK" scripts/e2e-mac.sh 2>&1 | tee e2e-mac.log
+          # LATENCY=report: the runner is a VM with no Neural Engine, so the speed bars are reported, not asserted.
+          CLEANUP=rules LANGUAGES=skip LATENCY=report sandbox-exec -p "$NO_NETWORK" scripts/e2e-mac.sh 2>&1 | tee e2e-mac.log
       - name: Meeting, network denied
         # The script runs shepetal under the same profile itself; a sandbox cannot be applied inside another.
         run: SHEPETAL_BIN=.build/release/shepetal scripts/e2e-meeting.sh 2>&1 | tee e2e-meeting.log

@@ -33,6 +33,8 @@
 # French chosen, on e02: the English text is kept and the wrong-language hint names English. The whisper model is
 # SHEPETAL_WHISPER_MODEL (default: bench/.cache/whisper, downloaded there on the first run, about 574 MB).
 # LANGUAGES=skip skips this part and says so.
+# LATENCY=report prints the ready times instead of asserting the 700 and 800 ms bars, and says so. Only the Claims
+# workflow uses it: GitHub's Macs are virtual machines with no Neural Engine, where ready times went from 243 to 995 ms between runs.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=${SHEPETAL_BIN:-.build/release/shepetal}
@@ -121,6 +123,7 @@ open(sys.argv[1], "w").write(s + "\n\n\t\n\n" + s)' "$FIX/c05.field"
   fi
 fi
 
+[ "${LATENCY:-}" != report ] || echo "NOT ASSERTED: the 700 and 800 ms bars, ready times are only reported (LATENCY=report)"
 # A clip with an error exits 1; the checks below name it.
 "$BIN" --e2e "${CLIPS[@]}" ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl" || true
 
@@ -187,7 +190,11 @@ for r in rows:
     assert not r["window_visible"], (name, "the test put a window on screen")
     field = os.path.join(fix, name[:-4] + ".field")
     if not os.environ.get("ENGINE"):  # F24's field costs time: Pavel set its bar to 800 ms (2026-10-21)
-        assert r["ready_ms"] <= (800 if os.path.exists(field) else 700), (name, "slow", r["ready_ms"])
+        bar = 800 if os.path.exists(field) else 700
+        if os.environ.get("LATENCY") != "report":
+            assert r["ready_ms"] <= bar, (name, "slow", r["ready_ms"])
+        elif r["ready_ms"] > bar:
+            print(f"{name}: ready {r['ready_ms']} ms, over the {bar} ms bar (LATENCY=report: not asserted)")
         assert r["partials"] > 0, (name, "no live words while it recorded", r["partials"])  # F13: Parakeet only
         assert r["release_partial_running"], (name, "no partial running at the release: the bar missed the worst case")
     assert not r["late_partial_shown"], (name, "a partial came back after the release and was shown", r["last_partial"])
