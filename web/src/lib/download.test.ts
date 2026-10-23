@@ -1,7 +1,10 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { track } from './analytics';
 import { appcast, download, file, latest, releaseRoute } from './download';
+
+vi.mock('./analytics', async (actual) => ({ ...(await actual<typeof import('./analytics')>()), track: vi.fn(async () => {}) }));
 
 // The release bucket as R2 behaves for what download.ts asks: get/head by key, a range only as {offset, length} inside
 // the object (R2 throws otherwise). It records every key read, so a test can prove staging/ is never touched.
@@ -179,6 +182,33 @@ describe('releaseRoute: the release paths worker.ts serves before Next', () => {
       expect(await releaseRoute(b, at(path))).toBeNull();
     }
     expect(await releaseRoute(b, at('/download', 'POST'))).toBeNull();
+  });
+});
+
+describe('download_served counts downloads people start (B1)', () => {
+  const LATEST = { 'latest.json': '{"version":"0.2.0","build":745}' };
+  const counted = () => vi.mocked(track).mock.calls.filter(([e]) => e === 'download_served');
+  const dl = (method: string, ua: string) =>
+    new Request('https://shepetal.app/download?ref=x', { method, headers: { 'user-agent': ua } });
+
+  it('a browser GET counts once; a HEAD, a crawler, a link preview (Slack, iMessage, X) or a script downloads nothing and is not counted, but still gets its answer', async () => {
+    vi.mocked(track).mockClear();
+    const b = released(LATEST);
+    const chrome = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
+    expect((await releaseRoute(b, dl('GET', chrome)))?.status).toBe(302);
+    expect(counted()).toHaveLength(1);
+    expect(counted()[0][2]).toMatchObject({ version: '0.2.0', ref: 'x' });
+    for (const [method, ua] of [
+      ['HEAD', chrome],
+      ['GET', 'Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)'],
+      ['GET', 'facebookexternalhit/1.1 Facebot Twitterbot/1.0'],
+      ['GET', 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)'],
+      ['GET', 'curl/8.4.0'],
+      ['GET', ''],
+    ]) {
+      expect((await releaseRoute(b, dl(method, ua)))?.status, `${method} ${ua}`).toBe(302);
+    }
+    expect(counted()).toHaveLength(1);
   });
 });
 

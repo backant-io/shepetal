@@ -46,6 +46,9 @@ function Hero() {
           <a className="kc-mark" href="/">
             shepetal
           </a>
+          <a className="kc-login" href="/login">
+            Log in
+          </a>
         </header>
 
         <div className="kc-grid">
