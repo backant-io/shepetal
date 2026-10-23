@@ -98,11 +98,13 @@ final class DictionaryScreenshotTests: XCTestCase {
             window.isReleasedWhenClosed = false
             window.titlebarAppearsTransparent = true
             window.appearance = NSAppearance(named: appearance)
-            window.contentView = NSHostingView(rootView: make()
+            let host = NSHostingView(rootView: make()
                 .padding(.top, 28)  // under the title bar
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .frame(width: size.width, height: size.height, alignment: .topLeading)
                 .background(SH.bg)
                 .environment(\.colorScheme, scheme))
+            host.sizingOptions = []  // the window keeps the shot's size instead of growing to the list's ideal height
+            window.contentView = host
             let image = try render(window, size)
             try write(image, "\(name)-\(mode)@2x.png")
             let seen = try Self.text(in: image)
