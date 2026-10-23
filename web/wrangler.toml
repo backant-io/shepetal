@@ -61,10 +61,11 @@ POSTHOG_HOST = "https://us.i.posthog.com"
 # confirmation emails through Amazon SES. It is read at build time too (next.config.ts): change it, then build.
 WAITLIST = "on"
 
-# The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. Only "on" sends; anything
-# else logs what each cron run would send. Needs migration 0006 and the SES secrets below. Switch it here, commit and
-# deploy (README.md): a change in the dashboard is undone by the next deploy.
-LIFECYCLE_EMAILS = "on"
+# The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. "off": the sign-in no longer
+# asks for the opt-in they need, so none is sent. The code, /unsubscribe and users.trial_emails_at stay, so they can
+# come back with a new opt-in, the cron below every 5 minutes, and "on" here (README.md). Only "on" sends; anything
+# else logs what a cron run would send. A change in the dashboard is undone by the next deploy.
+LIFECYCLE_EMAILS = "off"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
 # and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
 # scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and
@@ -76,19 +77,19 @@ LIFECYCLE_EMAILS = "on"
 #          wrangler secret put STRIPE_SECRET_KEY
 #          wrangler secret put STRIPE_WEBHOOK_SECRET
 # Optional, the § 312k confirmation email to customers through Amazon SES (README.md), and needed for the trial
-# emails (LIFECYCLE_EMAILS): without all three, none is sent.
+# emails (LIFECYCLE_EMAILS, off): without all three, none is sent.
 #   The waitlist's confirmation emails (src/lib/waitlist.ts) need them too, once WAITLIST is "on".
 #          wrangler secret put SES_ACCESS_KEY_ID
 #          wrangler secret put SES_SECRET_ACCESS_KEY
 #          wrangler secret put SES_REGION
 # For local runs, put the same names in .dev.vars (see README.md).
 
-# The trial emails (src/lib/lifecycle.ts, worker.ts scheduled): every 5 minutes, at most 5 per run (1,440 a day), so a
-# run stays inside the Workers Free plan's 10 ms of CPU. This file is the source of truth: a cron changed in the
-# dashboard is undone by the next deploy.
-# The 03:15 UTC run also deletes the waitlist rows that are not confirmed, 29 days after their last signup (worker.ts).
+# Once a day at 03:15 UTC (worker.ts scheduled): the waitlist sweep, which deletes the rows that are not confirmed 29
+# days after their last signup, so the privacy policy's 30 days hold. The trial emails are off (LIFECYCLE_EMAILS), so
+# nothing else runs; with them back on, this goes back to every 5 minutes, at most 5 emails a run. This file is the
+# source of truth: a cron changed in the dashboard is undone by the next deploy.
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["15 3 * * *"]
 
 [observability.logs]
 enabled = true
