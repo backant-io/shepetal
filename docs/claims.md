@@ -18,8 +18,8 @@ the spot (`SIGKILL`), so a network attempt fails the run whatever the code does 
 and `scripts/e2e-meeting.sh` fail when shepetal exits with anything but 0 or 1 (137 is `SIGKILL`). The profile is
 inherited by every process started inside it, so shepetal's own process and the processes it spawns run without the
 network. A denial is also reported to the unified log as `Sandbox: <process>(<pid>) deny(1) network-...`, but the
-log can drop reports: in run 39889902952 the first reports for `shepetal(7056)` are missing and only "duplicate
-report" lines for it are left. That is why the profile kills the process instead of leaving the check to the log.
+log can drop reports: in run 39889902952 the log holds only "duplicate report" lines for `shepetal(7056)`, not the
+reports they duplicate. That is why the profile kills the process instead of leaving the check to the log.
 
 ## Works offline
 
@@ -50,22 +50,25 @@ Job `claims`, steps **Dictation, network denied** and **Meeting, network denied*
 A pass means the dictation and meeting paths work with no network for shepetal's own process and the processes it
 spawns, and that none of them tried the network (a try kills the process).
 
-Ready times on the runs of the pull request that added this workflow (macos-26; run ids under
-https://github.com/backant-io/shepetal/actions/runs/):
+Ready times on the macos-26 runs of the pull request that added this workflow that reached the dictation results
+(39886776416, 39888350903, 39888837394, 39889902952, 39890403775, 39890846701, 39892997881, 39894259075; run ids
+under https://github.com/backant-io/shepetal/actions/runs/):
 
 | Clip | Fastest | Slowest |
 |---|---|---|
-| e01 | 337 ms (39889902952) | 617 ms (39888837394) |
-| e01-quiet | 374 ms (39886776416) | 995 ms (39888837394) |
-| e02 | 329 ms (39890403775) | 627 ms (39888837394) |
+| e01 | 337 ms (39889902952) | 836 ms (39894259075) |
+| e01-quiet | 374 ms (39886776416) | 1075 ms (39894259075) |
+| e02 | 329 ms (39890403775) | 703 ms (39894259075) |
 | e03 | 306 ms (39888350903) | 875 ms (39888837394) |
-| e04 | 349 ms (39888350903) | 516 ms (39888837394) |
-| e05 | 429 ms (39889902952) | 568 ms (39890846701) |
-| e06 | 319 ms (39889902952) | 546 ms (39888837394) |
+| e04 | 349 ms (39888350903) | 736 ms (39894259075) |
+| e05 | 429 ms (39889902952) | 1063 ms (39892997881) |
+| e06 | 319 ms (39889902952) | 646 ms (39892997881) |
 
-Every value over the 700 ms bar (e01-quiet 995 ms, e03 875 ms) came from run 39888837394, one of the two runs
-carrying the throwaway request below (39888837394 and 39889902952). The clean runs (39886776416, 39888350903,
-39890403775, 39890846701) stayed under 570 ms.
+In the first six runs every value over the 700 ms bar (e01-quiet 995 ms, e03 875 ms) came from run 39888837394,
+one of the two runs carrying the throwaway request below (39888837394 and 39889902952), and the clean runs stayed
+under 570 ms. The two clean runs after them, with the app's code unchanged, went over it: e05 took 1063 ms in
+39892997881, and every clip but e06 was over 700 ms in 39894259075. The VMs' speed changes from run to run, which
+is why the 700 ms bar is not asserted there; every value is under the 2000 ms CI bar.
 
 ## 100% private
 
@@ -93,7 +96,11 @@ Two things keep that check honest:
   (`1 duplicate report for Sandbox: shepetal(7056) deny(1) network-outbound remote:*:443`):
   https://github.com/backant-io/shepetal/actions/runs/39889902952 (on 1b75500, which still carried 954a1a2's
   change). The commit was reverted (`git revert`) and the next run went green:
-  https://github.com/backant-io/shepetal/actions/runs/39890403775.
+  https://github.com/backant-io/shepetal/actions/runs/39890403775. Then with the kill: a throwaway commit (83121ae)
+  made one URLSession request to https://example.com, once, after the first dictation. The sandbox killed shepetal
+  and the dictation e2e failed (`e2e-mac: shepetal exited 137`); **Nothing leaves the Mac** printed
+  `Sandbox: shepetal(10122) deny(1) network-outbound`: https://github.com/backant-io/shepetal/actions/runs/39893739121.
+  Reverted (a0d5de2), green: https://github.com/backant-io/shepetal/actions/runs/39894259075.
 
 `scripts/e2e-mac.sh` checks that llama.framework and whisper.framework do not import `socket`, `connect`,
 `getaddrinfo`, `gethostbyname` or `curl_*` (`nm -u`).
@@ -108,8 +115,8 @@ Two things keep that check honest:
 ## What this does not cover
 
 - The cleanup model (Qwen3.5, about 1.3 GB). The workflow runs `e2e-mac.sh` with `CLEANUP=rules`, which skips the
-  clips that need it and says `SKIPPED: cleanup clips (CLEANUP=rules)` in the log. Its library imports none of the
-  network calls above (`nm -u`), and the full run with the model is part of the local check before a change to the pipeline lands.
+  clips that need it and says `SKIPPED: cleanup clips (CLEANUP=rules)` in the log. Its library (llama.framework)
+  imports none of the network calls above (`nm -u`), and the full run with the model is part of the local check before a change to the pipeline lands.
 - Languages: whisper large-v3-turbo (about 574 MB) and the language checks. `LANGUAGES=skip` skips them and says
   `SKIPPED: languages (LANGUAGES=skip)`.
 - c05, the 800 ms bar with a full text field: it is a cleanup clip, so `CLEANUP=rules` skips it too.
