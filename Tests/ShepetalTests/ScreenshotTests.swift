@@ -7,8 +7,8 @@ import ShepetalSummary
 
 /// Launch screenshots: the real Hub and Meeting transcript windows with fictional data, drawn offscreen at 2x.
 /// Skipped unless SHEPETAL_SCREENSHOTS names an output dir, so `swift test` and CI never write a file. Each shot
-/// is written in Light and Dark, as the raw window (`NN-name-light-window@2x.png`) and centred on the site's
-/// #E6E4DE at 1270 x 760 (`NN-name-light.png`).
+/// is written in Light and Dark, as the raw window with its 10 pt corners (`NN-name-light-window@2x.png`), centred
+/// on the site's #E6E4DE at 2540 x 1520 (`NN-name-light@2x.png`), and that halved to 1270 x 760 (`NN-name-light.png`).
 ///
 /// Building the Hub reads the account (Keychain and account.json), and Paths.root is a static let, so run this
 /// class alone with both env vars set before the process starts:
@@ -16,15 +16,33 @@ import ShepetalSummary
 ///     SHEPETAL_HOME=$(mktemp -d) SHEPETAL_KEYCHAIN_SERVICE=io.backant.shepetal.test.screenshots \
 ///     SHEPETAL_SCREENSHOTS=<dir> swift test --filter ShepetalTests.ScreenshotTests
 ///
-/// No window is ordered front or made key and nothing activates the app or clicks a button; the pipeline gets a
-/// private pasteboard, and the meetings models write the clipboard only from their Copy buttons. The brand keeps 🤫 out of screenshots, so no shot shows the
-/// menu, Home, Settings or the welcome window: they draw it or mention it.
+/// No window is ordered front or made key and nothing activates the app or clicks a button: windows only report
+/// the key window's look (AppKit's hasKeyAppearance) while a shot is drawn, so each is drawn as in use. The pipeline
+/// gets a private pasteboard, and the meetings models write the clipboard only from their Copy buttons. Defaults go
+/// to the argument domain, which lives in this process only: the locale (en_US, so every date reads in one style on
+/// any Mac) and the Hub's tab. The brand keeps 🤫 out of screenshots, so no shot shows the menu, Home, Settings or
+/// the welcome window: they draw it or mention it.
 @MainActor
 final class ScreenshotTests: XCTestCase {
     private var out: URL!
     private var root: URL!
     private var pasteboard: NSPasteboard!
     private var tz: String?
+    /// AppKit's own answer to "does this window look like the key window?", put back in tearDown.
+    private var appKit: (method: Method, answer: IMP)?
+
+    /// Locale.current is read once and then kept, so it is set before anything formats a date.
+    nonisolated override class func setUp() {
+        super.setUp()
+        if ProcessInfo.processInfo.environment["SHEPETAL_SCREENSHOTS"] != nil {
+            argue(["AppleLocale": "en_US", "AppleLanguages": ["en-US"]])
+            // XCTest has read Locale.current already, and it is kept: CoreFoundation's own (private) reset makes the
+            // next read see the argument domain. setUpWithError checks that it did.
+            if let reset = dlsym(dlopen(nil, RTLD_NOW), "_CFLocaleResetCurrent") {
+                unsafeBitCast(reset, to: (@convention(c) () -> Void).self)()
+            }
+        }
+    }
 
     override func setUpWithError() throws {
         let env = ProcessInfo.processInfo.environment
@@ -33,24 +51,32 @@ final class ScreenshotTests: XCTestCase {
             throw NSError(domain: "ScreenshotTests", code: 1, userInfo: [NSLocalizedDescriptionKey:
                 "set SHEPETAL_HOME and SHEPETAL_KEYCHAIN_SERVICE=io.backant.shepetal.test.* on the command line, or the Hub reads the real account"])
         }
+        XCTAssertEqual(Locale.current.identifier, "en_US", "the locale was not reset: dates would mix styles")
         _ = NSApplication.shared  // a window needs the app object, even in the test bundle
+        // Every window is drawn as the key window of the active app (coloured traffic lights, the selected tab and
+        // the sidebar's text as in use) while none is key or on screen. Overriding isKeyWindow does not do it: AppKit
+        // draws from its own hasKeyAppearance, which has no public setter, so it says yes until tearDown.
+        let key = try XCTUnwrap(class_getInstanceMethod(NSWindow.self, NSSelectorFromString("hasKeyAppearance")))
+        let yes: @convention(block) (AnyObject) -> Bool = { _ in true }
+        appKit = (key, method_setImplementation(key, imp_implementationWithBlock(yes)))
         out = URL(fileURLWithPath: dir)
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         root = Paths.root.appendingPathComponent("screenshots-\(UUID().uuidString)")
         pasteboard = NSPasteboard(name: .init("io.backant.shepetal.test.\(UUID().uuidString)"))
-        // The live meeting started 18 minutes ago by the real clock: a zone where now reads 09:48 makes it a
-        // morning call whenever this runs. Every other date is built in the same zone, so it reads as written.
+        // The live meeting started 4 minutes ago by the real clock: a zone where now reads 09:34 makes it a call
+        // that began at 9:30 whenever this runs. Every other date is built in the same zone, so it reads as written.
         tz = getenv("TZ").map { String(cString: $0) }
         let utc = Calendar(identifier: .gregorian).dateComponents(in: TimeZone(identifier: "UTC")!, from: Date())
-        var minutes = 9 * 60 + 48 - (utc.hour! * 60 + utc.minute!)
+        var minutes = 9 * 60 + 34 - (utc.hour! * 60 + utc.minute!)
         if minutes < -12 * 60 { minutes += 24 * 60 } else if minutes > 14 * 60 { minutes -= 24 * 60 }
         setZone(String(format: "GMT%@%02d:%02d", minutes < 0 ? "-" : "+", abs(minutes) / 60, abs(minutes) % 60))
     }
 
     override func tearDown() {
         if out != nil { setZone(tz) }
+        if let a = appKit { method_setImplementation(a.method, a.answer) }
+        appKit = nil
         NSApp?.appearance = nil
-        UserDefaults.standard.removeObject(forKey: "hubTab")
         pasteboard?.releaseGlobally()
         if let root { try? FileManager.default.removeItem(at: root) }
     }
@@ -112,10 +138,11 @@ final class ScreenshotTests: XCTestCase {
         }
     }
 
-    /// The window that opens by itself after a call: summary, action items and transcript in one place.
+    /// The window that opens by itself after a call: summary, action items and transcript in one place. 704 pt
+    /// ends it between the second and third line of the transcript.
     func testMeetingTranscriptWindow() throws {
         let office = try Self.meetings()[0]
-        try shoot("05-meeting-transcript-window", NSSize(width: 600, height: 760), expect: ["Copy summary", "Action items"]) {
+        try shoot("05-meeting-transcript-window", NSSize(width: 640, height: 704), expect: ["Copy summary", "Action items"]) {
             let w = MeetingTranscriptWindow(model: MeetingsModel(store: InMemoryMeetingStore([office]), copy: { _ in }),
                                             open: { _ in }, panel: TranscriptPanel())
             w.model.select(office.meeting.id)  // never w.show(): it orders the panel front
@@ -127,38 +154,45 @@ final class ScreenshotTests: XCTestCase {
 
     private static let hubSize = NSSize(width: 1120, height: 720)
 
+    /// The apps are named for what they are ("Email", not a product): History shows the name the row was typed into.
+    /// Each email is a greeting and one line, so History's three lines show all of it.
     private static let dictations: [(day: Int, time: String, app: String, text: String)] = [
-        (22, "17:12", "Mail", EmailFormat.apply("Hi Dana, thanks for sending the new floor plan. The second option works for us, as long as the kitchen wall can move by half a meter. Could we go through it on Thursday at 10? Best regards, Maya")),
-        (22, "16:48", "Messages", "Running ten minutes late, save me a seat by the window."),
-        (22, "16:05", "Notes", "Newsletter ideas: an interview with the bakery on Elm Street, the community garden schedule, and a reminder about the book swap on the 14th."),
-        (22, "15:20", "Mail", EmailFormat.apply("Hi Tomasz, the movers can come on Saturday morning. Could you book them by Friday and share the time slot with everyone? Thanks, Maya")),
-        (22, "14:02", "Notes", "Call the landlord about the heating, renew the parking permit, pick up the prints before 6."),
-        (22, "11:37", "Messages", "Happy birthday, Lena! Dinner on Saturday is on me."),
-        (22, "09:15", "Notes", "Three things for today: finish the budget draft, reply to Priya about the venue, and book the train for Tuesday."),
-        (21, "18:40", "Messages", "Can you grab oat milk on the way home? We're out."),
-        (21, "16:25", "Mail", EmailFormat.apply("Hi Priya, the hall is free on the 14th from ten until four. Shall I put us down for the book swap? Thanks, Maya")),
-        (21, "12:10", "Notes", "Garden schedule: watering on the first two weekends, closed for the winter from the 30th."),
-        (21, "09:05", "Messages", "Good morning! The plumber comes between 9 and 11, so I'll be home until noon."),
+        (22, "17:12", "Email", EmailFormat.apply("Hi Dana, thanks for the new floor plan. We'll go with the second option.")),
+        (22, "16:48", "Chat", "Running ten minutes late, save me a seat by the window."),
+        (22, "16:05", "Editor", "Newsletter ideas: an interview with the bakery on Elm Street, the community garden schedule, and a reminder about the book swap on the 14th."),
+        (22, "15:20", "Email", EmailFormat.apply("Hi Tomasz, the movers can come on Saturday morning. Could you send everyone the time slot?")),
+        (22, "14:02", "Editor", "Call the landlord about the heating, renew the parking permit, pick up the prints before 6."),
+        (22, "11:37", "Chat", "Happy birthday, Lena! Dinner on Saturday is on me."),
+        (22, "09:15", "Editor", "Three things for today: finish the budget draft, reply to Priya about the venue, and book the train for Tuesday."),
+        (21, "18:40", "Chat", "Can you grab oat milk on the way home? We're out."),
+        (21, "16:25", "Email", EmailFormat.apply("Hi Priya, the hall is free on the 14th from ten until four. Shall I put us down for the book swap?")),
+        (21, "12:10", "Editor", "Garden schedule: watering on the first two weekends, closed for the winter from the 30th."),
+        (21, "09:05", "Chat", "Good morning! The plumber comes between 9 and 11, so I'll be home until noon."),
     ]
 
     private static let dictionary = [
-        "*Maya Lindqvist", "*Tomasz Wierzbicki", "Saoirse", "Niamh", "Aoife", "Siobhán", "Okonkwo", "Nguyen",
-        "Alder Street", "Elm Street Bakery", "stand up => stand-up",
-        "my email => maya@example.com", "my address => 12 Alder Street", "Q four => Q4", "e g => e.g.",  // example.com is reserved
+        "*Maya Lindqvist", "*Tomasz Wierzbicki", "Saoirse", "Niamh", "Aoife", "Siobhán", "Caoimhe", "Okonkwo", "Nguyen",
+        "Kowalczyk", "Alder Street", "Elm Street Bakery", "stand up => stand-up", "check in => check-in",
+        "my email => maya@example.com", "my address => 12 Alder Street", "my phone => +1 555 0134",  // example.com and 555-01xx are reserved
+        "Q four => Q4", "e g => e.g.",
     ]
 
+    /// Worded so the summarizer's own output reads well: the sentence that names the agenda is the overview (after
+    /// two short greetings, so the transcript window does not show it twice), a decision is said as one ("So we
+    /// use…"), and each action item is an "I'll … by <day>".
     private static let office: [(Speaker, Double, String)] = [
-        (.others, 4, "This is the planning call for the office move, so let's go through the floor plan and the movers."),
-        (.me, 95, "Sounds good. The lease for the old office ends on the 20th, so we have a week of overlap."),
-        (.others, 260, "Dana sent the new floor plan, and the second option gives every team a quiet room."),
-        (.others, 420, "The landlord is fine with small changes to the walls if we ask two weeks ahead."),
-        (.me, 610, "Then let's use the second option and ask for the kitchen wall in writing."),
-        (.others, 700, "Agreed. We keep the old phone numbers."),
+        (.others, 4, "Hi, everyone. Thanks for making time."),
+        (.me, 9, "Glad we found a slot."),
+        (.others, 15, "We have two things today: the floor plan for the new office and the movers, before the old lease ends on the 20th."),
+        (.others, 160, "Dana sent the new floor plan, and the second option gives every team a quiet room."),
+        (.others, 330, "The landlord is fine with small changes to the walls if we ask two weeks ahead."),
+        (.me, 610, "So we use the second option, and we ask the landlord for the kitchen wall in writing."),
+        (.others, 700, "Agreed. We keep the old phone numbers too."),
         (.me, 905, "What about the movers?"),
         (.others, 980, "Tomasz got two quotes, and the cheaper movers only come on a Saturday morning."),
         (.me, 1190, "A Saturday works for me."),
         (.others, 1300, "Tomasz, can you book the movers for that Saturday?"),
-        (.others, 1385, "Sure, I'll book the movers by Friday and share the time slot with everyone."),
+        (.others, 1385, "Sure, I'll book the movers by Friday and send everyone the time slot."),
         (.me, 1520, "I'll write to the landlord about the kitchen wall tomorrow."),
         (.others, 1610, "Dana, could you order the new desk lamps?"),
         (.others, 1690, "Yes, I'll order the desk lamps by next Wednesday."),
@@ -180,15 +214,16 @@ final class ScreenshotTests: XCTestCase {
         (.me, 1300, "I'll send the final numbers on Friday."),
     ]
 
+    /// Four minutes in. The hall for the book swap on the 14th is the one Maya asked Priya about in History.
     private static let liveLines: [(Speaker, Double, String)] = [
-        (.others, 845, "Morning! Can everyone hear me okay?"),
-        (.me, 862, "Loud and clear. Shall we start with the newsletter?"),
-        (.others, 880, "Lena finished the interview with the bakery on Elm Street, and it reads really well."),
-        (.me, 910, "Great. Then it goes first, and the garden schedule goes second."),
-        (.others, 940, "Priya asked if we can move the book swap to the 14th, because the hall is booked on the 7th."),
-        (.me, 975, "The 14th works. I'll update the date in the draft today."),
-        (.others, 1010, "Perfect. The cover photos are due on Thursday."),
-        (.me, 1050, "Then the newsletter goes out on Friday morning."),
+        (.others, 5, "Morning! Can everyone hear me okay?"),
+        (.me, 12, "Loud and clear. Shall we start with the newsletter?"),
+        (.others, 27, "Lena finished the interview with the bakery on Elm Street, and it reads really well."),
+        (.me, 49, "Great. Then it goes first, and the garden schedule goes second."),
+        (.others, 78, "Priya booked the hall for the book swap on the 14th, from ten until four."),
+        (.me, 104, "Good. I'll add the times to the draft today."),
+        (.others, 151, "Perfect. The cover photos are due on Thursday."),
+        (.me, 188, "Then the newsletter goes out on Friday morning."),
     ]
 
     /// The office-move call first, then two older ones for the sidebar. "Manual" is what MeetingRecorder writes for
@@ -204,10 +239,10 @@ final class ScreenshotTests: XCTestCase {
             }
     }
 
-    /// Still recording: no end, no summary yet. It started 18 minutes ago, by the real clock the tab reads.
+    /// Still recording: no end, no summary yet. It started 4 minutes ago, by the real clock the tab reads.
     private static func liveMeeting() -> MeetingRecord {
         MeetingRecord(meeting: Meeting(id: UUID().uuidString, app: MeetingRecorder.manualApp,
-                                       startedAt: Date().addingTimeInterval(-18 * 60), meAudioPath: "", othersAudioPath: ""),
+                                       startedAt: Date().addingTimeInterval(-4 * 60), meAudioPath: "", othersAudioPath: ""),
                       segments: segments(liveLines))
     }
 
@@ -235,8 +270,10 @@ final class ScreenshotTests: XCTestCase {
             let (owner, window) = try make()
             try withExtendedLifetime(owner) {
                 let image = try render(window, size)
+                let framed = try Self.framed(image)
                 try write(image, "\(name)-\(mode)-window@2x.png")
-                try write(Self.framed(image), "\(name)-\(mode).png")
+                try write(framed, "\(name)-\(mode)@2x.png")
+                try write(try Self.halved(framed), "\(name)-\(mode).png")
                 // A placeholder, an empty list or a clipped pane would not show these.
                 let seen = try Self.text(in: image)
                 for line in expect { XCTAssertTrue(seen.contains(line), "\(name) \(mode) does not show “\(line)”:\n\(seen)") }
@@ -251,8 +288,15 @@ final class ScreenshotTests: XCTestCase {
         NSTimeZone.resetSystemTimeZone()
     }
 
+    /// Like `-key value` on the command line: this process only, never written to a defaults file.
+    nonisolated private static func argue(_ values: [String: Any]) {
+        let d = UserDefaults.standard
+        d.setVolatileDomain(d.volatileDomain(forName: UserDefaults.argumentDomain).merging(values) { $1 },
+                            forName: UserDefaults.argumentDomain)
+    }
+
     private func hub(_ pipeline: Pipeline, tab: String, meetings: MeetingStoring = InMemoryMeetingStore()) -> Hub {
-        UserDefaults.standard.set(tab, forKey: "hubTab")  // the test runner's defaults, never io.backant.shepetal
+        Self.argue(["hubTab": tab])  // as `-hubTab history` at launch picks it
         return Hub(pipeline: pipeline, engine: { nil }, status: { ("On-device speech recognition (standard engine)", true) },
                    retention: { .keep }, setRetention: { _ in }, openPermissions: {}, loginItem: LoginItem(say: { _ in }),
                    openDictionary: {}, restoreFnKey: {}, meetingStore: meetings)
@@ -264,6 +308,7 @@ final class ScreenshotTests: XCTestCase {
 
     /// The window's theme frame (title bar and traffic lights included) at 2x, on the window background of its
     /// appearance, so a translucent sidebar or title bar shows what it shows over the window, not transparency.
+    /// Outside its 10 pt corners it is transparent, like a window.
     private func render(_ window: NSWindow, _ size: NSSize) throws -> CGImage {
         window.setContentSize(size)
         for _ in 0..<3 {  // SwiftUI restyles and fills its lists on the next passes
@@ -272,7 +317,7 @@ final class ScreenshotTests: XCTestCase {
             window.displayIfNeeded()
         }
         XCTAssertFalse(window.isVisible, "a screenshot must not put the window on screen")
-        XCTAssertFalse(window.isKeyWindow)
+        XCTAssertNil(NSApp.keyWindow, "a screenshot must not make a window key")
         let frame = try XCTUnwrap(window.contentView?.superview, "the window has no theme frame")
         let b = frame.bounds
         let rep = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: Int(b.width) * 2, pixelsHigh: Int(b.height) * 2,
@@ -284,25 +329,28 @@ final class ScreenshotTests: XCTestCase {
         window.effectiveAppearance.performAsCurrentDrawingAppearance { background = NSColor.windowBackgroundColor.cgColor }
         let ctx = try Self.context(rep.pixelsWide, rep.pixelsHigh)
         let all = CGRect(x: 0, y: 0, width: rep.pixelsWide, height: rep.pixelsHigh)
+        ctx.addPath(CGPath(roundedRect: all, cornerWidth: 20, cornerHeight: 20, transform: nil))
+        ctx.clip()
         ctx.setFillColor(background)
         ctx.fill(all)
         ctx.draw(try XCTUnwrap(rep.cgImage), in: all)
         return try XCTUnwrap(ctx.makeImage())
     }
 
-    /// 1270 x 760 (Product Hunt's gallery size): the window fitted inside 64 px side and 48 px top and bottom margins,
-    /// centred on #E6E4DE, with the brand's 20 px screenshot-frame corners and one soft shadow. Nothing inside changes.
+    /// 2540 x 1520, Product Hunt's 1270 x 760 gallery size at 2x: the window fitted inside 128 px side and 96 px top
+    /// and bottom margins (never enlarged), centred on #E6E4DE, with the brand's 40 px screenshot-frame corners and one
+    /// soft shadow. Nothing inside changes.
     private static func framed(_ window: CGImage) throws -> CGImage {
-        let w = 1270.0, h = 760.0
+        let w = 2540.0, h = 1520.0
         let ctx = try context(Int(w), Int(h))
         ctx.setFillColor(CGColor(srgbRed: 0xE6 / 255, green: 0xE4 / 255, blue: 0xDE / 255, alpha: 1))
         ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
-        let scale = min((w - 128) / Double(window.width), (h - 96) / Double(window.height))
+        let scale = min((w - 256) / Double(window.width), (h - 192) / Double(window.height), 1)
         let fw = (Double(window.width) * scale).rounded(), fh = (Double(window.height) * scale).rounded()
         let rect = CGRect(x: ((w - fw) / 2).rounded(), y: ((h - fh) / 2).rounded(), width: fw, height: fh)
-        let path = CGPath(roundedRect: rect, cornerWidth: 20, cornerHeight: 20, transform: nil)
+        let path = CGPath(roundedRect: rect, cornerWidth: 40, cornerHeight: 40, transform: nil)
         ctx.saveGState()
-        ctx.setShadow(offset: CGSize(width: 0, height: -8), blur: 36, color: CGColor(gray: 0, alpha: 0.22))
+        ctx.setShadow(offset: CGSize(width: 0, height: -16), blur: 72, color: CGColor(gray: 0, alpha: 0.22))
         ctx.addPath(path)
         ctx.setFillColor(CGColor(gray: 0, alpha: 1))
         ctx.fillPath()
@@ -311,6 +359,14 @@ final class ScreenshotTests: XCTestCase {
         ctx.clip()
         ctx.interpolationQuality = .high
         ctx.draw(window, in: rect)
+        return try XCTUnwrap(ctx.makeImage())
+    }
+
+    /// The 1270 x 760 file: the 2x canvas at half size, so the 1x and 2x files show the same pixels.
+    private static func halved(_ image: CGImage) throws -> CGImage {
+        let ctx = try context(image.width / 2, image.height / 2)
+        ctx.interpolationQuality = .high
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width / 2, height: image.height / 2))
         return try XCTUnwrap(ctx.makeImage())
     }
 
@@ -335,9 +391,10 @@ final class ScreenshotTests: XCTestCase {
 
     // MARK: brand
 
-    /// What the shot shows, read back from the pixels: the name in lowercase, no "AI", no competitor.
+    /// What the shot shows, read back from the pixels: the name in lowercase, no "AI", no em dash, no other
+    /// product (a competitor, a call app or an Apple app a row was typed into).
     private func assertOnBrand(_ text: String, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
-        if let r = text.range(of: #"\bAI\b|Shepetal|Wispr|Superwhisper|MacWhisper|Otter|Granola|Fireflies|Dragon"#,
+        if let r = text.range(of: #"\bAI\b|Shepetal|Wispr|Superwhisper|MacWhisper|Otter|Granola|Fireflies|Dragon|—|\b(?:Mail|Messages|Zoom|Teams|Slack)\b"#,
                               options: .regularExpression) {
             XCTFail("\(name) shows “\(text[r])”", file: file, line: line)
         }
