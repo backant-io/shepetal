@@ -594,12 +594,14 @@ private struct HistoryTab: View {
         /// Copy text, Show raw, Play, Re-transcribe and Archive, each at its own width.
         @ViewBuilder private func toolButtons(replay: Bool) -> some View {
             Button { model.copy(e) } label: { Label { Text("Copy text") } icon: { SHIcon(.copy) } }
+                .fixedSize()
                 .focused($focus, equals: .copy)
                 .disabled(e.shownText.isEmpty)
             Button(e.reverted ? "Show cleaned" : "Show raw") { model.setReverted(e, !e.reverted) }
+                .fixedSize()
                 .focused($focus, equals: .raw)
                 .disabled(e.text.isEmpty)
-            Button("Play") { model.play(e) }.focused($focus, equals: .play).disabled(!replay)
+            Button("Play") { model.play(e) }.fixedSize().focused($focus, equals: .play).disabled(!replay)
             Menu {
                 ForEach(model.retryChoices, id: \.title) { c in Button(c.title) { model.retry(e, with: c.model) } }
             } label: {
@@ -611,6 +613,7 @@ private struct HistoryTab: View {
             .focused($focus, equals: .retranscribe)
             .disabled(!replay || model.busy != nil)
             Button(e.archived ? "Unarchive" : "Archive") { model.setArchived(e, !e.archived) }
+                .fixedSize()
                 .focused($focus, equals: .archive)
         }
 
