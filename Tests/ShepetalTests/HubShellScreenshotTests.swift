@@ -93,7 +93,7 @@ final class HubShellScreenshotTests: XCTestCase {
     func testHubSettings() throws {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         try shoot("22-hub-settings", NSSize(width: 1120, height: 2600),
-                  expect: ["Settings", "Always record meetings automatically", "Show words while you speak", "Milestone notices"]) {
+                  expect: ["Settings", "Always record meetings automatically", "Show words while you speak", "Open recordings folder"]) {
             let hub = self.hub(pipeline, tab: "settings")
             return (hub, try self.part(hub, "window"))
         }

@@ -119,7 +119,7 @@ final class ScreenshotTests: XCTestCase {
     /// A call still recording: its transcript, split into Me and Others, as it is written.
     func testMeetingLive() throws {
         let live = Self.liveMeeting()
-        try shoot("03-meeting-live", Self.hubSize, expect: ["Loud and clear", "Live", "at 9:30"]) {
+        try shoot("03-meeting-live", Self.hubSize, expect: ["Loud and clear", "Live", "9:30 AM"]) {
             let hub = self.hub(try Pipeline(root: self.root, pasteboard: self.pasteboard), tab: "meetings",
                                meetings: InMemoryMeetingStore(try Self.meetings() + [live]))
             (try self.part(hub, "meetings") as MeetingsModel).select(live.meeting.id)
