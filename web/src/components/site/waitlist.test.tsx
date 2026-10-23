@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { copyProblems, visibleText } from '@/lib/brand-copy';
 import { CONSENT_TEXT, PAGE } from '@/lib/waitlist-config';
 import { WaitlistForm } from './Waitlist';
@@ -22,8 +22,13 @@ const attrs = (html: string, name: string, ...has: string[]) => {
   return tag ? Object.fromEntries([...tag.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]])) : null;
 };
 
-// WAITLIST is off in wrangler.toml, and the build inlines it (next.config.ts): what the site shows until Pavel approves.
+// The build inlines WAITLIST from wrangler.toml (next.config.ts): what the site shows with it "off".
 describe('with WAITLIST off', () => {
+  beforeEach(() => {
+    vi.stubEnv('WAITLIST', 'off');
+    // The FAQ's answers are built when the module loads (as in the build, which inlines WAITLIST).
+    vi.resetModules();
+  });
   const render = async (file: string) => {
     const mod = await import(/* @vite-ignore */ join(APP, file));
     return renderToStaticMarkup(mod.default());
