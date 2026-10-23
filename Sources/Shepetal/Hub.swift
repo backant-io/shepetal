@@ -41,7 +41,11 @@ final class Hub {
         window.toolbarStyle = .unifiedCompact
         window.backgroundColor = SH.bg.nsColor
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: HubView(model: model, meetings: meetings, dictionary: dictionary, input: input))
+        let host = NSHostingView(rootView: HubView(model: model, meetings: meetings, dictionary: dictionary, input: input))
+        // The view draws its own 40 pt bar under the title bar, so it takes no safe area from the window: a page's
+        // scroll view then starts below that bar instead of reaching under the title bar.
+        host.safeAreaRegions = []
+        window.contentView = host
         window.center()
     }
 
@@ -241,19 +245,16 @@ private struct HubView: View {
     private var screen: HubScreen { HubScreen(rawValue: tab) ?? .home }
 
     var body: some View {
-        GeometryReader { window in
-            VStack(spacing: 0) {
-                HubTitleBar(title: screen.title, height: max(HubTitleBar.minHeight, window.safeAreaInsets.top))
-                HStack(spacing: 0) {
-                    SHSidebar {
-                        ForEach(HubScreen.allCases, id: \.self) { s in
-                            SHSidebarItem(s.title, icon: s.icon, current: s == screen) { tab = s.rawValue }
-                        }
+        VStack(spacing: 0) {
+            HubTitleBar(title: screen.title)
+            HStack(spacing: 0) {
+                SHSidebar {
+                    ForEach(HubScreen.allCases, id: \.self) { s in
+                        SHSidebarItem(s.title, icon: s.icon, current: s == screen) { tab = s.rawValue }
                     }
-                    content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 }
+                content.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
-            .ignoresSafeArea(.container, edges: .top)
         }
         .background(SH.bg)
         .foregroundStyle(SH.text)
@@ -277,16 +278,14 @@ private struct HubView: View {
 /// The 40 pt bar at the top (design/ui/components/TitleBar): the screen's name centred in app-strong 13 over sh-bg,
 /// a hairline below. The traffic lights are the window's own.
 private struct HubTitleBar: View {
-    static let minHeight: CGFloat = 40
     let title: String
-    var height = Self.minHeight
 
     var body: some View {
         Text(title)
             .shText(SH.appStrong.with(size: 13))
             .foregroundStyle(SH.text)
             .frame(maxWidth: .infinity)
-            .frame(height: height)
+            .frame(height: 40)
             .background(SH.bg)
             .shHairline(.bottom)
             .accessibilityAddTraits(.isHeader)
