@@ -68,7 +68,7 @@ export const FROM = 'shepetal <hello@shepetal.app>';
 export async function compose({ kind, user }: Due, secret: string, now: number) {
   const l = licenseOf(user, now);
   const unsubscribe = await unsubscribeUrl(user.id, secret);
-  const mail = render(copyFor(kind, { trial: l.plan === 'trial', daysLeft: daysLeft(user, now) }), unsubscribe);
+  const mail = render(kind, copyFor(kind, { trial: l.plan === 'trial', daysLeft: daysLeft(user, now) }), unsubscribe);
   return {
     from: FROM,
     to: user.email,

@@ -206,7 +206,7 @@ describe('unsubscribe', () => {
 });
 
 describe('the copy', () => {
-  const all = (['welcome', 'day3', 'day25'] as Kind[]).map((k) => render(copyFor(k), 'https://shepetal.app/unsubscribe?u=1&s=x'));
+  const all = (['welcome', 'day3', 'day25'] as Kind[]).map((k) => render(k, copyFor(k), 'https://shepetal.app/unsubscribe?u=1&s=x'));
   const words = all.map((m) => `${m.subject}\n${m.text}`).join('\n');
 
   // BRAND.md and the voice rules: the name lowercase, no exclamation marks, never the step-by-step line or the old
@@ -239,10 +239,85 @@ describe('the copy', () => {
     expect((await compose(d, SECRET, NOW)).subject).toBe('Your shepetal trial ends in 5 days');
   });
 
+  it('goes out from hello@ with the branded HTML part and the one-click unsubscribe headers', async () => {
+    await user('a@example.com', 1);
+    const [d] = await due(db(), NOW);
+    const m = await compose(d, SECRET, NOW);
+    expect(m.from).toBe('shepetal <hello@shepetal.app>');
+    expect(m.html).toContain('https://shepetal.app/?ref=email-welcome');
+    expect(m.headers['List-Unsubscribe']).toBe(`<${await unsubscribeUrl(d.user.id, SECRET)}>`);
+    expect(m.headers['List-Unsubscribe-Post']).toBe('List-Unsubscribe=One-Click');
+  });
+
   it('escapes the HTML part and links only the URLs in it', () => {
-    const { html } = render({ subject: 'a<b', paragraphs: ['x <script> https://shepetal.app/account'] }, 'https://shepetal.app/unsubscribe?u=1&s=x');
-    expect(html).toContain('x &lt;script&gt; <a href="https://shepetal.app/account"');
+    const { html } = render('day3', { subject: 'a<b', paragraphs: ['x <script> "q" https://shepetal.app/account'] }, 'https://shepetal.app/unsubscribe?u=1&s=x');
+    expect(html).toContain('<title>a&lt;b</title>');
+    expect(html).toContain('x &lt;script&gt; &quot;q&quot; <a href="https://shepetal.app/account" style="color:#161512;text-decoration:underline">shepetal.app/account</a>');
     expect(html).toContain('href="https://shepetal.app/unsubscribe?u=1&amp;s=x"');
     expect(html).not.toContain('<script>');
+  });
+});
+
+describe('the branded HTML', () => {
+  const UNSUB = 'https://shepetal.app/unsubscribe?u=1&s=x';
+  const [welcome, day3, day25] = (['welcome', 'day3', 'day25'] as Kind[]).map((k) => render(k, copyFor(k), UNSUB).html);
+  const button = (label: string, href: string) =>
+    `<td style="background:#161512;border-radius:4px"><a href="${href}" style="display:inline-block;padding:14px 22px;font:600 16px/1 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#E6E4DE;text-decoration:none">${label}</a></td>`;
+
+  it('has the landing palette, a 560px table layout and stays light in dark mode', () => {
+    for (const html of [welcome, day3, day25]) {
+      expect(html).toContain('<meta name="color-scheme" content="light only">');
+      expect(html).toContain('<body style="margin:0;padding:0;background:#E6E4DE">');
+      expect(html).toContain('<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">');
+      expect(html).toContain("font:400 17px/1.55 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#161512");
+      expect(html).not.toMatch(/<(div|style|script|link)\b/); // inline styles only
+    }
+  });
+
+  it('heads each email with the wordmark, linked with ?ref=email-<kind>, over the orange rule', () => {
+    for (const [kind, html] of [['welcome', welcome], ['day3', day3], ['day25', day25]]) {
+      expect(html).toContain(
+        `<a href="https://shepetal.app/?ref=email-${kind}"><img src="https://shepetal.app/press/shepetal-wordmark-ink.png" width="132" alt="shepetal" style="display:block;width:132px;height:auto;border:0"></a>`,
+      );
+      expect(html).toContain('border-top:2px solid #FF4F12');
+    }
+  });
+
+  it('puts the button right after its line: How to install on welcome, Choose a plan on day 25, none on day 3', () => {
+    expect(welcome).toContain(
+      `shepetal.app/install</a></p><table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 24px"><tr>${button('How to install', 'https://shepetal.app/install?ref=email-welcome')}`,
+    );
+    expect(day25).toContain(
+      `shepetal.app/account</a></p><table role="presentation" cellpadding="0" cellspacing="0" style="margin:4px 0 24px"><tr>${button('Choose a plan', 'https://shepetal.app/account?ref=email-day25#plans')}`,
+    );
+    expect(day3).not.toContain('background:#161512;border-radius:4px');
+    expect(welcome.match(/border-radius:4px/g)).toHaveLength(1);
+  });
+
+  it('boxes the two prices on day 25, and only there', () => {
+    expect(day25).toContain(
+      "<p style=\"margin:0 0 16px;font:600 19px/1.5 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#161512;padding:14px 18px;border-left:3px solid #FF4F12;background:#EDEBE6\">$23.99 once. Yours forever.<br>$0.99 a month.</p>",
+    );
+    expect(welcome + day3).not.toContain('border-left:3px solid #FF4F12');
+  });
+
+  it('signs off in italic Georgia and ends with the small footer and its unsubscribe link', () => {
+    for (const html of [welcome, day3, day25]) {
+      expect(html).toContain("<p style=\"margin:0 0 4px;font:italic 400 22px/1.3 Georgia,'Bodoni 72','Times New Roman',serif;color:#161512\">Pavel</p>");
+      expect(html).toContain('<tr><td style="padding:20px 0 0;border-top:1px solid #D3D0C9">');
+      expect(html).toContain(
+        "font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#57544E\">You get this email because you started a shepetal trial. It is one of three. To get no more: <a href=\"https://shepetal.app/unsubscribe?u=1&amp;s=x\" style=\"color:#161512;text-decoration:underline\">shepetal.app/unsubscribe?u=1&amp;s=x</a></p>",
+      );
+      expect(html).toContain('BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA');
+      expect(html).not.toContain('>https://'); // links are shown without the scheme
+    }
+  });
+
+  it('keeps the text part plain: no button, no box, the copy and the footer as they are', () => {
+    const { text } = render('day25', copyFor('day25'), UNSUB);
+    expect(text).toBe(
+      [...copyFor('day25').paragraphs, '--', `You get this email because you started a shepetal trial. It is one of three. To get no more: ${UNSUB}`, 'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA'].join('\n\n') + '\n',
+    );
+    expect(text).not.toContain('Choose a plan');
   });
 });

@@ -968,6 +968,7 @@ async function main() {
       assert.equal(c.body.FromEmailAddress, 'shepetal <hello@shepetal.app>');
       assert.deepEqual(c.body.ReplyToAddresses, ['support@shepetal.app']);
       assert.ok(c.body.Content.Simple.Body.Html.Data.startsWith('<!doctype html>'));
+      assert.ok(c.body.Content.Simple.Body.Html.Data.includes('<img src="https://shepetal.app/press/shepetal-wordmark-ink.png" width="132" alt="shepetal"'), 'the branded HTML');
     }
     assert.deepEqual(await cron(), [], 'the next run sends nothing again');
     const rows = await d1("SELECT kind, status, message_id FROM lifecycle_emails ORDER BY kind");
