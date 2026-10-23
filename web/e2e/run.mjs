@@ -25,10 +25,13 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { encode } from 'next-auth/jwt';
+import { wranglerVar } from '../domain.config.mjs';
 
 const WEB = join(dirname(fileURLToPath(import.meta.url)), '..');
 const BIN = join(WEB, 'node_modules', '.bin');
 const DB_ID = 'bd45470f-27b2-4564-aa94-850856413b3e'; // wrangler.toml
+// The waitlist switch, read as next.config.ts reads it for the build; the env file passes the same value to the Worker.
+const WAITLIST = wranglerVar('WAITLIST');
 const MAC = 'shepetal://auth'; // the Mac and iPhone redirect_uri
 const DAY = 86_400_000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -169,6 +172,7 @@ const env = {
   SES_REGION: 'eu-central-1',
   SES_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
   LIFECYCLE_EMAILS: 'on',
+  WAITLIST,
 };
 // An env file instead of --var keeps values out of `ps`, and replaces any developer .dev.vars.
 const envFile = join(tmp, 'e2e.env');
@@ -746,24 +750,93 @@ async function main() {
     for (let i = 0; i < 6; i++) flood.push((await press({ email: other })).status);
     assert.ok(flood.includes(429), `over the limit: ${flood}`);
   });
-  // WAITLIST = "off" in wrangler.toml until Pavel approves: no form, no link, and the routes store nothing.
-  await check('waitlist off: /waitlist and its signup pages 404 with no form, FAQ and sitemap leave it out, POST /api/waitlist and the confirm link 404 and store nothing', async () => {
-    for (const p of ['/waitlist', '/waitlist/thanks', '/waitlist/check', '/waitlist/confirmed']) {
-      const res = await fetch(`${BASE}${p}`);
-      assert.equal(res.status, 404, p);
-      assert.doesNotMatch(await res.text(), /name="consent"|action="\/api\/waitlist"/, p);
-    }
-    assert.doesNotMatch(await (await fetch(`${BASE}/faq`)).text(), /href="\/waitlist"/);
-    assert.doesNotMatch(await (await fetch(`${BASE}/sitemap.xml`)).text(), /\/waitlist/);
-    const post = await fetch(`${BASE}/api/waitlist`, {
+  // WAITLIST in wrangler.toml [vars] (or the environment, as for the build): the run tests the state the build has.
+  const waitlistPost = (fields, headers = { origin: BASE }) =>
+    fetch(`${BASE}/api/waitlist`, {
       method: 'POST', redirect: 'manual',
-      headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE },
-      body: new URLSearchParams({ email: 'e2e-waitlist@example.com', platform: 'linux', consent: 'yes' }),
+      headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+      body: new URLSearchParams(fields),
     });
-    assert.equal(post.status, 404);
-    assert.equal((await fetch(`${BASE}/api/waitlist/confirm?t=x.${'A'.repeat(43)}`, { redirect: 'manual' })).status, 404);
-    assert.deepEqual(await d1("SELECT COUNT(*) AS n FROM waitlist"), [[0]]);
-  });
+  if (WAITLIST !== 'on') {
+    await check('waitlist off: /waitlist and its signup pages 404 with no form, FAQ and sitemap leave it out, POST /api/waitlist and the confirm link 404 and store nothing', async () => {
+      for (const p of ['/waitlist', '/waitlist/thanks', '/waitlist/check', '/waitlist/confirmed']) {
+        const res = await fetch(`${BASE}${p}`);
+        assert.equal(res.status, 404, p);
+        assert.doesNotMatch(await res.text(), /name="consent"|action="\/api\/waitlist"/, p);
+      }
+      assert.doesNotMatch(await (await fetch(`${BASE}/faq`)).text(), /href="\/waitlist"/);
+      assert.doesNotMatch(await (await fetch(`${BASE}/sitemap.xml`)).text(), /\/waitlist/);
+      const post = await waitlistPost({ email: 'e2e-waitlist@example.com', platform: 'linux', consent: 'yes' });
+      assert.equal(post.status, 404);
+      assert.equal((await fetch(`${BASE}/api/waitlist/confirm?t=x.${'A'.repeat(43)}`, { redirect: 'manual' })).status, 404);
+      assert.deepEqual(await d1("SELECT COUNT(*) AS n FROM waitlist"), [[0]]);
+    });
+  } else {
+    await check('waitlist on: /waitlist has the form, the sitemap and the FAQ link it; a bad address or another site stores nothing; a signup stores one unconfirmed row and mails the fake SES; the link confirms it and unsubscribe deletes it', async () => {
+      const page = await fetch(`${BASE}/waitlist`);
+      assert.equal(page.status, 200);
+      const html = await page.text();
+      // The first tag with all of `has`, in any order (React picks the order).
+      const tag = (name, ...has) => [...html.matchAll(new RegExp(`<${name}\\b[^>]*>`, 'g'))].map((m) => m[0]).find((t) => has.every((h) => t.includes(h)));
+      assert.ok(tag('form', 'method="post"', 'action="/api/waitlist"'), 'the form posts to /api/waitlist');
+      assert.ok(tag('input', 'name="email"', 'type="email"', 'required'), 'the email field');
+      const box = tag('input', 'name="consent"');
+      assert.ok(box?.includes('type="checkbox"') && box.includes('value="yes"') && !/\bchecked\b/.test(box), `the consent box, unticked: ${box}`);
+      for (const p of ['windows', 'linux', 'iphone']) assert.ok(tag('input', 'name="platform"', `value="${p}"`), p);
+      assert.match(html, /href="\/privacy#waitlist"/);
+      assert.match(await (await fetch(`${BASE}/sitemap.xml`)).text(), /<loc>[^<]*\/waitlist<\/loc>/, 'in the sitemap');
+      assert.match(await (await fetch(`${BASE}/faq`)).text(), /href="\/waitlist"/, 'the FAQ links it');
+      assert.match(await (await fetch(`${BASE}/privacy`)).text(), /id="waitlist"/, 'the privacy section');
+      for (const p of ['/waitlist/thanks', '/waitlist/check', '/waitlist/confirmed', '/waitlist/unsubscribed']) assert.equal((await fetch(`${BASE}${p}`)).status, 200, p);
+
+      const addr = `e2e-waitlist-${randomBytes(4).toString('hex')}@example.com`;
+      const rows = () => d1(`SELECT confirmed_at, platforms FROM waitlist WHERE email = '${addr}'`);
+      const mails = () => sesCalls.filter((c) => c.body.Content.Simple.Subject.Data === 'Confirm your email for the shepetal waitlist');
+      // An invalid address (and a missing consent): back to the form's error page, nothing stored, nothing sent.
+      for (const fields of [{ email: 'not-an-address', platform: 'linux', consent: 'yes' }, { email: addr, platform: 'linux' }]) {
+        const r = await waitlistPost(fields);
+        assert.deepEqual([r.status, r.headers.get('location')], [303, '/waitlist/check'], JSON.stringify(fields));
+      }
+      // No Origin, or another site's: 403.
+      assert.equal((await waitlistPost({ email: addr, platform: 'linux', consent: 'yes' }, {})).status, 403);
+      assert.equal((await waitlistPost({ email: addr, platform: 'linux', consent: 'yes' }, { origin: 'https://evil.example' })).status, 403);
+      assert.deepEqual(await d1('SELECT COUNT(*) FROM waitlist'), [[0]], 'nothing stored');
+      assert.equal(mails().length, 0, 'nothing sent');
+
+      const r = await waitlistPost({ email: addr, platform: 'linux', consent: 'yes' });
+      assert.deepEqual([r.status, r.headers.get('location')], [303, '/waitlist/thanks']);
+      assert.deepEqual(await rows(), [[null, 'linux']], 'one unconfirmed row');
+      for (let i = 0; i < 20 && !mails().length; i++) await sleep(250);
+      assert.deepEqual(mails().map((c) => c.body.Destination.ToAddresses), [[addr]], 'one confirmation, through the fake SES, to the address');
+      const text = JSON.stringify(mails()[0].body);
+      const confirmUrl = text.match(/https?:\/\/[^\s"\\]+\/api\/waitlist\/confirm\?t=[\w.-]+/)?.[0];
+      const unsubUrl = text.match(/https?:\/\/[^\s"\\]+\/api\/waitlist\/unsubscribe\?t=[\w.-]+/)?.[0];
+      assert.ok(confirmUrl && unsubUrl, 'the email has the confirm and the unsubscribe link');
+      assert.ok(!confirmUrl.includes(addr.split('@')[0]) && !unsubUrl.includes(addr.split('@')[0]), 'no address in a link');
+
+      const c = await fetch(confirmUrl.replace(/^https?:\/\/[^/]+/, BASE), { redirect: 'manual' });
+      assert.deepEqual([c.status, c.headers.get('location')], [303, '/waitlist/confirmed']);
+      const [[confirmedAt]] = await rows();
+      assert.ok(confirmedAt, 'confirmed');
+      const forged = await fetch(`${BASE}/api/waitlist/confirm?t=x.${'A'.repeat(43)}`, { redirect: 'manual' });
+      assert.deepEqual([forged.status, forged.headers.get('location')], [303, '/waitlist/link'], 'a forged link confirms nothing');
+
+      // The unsubscribe link: GET goes to the page with the button (the signed t in its form), the button deletes.
+      const u = await fetch(unsubUrl.replace(/^https?:\/\/[^/]+/, BASE), { redirect: 'manual' });
+      assert.equal(u.status, 303);
+      assert.deepEqual(await rows(), [[confirmedAt, 'linux']], 'GET deletes nothing');
+      const form = await (await fetch(new URL(u.headers.get('location'), BASE))).text();
+      const t = form.match(/name="t" value="([\w.-]+)"/)?.[1];
+      assert.equal(t, new URL(unsubUrl).searchParams.get('t'), 'the button carries the signed link');
+      const out = await fetch(`${BASE}/api/waitlist/unsubscribe`, {
+        method: 'POST', redirect: 'manual',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', origin: BASE },
+        body: new URLSearchParams({ t }),
+      });
+      assert.deepEqual([out.status, out.headers.get('location')], [303, '/waitlist/unsubscribed']);
+      assert.deepEqual(await rows(), [], 'the row is deleted');
+    });
+  }
   await check('/account, subscriber: status, next charge, Manage billing, Switch to lifetime, Cancel subscription with a confirmation', async () => {
     const t = await accountText();
     for (const s of ['$0.99 a month.', 'Monthly', 'Active', 'Next charge', 'Manage billing', 'Switch to lifetime', 'Cancel subscription', 'Cancel your subscription?', 'nothing is charged again'])
