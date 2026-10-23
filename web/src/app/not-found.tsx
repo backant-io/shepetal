@@ -17,7 +17,7 @@ export default function NotFound() {
         <h1 className="s-h2">Page not found.</h1>
         <div className="s-prose">
           <p>
-            There is nothing at this address. <Link href="/">Back to shepetal</Link>
+            There is nothing at this address. <Link href="/" prefetch={false}>Back to shepetal</Link>
           </p>
         </div>
       </main>

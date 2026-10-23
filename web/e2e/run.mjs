@@ -345,8 +345,9 @@ async function main() {
     assert.doesNotMatch(missing.body, tracker, 'the 404 page has no analytics meta');
     for (const path of ['/robots.txt', '/sitemap.xml']) await cached(path);
     const install = (await cached('/install?ref=x&utm_source=y')).body;
-    assert.equal(unescape(install.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the refresh carries the attribution');
-    assert.equal(install.match(/http-equiv="refresh"/gi)?.length, 1, 'one refresh only: a second, bare one (from React) is what browsers followed');
+    assert.equal(install.match(/location\.replace\("([^"]+)"\)/)?.[1], '/download?ref=x&utm_source=y', 'the script that starts the download carries the attribution');
+    assert.equal(install.match(/location\.replace\(/g)?.length, 1, 'one download starter only: a second, bare one (from React) is what browsers followed');
+    assert.doesNotMatch(install, /http-equiv="refresh"/i, 'no meta refresh (axe meta-refresh)');
     assert.equal(unescape(install.match(/<a href="(\/download[^"]*)"/)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the fallback link too');
     assert.match(install, /<meta name="robots" content="noindex"/, '/install stays out of search');
     const license = await fetch(`${BASE}/api/license`);
@@ -405,7 +406,7 @@ async function main() {
     assert.equal(cta, '/install', 'the main CTA');
     const install = await fetch(`${BASE}${cta}?ref=e2e`, { redirect: 'manual' });
     assert.equal(install.status, 200, `/install: ${install.status} ${install.headers.get('location')}`);
-    const next = unescape((await install.text()).match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? '');
+    const next = (await install.text()).match(/location\.replace\("([^"]+)"\)/)?.[1] ?? '';
     assert.equal(next, '/download?ref=e2e', 'the install guide starts the download, with the attribution');
     const dl = await fetch(`${BASE}${next}`, { redirect: 'manual' });
     assert.equal(dl.status, 302, `/download: ${dl.status}`);
