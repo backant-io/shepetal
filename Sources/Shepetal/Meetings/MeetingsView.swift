@@ -428,11 +428,13 @@ private struct MeetingRow: View {
                     Spacer(minLength: SH.space1)
                     // The open meeting shows Live in the detail, so the view keeps one signal mark.
                     if meeting.endedAt == nil { LiveMark(signal: !selected) }
+                    TimelineView(.periodic(from: .now, by: 30)) { t in
+                        Text(MeetingFormat.duration(meeting, now: t.date)).shText(SH.label).foregroundStyle(SH.textMuted)
+                            .lineLimit(1).fixedSize()
+                    }
                 }
-                TimelineView(.periodic(from: .now, by: 30)) { t in
-                    Text("\(meeting.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(MeetingFormat.duration(meeting, now: t.date))")
-                        .shText(SH.label).foregroundStyle(SH.textMuted).lineLimit(1)
-                }
+                Text(meeting.startedAt.formatted(date: .abbreviated, time: .shortened))
+                    .shText(SH.label).foregroundStyle(SH.textMuted).lineLimit(1)
                 if !snippet.isEmpty {
                     Text(highlighted).shText(SH.appSmall).foregroundStyle(SH.textMuted).lineLimit(2)
                         .padding(.top, 2)
