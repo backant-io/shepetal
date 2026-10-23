@@ -132,7 +132,7 @@ final class ScreenshotTests: XCTestCase {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         try (Vocabulary.header + Self.dictionary.joined(separator: "\n") + "\n")
             .write(to: pipeline.dictionary, atomically: true, encoding: .utf8)
-        try shoot("04-dictionary", Self.hubSize, expect: ["Saoirse", "maya@example.com", "e.g."]) {
+        try shoot("04-dictionary", Self.hubSize, expect: ["Saoirse", "maya@example.com", "check-in"]) {
             let hub = self.hub(pipeline, tab: "dictionary")
             (try self.part(hub, "dictionary") as DictionaryModel).reload()  // the tab's onAppear may not run offscreen
             return (hub, try self.part(hub, "window"))

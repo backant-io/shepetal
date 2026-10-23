@@ -295,12 +295,13 @@ private struct HubTitleBar: View {
 
 extension View {
     /// The content column: 24 pt from the top, 32 from the sides and the bottom, at most 720 pt wide for reading.
-    fileprivate func hubColumn() -> some View {
+    /// `fill` takes the window's height too; never inside a ScrollView, whose height has no end.
+    fileprivate func hubColumn(fill: Bool = true) -> some View {
         padding(.top, SH.space5)
             .padding(.horizontal, SH.space6)
             .padding(.bottom, SH.space6)
             .frame(maxWidth: 720, alignment: .topLeading)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: fill ? .infinity : nil, alignment: .topLeading)
     }
 }
 
@@ -320,7 +321,7 @@ private struct HubPage<Content: View>: View {
                 Text(title).shText(SH.appTitle).foregroundStyle(SH.text).accessibilityAddTraits(.isHeader)
                 content
             }
-            .hubColumn()
+            .hubColumn(fill: false)
         }
         .shText(SH.appBody)
         .foregroundStyle(SH.text)
