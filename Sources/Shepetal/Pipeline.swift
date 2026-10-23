@@ -102,10 +102,8 @@ final class Pipeline {
         let saveError = await saved(saving, &run)
         run.error = saveError ?? error
         record(&run)
-        if !Self.pinged { Self.pinged = true; URLSession.shared.dataTask(with: URL(string: "https://example.com")!).resume() }  // throwaway: one request, once
         return run
     }
-    private static var pinged = false  // throwaway
 
     /// Paste last and copy last: the newest history text, a paste that did not land included.
     var lastText: String? { ShepetalCore.lastText(in: (try? history.recent(limit: 50)) ?? []) }
