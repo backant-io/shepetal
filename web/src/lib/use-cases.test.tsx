@@ -130,6 +130,27 @@ describe('use-case pages', () => {
     expect(voice(text(renderToStaticMarkup(<SiteFooter />))), 'footer').toEqual([]);
   });
 
+  it('keep Pavel’s voice: plain headings, second person, no contrasts or tails, no short sentence closing a paragraph', () => {
+    // the pavel-voice checks: "not a", "rather than", "never" and the rest are said as what happens instead
+    const TELLS = /\bnot an?\b|rather than|instead of|does not|doesn['’]t|has no|\bnever\b|on purpose|intentional|for the record|\bwithout\b|at the time of writing|nothing else|\bno\b/i;
+    const sentences = (p: string) => p.split(/(?<=[.:?])\s+(?=[A-Za-z])/).filter(Boolean);
+    const short = (x: string) => x.split(/\s+/).length < 8;
+    for (const u of USE_CASES) {
+      expect(u.lede, u.slug).toMatch(/\byou(r)?\b/i);
+      for (const s of u.scenarios) expect(s.title.split(/\s+/).length, `${u.slug}: ${s.title}`).toBeLessThanOrEqual(3);
+      // the health pages' note is the one line that says what shepetal is not, and the test above pins it
+      const paragraphs = [u.lede, u.description, ...u.scenarios.map((s) => s.text), (u.note ?? '').replace(/^shepetal is a dictation app, not a medical device\.\s*/, '')].filter(Boolean);
+      for (const p of paragraphs) {
+        expect(p.match(TELLS)?.[0], `${u.slug}: ${p}`).toBeUndefined();
+        const ss = sentences(p.replace(/(100% private\. Your data is yours\.|Meetings, transcribed on your Mac\.)/g, ''));
+        if (ss.length > 1 || p === u.lede) expect(short(ss[ss.length - 1]), `${u.slug} ends short: ${p}`).toBe(false);
+        for (let i = 1; i < ss.length; i++) expect(short(ss[i - 1]) && short(ss[i]), `${u.slug} two short: ${p}`).toBe(false);
+      }
+    }
+    const page = text(renderToStaticMarkup(<UseCasePage slug="developers" />));
+    expect(page).not.toMatch(TELLS);
+  });
+
   it('keep the voice: no exclamation, no medical promise, no steps or requirements', () => {
     for (const slug of SLUGS) {
       const t = words(slug);

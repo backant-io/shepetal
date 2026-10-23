@@ -43,7 +43,7 @@ export function UseCasePage({ slug }: { slug: string }) {
 
         <section className="s-for-try" aria-labelledby="s-for-try">
           <h2 id="s-for-try" className="s-h2">
-            30 days free.
+            30 days free
           </h2>
           <div className="s-plans">
             <div className="s-plan">
@@ -59,13 +59,9 @@ export function UseCasePage({ slug }: { slug: string }) {
             <TryButton slug={slug} />
           </div>
           <p className="s-small s-for-more">
-            How it works, and what it needs, in the{' '}
+            Everything on how it works and what it needs is in the{' '}
             <Link href="/faq" prefetch={false}>
               FAQ
-            </Link>{' '}
-            and the{' '}
-            <Link href="/privacy" prefetch={false}>
-              Privacy Policy
             </Link>
             .
           </p>
