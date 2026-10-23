@@ -5,13 +5,12 @@ import { sesConfigured, SesError, sesSend, type SesEnv } from './mail';
 import { SITE_URL } from './site';
 
 /**
- * The trial emails: welcome, a tip on day 3, and on day 25 the note that the trial ends in 5 days. Off for now: the
- * sign-in no longer asks for the opt-in, LIFECYCLE_EMAILS is "off" and the Cron Trigger (wrangler.toml [triggers])
- * runs once a day for the waitlist sweep only. To bring them back: an opt-in that sets users.trial_emails_at, the
- * cron every 5 minutes, and LIFECYCLE_EMAILS = "on". The cron then calls runLifecycle from worker.ts. Each run sends at most BATCH emails:
+ * The trial emails: welcome, a tip on day 3, and on day 25 the note that the trial ends in 5 days. The Cron Trigger
+ * (wrangler.toml [triggers], every 5 minutes) calls runLifecycle from worker.ts. Each run sends at most BATCH emails:
  * the Workers Free plan gives a cron run 10 ms of CPU, like a request. That is 1,440 a day.
  *
- * - Only users who opted in get them (users.trial_emails_at; no sign-in sets it now).
+ * - Every trial user gets them, with no opt-in (Art. 6(1)(f) GDPR, privacy policy III.8); users.trial_emails_at is
+ *   not read.
  * - Each email has a window after trial_started_at. Outside it nothing is sent, so switching this on later never
  *   sends a welcome to someone in their third week.
  * - day25 only goes to a user still on the free trial (no lifetime license, no subscription, ever).
@@ -40,14 +39,13 @@ const iso = (ms: number) => new Date(ms).toISOString();
 
 /**
  * The emails due at `now`, at most `limit`, in one query: day25 first (it cannot wait), then welcome, then day3.
- * Only to users who opted in (users.trial_emails_at) and never unsubscribed.
+ * To every user in the email's window who never unsubscribed.
  */
 export async function due(DB: D1Database, now: number, limit = BATCH): Promise<Due[]> {
   const parts = KINDS.map(
     (kind, i) => `SELECT ${i} AS prio, '${kind}' AS kind, u.* FROM users u
       WHERE u.trial_started_at > ?${2 * i + 1} AND u.trial_started_at <= ?${2 * i + 2}
         ${kind === 'day25' ? "AND u.status = 'trial' AND u.plan IS NULL" : ''}
-        AND u.trial_emails_at IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM lifecycle_emails e WHERE e.user_id = u.id AND e.kind = '${kind}')
         AND NOT EXISTS (SELECT 1 FROM email_unsubscribes x WHERE x.user_id = u.id)`,
   );

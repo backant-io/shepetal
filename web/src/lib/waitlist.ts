@@ -231,6 +231,15 @@ export async function unsubscribe(req: Request, env: WaitlistEnv): Promise<Respo
   return oneClick ? new Response('Unsubscribed', { headers: { 'cache-control': 'no-store' } }) : see(PAGE.unsubscribed);
 }
 
+/**
+ * The cron tick that runs the sweep: 03:15 UTC. The Cron Trigger fires every 5 minutes (for the trial emails), and the
+ * sweep runs on one of those ticks a day.
+ */
+export function sweepTick(scheduledTime: number): boolean {
+  const at = new Date(scheduledTime);
+  return at.getUTCHours() === 3 && at.getUTCMinutes() === 15;
+}
+
 /** The daily sweep (worker.ts scheduled): a row that is not confirmed goes KEEP_DAYS after its last signup. */
 export async function sweep(DB: D1Database, now = Date.now()): Promise<number> {
   const r = await DB.prepare('DELETE FROM waitlist WHERE confirmed_at IS NULL AND last_request_at < ?1').bind(iso(now - KEEP_DAYS * DAY)).run();

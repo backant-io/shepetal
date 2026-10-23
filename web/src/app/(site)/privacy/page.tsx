@@ -137,9 +137,28 @@ export default function PrivacyPolicy() {
             cancellations (§&nbsp;312k of the German Civil Code), and Art. 6(1)(f) GDPR, our legitimate interest in being
             able to prove them.
           </p>
+          <h3 id="trial-emails">8. Emails about your trial</h3>
+          <p>
+            When you start a trial, we send you three emails: a welcome when your trial starts, a tip on day 3, and on
+            day 25 the note that your free trial ends in 5 days, with our prices. The day 25 email goes only to you while you
+            are still on the free trial.
+          </p>
+          <p>
+            For these emails we use your email address, the date your trial started, which of the emails we sent and
+            when, the message id Amazon SES gives each of them, and, if you unsubscribe, the time you did. Amazon Web
+            Services (SES) sends the emails for us, as our processor. Legal basis: Art. 6(1)(f) GDPR, our legitimate
+            interest in direct marketing for our own product to people who started a trial.
+          </p>
+          <p>
+            You can object to these emails at any time, free of charge and without giving reasons, through the
+            unsubscribe link in every one of them, or by writing to{' '}
+            <a href="mailto:support@shepetal.app">support@shepetal.app</a>. We then send you none of them again. Receipts
+            and confirmations of what you buy or cancel still come.
+          </p>
+
           {waitlistOn() && (
             <>
-              <h3 id="waitlist">8. The waitlist</h3>
+              <h3 id="waitlist">9. The waitlist</h3>
               <p>
                 When you join the waitlist for Windows, Linux or iPhone, we store your email address, the platforms you
                 chose, the words of the box you ticked, and when you signed up and when you confirmed. Of your IP
@@ -168,7 +187,7 @@ export default function PrivacyPolicy() {
           <div className="s-box">
             <h3>Your right to object</h3>
             <p>
-              Where we rely on our legitimate interests (Art. 6(1)(f) GDPR, sections 1, 2, 4, 5, 6 and 7 above), you can
+              Where we rely on our legitimate interests (Art. 6(1)(f) GDPR, sections 1, 2, 4, 5, 6, 7 and 8 above), you can
               object at any time, on grounds relating to your particular situation (Art. 21 GDPR). Write to{' '}
               <a href="mailto:support@shepetal.app">support@shepetal.app</a>. We then stop, unless we have compelling
               legitimate grounds that override your interests, or we need the data to establish, exercise or defend
@@ -176,7 +195,9 @@ export default function PrivacyPolicy() {
             </p>
             <p>
               You can also object at any time to the use of your data for direct marketing, without giving a reason,
-              and we then stop using it for that (Art. 21(2) and (3) GDPR).
+              and we then stop using it for that (Art. 21(2) and (3) GDPR). For the emails about your trial (section 8),
+              object at any time, free of charge and without giving reasons, through the unsubscribe link in every one
+              of them or by writing to <a href="mailto:support@shepetal.app">support@shepetal.app</a>.
             </p>
           </div>
 
@@ -188,8 +209,8 @@ export default function PrivacyPolicy() {
           <ul>
             <li>Cloudflare, Inc. (United States): hosting, the database, file storage, request logs, email forwarding and the emails that tell us of a cancellation.</li>
             <li>
-              Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7)
-              {waitlistOn() && ', and the waitlist emails (section III.8)'}.
+              Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7), and the emails about your trial (section III.8)
+              {waitlistOn() && ', and the waitlist emails (section III.9)'}.
             </li>
             <li>Stripe, Inc. (United States): payments and tax. Stripe also uses payment data as its own controller, for example to prevent fraud and to meet its legal duties.</li>
             <li>PostHog, Inc. (United States): the analytics above.</li>
@@ -233,6 +254,7 @@ export default function PrivacyPolicy() {
             <li>Analytics: PostHog keeps events for as long as our PostHog plan does, 1 year on its free plan and 7 years on its paid plans. A profile stays until we delete it.</li>
             <li>Payment and tax records: as long as tax law requires, up to 10 years.</li>
             <li>Email to us: up to 3 years after the end of the year of our last exchange.</li>
+            <li>Emails about your trial: the record of which emails we sent, when and with which message id, until you ask us to delete your account. Our record of your unsubscribe, so that no further email goes out: until you ask us to delete your account.</li>
             {waitlistOn() && (
               <li>
                 The waitlist: an unconfirmed address is deleted within 30 days of its last signup. A confirmed address
