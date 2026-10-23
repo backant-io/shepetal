@@ -118,16 +118,29 @@ enum DataExport {
 }
 
 /// The Settings row: a folder panel first (nothing is written without it), then the export, shown in Finder.
+/// A whole row (label, what it writes or how it went, the keycap), for a run of rows in Settings.
 struct DataExportButton: View {
     let history: History
     let meetings: MeetingStoring
     @State private var message = ""
+    @State private var failed = false
 
     var body: some View {
-        Button("Export my data…", action: export)
-        Text(message.isEmpty ? "History, dictionary and meetings as JSON, CSV and Markdown. Recordings stay in the recordings folder; the export lists their paths."
-                             : message)
-            .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+        SHContentRow("Export") {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("History, dictionary and meetings").shText(SH.appStrong).foregroundStyle(SH.text)
+                if failed {
+                    SHErrorLine(message)
+                } else {
+                    Text(message.isEmpty ? "As JSON, CSV and Markdown. Recordings stay in the recordings folder; the export lists their paths."
+                                         : message)
+                        .shText(SH.appSmall).foregroundStyle(SH.textMuted).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        } action: {
+            Button("Export my data…", action: export).buttonStyle(.keycap(.secondary, .sm))
+        }
     }
 
     private func export() {
@@ -141,9 +154,11 @@ struct DataExportButton: View {
         do {
             let folder = try DataExport.write(into: url, history: history, meetings: meetings, dictionary: Paths.dictionary)
             message = "Exported to \(folder.path)"
+            failed = false
             NSWorkspace.shared.activateFileViewerSelecting([folder])
         } catch {
             message = "Export failed: \(error.localizedDescription)"
+            failed = true
         }
     }
 }

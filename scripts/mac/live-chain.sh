@@ -13,13 +13,36 @@ UA="shepetal-update-test-bot/1 (read-only release check)"
 T=$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/live-chain.XXXXXX")
 MNT=$T/mnt
 fail() { echo "::error::$*"; exit 1; }
-get() { curl -fsSL --retry 3 -A "$UA" "$@"; }
+# get <file> <url>: GET with the bot user agent, the final URL in $GOT. Cloudflare's bot protection can answer a
+# GitHub runner (a datacenter IP with a bot user agent) with 403 where any other client gets the file: a 403 is tried
+# once more, and a second 403 that comes from Cloudflare (a cf-ray header, server cloudflare) skips the live chain with
+# a warning. Any other error fails it.
+GOT=
+get() {
+  local out=$1 url=$2 code try
+  for try in 1 2; do
+    code=$(curl -sSL --retry 3 -A "$UA" -D "$T/headers" -o "$out" -w '%{http_code} %{url_effective}' "$url") ||
+      fail "GET $url: curl exited $?"
+    GOT=${code#* }; code=${code%% *}
+    [ "$code" = 403 ] && [ "$try" = 1 ] && { echo "GET $url: 403, trying once more"; sleep 10; continue; }
+    break
+  done
+  [ "$code" = 200 ] && return 0
+  # the headers of the last response, after any redirects
+  awk 'toupper($0) ~ /^HTTP\// { h = "" } { h = h $0 "\n" } END { printf "%s", h }' "$T/headers" | tr -d '\r' > "$T/last-headers"
+  sed 's/^/  header: /' "$T/last-headers"
+  if [ "$code" = 403 ] && grep -qi '^cf-ray:' "$T/last-headers" && grep -qi '^server: *cloudflare' "$T/last-headers"; then
+    echo "::warning::live chain skipped: Cloudflare answered GET $url with 403 twice ($(grep -i '^cf-ray:' "$T/last-headers")), its bot protection on this runner's IP; any other error fails the check"
+    exit 0
+  fi
+  fail "GET $url: HTTP $code"
+}
 
-URL=$(get -o "$T/live.dmg" -w '%{url_effective}' "$SITE/download")
+get "$T/live.dmg" "$SITE/download"; URL=$GOT
 echo "$SITE/download -> $URL ($(stat -f %z "$T/live.dmg") bytes)"
 [[ $URL == "$SITE"/download/*/Shepetal-*.dmg ]] || fail "$SITE/download did not end at $SITE/download/<v>/Shepetal-<v>.dmg"
-get -o "$T/live.dmg.sha256" "$URL.sha256"
-get -o "$T/appcast.xml" "$SITE/appcast.xml"
+get "$T/live.dmg.sha256" "$URL.sha256"
+get "$T/appcast.xml" "$SITE/appcast.xml"
 echo "$URL.sha256: $(cat "$T/live.dmg.sha256")"
 cat "$T/appcast.xml"
 

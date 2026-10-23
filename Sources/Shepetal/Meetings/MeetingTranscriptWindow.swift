@@ -81,9 +81,10 @@ struct MeetingTranscriptView: View {
 
     var body: some View {
         Group {
-            if let r = model.record { content(r) } else { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
+            if let r = model.record { content(r) } else { ProgressView().controlSize(.small).frame(maxWidth: .infinity, maxHeight: .infinity) }
         }
         .frame(minWidth: 460, minHeight: 320)
+        .background(SH.bg)
         // ponytail: polls like the Meetings tab, so the summary shows up when it lands.
         .task {
             while !Task.isCancelled {
@@ -95,41 +96,42 @@ struct MeetingTranscriptView: View {
 
     private func content(_ r: MeetingRecord) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text(MeetingFormat.headline(r.meeting)).font(.headline).lineLimit(1)
-                    Spacer(minLength: 8)
-                    Text(model.message).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            VStack(alignment: .leading, spacing: SH.space3) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(MeetingFormat.headline(r.meeting)).shText(SH.appHeading).foregroundStyle(SH.text).lineLimit(1)
+                    Spacer(minLength: SH.space2)
+                    Text(model.message).shText(SH.appSmall).foregroundStyle(SH.textMuted).lineLimit(1)
                 }
-                HStack(spacing: 8) {
-                    Button { model.copyTranscript() } label: { Label("Copy transcript", systemImage: "text.quote") }
+                HStack(spacing: SH.space2) {
+                    MeetingTool("Copy transcript", icon: .textQuote, variant: .secondary) { model.copyTranscript() }
                         .disabled(r.segments.isEmpty)
-                    Button { model.copySummary() } label: { Label("Copy summary", systemImage: "doc.on.doc") }
+                    MeetingTool("Copy summary", icon: .copy, variant: .secondary) { model.copySummary() }
                         .disabled(!model.canCopySummary)
-                    Spacer(minLength: 8)
-                    Button("Open in Meetings") { open(r.meeting.id) }
+                    Spacer(minLength: SH.space2)
+                    Button("Open in Meetings") { open(r.meeting.id) }.buttonStyle(.keycap(.quiet, .sm))
                 }
             }
-            .padding(16)
-            Divider()
+            .padding(.horizontal, SH.space5).padding(.top, SH.space4).padding(.bottom, SH.space3)
+            Rectangle().fill(SH.border).frame(height: 1)
             if r.segments.isEmpty && r.transcriptDeletedAt == nil {
-                ContentUnavailableView("No speech was recorded", systemImage: "waveform",
-                                       description: Text("Nothing was transcribed in this meeting."))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                MeetingsEmpty("No speech was recorded", icon: .captions, detail: "Nothing was transcribed in this meeting.")
             } else {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: SH.space5) {
                         summary(r)
-                        Divider()
+                        Rectangle().fill(SH.border).frame(height: 1)
                         if let deleted = MeetingFormat.transcriptDeleted(r) {  // F81: the summary stays
-                            Text(deleted.title).font(.headline)
-                            Text(deleted.detail).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: SH.space1) {
+                                Text(deleted.title).shText(SH.appHeading).foregroundStyle(SH.text)
+                                Text(deleted.detail).shText(SH.appBody).foregroundStyle(SH.textMuted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
-                        LazyVStack(spacing: 12) {
+                        LazyVStack(spacing: SH.space3) {
                             ForEach(Array(r.segments.enumerated()), id: \.offset) { _, s in Bubble(segment: s) }
                         }
                     }
-                    .padding(16)
+                    .padding(SH.space5)
                 }
             }
         }
@@ -139,14 +141,11 @@ struct MeetingTranscriptView: View {
     @ViewBuilder private func summary(_ r: MeetingRecord) -> some View {
         let notes = noteLines(r.notes)
         if r.summary == nil && summarizing {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Summarizing…").foregroundStyle(.secondary)
-            }
+            Text("Summarizing…").shText(SH.appBody).foregroundStyle(SH.textMuted)
         } else if !notes.isEmpty || !(r.summary?.isEmpty ?? true) {
             SummarySections(summary: r.summary ?? Summary(overview: ""), notes: notes).textSelection(.enabled)
         } else {
-            Text("No summary for this meeting").foregroundStyle(.secondary)
+            Text("No summary for this meeting").shText(SH.appBody).foregroundStyle(SH.textMuted)
         }
     }
 }
