@@ -22,6 +22,7 @@ struct AccountSection: View {
                     actions
                     if account.signedIn { Button("Sign out") { account.signOut() }.buttonStyle(.keycap(.quiet, .sm)) }
                 }
+                .fixedSize()  // a keycap's label is never cut; the summary wraps instead
             }
         }
     }

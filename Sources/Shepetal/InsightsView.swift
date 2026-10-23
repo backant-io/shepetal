@@ -17,7 +17,10 @@ struct InsightsSection: View {
                     Heatmap(days: i.days, labels: model.labels)
                         .alignmentGuide(.firstTextBaseline) { $0[.top] + 11 }  // the label on the first row of squares
                 }
-                ForEach(InsightsFormat.card(i), id: \.title) { SHRow($0.title, title: $0.value) }
+                ForEach(InsightsFormat.card(i), id: \.title) { r in
+                    // A content row: its label wraps onto a second line instead of being cut ("Favourite phrase").
+                    SHContentRow(r.title) { Text(r.value).shText(SH.appStrong).foregroundStyle(SH.text) }
+                }
             }
         }
         if !model.problem.isEmpty { SHErrorLine(model.problem) }
