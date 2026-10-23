@@ -21,7 +21,8 @@ import ShepetalSummary
 /// gets a private pasteboard, and the meetings models write the clipboard only from their Copy buttons. Defaults go
 /// to the argument domain, which lives in this process only: the locale (en_US, so every date reads in one style on
 /// any Mac) and the Hub's tab. The brand keeps 🤫 out of screenshots, so no shot shows the menu, Home, Settings or
-/// the welcome window: they draw it or mention it.
+/// the welcome window: they draw it or mention it. The one exception is 06-gallery, the shepetal UI Gallery, which
+/// is for review (.github/workflows/screens.yml), never a launch screenshot.
 @MainActor
 final class ScreenshotTests: XCTestCase {
     private var out: URL!
@@ -147,6 +148,16 @@ final class ScreenshotTests: XCTestCase {
                                             open: { _ in }, panel: TranscriptPanel())
             w.model.select(office.meeting.id)  // never w.show(): it orders the panel front
             return (w, w.panel)
+        }
+    }
+
+    /// The shepetal UI foundation (Sources/Shepetal/UI), every component: Concrete in the light shot, Night in the
+    /// dark one. A review picture for .github/workflows/screens.yml, not a launch screenshot: it shows the indicator.
+    func testGallery() throws {
+        try shoot("06-gallery", NSSize(width: 760, height: 2000), expect: ["Continue", "Hands-free", "Quit shepetal"]) {
+            let night = NSApp.appearance?.name == .darkAqua
+            let window = SHGallery.window(schemes: [night ? .dark : .light])
+            return (window, window)
         }
     }
 
