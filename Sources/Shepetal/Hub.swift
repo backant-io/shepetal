@@ -497,14 +497,15 @@ private struct HistoryTab: View {
     var body: some View {
         HubPage("History") {
             VStack(alignment: .leading, spacing: SH.space2) {
-                HStack(spacing: SH.space5) {
+                HStack(alignment: .top, spacing: SH.space5) {
                     Text("Search").shText(SH.label).foregroundStyle(SH.textMuted)
-                        .frame(width: SH.rowLabel, alignment: .leading)
+                        .frame(width: SH.rowLabel, minHeight: SH.controlMd, alignment: .leading)
                         .accessibilityHidden(true)
-                    TextField("e.g. invoice", text: $model.query)
-                        .textFieldStyle(.shField)
-                        .accessibilityLabel("Search")
-                    Toggle("Show archived", isOn: $model.showArchived).toggleStyle(.shSwitch).fixedSize()
+                    // Show archived goes under the field when the column is too narrow for both.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: SH.space5) { search.frame(minWidth: 200); archived }
+                        VStack(alignment: .leading, spacing: SH.space2) { search; archived }
+                    }
                 }
                 if !model.message.isEmpty {
                     Text(model.message).shText(SH.appSmall).foregroundStyle(SH.textMuted)
@@ -516,6 +517,14 @@ private struct HistoryTab: View {
             }
             .shHairline(.top)
         }
+    }
+
+    private var search: some View {
+        TextField("e.g. invoice", text: $model.query).textFieldStyle(.shField).accessibilityLabel("Search")
+    }
+
+    private var archived: some View {
+        Toggle("Show archived", isOn: $model.showArchived).toggleStyle(.shSwitch).fixedSize()
     }
 
     /// One dictation (design/ui/components/HistoryEntry): the app and the time in mono, the words as they landed,
