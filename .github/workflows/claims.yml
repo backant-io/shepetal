@@ -83,8 +83,9 @@ jobs:
         run: |
           sudo log show --start "$SINCE" --style compact \
             --predicate 'eventMessage CONTAINS "deny(" AND eventMessage CONTAINS "network"' > denials.log
-          echo "$(wc -l < denials.log) network denials in the log since $SINCE"
-          grep -E 'curl\([0-9]+\) deny\([0-9]+\) network' denials.log ||
+          echo "network denials on this Mac since $SINCE, from any process:"
+          grep 'Sandbox:' denials.log || true
+          grep -qE 'curl\([0-9]+\) deny\([0-9]+\) network' denials.log ||
             { echo "::error::the canary's denial is not in the log, so this check cannot see one"; exit 1; }
           if grep -E 'shepetal\([0-9]+\) deny\([0-9]+\) network' denials.log; then
             echo "::error::shepetal tried to reach the network (denials above)"; exit 1
