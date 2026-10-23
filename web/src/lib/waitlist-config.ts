@@ -13,7 +13,7 @@ export const PLATFORMS = { windows: 'Windows', linux: 'Linux', iphone: 'iPhone' 
 export type Platform = keyof typeof PLATFORMS;
 
 /** The checkbox's words. The form shows exactly this, and each row stores what it showed. */
-export const CONSENT_TEXT = 'Email me when shepetal comes to a platform I chose, and for nothing else. Unsubscribe anytime.';
+export const CONSENT_TEXT = 'Email me when shepetal comes to a platform I chose. You use my email for this only, and I can unsubscribe anytime.';
 
 /** Where each answer goes: static pages, prerendered and served from the cache. */
 export const PAGE = {

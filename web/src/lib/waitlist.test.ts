@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { copyProblems } from './brand-copy';
 import { db, useTestDb } from './test-db';
 
 // The waitlist is answered by worker.ts without Next (10 ms of CPU on Workers Free), and it holds people's email
@@ -256,11 +257,12 @@ describe('the confirmation email and its link (double opt-in)', () => {
 
   it('says what the address is for, and has a link that unsubscribes', async () => {
     const m = await signedUp('ada@example.com', ['windows', 'iphone']);
-    expect(m.subject).toBe('Confirm your place on the shepetal waitlist');
+    expect(m.subject).toBe('Confirm your email for the shepetal waitlist');
     expect(m.text).toContain('shepetal comes to iPhone or Windows');
-    expect(m.text).toContain('We use your address for this one thing only: one email when shepetal comes to a platform you chose.');
+    expect(m.text).toContain('we only use your address to send you one email when shepetal comes to a platform you chose.');
     expect(m.text).toMatch(/Unsubscribe and delete your address: https:\/\/shepetal\.app\/api\/waitlist\/unsubscribe\?t=[\w-]+\.[\w-]+/);
-    expect(m.text).not.toMatch(/Shepetal|—|\b(may|might|about|around|roughly|typically)\b/);
+    // The links carry random tokens: only the words are copy.
+    expect(copyProblems(`${m.subject}\n${m.text.replace(/https:\/\/\S+/g, '<link>')}`)).toEqual([]);
   });
 
   // The request logs keep every URL: the address must not be in one, not even encoded.

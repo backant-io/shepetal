@@ -8,7 +8,7 @@ import { waitlistOn } from '@/lib/waitlist-config';
 
 export const metadata: Metadata = pageMetadata('waitlist', {
   title: 'Waitlist',
-  description: 'shepetal is for Mac today. Leave your email to hear when it comes to Windows, Linux or iPhone.',
+  description: 'shepetal is on the Mac today, and if you leave your email we will tell you when it comes to Windows, Linux or iPhone.',
 });
 
 // Prerendered and served from the cache: the Workers Free plan's 10 ms of CPU leaves no room for a render. The build
@@ -21,13 +21,16 @@ export default function Waitlist() {
     <>
       <SiteHeader end={<Link href="/faq" prefetch={false}>FAQ</Link>} />
       <main className="s-main s-legal s-waitlist">
-        <h1 className="s-h2">Windows, Linux and iPhone.</h1>
-        <p className="s-lede">shepetal is for Mac today. Leave your email, and we write when it comes to yours.</p>
+        <h1 className="s-h2">The waitlist.</h1>
+        <p className="s-lede">
+          You probably use Windows, Linux or an iPhone and want shepetal there too, and today it is only on the Mac.
+          Leave your email and we will write to you when it comes to yours.
+        </p>
         <WaitlistForm />
         <p className="s-small">
-          We use your email for one thing: to tell you when shepetal comes to a platform you chose. First we send one
-          email to confirm your address. Every email has a link that unsubscribes you and deletes your address.{' '}
-          <Link href="/privacy#waitlist" prefetch={false}>Privacy Policy</Link>.
+          We only use your email to tell you when shepetal comes to a platform you chose. First we send you one email
+          to confirm your address, and every email from us has a link that unsubscribes you and deletes your address.
+          You can read the details in our <Link href="/privacy#waitlist" prefetch={false}>Privacy Policy</Link>.
         </p>
       </main>
     </>

@@ -115,12 +115,12 @@ const QAS: QA[] = [
         {waitlistOn() && (
           <>
             {' '}
-            <Link href="/waitlist" prefetch={false}>Join the waitlist</Link> to hear when yours is out.
+            <Link href="/waitlist" prefetch={false}>Join the waitlist</Link> and we will email you when yours is out.
           </>
         )}
       </p>
     ),
-    text: `Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready.${waitlistOn() ? ' Join the waitlist to hear when yours is out.' : ''}`,
+    text: `Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready.${waitlistOn() ? ' Join the waitlist and we will email you when yours is out.' : ''}`,
   },
   {
     q: 'Can I use it on more than one Mac?',

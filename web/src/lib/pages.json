@@ -25,9 +25,9 @@
   },
   "waitlist": {
     "path": "/waitlist",
-    "title": "Windows, Linux and iPhone.",
-    "sub": "shepetal is for Mac today. Leave your email to hear when it comes to yours.",
-    "updated": "2026-10-22",
+    "title": "The waitlist.",
+    "sub": "shepetal is on the Mac today, and if you leave your email we will tell you when it comes to yours.",
+    "updated": "2026-10-23",
     "priority": 0.5,
     "freq": "monthly"
   },

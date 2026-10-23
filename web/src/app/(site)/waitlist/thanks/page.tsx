@@ -11,8 +11,8 @@ export default function Thanks() {
   if (!waitlistOn()) notFound();
   return (
     <WaitlistNote title="Check your email.">
-      <p>Click the link in our email to join the waitlist. It works for 7 days.</p>
-      <p>No email? Look in your spam folder, or sign up again in 30 minutes.</p>
+      <p>Open the email from us and click the link in it to join the waitlist, and you have 7 days to do that.</p>
+      <p>If you can't find it, look in your spam folder or sign up again in 30 minutes.</p>
     </WaitlistNote>
   );
 }

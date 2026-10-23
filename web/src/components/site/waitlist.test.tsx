@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { copyProblems, visibleText } from '@/lib/brand-copy';
 import { CONSENT_TEXT, PAGE } from '@/lib/waitlist-config';
 import { WaitlistForm } from './Waitlist';
 
@@ -55,13 +56,13 @@ describe('with WAITLIST on', () => {
     // The FAQ's answers are built when the module loads (as in the build, which inlines WAITLIST).
     vi.resetModules();
     const faq = renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'faq', 'page.tsx'))).default());
-    expect(faq).toContain('<a href="/waitlist">Join the waitlist</a> to hear when yours is out.');
+    expect(faq).toContain('<a href="/waitlist">Join the waitlist</a> and we will email you when yours is out.');
     expect((await import('@/app/sitemap')).default().map((e) => e.url)).toContain(`https://${process.env.SHEPETAL_DOMAIN}/waitlist`);
     const privacy = renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'privacy', 'page.tsx'))).default());
     for (const must of ['id="waitlist"', 'one purpose only', 'double opt-in', 'Art. 6(1)(a) GDPR', 'withdraw', 'deletes your address at once', 'within 30 days', 'and the waitlist emails'])
       expect(privacy, must).toContain(must);
     expect(renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'waitlist', 'page.tsx'))).default())).toContain(
-      'We use your email for one thing: to tell you when shepetal comes to a platform you chose.',
+      'We only use your email to tell you when shepetal comes to a platform you chose.',
     );
   });
 });
@@ -86,7 +87,7 @@ describe('the waitlist form', () => {
 
   // GDPR consent is a box the person ticks, in these exact words, which each row stores (consent_text).
   it('asks for consent with a required box that starts unticked, in the words the database stores', () => {
-    expect(CONSENT_TEXT).toBe('Email me when shepetal comes to a platform I chose, and for nothing else. Unsubscribe anytime.');
+    expect(CONSENT_TEXT).toBe('Email me when shepetal comes to a platform I chose. You use my email for this only, and I can unsubscribe anytime.');
     expect(attrs(html, 'input', 'name="consent"')).toEqual({ type: 'checkbox', required: '', name: 'consent', value: 'yes' });
     expect(html).toMatch(new RegExp(`<label class="s-check"><input [^>]*name="consent"[^>]*/>${CONSENT_TEXT.replace(/\./g, '\\.')}</label>`));
     expect(html).not.toMatch(/checked/);
@@ -129,5 +130,45 @@ describe('the waitlist pages', () => {
 
   it('link with prefetch off', () => {
     for (const p of pages) for (const tag of read(p).match(/<Link\b[^>]*>/g) ?? []) expect(tag, p).toContain('prefetch={false}');
+  });
+});
+
+// Every word a visitor reads on the waitlist: the pages, their titles and previews, the form, the FAQ line and the
+// privacy section (the email is checked in src/lib/waitlist.test.ts). Brand rules and the voice skill's sentence shapes.
+describe('the waitlist copy', () => {
+  it('catches what the brand rules ban', () => {
+    for (const bad of ['Shepetal is out.', 'Hold fn, speak, let go.', 'hold fn, talk', 'Dictation that keeps quiet.', 'It may come.', 'up to 3 years', 'Now with AI.', 'That is it—done.', 'Twice the speed<sup>1</sup>', '3x faster than typing', 'We never sell it.', 'It works without a key.', '$5 a month'])
+      expect(copyProblems(bad), bad).not.toEqual([]);
+    for (const good of ['$23.99 once. Yours forever.', '$0.99 a month.', '4x faster than typing.', 'Works offline.'])
+      expect(copyProblems(good), good).toEqual([]);
+  });
+
+  it('keeps every brand rule on every page, title, preview, label and message', async () => {
+    vi.stubEnv('WAITLIST', 'on');
+    vi.resetModules();
+    const texts: Record<string, string> = {};
+    const pages = ['', ...readdirSync(DIR, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name)];
+    for (const p of pages) {
+      const mod = await import(/* @vite-ignore */ join(DIR, p, 'page.tsx'));
+      const html = renderToStaticMarkup(mod.default());
+      expect(html, p).not.toBe('');
+      texts[p || 'waitlist'] = visibleText(html);
+      const m = mod.metadata as { title?: string; description?: string; openGraph?: { title?: string; description?: string; images?: { alt?: string }[] } };
+      texts[`${p || 'waitlist'} metadata`] = [m.title, m.description, m.openGraph?.title, m.openGraph?.description, m.openGraph?.images?.[0]?.alt].join(' ');
+    }
+    const { PAGES } = await import('@/lib/seo');
+    texts['link preview'] = `${PAGES.waitlist.title} ${PAGES.waitlist.sub}`;
+    texts.consent = CONSENT_TEXT;
+    const faq = visibleText(renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'faq', 'page.tsx'))).default()));
+    texts.faq = faq.match(/Join the waitlist[^.]*\./)![0];
+    const privacy = renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'privacy', 'page.tsx'))).default());
+    texts.privacy = [
+      privacy.match(/<h3 id="waitlist">[\s\S]*?(?=<div class="s-box">)/)![0],
+      privacy.match(/<li>The waitlist:[^<]*<\/li>/)![0],
+      privacy.match(/The waitlist needs[^.]*\./)![0],
+      privacy.match(/and the waitlist emails \(section III\.8\)/)![0],
+    ].map(visibleText).join(' ');
+    for (const [where, text] of Object.entries(texts)) expect(copyProblems(text), `${where}: ${text}`).toEqual([]);
+    expect(texts.privacy).toContain('one purpose only');
   });
 });

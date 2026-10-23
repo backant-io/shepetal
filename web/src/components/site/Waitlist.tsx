@@ -18,7 +18,7 @@ export function WaitlistForm() {
         <input className="s-input s-input-plain" id="wl-email" name="email" type="email" autoComplete="email" maxLength={254} required />
       </div>
       <fieldset className="s-wl-set">
-        <legend className="s-label">Platform (one or more)</legend>
+        <legend className="s-label">Your platforms, one or more</legend>
         {Object.entries(PLATFORMS).map(([value, name]) => (
           <label key={value} className="s-check">
             <input type="checkbox" name="platform" value={value} />

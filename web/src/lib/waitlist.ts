@@ -180,19 +180,19 @@ export async function sendConfirmation(secret: string, origin: string, email: st
   const names = platforms.map((p) => PLATFORMS[p]);
   const which = names.length > 1 ? `${names.slice(0, -1).join(', ')} or ${names.at(-1)}` : names[0];
   const text = [
-    `You asked to hear when shepetal comes to ${which}. Confirm it with this link:`,
+    `You asked us to tell you when shepetal comes to ${which}, so just click this link to confirm your email:`,
     '',
     confirm,
     '',
-    `The link works for ${CONFIRM_DAYS} days. We use your address for this one thing only: one email when shepetal comes to a platform you chose.`,
-    'If you did not ask for this, ignore this email: you hear nothing more from us, and we delete your address within 30 days.',
+    `The link works for ${CONFIRM_DAYS} days, and we only use your address to send you one email when shepetal comes to a platform you chose.`,
+    'If someone else typed in your address, just ignore this email. This is the last one you get from us, and we delete your address within 30 days.',
     '',
     `Unsubscribe and delete your address: ${unsubscribe}`,
     '',
     'shepetal',
     'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA',
   ].join('\n');
-  await sendMail(email, 'Confirm your place on the shepetal waitlist', text);
+  await sendMail(email, 'Confirm your email for the shepetal waitlist', text);
 }
 
 // --- GET /api/waitlist/confirm, GET and POST /api/waitlist/unsubscribe ------------------------------------------------
