@@ -177,13 +177,12 @@ describe('consent page', () => {
     expect(html).toContain('<a href="/cancel" lang="de">Verträge hier kündigen</a>');
   });
 
-  // The trial emails need consent (§ 7 UWG, Art. 6(1)(a) GDPR): asked here, where the app creates the account, unticked.
-  it('asks for the trial emails with an unticked box and a link to what they are', () => {
+  // No trial emails are sent, so nothing asks for them: the form is the hidden fields and Continue.
+  it('has no checkbox and does not offer the trial emails', () => {
     const html = consentPage('a@example.com', r, 'c');
-    expect(html).toContain(
-      '<label class="check"><input type="checkbox" name="trial_emails" value="yes"> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a></label><button type="submit">Continue</button></form>',
-    );
-    expect(html).not.toMatch(/checked/);
+    expect(html).toContain('<input type="hidden" name="csrf" value="c"><button type="submit">Continue</button></form>');
+    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toMatch(/trial_emails|trial-emails|emails about my trial/);
   });
 
   // state and email come from outside: they must never become markup.

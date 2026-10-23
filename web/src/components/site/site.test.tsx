@@ -14,18 +14,15 @@ describe('sign-in page', () => {
     expect(html).toContain('<h1 class="s-h1">Sign in.</h1>');
     expect(html.match(/s-btn-signal/g)).toHaveLength(1);
     expect(html).toMatch(
-      /<form class="s-form"[^>]*><label class="s-check">.*<\/label><button type="submit" class="s-btn s-btn-signal">Continue with Google<\/button><\/form>/,
+      /<form class="s-form"[^>]*><button type="submit" class="s-btn s-btn-signal">Continue with Google<\/button><\/form>/,
     );
     expect(html.match(/<button\b/g)).toHaveLength(1);
   });
 
-  // The trial emails need consent (§ 7 UWG, Art. 6(1)(a) GDPR): asked where the account is created, in the form that
-  // posts to Google, unticked, with a link to what they are.
-  it('asks for the trial emails with an unticked box inside the sign-in form', () => {
-    expect(html).toContain(
-      '<label class="s-check"><input type="checkbox" name="trial_emails" value="yes"/> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a></label>',
-    );
-    expect(html).not.toMatch(/checked/);
+  // No trial emails are sent, so nothing asks for them: no checkbox, no field, no link to them.
+  it('has no checkbox and does not offer the trial emails', () => {
+    expect(html).not.toContain('type="checkbox"');
+    expect(html).not.toMatch(/trial_emails|trial-emails|emails about my trial/);
   });
 
   it('keeps the key small, beside the heading, and says what failed when Google sends the user back', () => {
