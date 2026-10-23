@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { USE_CASES, useCasePath } from '@/lib/use-cases';
+import { COMPARE_LINKS } from '@/lib/compare';
 
 /** The "shepetal" wordmark in Bodoni Moda italic, as on the landing page. */
 export function Wordmark({ small = false }: { small?: boolean }) {
@@ -20,13 +22,29 @@ export function SiteHeader({ end }: { end?: React.ReactNode }) {
 }
 
 /**
- * The footer, as on the landing page: the wordmark, then Privacy · Terms · Refunds · Legal, and the cancellation button
- * "Verträge hier kündigen" (§ 312k BGB: on every page, no sign-in, in exactly these words).
+ * The footer, as on the landing page: the wordmark, the "Made for" pages, the "Compare" pages, then Privacy · Terms · Refunds · Legal,
+ * and the cancellation button "Verträge hier kündigen" (§ 312k BGB: on every page, no sign-in, in exactly these words).
  */
 export function SiteFooter() {
   return (
     <footer className="s-foot">
       <Wordmark small />
+      <nav aria-label="Made for" className="s-mono s-foot-nav s-foot-for">
+        <span>Made for</span>
+        {USE_CASES.map((u) => (
+          <Link key={u.slug} href={useCasePath(u.slug)} prefetch={false}>
+            {u.label}
+          </Link>
+        ))}
+      </nav>
+      <nav aria-label="Compare" className="s-mono s-foot-nav s-foot-cmp">
+        <span>Compare</span>
+        {COMPARE_LINKS.map((c) => (
+          <Link key={c.href} href={c.href} prefetch={false}>
+            {c.label}
+          </Link>
+        ))}
+      </nav>
       <nav aria-label="Legal" className="s-mono s-foot-nav">
         <Link href="/privacy" prefetch={false}>Privacy</Link>
         <Link href="/terms" prefetch={false}>Terms</Link>

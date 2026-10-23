@@ -64,7 +64,7 @@ WAITLIST = "off"
 # The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. Only "on" sends; anything
 # else logs what each cron run would send. Needs migration 0006 and the SES secrets below. Switch it here, commit and
 # deploy (README.md): a change in the dashboard is undone by the next deploy.
-LIFECYCLE_EMAILS = "off"
+LIFECYCLE_EMAILS = "on"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
 # and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
 # scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and
