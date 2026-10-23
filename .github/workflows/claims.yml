@@ -71,15 +71,23 @@ jobs:
       # Network denied from here on.
       - name: Dictation, network denied
         run: |
-          echo "SINCE=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
+          SINCE=$(date '+%Y-%m-%d %H:%M:%S'); echo "SINCE=$SINCE" >> "$GITHUB_ENV"
           # The canary, under the plain deny profile (no kill), so curl lives to fail: it must not get through, and
-          # its denial, by pid, is what the log check looks for below.
-          sandbox-exec -p '(version 1)(allow default)(deny network*)' curl -sS -m 10 -o /dev/null https://example.com &
-          canary=$!
-          echo "CANARY_PID=$canary" >> "$GITHUB_ENV"
-          if wait $canary; then
-            echo "::error::curl reached example.com under the deny-network profile"; exit 1
-          fi
+          # its denial, by pid, is what the log check looks for below. The log can drop a report (run 39894847241),
+          # so up to three tries, each a new curl.
+          canaries=
+          for try in 1 2 3; do
+            sandbox-exec -p '(version 1)(allow default)(deny network*)' curl -sS -m 10 -o /dev/null https://example.com &
+            canary=$!; canaries="$canaries curl($canary)"
+            if wait $canary; then
+              echo "::error::curl reached example.com under the deny-network profile"; exit 1
+            fi
+            sleep 5
+            sudo log show --start "$SINCE" --style compact --predicate 'eventMessage CONTAINS "deny("' |
+              grep -E "curl\($canary\) deny\([0-9]+\) network-" > /dev/null && break
+            echo "no denial in the log for canary curl($canary) (try $try of 3)"
+          done
+          echo "CANARIES=$canaries" >> "$GITHUB_ENV"
           # LATENCY=report: the runner is a VM with no Neural Engine, so the 700 and 800 ms bars are reported and
           # only a loose 2000 ms bar is asserted.
           CLEANUP=rules LANGUAGES=skip LATENCY=report sandbox-exec -p "$NO_NETWORK" scripts/e2e-mac.sh 2>&1 | tee e2e-mac.log
@@ -87,17 +95,18 @@ jobs:
         # The script runs shepetal under the same kill profile itself; a sandbox cannot be applied inside another.
         run: SHEPETAL_BIN=.build/release/shepetal scripts/e2e-meeting.sh 2>&1 | tee e2e-meeting.log
       - name: Nothing leaves the Mac
-        if: ${{ !cancelled() && env.SINCE != '' }}
+        if: ${{ !cancelled() && env.CANARIES != '' }}
         run: |
           sudo log show --start "$SINCE" --style compact \
             --predicate 'eventMessage CONTAINS "deny(" AND eventMessage CONTAINS "network"' > denials.log
-          echo "network denials on this Mac since $SINCE, from any process (the canary is curl($CANARY_PID)):"
+          echo "network denials on this Mac since $SINCE, from any process (canaries:$CANARIES):"
           grep 'Sandbox:' denials.log || true
-          grep -qE "curl\($CANARY_PID\) deny\([0-9]+\) network-" denials.log ||
-            { echo "::error::the canary's denial is not in the log, so this check cannot see one"; exit 1; }
+          canaries=(); for c in $CANARIES; do canaries+=(-e "$c"); done
+          grep -E 'deny\([0-9]+\) network-' denials.log | grep -F "${canaries[@]}" > /dev/null ||
+            { echo "::error::no canary's denial is in the log, so this check cannot see one"; exit 1; }
           # Any process but the canary: shepetal, or anything it or the scripts start. Daemons' file-read-data
           # denials of network preference files do not match.
-          if grep -E 'deny\([0-9]+\) network-' denials.log | grep -vF "curl($CANARY_PID)"; then
+          if grep -E 'deny\([0-9]+\) network-' denials.log | grep -vF "${canaries[@]}"; then
             echo "::error::a process other than the canary tried to reach the network (denials above)"; exit 1
           fi
           if grep -shiE 'NSURLErrorDomain|kCFErrorDomainCFNetwork|nw_connection|nw_resolver|appears to be offline|hostname could not be found|could not connect to the server|network is unreachable' \

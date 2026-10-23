@@ -87,8 +87,9 @@ Two things keep that check honest:
 
 - A canary at the start of the run: `curl https://example.com` under the plain profile
   `(version 1)(allow default)(deny network*)` (no kill, so curl lives to fail) must fail, and its denial, found by
-  curl's pid, must be in the log. If the sandbox let curl through, or the log showed no denials, the job fails
-  instead of passing on an empty log. On GitHub's macos-15 Macs the canary's denial did not show in the log, which
+  curl's pid, must be in the log. The log can drop the canary's report too (run 39894847241 failed that way), so the
+  workflow tries up to three curls, each a new pid, and needs one of them in the log. If the sandbox let curl
+  through, or the log showed none of them, the job fails instead of passing on an empty log. On GitHub's macos-15 Macs the canary's denial did not show in the log, which
   is one reason the workflow runs on macos-26.
 - The checks were shown to fail on the pull request that added this workflow. First the log check alone, under the
   profile without the kill: a throwaway commit (954a1a2) sent one request to https://example.com after each
