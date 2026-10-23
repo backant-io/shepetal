@@ -60,11 +60,12 @@ if [ -e "$DICT" ] && ! head -1 "$DICT" | grep -q '^# e2e-mac'; then
 fi
 printf '# e2e-mac dictionary\ndentist => orthodontist\n' > "$DICT"
 
-while IFS='|' read -r id voice text; do
-  [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "$text"
+# id|voice|text[|what the voice is given instead, where it reads the text wrong]. The text is the reference either way.
+while IFS='|' read -r id voice text spoken; do
+  [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "${spoken:-$text}"
   printf '%s\n' "$text" > "$FIX/$id.txt"
 done <<'FIXTURES'
-e01|Samantha|Please send the quarterly report to the design team before Friday afternoon, and copy the finance lead on the thread.
+e01|Samantha|Please send the quarterly report to the design team before Friday afternoon, and copy the finance lead on the thread.|Please send the quarterly report to the design team before Friday afternoon, and copy the finance leed on the thread.
 e02|Daniel|The deployment finished without errors, but the staging database still needs a fresh backup tonight.
 e03|Samantha|Remind me to call the dentist tomorrow morning and to pick up groceries on the way home.
 e04|Daniel|Our new onboarding flow cut the average setup time in half, so let's share the results at the next team meeting.
