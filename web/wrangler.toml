@@ -55,9 +55,11 @@ SHEPETAL_DOMAIN = "shepetal.app"
 # Analytics (src/lib/analytics.ts, all server-side): backant's PostHog project on the US cloud. The project key is a secret set at GO
 # (POSTHOG_KEY, from SSM /backant/production/NEXT_PUBLIC_POSTHOG_KEY); without it analytics are off.
 POSTHOG_HOST = "https://us.i.posthog.com"
-# The waitlist's confirmation emails (src/lib/waitlist.ts). "off": signups are stored and the email each would get is
-# written to the log instead of sent. "on" sends them through Amazon SES (the SES_* secrets below). Pavel's call.
-WAITLIST_EMAILS = "off"
+# The waitlist for Windows, Linux and iPhone (src/lib/waitlist-config.ts). "off" until Pavel approves: no form, no
+# link to it, not in the sitemap, and POST /api/waitlist and the confirmation link answer 404 and store nothing.
+# "on" (with migrations/0008_waitlist.sql applied and the SES_* secrets below set) shows the form and sends the
+# confirmation emails through Amazon SES. It is read at build time too (next.config.ts): change it, then build.
+WAITLIST = "off"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
 # and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
 # scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and
@@ -69,14 +71,14 @@ WAITLIST_EMAILS = "off"
 #          wrangler secret put STRIPE_SECRET_KEY
 #          wrangler secret put STRIPE_WEBHOOK_SECRET
 # Optional, the § 312k confirmation email to customers through Amazon SES (README.md): without all three, none is sent.
-#   The waitlist (src/lib/ses.ts) reads them too, only while WAITLIST_EMAILS is "on".
+#   The waitlist's confirmation emails (src/lib/waitlist.ts) need them too, once WAITLIST is "on".
 #          wrangler secret put SES_ACCESS_KEY_ID
 #          wrangler secret put SES_SECRET_ACCESS_KEY
 #          wrangler secret put SES_REGION
 # For local runs, put the same names in .dev.vars (see README.md).
 
-# Daily at 03:17 UTC: worker.ts scheduled() deletes the waitlist rows that are not confirmed and subscribed, 29 days
-# after their last signup.
+# Daily at 03:17 UTC: worker.ts scheduled() deletes the waitlist rows that are not confirmed, 29 days after their last
+# signup (with the waitlist off there are none).
 [triggers]
 crons = ["17 3 * * *"]
 

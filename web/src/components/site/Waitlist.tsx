@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
-import { CONSENT_TEXT, PLATFORMS } from '@/lib/waitlist';
+import { CONSENT_TEXT, PLATFORMS, waitlistOn } from '@/lib/waitlist-config';
 
 /**
  * The waitlist form. A plain form POST to /api/waitlist (worker.ts answers it without Next), so it works without
- * JavaScript; the browser asks for the email and the consent box, the Worker for at least one platform.
+ * JavaScript; the browser asks for the email and the consent box, the Worker for at least one platform. Nothing at
+ * all while WAITLIST is off.
  */
 export function WaitlistForm() {
+  if (!waitlistOn()) return null;
   return (
     <form className="s-wl" method="post" action="/api/waitlist">
       <div className="s-field">
@@ -39,7 +41,7 @@ export function WaitlistForm() {
 export function WaitlistNote({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <>
-      <SiteHeader end={<Link href="/faq">FAQ</Link>} />
+      <SiteHeader end={<Link href="/faq" prefetch={false}>FAQ</Link>} />
       <main className="s-main s-legal s-waitlist">
         <h1 className="s-h2">{title}</h1>
         <div className="s-prose">{children}</div>

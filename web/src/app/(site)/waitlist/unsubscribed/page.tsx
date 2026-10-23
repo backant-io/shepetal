@@ -6,7 +6,7 @@ export const dynamic = 'force-static';
 export default function Unsubscribed() {
   return (
     <WaitlistNote title="You are unsubscribed.">
-      <p>You get no more waitlist emails. We delete your address within 30 days.</p>
+      <p>You get no more waitlist emails, and your address is deleted.</p>
     </WaitlistNote>
   );
 }

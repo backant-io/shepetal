@@ -1,9 +1,16 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it } from 'vitest';
-import { CONSENT_TEXT, PAGE } from '@/lib/waitlist';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { CONSENT_TEXT, PAGE } from '@/lib/waitlist-config';
 import { WaitlistForm } from './Waitlist';
+
+vi.mock('next/navigation', () => ({
+  notFound: () => {
+    throw new Error('NEXT_NOT_FOUND');
+  },
+}));
+afterEach(() => vi.unstubAllEnvs());
 
 const APP = join(__dirname, '..', '..', 'app');
 const DIR = join(APP, '(site)', 'waitlist');
@@ -14,8 +21,55 @@ const attrs = (html: string, name: string, ...has: string[]) => {
   return tag ? Object.fromEntries([...tag.matchAll(/(\w+)="([^"]*)"/g)].map((m) => [m[1], m[2]])) : null;
 };
 
+// WAITLIST is off in wrangler.toml, and the build inlines it (next.config.ts): what the site shows until Pavel approves.
+describe('with WAITLIST off', () => {
+  const render = async (file: string) => {
+    const mod = await import(/* @vite-ignore */ join(APP, file));
+    return renderToStaticMarkup(mod.default());
+  };
+
+  it('the form renders nothing', () => {
+    expect(process.env.WAITLIST).toBe('off');
+    expect(renderToStaticMarkup(<WaitlistForm />)).toBe('');
+  });
+
+  it('the pages that take an address or follow a signup are the 404 page', async () => {
+    for (const p of ['', 'thanks', 'check', 'confirmed']) await expect(render(join('(site)', 'waitlist', p, 'page.tsx')), p).rejects.toThrow('NEXT_NOT_FOUND');
+    // What a link already sent leads to still works.
+    expect(await render(join('(site)', 'waitlist', 'unsubscribe', 'page.tsx'))).toContain('action="/api/waitlist/unsubscribe"');
+    expect(await render(join('(site)', 'waitlist', 'link', 'page.tsx'))).not.toContain('href="/waitlist"');
+  });
+
+  it('nothing links to it, the sitemap leaves it out, and the privacy policy does not describe it', async () => {
+    expect(await render(join('(site)', 'faq', 'page.tsx'))).not.toMatch(/waitlist/i);
+    const sitemap = (await import('@/app/sitemap')).default();
+    expect(sitemap.map((e) => e.url).join(' ')).not.toContain('/waitlist');
+    expect(sitemap.length).toBeGreaterThan(5);
+    expect(await render(join('(site)', 'privacy', 'page.tsx'))).not.toMatch(/waitlist/i);
+  });
+});
+
+describe('with WAITLIST on', () => {
+  it('the FAQ links to it, the sitemap has it, and the privacy policy has its section', async () => {
+    vi.stubEnv('WAITLIST', 'on');
+    // The FAQ's answers are built when the module loads (as in the build, which inlines WAITLIST).
+    vi.resetModules();
+    const faq = renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'faq', 'page.tsx'))).default());
+    expect(faq).toContain('<a href="/waitlist">Join the waitlist</a> to hear when yours is out.');
+    expect((await import('@/app/sitemap')).default().map((e) => e.url)).toContain(`https://${process.env.SHEPETAL_DOMAIN}/waitlist`);
+    const privacy = renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'privacy', 'page.tsx'))).default());
+    for (const must of ['id="waitlist"', 'one purpose only', 'double opt-in', 'Art. 6(1)(a) GDPR', 'withdraw', 'deletes your address at once', 'within 30 days', 'and the waitlist emails'])
+      expect(privacy, must).toContain(must);
+    expect(renderToStaticMarkup((await import(/* @vite-ignore */ join(APP, '(site)', 'waitlist', 'page.tsx'))).default())).toContain(
+      'We use your email for one thing: to tell you when shepetal comes to a platform you chose.',
+    );
+  });
+});
+
 describe('the waitlist form', () => {
+  vi.stubEnv('WAITLIST', 'on');
   const html = renderToStaticMarkup(<WaitlistForm />);
+  vi.unstubAllEnvs();
 
   // No script runs it: a plain POST that worker.ts answers with a redirect.
   it('is a plain form POST to /api/waitlist, and works without JavaScript', () => {
@@ -32,7 +86,7 @@ describe('the waitlist form', () => {
 
   // GDPR consent is a box the person ticks, in these exact words, which each row stores (consent_text).
   it('asks for consent with a required box that starts unticked, in the words the database stores', () => {
-    expect(CONSENT_TEXT).toBe('Email me when shepetal comes to my platform. Unsubscribe anytime.');
+    expect(CONSENT_TEXT).toBe('Email me when shepetal comes to a platform I chose, and for nothing else. Unsubscribe anytime.');
     expect(attrs(html, 'input', 'name="consent"')).toEqual({ type: 'checkbox', required: '', name: 'consent', value: 'yes' });
     expect(html).toMatch(new RegExp(`<label class="s-check"><input [^>]*name="consent"[^>]*/>${CONSENT_TEXT.replace(/\./g, '\\.')}</label>`));
     expect(html).not.toMatch(/checked/);
@@ -51,11 +105,12 @@ describe('the waitlist pages', () => {
       expect(src, p || 'waitlist').toContain("export const dynamic = 'force-static';");
       expect(src, p).not.toMatch(/searchParams|cookies\(|headers\(|@\/lib\/auth|getCloudflareContext/);
     }
-    // After a build, Next's own list of prerendered routes has them all.
+    // After a build, Next's own list of prerendered routes has them all (with WAITLIST off, those left are the
+    // unsubscribe pages: the rest are built as the 404 page).
     const manifest = join(__dirname, '..', '..', '..', '.next', 'prerender-manifest.json');
     if (existsSync(manifest)) {
       const routes = Object.keys(JSON.parse(readFileSync(manifest, 'utf8')).routes);
-      for (const p of pages) expect(routes).toContain(p ? `/waitlist/${p}` : '/waitlist');
+      for (const p of ['unsubscribe', 'unsubscribed', 'link']) expect(routes).toContain(`/waitlist/${p}`);
     }
   });
 
@@ -72,8 +127,7 @@ describe('the waitlist pages', () => {
     }
   });
 
-  it('are linked from the FAQ answer about other platforms', () => {
-    const faq = readFileSync(join(APP, '(site)', 'faq', 'page.tsx'), 'utf8');
-    expect(faq).toMatch(/Is there shepetal for Windows, Linux or iPhone\?[\s\S]{0,400}<Link href="\/waitlist">Join the waitlist<\/Link>/);
+  it('link with prefetch off', () => {
+    for (const p of pages) for (const tag of read(p).match(/<Link\b[^>]*>/g) ?? []) expect(tag, p).toContain('prefetch={false}');
   });
 });

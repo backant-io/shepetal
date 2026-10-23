@@ -10,7 +10,7 @@ export const dynamic = 'force-static';
 export default function Unsubscribe() {
   return (
     <WaitlistNote title="Unsubscribe.">
-      <p>Stop the emails about shepetal for Windows, Linux and iPhone.</p>
+      <p>Stop the waitlist emails for shepetal on Windows, Linux and iPhone, and delete your address.</p>
       <form className="s-wl" method="post" action="/api/waitlist/unsubscribe">
         <input type="hidden" name="t" value="" />
         <button type="submit" className="s-btn">

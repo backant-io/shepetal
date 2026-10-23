@@ -23,7 +23,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
 | `src/lib/download.ts` | `/download`, the release files and `/appcast.xml`, from the R2 bucket `shepetal-releases` |
 | `src/app/api/` | the API routes in API.md |
-| `src/lib/waitlist.ts`, `src/lib/ses.ts`, `src/app/(site)/waitlist/` | the waitlist for Windows, Linux and iPhone (API.md): double opt-in, the table `waitlist` (`migrations/0005_waitlist.sql`), email through Amazon SES only while `WAITLIST_EMAILS` is `"on"` |
+| `src/lib/waitlist.ts`, `src/lib/waitlist-config.ts`, `src/app/(site)/waitlist/` | the waitlist for Windows, Linux and iPhone (API.md): double opt-in, the table `waitlist` (`migrations/0008_waitlist.sql`), the confirmation email through `src/lib/mail.ts`; off until `WAITLIST` in `wrangler.toml` is `"on"` |
 
 ## What comes from backant.io
 

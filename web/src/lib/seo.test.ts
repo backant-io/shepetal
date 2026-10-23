@@ -11,7 +11,8 @@ const WEB = join(__dirname, '..', '..');
 describe('discovery', () => {
   it('lists every public page in the sitemap on the domain, and nothing signed-in', () => {
     const urls = sitemap().map((e) => e.url);
-    expect(urls).toEqual(Object.values(PAGES).map((p) => `${SITE_URL}${p.path === '/' ? '' : p.path}`));
+    // /waitlist only once WAITLIST is on (src/lib/waitlist-config.ts).
+    expect(urls).toEqual(Object.values(PAGES).filter((p) => p.path !== '/waitlist').map((p) => `${SITE_URL}${p.path === '/' ? '' : p.path}`));
     for (const p of ['/faq', '/press', '/changelog', '/refunds', '/impressum', '/privacy', '/terms', '/legal']) expect(urls).toContain(`${SITE_URL}${p}`);
     expect(urls.some((u) => /account|install|download|\/app\b|\/api\//.test(u))).toBe(false);
   });

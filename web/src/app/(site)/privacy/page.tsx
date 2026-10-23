@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
+import { waitlistOn } from '@/lib/waitlist-config';
 
 export const metadata: Metadata = pageMetadata('privacy', { title: 'Privacy Policy', description: 'How shepetal handles your information. Your voice and your text stay on your Mac.' });
 
@@ -136,6 +137,33 @@ export default function PrivacyPolicy() {
             cancellations (§&nbsp;312k of the German Civil Code), and Art. 6(1)(f) GDPR, our legitimate interest in being
             able to prove them.
           </p>
+          {waitlistOn() && (
+            <>
+              <h3 id="waitlist">8. The waitlist</h3>
+              <p>
+                When you join the waitlist for Windows, Linux or iPhone, we store your email address, the platforms you
+                chose, the words of the box you ticked, when you signed up and when you confirmed, and a keyed hash
+                (HMAC-SHA-256) of your IP address, which only limits how many signups come from one connection. Your IP
+                address itself is not stored.
+              </p>
+              <p>
+                We use your email address for one purpose only: to email you when shepetal comes to a platform you
+                chose. No newsletter, no offers, no analytics, and nobody receives it except Amazon Web Services, which
+                sends the emails for us. First we send one email to confirm the address (double opt-in): the address
+                counts only once you click its link, and if you never do, we send nothing else.
+              </p>
+              <p>
+                Every email has a link that unsubscribes you and deletes your address at once. You can also withdraw
+                your consent at any time by writing to <a href="mailto:support@shepetal.app">support@shepetal.app</a>;
+                that does not affect what we did before. The links carry a random number, never your address, and your
+                address is never written to our request logs.
+              </p>
+              <p>
+                Legal basis: Art. 6(1)(a) GDPR, your consent, which is also the express consent § 7 of the German Act
+                against Unfair Competition (UWG) requires for this email.
+              </p>
+            </>
+          )}
 
           <div className="s-box">
             <h3>Your right to object</h3>
@@ -155,7 +183,10 @@ export default function PrivacyPolicy() {
           </p>
           <ul>
             <li>Cloudflare, Inc. (United States): hosting, the database, file storage, request logs, email forwarding and the emails that tell us of a cancellation.</li>
-            <li>Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7).</li>
+            <li>
+              Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7)
+              {waitlistOn() && ', and the waitlist emails (section III.8)'}.
+            </li>
             <li>Stripe, Inc. (United States): payments and tax. Stripe also uses payment data as its own controller, for example to prevent fraud and to meet its legal duties.</li>
             <li>PostHog, Inc. (United States): the analytics above.</li>
             <li>The provider of our mailbox, which receives mail sent to support@shepetal.app.</li>
@@ -198,6 +229,13 @@ export default function PrivacyPolicy() {
             <li>Analytics: PostHog keeps events for as long as our PostHog plan does, 1 year on its free plan and 7 years on its paid plans. A profile stays until we delete it.</li>
             <li>Payment and tax records: as long as tax law requires, up to 10 years.</li>
             <li>Email to us: up to 3 years after the end of the year of our last exchange.</li>
+            {waitlistOn() && (
+              <li>
+                The waitlist: an address that is not confirmed is deleted within 30 days of its last signup. A confirmed
+                address is deleted when you unsubscribe, or once shepetal has come to every platform you chose and we
+                have told you.
+              </li>
+            )}
             <li>Cancellations: 3 years after the end of the year you sent them, deleted by the next cancellation sent after that. The email that told us of it is kept like email to us. The counts that limit the form: one minute.</li>
           </ul>
 
@@ -206,7 +244,7 @@ export default function PrivacyPolicy() {
             You need a Google account and its email address to have an account and to use the app: without them we
             cannot give you a trial or a license. To buy, Stripe needs your payment and billing details, which the law
             also requires for tax. To cancel without signing in, we need the email of your account to find your
-            contract. Analytics are not needed for anything: the Service works the same without them. No analytics script
+            contract.{waitlistOn() && ' The waitlist needs your email address, and only if you want to join it.'} Analytics are not needed for anything: the Service works the same without them. No analytics script
             runs in your browser. The server events in section III.5 do not depend on your browser, but you can object
             to them (see the box in section III).
           </p>

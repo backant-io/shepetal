@@ -77,17 +77,17 @@ The app makes a code_verifier (43 to 128 characters from A-Z a-z 0-9 - . _ ~), i
 
 ## Waitlist (the website, not the apps)
 
-Answered by worker.ts without Next (src/lib/waitlist.ts). The pages are static: /waitlist, and after it /waitlist/thanks, /waitlist/check, /waitlist/confirmed, /waitlist/unsubscribe, /waitlist/unsubscribed and /waitlist/link.
+Answered by worker.ts without Next (src/lib/waitlist.ts). The pages are static: /waitlist, and after it /waitlist/thanks, /waitlist/check, /waitlist/confirmed, /waitlist/unsubscribe, /waitlist/unsubscribed and /waitlist/link. An address is used only to tell that person shepetal is out on a platform they chose (privacy policy, section III.8).
 
+- WAITLIST in wrangler.toml [vars] is "off" until Pavel approves. Off: /waitlist, /waitlist/thanks, /waitlist/check and /waitlist/confirmed are built as the 404 page, the FAQ and the sitemap do not mention it, the privacy policy has no waitlist section, and POST /api/waitlist and GET /api/waitlist/confirm answer 404 without reading the request. Unsubscribe works either way. The build reads WAITLIST too (next.config.ts): turning it on takes a build and a deploy, with migrations/0008_waitlist.sql applied and the SES secrets set.
 - POST /api/waitlist (form-encoded, the /waitlist form): email, platform (windows, linux or iphone, one or more) and consent=yes.
   - 403 unless the Origin header is the site's origin.
   - 303 to /waitlist/check for a missing or bad email, no known platform, or no consent. Nothing is stored.
-  - Otherwise 303 to /waitlist/thanks, the same answer for a new, pending, confirmed, unsubscribed or throttled address and when the database fails. The confirmation email goes out after the answer.
-  - Throttle: at most 10 signups an hour from one IP address (more are dropped); at most one confirmation email per address per 30 minutes.
-  - A new or pending address stores the choice and gets a confirmation email. A confirmed or unsubscribed one keeps its stored choice until the new link is clicked; a confirmed one choosing the same platforms gets no email.
-  - With WAITLIST_EMAILS anything but "on", the email is written to the log instead of sent.
-- GET /api/waitlist/confirm?t=<signed>: the link in the email (HMAC-SHA256 under AUTH_SECRET, 7 days). 303 to /waitlist/confirmed, or /waitlist/link for a bad, changed or old link, or one sent before the address unsubscribed.
+  - Otherwise 303 to /waitlist/thanks, the same answer for a new, pending, confirmed or throttled address and when the database fails. The confirmation email goes out after the answer, through src/lib/mail.ts (Amazon SES).
+  - Throttle: at most 10 signups an hour from one IP address (more are dropped); at most one confirmation email per address per 30 minutes, and 200 an hour in all.
+  - A new or pending address stores the choice and gets a confirmation email. A confirmed one keeps its stored choice until the new link is clicked; choosing the same platforms again sends no email.
+- GET /api/waitlist/confirm?t=<signed>: the link in the email (HMAC-SHA256 under AUTH_SECRET, 7 days). 303 to /waitlist/confirmed, or /waitlist/link for a bad, changed or old link, or one whose row was deleted (an unsubscribe) since.
 - GET /api/waitlist/unsubscribe?t=<signed>: 303 to /waitlist/unsubscribe?t=…, the page with the button (worker.ts puts t into its form). A GET never unsubscribes: link checkers open every link.
-- POST /api/waitlist/unsubscribe: t in the form (the button: 303 to /waitlist/unsubscribed) or in the URL with the body List-Unsubscribe=One-Click (RFC 8058, from a mail app, no Origin needed: 200). An unsubscribe link does not expire.
-- Every email carries `List-Unsubscribe: <https://shepetal.app/api/waitlist/unsubscribe?t=…>` and `List-Unsubscribe-Post: List-Unsubscribe=One-Click`.
-- Daily at 03:17 UTC (wrangler.toml [triggers]), a row that is not confirmed and subscribed is deleted 29 days after its last signup.
+- POST /api/waitlist/unsubscribe: t in the form (the button: 303 to /waitlist/unsubscribed) or in the URL with the body List-Unsubscribe=One-Click (RFC 8058, from a mail app, no Origin needed: 200). Deletes the row. An unsubscribe link does not expire.
+- The links carry the row's random id, never the address, so no URL in a request log holds one; errors are logged with every address replaced.
+- Daily at 03:17 UTC (wrangler.toml [triggers]), a row that is not confirmed is deleted 29 days after its last signup.
