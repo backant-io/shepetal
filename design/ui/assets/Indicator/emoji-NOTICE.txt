@@ -1,0 +1,9 @@
+shepetal's indicator, tray icon, app icon and favicon use the 🤫 (U+1F92B, shushing face)
+from Noto Color Emoji by Google.
+
+Source:  https://github.com/googlefonts/noto-emoji/blob/41e31b110b4eb929dffb410264694a06205b7ad7/svg/emoji_u1f92b.svg
+License: Apache License, Version 2.0 (emoji-LICENSE-Apache-2.0.txt in this folder)
+Copyright Google LLC
+
+shush.svg is the unmodified artwork. shepetal places it on its own grounds and renders it to
+PNG, ICO and ICNS; the artwork itself is not changed.
