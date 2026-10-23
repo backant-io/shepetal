@@ -183,15 +183,18 @@ final class MeetingsModel: ObservableObject {
     }
 }
 
+/// The tab in shepetal UI: the list of meetings on the left (one entry per meeting, mono meta, a hairline below,
+/// the open one on the sunken ground), the open meeting on the right. A meeting that records is the view's one
+/// signal mark: on its entry, or in the detail's title when it is the open one.
 struct MeetingsView: View {
     @ObservedObject var model: MeetingsModel
 
     var body: some View {
         HStack(spacing: 0) {
-            sidebar.frame(width: 250)
-            Divider()
+            sidebar.frame(width: 280).shHairline(.trailing)
             detail.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(SH.bg)
         // ponytail: polls the store every second so live segments and new meetings show up; a change
         // notification from the store would replace this if it ever gets costly.
         .task {
@@ -203,39 +206,127 @@ struct MeetingsView: View {
     }
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
-            Picker("Show", selection: $model.tab) {
-                ForEach(MeetingsModel.Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().frame(maxWidth: .infinity)
-            .padding(.horizontal, 10).padding(.top, 10)
-            if model.tab == .folders { FolderBar(model: model).padding(.horizontal, 10).padding(.top, 8) }
-
-            HStack(spacing: 6) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("Search meetings", text: $model.query).textFieldStyle(.plain)
-                if !model.query.isEmpty {
-                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
-                }
-            }
-            .padding(.horizontal, 10).padding(.vertical, 7)
-            .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .padding(10)
+        VStack(alignment: .leading, spacing: SH.space3) {
+            SHSegmented("Show", selection: $model.tab, options: MeetingsModel.Tab.allCases.map { (value: $0, label: $0.rawValue) })
+            if model.tab == .folders { FolderBar(model: model) }
+            MeetingSearchField(query: $model.query)
 
             if model.tab == .folders && model.folders.isEmpty {
-                ContentUnavailableView("No folders yet", systemImage: "folder",
-                                       description: Text("Make one with New folder, then add meetings to it from their right-click menu."))
+                MeetingsEmpty("No folders yet", icon: .folder,
+                              detail: "Make one with New folder, then add meetings to it from their right-click menu.")
             } else {
-                List(selection: Binding(get: { model.selectedID }, set: { model.select($0) })) {
+                MeetingList(model: model)
+            }
+        }
+        .padding(.top, SH.space4)
+        .padding(.horizontal, SH.space3)
+    }
+
+    @ViewBuilder private var detail: some View {
+        if let r = model.record {
+            MeetingDetail(record: r, model: model).id(r.meeting.id)
+        } else if !model.query.isEmpty {
+            MeetingsEmpty("No results for “\(model.query)”", icon: .search, detail: "Check the spelling or try a new search.")
+        } else if model.tab == .folders {
+            MeetingsEmpty("No meetings in this folder", icon: .folder,
+                          detail: "Right-click a meeting in All and choose Add to folder.")
+        } else {
+            MeetingsEmpty("No meetings yet", icon: .users,
+                          detail: "Recorded calls show up here with a live transcript and a summary written on this Mac.")
+        }
+    }
+}
+
+/// An empty pane: a 20 pt icon, what is missing, and the way to fill it.
+struct MeetingsEmpty: View {
+    let title: String
+    let icon: SHIconName
+    let detail: String
+
+    init(_ title: String, icon: SHIconName, detail: String) {
+        self.title = title
+        self.icon = icon
+        self.detail = detail
+    }
+
+    var body: some View {
+        VStack(spacing: SH.space2) {
+            SHIcon(icon, size: 20).foregroundStyle(SH.textMuted).padding(.bottom, SH.space1)
+            Text(title).shText(SH.appHeading).foregroundStyle(SH.text)
+            Text(detail).shText(SH.appSmall).foregroundStyle(SH.textMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: 320)
+        .padding(SH.space5)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// The search field: a field-ground input with the search icon, and a quiet clear button while it holds text.
+private struct MeetingSearchField: View {
+    @Binding var query: String
+    @FocusState private var focused: Bool
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: SH.space2) {
+            SHIcon(.search).foregroundStyle(SH.textMuted)
+            TextField("Search meetings", text: $query)
+                .textFieldStyle(.plain)
+                .shText(SH.appBody)
+                .foregroundStyle(SH.text)
+                .focused($focused)
+            if !query.isEmpty {
+                Button { query = "" } label: { SHIcon(.x).foregroundStyle(SH.textMuted).contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: SH.controlMd)
+        .background(SH.bgField, in: RoundedRectangle(cornerRadius: SH.radiusSm, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: SH.radiusSm, style: .continuous)
+            .strokeBorder(hover ? SH.textMuted : SH.borderStrong, lineWidth: 1))
+        .shFocusRing(focused)
+        .onHover { hover = $0 }
+    }
+}
+
+/// The meetings as entries, newest first. ↑ and ↓ open the one above or below, as the system list did.
+private struct MeetingList: View {
+    @ObservedObject var model: MeetingsModel
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(model.meetings, id: \.id) { m in
-                        MeetingRow(meeting: m, snippet: model.snippets[m.id] ?? "", query: model.query).tag(m.id)
+                        MeetingRow(meeting: m, snippet: model.snippets[m.id] ?? "", query: model.query,
+                                   selected: m.id == model.selectedID) { model.select(m.id); focused = true }
+                            .id(m.id)
                             .contextMenu { folderMenu(m.id) }
                     }
                 }
-                .listStyle(.sidebar)
+                .shHairline(.top)
+                .padding(.bottom, SH.space3)
             }
+            .focusable()
+            .focused($focused)
+            .focusEffectDisabled()
+            .onKeyPress(.downArrow) { step(1, proxy) }
+            .onKeyPress(.upArrow) { step(-1, proxy) }
         }
+    }
+
+    private func step(_ by: Int, _ proxy: ScrollViewProxy) -> KeyPress.Result {
+        let ids = model.meetings.map(\.id)
+        guard let i = ids.firstIndex(where: { $0 == model.selectedID }), ids.indices.contains(i + by) else { return .ignored }
+        model.select(ids[i + by])
+        proxy.scrollTo(ids[i + by])
+        return .handled
     }
 
     /// A meeting's right-click menu: a check for each folder it is in. A meeting can be in several.
@@ -246,20 +337,6 @@ struct MeetingsView: View {
                     Toggle(f.name, isOn: Binding(get: { f.meetingIDs.contains(id) }, set: { _ in model.toggle(id, in: f.id) }))
                 }
             }
-        }
-    }
-
-    @ViewBuilder private var detail: some View {
-        if let r = model.record {
-            MeetingDetail(record: r, model: model).id(r.meeting.id)
-        } else if !model.query.isEmpty {
-            ContentUnavailableView.search(text: model.query)
-        } else if model.tab == .folders {
-            ContentUnavailableView("No meetings in this folder", systemImage: "folder",
-                                   description: Text("Right-click a meeting in All and choose Add to folder."))
-        } else {
-            ContentUnavailableView("No meetings yet", systemImage: "person.2.wave.2",
-                                   description: Text("Recorded calls show up here with a live transcript and a summary written on this Mac."))
         }
     }
 }
@@ -275,24 +352,42 @@ private struct FolderBar: View {
     private var open: MeetingFolder? { model.folders.first { $0.id == model.folderID } }
 
     var body: some View {
-        HStack(spacing: 6) {
-            if !model.folders.isEmpty {
-                Picker("Folder", selection: Binding(get: { model.folderID ?? "" }, set: { model.openFolder($0) })) {
-                    ForEach(model.folders) { Text("\($0.name) (\($0.meetingIDs.count))").tag($0.id) }
+        HStack(spacing: SH.space2) {
+            if let f = open {
+                Menu {
+                    ForEach(model.folders) { folder in
+                        Button("\(folder.name) (\(folder.meetingIDs.count))") { model.openFolder(folder.id) }
+                    }
+                } label: {
+                    HStack(spacing: SH.space2) {
+                        Text("\(f.name) (\(f.meetingIDs.count))").lineLimit(1)
+                        SHIcon(.chevronDown).foregroundStyle(SH.textMuted)
+                    }
                 }
-                .labelsHidden()
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
+                .buttonStyle(.keycap(.secondary, .sm))
+                .accessibilityLabel("Folder")
+                .accessibilityValue(f.name)
             }
             Button { name = ""; naming = ""; asking = true } label: {
                 // Its title only while there is no folder picker beside it.
-                if model.folders.isEmpty { Label("New folder", systemImage: "folder.badge.plus") } else { Image(systemName: "folder.badge.plus") }
+                if model.folders.isEmpty { Label { Text("New folder") } icon: { SHIcon(.folderPlus) } } else { SHIcon(.folderPlus) }
             }
+            .buttonStyle(.keycap(model.folders.isEmpty ? .secondary : .quiet, .sm))
             .help("New folder")
+            .accessibilityLabel("New folder")
             if let f = open {
                 Menu {
                     Button("Rename…") { name = f.name; naming = f.id; asking = true }
                     Button("Delete…", role: .destructive) { deleting = true }
-                } label: { Image(systemName: "ellipsis.circle") }
-                    .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Rename or delete this folder")
+                } label: { SHIcon(.ellipsis) }
+                    .menuStyle(.button)
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.keycap(.quiet, .sm))
+                    .fixedSize()
+                    .help("Rename or delete this folder")
+                    .accessibilityLabel("Rename or delete this folder")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -311,50 +406,84 @@ private struct FolderBar: View {
     }
 }
 
+/// One meeting in the list, as a History entry: its name and length, when it started in mono, and the search match.
 private struct MeetingRow: View {
     let meeting: Meeting
     /// F120: the text around the search match, its match in bold; "" with no search.
     var snippet = ""
     var query = ""
+    var selected = false
+    let open: () -> Void
+
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focused: Bool
+    @State private var hover = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                Text(meeting.app).font(.body.weight(.medium)).lineLimit(1)
-                Spacer(minLength: 4)
-                if meeting.endedAt == nil { LiveBadge() }
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: SH.space2) {
+                    Text(meeting.app).shText(SH.appStrong).foregroundStyle(SH.text).lineLimit(1)
+                    Spacer(minLength: SH.space1)
+                    // The open meeting shows Live in the detail, so the view keeps one signal mark.
+                    if meeting.endedAt == nil { LiveMark(signal: !selected) }
+                }
+                TimelineView(.periodic(from: .now, by: 30)) { t in
+                    Text("\(meeting.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(MeetingFormat.duration(meeting, now: t.date))")
+                        .shText(SH.label).foregroundStyle(SH.textMuted).lineLimit(1)
+                }
+                if !snippet.isEmpty {
+                    Text(highlighted).shText(SH.appSmall).foregroundStyle(SH.textMuted).lineLimit(2)
+                        .padding(.top, 2)
+                }
             }
-            TimelineView(.periodic(from: .now, by: 30)) { t in
-                Text("\(meeting.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(MeetingFormat.duration(meeting, now: t.date))")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            if !snippet.isEmpty {
-                Text(highlighted).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background { ground }
+            .contentShape(Rectangle())
         }
-        .padding(.vertical, 4)
+        .buttonStyle(.plain)
+        .focused($focused)
+        .shFocusRing(focused)
+        .shHairline(.bottom)
+        .onHover { inside in withAnimation(SH.settle(reduce: reduceMotion)) { hover = inside } }
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    @ViewBuilder private var ground: some View {
+        if selected {
+            Rectangle().fill(SH.bgSunken)
+        } else if hover {
+            Rectangle().fill(SH.text(scheme).opacity(0.04))
+        }
     }
 
     private var highlighted: AttributedString {
         var a = AttributedString(snippet)
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         if !q.isEmpty, let r = a.range(of: q, options: .caseInsensitive) {
-            a[r].inlinePresentationIntent = .stronglyEmphasized
-            a[r].foregroundColor = .primary
+            a[r].font = SH.appSmall.with(weight: 600).font
+            a[r].foregroundColor = SH.text(scheme)
         }
         return a
     }
 }
 
-private struct LiveBadge: View {
+/// A meeting that records: "Live" in mono, with a signal square when it is the view's one signal mark.
+private struct LiveMark: View {
+    var signal = true
+
     var body: some View {
-        HStack(spacing: 4) {
-            Circle().fill(.red).frame(width: 6, height: 6)
-            Text("Live").font(.caption2.weight(.semibold))
+        HStack(spacing: 6) {
+            if signal {
+                RoundedRectangle(cornerRadius: SH.radiusXs, style: .continuous).fill(SH.signal).frame(width: 8, height: 8)
+            }
+            Text("Live").shText(SH.label).foregroundStyle(SH.textMuted)
         }
-        .foregroundStyle(.red)
-        .padding(.horizontal, 6).padding(.vertical, 2)
-        .background(.red.opacity(0.12), in: Capsule())
+        .fixedSize()
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -375,50 +504,74 @@ private struct MeetingDetail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(record.meeting.app).font(.title2.weight(.semibold)).lineLimit(1)
-                    if live { LiveBadge() }
+            VStack(alignment: .leading, spacing: SH.space1) {
+                HStack(alignment: .firstTextBaseline, spacing: SH.space3) {
+                    Text(record.meeting.app).shText(SH.appTitle).foregroundStyle(SH.text).lineLimit(1)
+                    if live { LiveMark() }
                 }
                 TimelineView(.periodic(from: .now, by: 1)) { t in
                     Text("\(record.meeting.startedAt.formatted(date: .long, time: .shortened)) · \(MeetingFormat.duration(record.meeting, now: t.date))")
-                        .foregroundStyle(.secondary).lineLimit(1)
+                        .shText(SH.label).foregroundStyle(SH.textMuted).lineLimit(1)
                 }
                 if !model.message.isEmpty {
-                    Text(model.message).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    Text(model.message).shText(SH.appSmall).foregroundStyle(SH.textMuted).lineLimit(1)
                 }
             }
-            .padding(.horizontal, 24).padding(.top, 18).padding(.bottom, 14)
+            .padding(.horizontal, SH.space5).padding(.top, SH.space5).padding(.bottom, SH.space4)
 
-            HStack(spacing: 8) {
-                Picker("View", selection: $pane) {
-                    ForEach(Pane.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                }
-                .pickerStyle(.segmented).labelsHidden().fixedSize()
-                Spacer()
+            HStack(spacing: SH.space2) {
+                SHSegmented("View", selection: $pane, options: Pane.allCases.map { (value: $0, label: $0.rawValue) }).fixedSize()
+                Spacer(minLength: SH.space2)
                 // Icons only when the window is too narrow for the labels.
-                ViewThatFits(in: .horizontal) { actions.fixedSize(); actions.labelStyle(.iconOnly) }
+                ViewThatFits(in: .horizontal) { actions(iconOnly: false).fixedSize(); actions(iconOnly: true) }
             }
-            .padding(.horizontal, 24).padding(.bottom, 12)
+            .padding(.horizontal, SH.space5).padding(.bottom, SH.space3)
 
-            Divider()
+            Rectangle().fill(SH.border).frame(height: 1)
             switch pane {
             case .summary: SummaryPane(summary: record.summary, notes: noteLines(record.notes), live: live)
             case .notes: NotesPane(record: record, model: model)
             case .transcript: TranscriptPane(segments: record.segments, live: live, deleted: MeetingFormat.transcriptDeleted(record))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    private var actions: some View {
-        HStack(spacing: 8) {
-            Button { model.copyTranscript() } label: { Label("Copy transcript", systemImage: "text.quote") }
-                .disabled(record.segments.isEmpty).help("Copy transcript")
-            Button { model.copySummary() } label: { Label("Copy summary", systemImage: "doc.on.doc") }
-                .disabled(!model.canCopySummary).help("Copy summary")
-            Button { model.export() } label: { Label("Export Markdown…", systemImage: "square.and.arrow.up") }
-                .help("Export Markdown…")
+    private func actions(iconOnly: Bool) -> some View {
+        HStack(spacing: SH.space1) {
+            MeetingTool("Copy transcript", icon: .textQuote, iconOnly: iconOnly) { model.copyTranscript() }
+                .disabled(record.segments.isEmpty)
+            MeetingTool("Copy summary", icon: .copy, iconOnly: iconOnly) { model.copySummary() }
+                .disabled(!model.canCopySummary)
+            MeetingTool("Export Markdown…", icon: .share, iconOnly: iconOnly) { model.export() }
         }
+    }
+}
+
+/// A quiet tool button with a 16 pt icon, its title hidden when there is no room; the title is always its name.
+struct MeetingTool: View {
+    let title: String
+    let icon: SHIconName
+    var iconOnly = false
+    var variant: SHKeycapStyle.Variant = .quiet
+    let action: () -> Void
+
+    init(_ title: String, icon: SHIconName, iconOnly: Bool = false, variant: SHKeycapStyle.Variant = .quiet,
+         action: @escaping () -> Void) {
+        self.title = title
+        self.icon = icon
+        self.iconOnly = iconOnly
+        self.variant = variant
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            if iconOnly { SHIcon(icon) } else { Label { Text(title) } icon: { SHIcon(icon) } }
+        }
+        .buttonStyle(.keycap(variant, .sm))
+        .help(title)
+        .accessibilityLabel(title)
     }
 }
 
@@ -432,14 +585,13 @@ private struct SummaryPane: View {
             ScrollView {
                 SummarySections(summary: s, notes: notes)
                     .textSelection(.enabled)
-                    .frame(maxWidth: 680, alignment: .leading)
-                    .padding(24)
+                    .frame(maxWidth: 720, alignment: .leading)
+                    .padding(SH.space5)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         } else {
-            ContentUnavailableView(live ? "Summary comes after the call" : "Summary not ready yet",
-                                   systemImage: "text.alignleft",
-                                   description: Text("It is written on this Mac once the meeting ends."))
+            MeetingsEmpty(live ? "Summary comes after the call" : "Summary not ready yet", icon: .textAlignStart,
+                          detail: "It is written on this Mac once the meeting ends.")
         }
     }
 }
@@ -451,22 +603,29 @@ struct SummarySections: View {
 
     var body: some View {
         let s = summary
-        VStack(alignment: .leading, spacing: 26) {
+        VStack(alignment: .leading, spacing: SH.space5) {
             if !notes.isEmpty {
-                section("Your notes") { bullets(notes, icon: "pencil", size: 11, tint: .accentColor) }
+                section("Your notes") { bullets(notes) { SHIcon(.pencil).foregroundStyle(SH.textMuted) } }
             }
             if !s.overview.isEmpty {
-                section("Overview") { Text(s.overview).lineSpacing(3) }
+                section("Overview") { Text(s.overview).shText(SH.appBody).foregroundStyle(SH.text) }
             }
             if !s.keyPoints.isEmpty {
-                section("Key points") { bullets(s.keyPoints, icon: "circle.fill", size: 5, tint: .secondary) }
+                section("Key points") {
+                    bullets(s.keyPoints) {
+                        RoundedRectangle(cornerRadius: 1).fill(SH.textMuted).frame(width: 4, height: 4)
+                            .frame(width: 16, height: 16)
+                    }
+                }
             }
             if !s.decisions.isEmpty {
-                section("Decisions") { bullets(s.decisions, icon: "checkmark.seal.fill", size: 12, tint: .green) }
+                section("Decisions") { bullets(s.decisions) { SHIcon(.check).foregroundStyle(SH.text) } }
             }
             if !s.actionItems.isEmpty {
                 section("Action items") {
-                    ForEach(Array(s.actionItems.enumerated()), id: \.offset) { _, a in ActionRow(item: a) }
+                    VStack(alignment: .leading, spacing: SH.space3) {
+                        ForEach(Array(s.actionItems.enumerated()), id: \.offset) { _, a in ActionRow(item: a) }
+                    }
                 }
             }
         }
@@ -474,44 +633,42 @@ struct SummarySections: View {
 
     private func section(_ title: String, @ViewBuilder _ content: () -> some View) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(title).font(.headline)
+            Text(title).shText(SH.appHeading).foregroundStyle(SH.text)
+                .accessibilityAddTraits(.isHeader)
             content()
         }
     }
 
-    private func bullets(_ lines: [String], icon: String, size: CGFloat, tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
+    private func bullets<Mark: View>(_ lines: [String], @ViewBuilder mark: @escaping () -> Mark) -> some View {
+        VStack(alignment: .leading, spacing: SH.space2) {
             ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
-                    Image(systemName: icon).font(.system(size: size)).foregroundStyle(tint).frame(width: 14)
-                    Text(line).fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top, spacing: 10) {
+                    mark().padding(.top, 2)
+                    Text(line).shText(SH.appBody).foregroundStyle(SH.text).fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
     }
 }
 
+/// One action item: the task, then who owns it and when it is due as mono labels.
 struct ActionRow: View {
     let item: ActionItem
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 10) {
-            Image(systemName: "circle").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 14)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(item.task).fixedSize(horizontal: false, vertical: true)
-                HStack(spacing: 8) {
-                    Label(MeetingFormat.owner(item), systemImage: "person.fill")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(item.owner.isEmpty ? .secondary : .primary)
-                        .padding(.horizontal, 7).padding(.vertical, 2)
-                        .background(.quaternary.opacity(0.7), in: Capsule())
-                    if !item.due.isEmpty {
-                        Label(item.due, systemImage: "calendar").font(.caption).foregroundStyle(.secondary)
-                    }
+        HStack(alignment: .top, spacing: 10) {
+            SHIcon(.circle).foregroundStyle(SH.textMuted).padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(item.task).shText(SH.appBody).foregroundStyle(SH.text).fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: SH.space3) {
+                    Text(MeetingFormat.owner(item))
+                    if !item.due.isEmpty { Text("due \(item.due)") }
                 }
+                .shText(SH.label)
+                .foregroundStyle(SH.textMuted)
             }
         }
-        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -520,6 +677,7 @@ private struct NotesPane: View {
     let id: String
     @ObservedObject var model: MeetingsModel
     @State private var text: String
+    @FocusState private var focused: Bool
 
     init(record: MeetingRecord, model: MeetingsModel) {
         id = record.meeting.id
@@ -529,15 +687,27 @@ private struct NotesPane: View {
 
     var body: some View {
         TextEditor(text: $text)
-            .font(.body)
+            .font(SH.appBody.font)
+            .lineSpacing(SH.appBody.lineSpacing)
+            .foregroundStyle(SH.text)
             .scrollContentBackground(.hidden)
-            .padding(20)
+            .focused($focused)
+            .focusEffectDisabled()
+            .padding(SH.space3)
             .overlay(alignment: .topLeading) {
                 if text.isEmpty {
                     Text("Type your notes here. They are saved as you type and merged into the summary.")
-                        .foregroundStyle(.tertiary).padding(.leading, 25).padding(.top, 20).allowsHitTesting(false)
+                        .shText(SH.appBody).foregroundStyle(SH.textMuted)
+                        .padding(.leading, SH.space3 + 5).padding(.top, SH.space3)
+                        .allowsHitTesting(false)
                 }
             }
+            .background(SH.bgField, in: RoundedRectangle(cornerRadius: SH.radiusSm, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: SH.radiusSm, style: .continuous).strokeBorder(SH.borderStrong, lineWidth: 1))
+            .shFocusRing(focused)
+            .frame(maxWidth: 720, alignment: .leading)
+            .padding(SH.space5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .onChange(of: text) { model.setNotes(text, for: id) }
     }
 }
@@ -548,45 +718,54 @@ private struct TranscriptPane: View {
     /// F81: the retention setting deleted it.
     var deleted: (title: String, detail: String)?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         if segments.isEmpty, let deleted {
-            ContentUnavailableView(deleted.title, systemImage: "clock.badge.xmark", description: Text(deleted.detail))
+            MeetingsEmpty(deleted.title, icon: .clockAlert, detail: deleted.detail)
         } else if segments.isEmpty {
-            ContentUnavailableView(live ? "Listening…" : "No transcript", systemImage: "waveform",
-                                   description: Text(live ? "What is said appears here as the call goes on."
-                                                          : "Nothing was transcribed in this meeting."))
+            MeetingsEmpty(live ? "Listening…" : "No transcript", icon: .captions,
+                          detail: live ? "What is said appears here as the call goes on." : "Nothing was transcribed in this meeting.")
         } else {
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(spacing: 12) {
+                    LazyVStack(spacing: SH.space3) {
                         ForEach(Array(segments.enumerated()), id: \.offset) { i, s in Bubble(segment: s).id(i) }
                     }
-                    .padding(20)
+                    .frame(maxWidth: 720)
+                    .padding(SH.space5)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .onAppear { if live { proxy.scrollTo(segments.count - 1, anchor: .bottom) } }
                 // ponytail: always follows the newest line while live, even if the user scrolled up.
                 .onChange(of: segments.count) {
-                    if live { withAnimation(.easeOut(duration: 0.2)) { proxy.scrollTo(segments.count - 1, anchor: .bottom) } }
+                    withAnimation(SH.motion(SH.easeMove, SH.durBase, reduce: reduceMotion)) {
+                        if live { proxy.scrollTo(segments.count - 1, anchor: .bottom) }
+                    }
                 }
             }
         }
     }
 }
 
+/// One thing said: who and when in mono, then the words. Others on the raised ground at the left, Me on the sunken
+/// ground at the right; a hairline edge, no shadow.
 struct Bubble: View {
     let segment: Segment
 
     var body: some View {
         let me = segment.speaker == .me
-        VStack(alignment: me ? .trailing : .leading, spacing: 3) {
+        VStack(alignment: me ? .trailing : .leading, spacing: SH.space1) {
             Text("\(segment.speaker.rawValue) · \(MeetingFormat.clock(segment.start))")
-                .font(.caption).foregroundStyle(.secondary)
+                .shText(SH.label).foregroundStyle(SH.textMuted)
             Text(segment.text)
+                .shText(SH.appBody)
+                .foregroundStyle(SH.text)
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .background(me ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.12),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(.horizontal, SH.space3).padding(.vertical, SH.space2)
+                .background(me ? SH.bgSunken : SH.bgRaised, in: RoundedRectangle(cornerRadius: SH.radiusSm, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: SH.radiusSm, style: .continuous).strokeBorder(SH.border, lineWidth: 1))
         }
         .frame(maxWidth: 480, alignment: me ? .trailing : .leading)
         .frame(maxWidth: .infinity, alignment: me ? .trailing : .leading)
@@ -609,8 +788,15 @@ struct TranscriptRetentionPicker: View {
             catch { problem = "Transcripts not deleted: \(error.localizedDescription)" }
         }
         Text("Only what was said goes. The summary, your notes and folders stay, and the audio follows Recordings.")
-            .font(.caption).foregroundStyle(.secondary)
-        if !problem.isEmpty { Text(problem).font(.caption).foregroundStyle(.orange) }
+            .shText(SH.appSmall).foregroundStyle(SH.textMuted)
+        if !problem.isEmpty {
+            HStack(alignment: .top, spacing: 6) {
+                SHIcon(.circleAlert).padding(.top, 1)
+                Text(problem).shText(SH.appSmall)
+            }
+            .foregroundStyle(SH.danger)
+            .accessibilityElement(children: .combine)
+        }
     }
 }
 
