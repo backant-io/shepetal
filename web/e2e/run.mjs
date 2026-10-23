@@ -338,6 +338,8 @@ async function main() {
       assert.ok(body.includes(`href="/install?ref=for-${slug}"`), `/for/${slug} links the trial with its ref`);
       assert.ok(body.includes(`<link rel="canonical" href="https://shepetal.app/for/${slug}"/>`), `/for/${slug} canonical`);
       assert.ok(sitemapXml.includes(`/for/${slug}</loc>`), `/for/${slug} is in the sitemap`);
+      assert.ok(body.includes(`<meta property="og:image" content="https://shepetal.app/og/for-${slug}.jpg"/>`), `/for/${slug} has its own link preview`);
+      assert.equal((body.match(/<h1\b/g) ?? []).length, 1, `/for/${slug} has one h1`);
     }
     await cached('/for/not-a-page', {}, 404);
     const fromFor = (await cached('/install?ref=for-developers')).body;

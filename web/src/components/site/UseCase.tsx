@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
-import { jsonLd } from '@/lib/seo';
-import { TRY, useCase, useCaseFaqJsonLd } from '@/lib/use-cases';
+import { TRY, useCase } from '@/lib/use-cases';
 
 /** The trial button: the install guide, which starts the download. ?ref= tells /download which page sent the visitor. */
 function TryButton({ slug }: { slug: string }) {
@@ -15,7 +14,6 @@ function TryButton({ slug }: { slug: string }) {
 /** A use-case page (/for/<slug>, src/lib/use-cases.ts): static, in the site's page style. */
 export function UseCasePage({ slug }: { slug: string }) {
   const u = useCase(slug);
-  const faq = useCaseFaqJsonLd(slug);
   return (
     <>
       <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
@@ -40,16 +38,7 @@ export function UseCasePage({ slug }: { slug: string }) {
             {u.facts.map((f) => (
               <li key={f}>{f}</li>
             ))}
-            <li>macOS 14.4 or later on Apple silicon.</li>
-            <li>25 European languages.</li>
           </ul>
-
-          {u.qas?.map((x) => (
-            <section key={x.q}>
-              <h2>{x.q}</h2>
-              <p>{x.a}</p>
-            </section>
-          ))}
         </div>
 
         <section className="s-for-try" aria-labelledby="s-for-try">
@@ -70,10 +59,17 @@ export function UseCasePage({ slug }: { slug: string }) {
             <TryButton slug={slug} />
           </div>
           <p className="s-small s-for-more">
-            More in the <Link href="/faq">FAQ</Link> and the <Link href="/privacy">Privacy Policy</Link>.
+            How it works, and what it needs, in the{' '}
+            <Link href="/faq" prefetch={false}>
+              FAQ
+            </Link>{' '}
+            and the{' '}
+            <Link href="/privacy" prefetch={false}>
+              Privacy Policy
+            </Link>
+            .
           </p>
         </section>
-        {faq && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(faq) }} />}
       </main>
     </>
   );

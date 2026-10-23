@@ -1,12 +1,13 @@
 import type { Metadata } from 'next';
-import { ogImage } from './seo';
-import { SITE_URL } from './site';
+import og from './use-case-og.json';
 
 /**
  * The use-case pages at /for/<slug>: one per audience, each a static page (src/app/(site)/for/<slug>/page.tsx) in the
- * sitemap and in the footer's "Made for" list. Plain text only, so the tests read exactly what the page says.
- * Every claim comes from the FAQ or the landing page. No number but the trial, the prices, macOS 14.4 and the 25
- * languages; no model name; no medical claim.
+ * sitemap and in the footer's "Made for" list, with its own link preview (public/og/for-<slug>.jpg, rendered by
+ * og/pages.mjs from use-case-og.json). Plain text only, so the tests read exactly what the page says.
+ * Marketing copy: the approved claims word for word, one per line, and only what the app does today with its default
+ * settings. How it works and what it needs (sign-in, license checks, the Macs it runs on) belong to the FAQ and the
+ * Privacy Policy, which the page links to. No model name; no medical claim.
  */
 export type UseCase = {
   slug: string;
@@ -18,38 +19,42 @@ export type UseCase = {
   h1: string;
   lede: string;
   scenarios: { title: string; text: string }[];
+  /** "The facts": the approved claims, one per line */
   facts: string[];
   /** a plain sentence after the scenarios, when the page needs one */
   note?: string;
-  /** shown on the page and sent as FAQPage data: only questions the FAQ answers */
-  qas?: { q: string; a: string }[];
   updated: string;
 };
 
 /** The landing page's trial button (Story.tsx TRY). */
 export const TRY = 'Try 30 days free';
 
+/** The approved claims, word for word. A page's "The facts" list uses only these. */
+export const CLAIMS = [
+  '100% private. Your data is yours.',
+  'Works offline.',
+  'Instant.',
+  '4x faster than typing.',
+  'Works in every app.',
+  'Meetings, transcribed on your Mac.',
+] as const;
+
 export const USE_CASES: UseCase[] = [
   {
     slug: 'developers',
     label: 'Developers',
     title: 'Dictation for developers',
-    description: 'Speak commit messages, PR descriptions, code review notes and chat on your Mac. Works in every app. Your voice never leaves your Mac.',
-    h1: 'Write the words around the code.',
+    description: 'Speak commit messages, PR descriptions, review notes and chat on your Mac. Works in every app. Your voice never leaves your Mac.',
+    h1: 'Say the words that go with the code.',
     lede: 'Commit messages, PR descriptions, review notes and chat, spoken. The key is fn, so your hands stay on the keyboard.',
     scenarios: [
-      { title: 'Commit messages', text: 'Say what changed while it is fresh. The words appear in your terminal or in your editor’s commit box.' },
-      { title: 'PR descriptions', text: 'Explain the why in full sentences, in the browser, before you ask for review.' },
-      { title: 'Code review notes', text: 'Read the diff, press the key and say what you see. The comment appears in the review box.' },
+      { title: 'Commit messages', text: 'Say what changed while it is fresh. Your words appear in the terminal or in your editor’s commit box.' },
+      { title: 'PR descriptions', text: 'Explain the why in full sentences, right in the browser.' },
+      { title: 'Code review notes', text: 'Read the diff and say what you see. Your words appear in the review box.' },
       { title: 'Chat with your team', text: 'Answer a question without leaving the keyboard. Chat is one more app, and shepetal works in all of them.' },
     ],
-    facts: [
-      'Works in every app. Your editor, the terminal, the browser and chat.',
-      'Instant. 4x faster than typing.',
-      '100% private. Your data is yours. Your voice never leaves your Mac.',
-      'Works offline.',
-    ],
-    updated: '2026-10-22',
+    facts: ['Works in every app.', 'Instant.', '4x faster than typing.', '100% private. Your data is yours.', 'Works offline.'],
+    updated: '2026-10-23',
   },
   {
     slug: 'writers',
@@ -59,24 +64,13 @@ export const USE_CASES: UseCase[] = [
     h1: 'Say the draft. Shape it after.',
     lede: 'Get the first version down as fast as you can say it. Your words appear in the app you write in.',
     scenarios: [
-      { title: 'The first draft', text: 'Talk through the piece in your editor. Then edit with the keyboard, as you always have.' },
-      { title: 'The idea that arrives mid-sentence', text: 'Say it into a note and go back to the page. The note is there when you need it.' },
+      { title: 'The first draft', text: 'Talk the piece through in your editor. Then edit with the keyboard, as you always have.' },
+      { title: 'The idea that arrives mid-sentence', text: 'Say it into shepetal’s Notes and stay on the page you are writing.' },
       { title: 'Long replies', text: 'Letters, emails and messages to editors, spoken in the app you send them from.' },
-      { title: 'On the move', text: 'Works offline. Write on a plane, on a train, in a cabin with no signal.' },
+      { title: 'In your language', text: '25 European languages, among them English, German, French, Spanish, Italian and Polish.' },
     ],
-    facts: [
-      'Instant. 4x faster than typing.',
-      'Works in every app.',
-      '100% private. Your data is yours. Your voice never leaves your Mac.',
-      'Works offline.',
-    ],
-    qas: [
-      {
-        q: 'Which languages does it understand?',
-        a: '25 European languages, among them English, German, French, Spanish, Italian, Portuguese, Dutch, Polish, Ukrainian and Slovene. Automatic picks the one you speak, or choose yours under Languages in the menu.',
-      },
-    ],
-    updated: '2026-10-22',
+    facts: ['Instant.', '4x faster than typing.', 'Works in every app.', '100% private. Your data is yours.', 'Works offline.'],
+    updated: '2026-10-23',
   },
   {
     slug: 'rsi',
@@ -84,32 +78,33 @@ export const USE_CASES: UseCase[] = [
     title: 'Dictation for RSI and wrist pain',
     description: 'Type less on your Mac: speak, and your words appear wherever your cursor is. One key, every app. Your voice never leaves your Mac.',
     h1: 'Type less.',
-    lede: 'When typing hurts, speak instead. Press one key, and your words appear wherever your cursor is.',
+    lede: 'Speak instead of typing. Press one key, and your words appear wherever your cursor is.',
     scenarios: [
       { title: 'The long email', text: 'Say the long reply instead of typing it. Then fix a word or two by hand.' },
-      { title: 'A day of messages', text: 'Chat, notes and tickets, each one spoken. Works in every app.' },
+      { title: 'A day of messages', text: 'Chat, notes and tickets, each one spoken.' },
       { title: 'Documents', text: 'Speak a page in your editor, then read it over.' },
-      { title: 'One key', text: 'shepetal needs one key, fn. No key combination to learn.' },
+      { title: 'One key', text: 'Dictation needs one key: fn.' },
     ],
-    facts: ['Works in every app.', 'Instant. 4x faster than typing.', '100% private. Your data is yours.', 'Works offline.'],
-    note: 'shepetal is a dictation app, not a medical device. For pain, talk to a doctor.',
-    updated: '2026-10-22',
+    facts: ['Works in every app.', 'Instant.', '4x faster than typing.', '100% private. Your data is yours.', 'Works offline.'],
+    note: 'shepetal is a dictation app, not a medical device. If typing hurts, talk to a doctor.',
+    updated: '2026-10-23',
   },
   {
     slug: 'adhd',
     label: 'ADHD',
     title: 'Dictation for ADHD',
-    description: 'Get thoughts down the moment you have them. Press one key on your Mac and speak. Works in every app, and your voice never leaves your Mac.',
+    description: 'Get thoughts down the moment you have them: one key on your Mac, and your words appear. Works in every app. Your voice never leaves your Mac.',
     h1: 'Catch the thought before it goes.',
-    lede: 'Press one key and say it. Your words appear wherever your cursor is.',
+    lede: 'Press one key. Your words appear wherever your cursor is.',
     scenarios: [
-      { title: 'The idea in the middle of something', text: 'Open a note, press the key, say it, go back to what you were doing.' },
+      { title: 'The idea in the middle of something', text: 'Say it into shepetal’s Notes and carry on with what you were doing.' },
       { title: 'The message you keep putting off', text: 'Say it the way you would say it to a friend. Then it is written, and you can send it.' },
       { title: 'Everything on your mind', text: 'Say it all into one document. Sort it later.' },
-      { title: 'The list', text: 'Speak the tasks into your to-do app. shepetal works in every app.' },
+      { title: 'The list', text: 'Speak the tasks into your to-do app.' },
     ],
-    facts: ['Instant.', 'Works in every app.', '100% private. Your data is yours. Your voice never leaves your Mac.', 'Works offline.'],
-    updated: '2026-10-22',
+    facts: ['Instant.', 'Works in every app.', '100% private. Your data is yours.', 'Works offline.'],
+    note: 'shepetal is a dictation app, not a medical device.',
+    updated: '2026-10-23',
   },
   {
     slug: 'privacy',
@@ -117,53 +112,36 @@ export const USE_CASES: UseCase[] = [
     title: 'Private dictation for Mac',
     description: 'Dictation that runs on your Mac: your voice never leaves it, and it works offline. 100% private. Your data is yours.',
     h1: 'Your voice stays on your Mac.',
-    lede: 'Speech recognition runs on your Mac and needs no internet. 100% private. Your data is yours.',
+    lede: 'Speech recognition runs on your Mac. Your voice never leaves it.',
     scenarios: [
-      { title: 'Work under NDA', text: 'Client names and figures are recognized on your Mac. shepetal itself sends no text.' },
-      { title: 'Personal notes', text: 'Your recordings and history stay on your Mac, in your user folder, until you delete them.' },
-      { title: 'No signal', text: 'Works offline. Once it is set up, dictate on a plane or a train.' },
+      { title: 'Work under NDA', text: 'Client names and figures are recognized on your Mac. shepetal itself sends no text and no analytics.' },
+      { title: 'Personal notes', text: 'Your recordings, notes and history stay on your Mac, in your user folder.' },
+      { title: 'No signal', text: 'Dictate on a plane, on a train, in a cabin with no signal.' },
       { title: 'Your words go where you put them', text: 'Into the app you dictate into, and into the history on your Mac.' },
     ],
-    facts: [
-      '100% private. Your data is yours.',
-      'Works offline.',
-      'shepetal itself sends no text and no analytics.',
-      'To sign in it uses your Google email, and it checks your license once a day.',
-    ],
-    qas: [
-      {
-        q: 'Does my voice leave my Mac?',
-        a: 'No. Your voice never leaves your Mac. Speech recognition runs on your Mac, and your recordings and history stay there. Your words go where you put them: into the app you dictate into. shepetal itself sends no text and no analytics. To sign in it uses your Google email, and it checks your license once a day.',
-      },
-      {
-        q: 'Does it work offline?',
-        a: 'Speech recognition needs no internet. You are online once to set up: you sign in, and you download speech recognition. After that you can dictate on a plane. A lifetime license works offline with no limit; during the trial, shepetal checks your license at least once a week.',
-      },
-    ],
-    updated: '2026-10-22',
+    facts: ['100% private. Your data is yours.', 'Works offline.', 'Works in every app.', 'Meetings, transcribed on your Mac.'],
+    updated: '2026-10-23',
   },
   {
     slug: 'meetings',
     label: 'Meetings',
     title: 'Meeting transcription on your Mac',
-    description: 'Meetings, transcribed on your Mac. The meeting reminder appears when a call starts. Your voice never leaves your Mac.',
+    description: 'Meetings, transcribed on your Mac. shepetal offers to record when a call starts. Your voice never leaves your Mac.',
     h1: 'Meetings, transcribed on your Mac.',
-    lede: 'When a call starts, the meeting reminder appears. Press Record, and the call is transcribed on your Mac.',
+    lede: 'When a call starts, shepetal offers to record it. Choose Record, and the call is transcribed on your Mac.',
     scenarios: [
       { title: 'The call you need notes from', text: 'Talk and listen. Read the transcript after.' },
       { title: 'Calls with clients', text: 'The recording and the transcript stay on your Mac. No bot joins the call.' },
-      { title: 'The follow-up', text: 'Write the summary email with the transcript open beside it, by voice, in any app.' },
-      { title: 'Ask first', text: 'Recording a call? Tell the people on it before you press Record.' },
+      { title: 'Your side and theirs', text: 'Your microphone and the call’s sound are both recorded, on your Mac.' },
+      { title: 'The follow-up', text: 'Write the follow-up email with the transcript open beside it, by voice, in any app.' },
     ],
-    facts: [
-      'Meetings, transcribed on your Mac.',
-      '100% private. Your data is yours.',
-      'Your recordings and history stay on your Mac, in your user folder.',
-      'Works in every app. Write the follow-up by voice.',
-    ],
-    updated: '2026-10-22',
+    facts: ['Meetings, transcribed on your Mac.', '100% private. Your data is yours.', 'Works in every app.'],
+    updated: '2026-10-23',
   },
 ];
+
+/** The use-case pages' link previews (use-case-og.json), keyed for-<slug>. */
+export const USE_CASE_OG = og as Record<string, { path: string; title: string; sub: string }>;
 
 export const useCase = (slug: string): UseCase => {
   const u = USE_CASES.find((x) => x.slug === slug);
@@ -173,29 +151,24 @@ export const useCase = (slug: string): UseCase => {
 
 export const useCasePath = (slug: string) => `/for/${slug}`;
 
-/** Canonical URL, Open Graph and the X card, with the landing page's link preview. */
+/** The page's own link preview, 1200 x 630 (public/og/for-<slug>.jpg). No price and no steps on a preview. */
+export function useCaseOgImage(slug: string) {
+  const p = USE_CASE_OG[`for-${slug}`];
+  if (!p) throw new Error(`no link preview for ${slug}`);
+  return { url: `/og/for-${slug}.jpg`, width: 1200, height: 630, type: 'image/jpeg', alt: `shepetal. ${p.title} The orange fn key on a concrete-white ground.` };
+}
+
+/** Canonical URL, Open Graph and the X card, with the page's own link preview. */
 export function useCaseMetadata(slug: string): Metadata {
   const u = useCase(slug);
   const path = useCasePath(slug);
   const ogTitle = `${u.title} - shepetal`;
-  const images = [ogImage('home')];
+  const images = [useCaseOgImage(slug)];
   return {
     title: u.title,
     description: u.description,
     alternates: { canonical: path },
     openGraph: { title: ogTitle, description: u.description, url: path, siteName: 'shepetal', type: 'website', locale: 'en_US', images },
     twitter: { card: 'summary_large_image', title: ogTitle, description: u.description, images },
-  };
-}
-
-/** FAQPage data for the questions the page shows, or null when it shows none. */
-export function useCaseFaqJsonLd(slug: string) {
-  const u = useCase(slug);
-  if (!u.qas?.length) return null;
-  return {
-    '@context': 'https://schema.org',
-    '@type': 'FAQPage',
-    url: `${SITE_URL}${useCasePath(slug)}`,
-    mainEntity: u.qas.map((x) => ({ '@type': 'Question', name: x.q, acceptedAnswer: { '@type': 'Answer', text: x.a } })),
   };
 }
