@@ -1,7 +1,12 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { analyticsConfig, attribution, attributionQuery, capture, userId, visitorId } from './analytics';
+import { db, useTestDb } from './test-db';
+import { forgetDailyKey } from './visitor-salt';
 
-const req = (ip: string, ua: string) => new Request('https://shepetal.app/download', { headers: { 'cf-connecting-ip': ip, 'user-agent': ua } });
+vi.mock('./db', () => import('./test-db'));
+useTestDb();
+
+const req = (ip: string, ua: string, path = '/download') => new Request(`https://shepetal.app${path}`, { headers: { 'cf-connecting-ip': ip, 'user-agent': ua } });
 const ok = () => vi.fn<typeof fetch>(async () => new Response('{}', { status: 200 }));
 
 describe('analytics: off without a key', () => {
@@ -38,14 +43,50 @@ describe('analytics: what one event carries', () => {
 });
 
 describe('analytics: ids are hashes', () => {
-  it('a visitor is the same all day, new the next day, and never contains the IP or the user agent', async () => {
-    const day = Date.parse('2026-10-22T08:00:00Z');
-    const a = await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day, 'salt');
-    expect(await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day + 3_600_000, 'salt')).toBe(a);
-    expect(await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day + 86_400_000, 'salt')).not.toBe(a);
-    expect(await visitorId(req('203.0.113.8', 'Mozilla/5.0'), day, 'salt')).not.toBe(a);
+  const day = Date.parse('2026-10-22T08:00:00Z');
+  const D = 86_400_000;
+  beforeEach(() => forgetDailyKey());
+  const salts = async () => (await db().prepare('SELECT day FROM visitor_salts ORDER BY day').all<{ day: string }>()).results.map((r) => r.day);
+
+  it('a visitor is the same all day on every route (page, download, app sign-in), so they join; and never contains the IP or the user agent', async () => {
+    const a = await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day, db());
+    expect(await visitorId(req('203.0.113.7', 'Mozilla/5.0', '/'), day + 3_600_000, db())).toBe(a);
+    expect(await visitorId(req('203.0.113.7', 'Mozilla/5.0', '/app/login'), day + 15 * 3_600_000, db())).toBe(a);
+    expect(await visitorId(req('203.0.113.8', 'Mozilla/5.0'), day, db())).not.toBe(a);
     expect(a).toMatch(/^v_[0-9a-f]{32}$/);
     expect(a).not.toContain('203');
+  });
+
+  it('the salt is random per UTC day: the same visitor is a new id tomorrow, and a salt is gone after 48 h', async () => {
+    const r = () => req('203.0.113.7', 'Mozilla/5.0');
+    const today = await visitorId(r(), day, db());
+    const tomorrow = await visitorId(r(), day + D, db());
+    expect(tomorrow).not.toBe(today);
+    expect(await salts()).toEqual(['2026-10-22', '2026-10-23']);
+    // On the 24th the 22nd's salt is deleted: nothing can recompute an id from that day any more.
+    await visitorId(r(), day + 2 * D, db());
+    expect(await salts()).toEqual(['2026-10-23', '2026-10-24']);
+  });
+
+  it('the salt is not derived from anything we keep: a new salt for the same day gives the same visitor another id', async () => {
+    const a = await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day, db());
+    await db().prepare('DELETE FROM visitor_salts').run();
+    forgetDailyKey();
+    expect(await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day, db())).not.toBe(a);
+  });
+
+  it('an isolate reads D1 once a day (CPU and D1 reads on the Free plan), and every isolate agrees on the day’s salt', async () => {
+    let reads = 0;
+    const counted = new Proxy(db(), { get: (t, k) => (k === 'batch' ? (...a: Parameters<D1Database['batch']>) => (reads++, t.batch(...a)) : Reflect.get(t, k).bind?.(t) ?? Reflect.get(t, k)) });
+    const first = await Promise.all([1, 2, 3].map((i) => visitorId(req('203.0.113.7', 'Mozilla/5.0'), day + i, counted)));
+    for (let i = 0; i < 20; i++) await visitorId(req(`203.0.113.${i}`, 'Mozilla/5.0'), day + i * 1000, counted);
+    expect(reads).toBe(1);
+    // Another isolate (no key in memory) reads the row the first one wrote, so the id is the same.
+    forgetDailyKey();
+    expect(await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day + 5, counted)).toBe(first[0]);
+    expect(new Set(first).size).toBe(1);
+    await visitorId(req('203.0.113.7', 'Mozilla/5.0'), day + D, counted);
+    expect(reads).toBe(3);
   });
 
   it('a user is a salted hash of the email, whatever its case', async () => {

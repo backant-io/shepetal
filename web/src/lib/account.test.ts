@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { licenseOf, paidThrough, planSettings, upsertUser, type Subscription, type User } from './account';
+import { licenseOf, paidThrough, planSettings, renewingSubscription, upsertUser, type Subscription, type User } from './account';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -176,6 +176,16 @@ describe('plan settings (GET /api/account/plan)', () => {
     expect(s.status).toBe('active');
     expect(s.subscription).toMatchObject({ status: 'cancels_at_period_end', next_billing_date: null, ends_at: '2026-03-01T00:00:00.000Z' });
     expect(s.actions).toMatchObject({ cancel: false, resume: true, switch_to_lifetime: true });
+  });
+
+  // A date set on /cancel (Stripe's cancel_at), possibly by someone else: the owner must see the end and be offered Resume.
+  it('shows a subscription set to end on a date as ending then, with no next charge and with resume', () => {
+    const u = subscriber({ cancel_at: '2026-04-15T23:59:59.000Z', sub_amount: 99, sub_currency: 'usd' });
+    expect(licenseOf(u, t0)).toMatchObject({ status: 'active', renews: false });
+    expect(renewingSubscription(u)).toBeNull();
+    const s = planSettings(u, t0 + 40 * DAY);
+    expect(s.subscription).toMatchObject({ status: 'cancels_at_period_end', next_billing_date: null, ends_at: '2026-04-15T23:59:59.000Z' });
+    expect(s.actions).toMatchObject({ cancel: false, resume: true });
   });
 
   it('shows a failed renewal as past due and an ended one as ended', () => {

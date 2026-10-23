@@ -20,7 +20,10 @@ export function SiteHeader({ end }: { end?: React.ReactNode }) {
   );
 }
 
-/** The footer, as on the landing page: the wordmark, the "Made for" pages, then Privacy · Terms · Refunds · Legal. */
+/**
+ * The footer, as on the landing page: the wordmark, the "Made for" pages, then Privacy · Terms · Refunds · Legal, and the
+ * cancellation button "Verträge hier kündigen" (§ 312k BGB: on every page, no sign-in, in exactly these words).
+ */
 export function SiteFooter() {
   return (
     <footer className="s-foot">
@@ -28,7 +31,7 @@ export function SiteFooter() {
       <nav aria-label="Made for" className="s-mono s-foot-nav s-foot-for">
         <span>Made for</span>
         {USE_CASES.map((u) => (
-          <Link key={u.slug} href={useCasePath(u.slug)}>
+          <Link key={u.slug} href={useCasePath(u.slug)} prefetch={false}>
             {u.label}
           </Link>
         ))}
@@ -38,6 +41,9 @@ export function SiteFooter() {
         <Link href="/terms">Terms</Link>
         <Link href="/refunds">Refunds</Link>
         <Link href="/legal">Legal</Link>
+        <Link href="/cancel" prefetch={false} lang="de">
+          Verträge hier kündigen
+        </Link>
       </nav>
     </footer>
   );

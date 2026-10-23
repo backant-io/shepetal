@@ -46,6 +46,9 @@ function Hero() {
           <a className="kc-mark" href="/">
             shepetal
           </a>
+          <a className="kc-login" href="/login">
+            Log in
+          </a>
         </header>
 
         <div className="kc-grid">
@@ -321,6 +324,10 @@ function TryIt() {
           <a href="/terms">Terms</a>
           <a href="/refunds">Refunds</a>
           <a href="/legal">Legal</a>
+          {/* § 312k BGB: the cancellation button, on every page, no sign-in, in exactly these words. */}
+          <a href="/cancel" lang="de">
+            Verträge hier kündigen
+          </a>
         </nav>
       </footer>
     </section>
