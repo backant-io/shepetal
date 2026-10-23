@@ -94,7 +94,7 @@ final class ScreenshotTests: XCTestCase {
                                                   audioPath: wav.path, durationMs: d.text.split(separator: " ").count * 380,
                                                   rawText: d.text, text: d.text, app: d.app))
         }
-        try shoot("01-history", Self.hubSize, expect: ["floor plan", "Running ten minutes late", "plumber comes"]) {
+        try shoot("01-history", Self.hubSize, expect: ["floor plan", "Running ten minutes late", "Newsletter ideas"]) {
             let hub = self.hub(pipeline, tab: "history")
             // Hub.show() loads the rows, and it would put the window on screen.
             (try self.part(hub, "model") as HubModel).reload()
@@ -119,7 +119,7 @@ final class ScreenshotTests: XCTestCase {
     /// A call still recording: its transcript, split into Me and Others, as it is written.
     func testMeetingLive() throws {
         let live = Self.liveMeeting()
-        try shoot("03-meeting-live", Self.hubSize, expect: ["Loud and clear", "Live", "at 9:30"]) {
+        try shoot("03-meeting-live", Self.hubSize, expect: ["Loud and clear", "Live", "9:30 AM"]) {
             let hub = self.hub(try Pipeline(root: self.root, pasteboard: self.pasteboard), tab: "meetings",
                                meetings: InMemoryMeetingStore(try Self.meetings() + [live]))
             (try self.part(hub, "meetings") as MeetingsModel).select(live.meeting.id)
@@ -132,7 +132,7 @@ final class ScreenshotTests: XCTestCase {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         try (Vocabulary.header + Self.dictionary.joined(separator: "\n") + "\n")
             .write(to: pipeline.dictionary, atomically: true, encoding: .utf8)
-        try shoot("04-dictionary", Self.hubSize, expect: ["Saoirse", "maya@example.com", "e.g."]) {
+        try shoot("04-dictionary", Self.hubSize, expect: ["Saoirse", "maya@example.com", "Niamh"]) {
             let hub = self.hub(pipeline, tab: "dictionary")
             (try self.part(hub, "dictionary") as DictionaryModel).reload()  // the tab's onAppear may not run offscreen
             return (hub, try self.part(hub, "window"))
