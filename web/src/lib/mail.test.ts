@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { sendMail, sesUrl, SesError, sigv4 } from './ses';
 
-const SES = { SES_ACCESS_KEY_ID: 'AKIDEXAMPLE', SES_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY', SES_REGION: 'eu-central-1' };
+const notify = vi.hoisted(() => ({ send: vi.fn(async (_: unknown) => ({ messageId: 'm1' })) }));
+vi.mock('@opennextjs/cloudflare', () => ({ getCloudflareContext: () => ({ env: { NOTIFY: notify } }) }));
+const { OWNER, sendMail, sesEnabled, sesSend, sesUrl, SesError, sigv4 } = await import('./mail');
+
 const AT = new Date('2015-08-30T12:36:00Z');
+const SES = { SES_ACCESS_KEY_ID: 'AKIDEXAMPLE', SES_SECRET_ACCESS_KEY: 'wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY', SES_REGION: 'eu-central-1' };
 const sign = (r: Partial<Parameters<typeof sigv4>[0]>) =>
   sigv4({ method: 'GET', url: 'https://example.amazonaws.com/', body: '', region: 'us-east-1', service: 'service', key: SES.SES_ACCESS_KEY_ID, secret: SES.SES_SECRET_ACCESS_KEY, now: AT, ...r });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
+  vi.clearAllMocks();
+});
 
 describe('sigv4', () => {
   // AWS's own test vectors (aws-sig-v4-test-suite get-vanilla and post-vanilla): a signer that is off by one byte
@@ -32,11 +39,44 @@ describe('sigv4', () => {
 });
 
 describe('sendMail', () => {
-  const mail = { to: 'a@example.com', subject: 'Welcome to shepetal', text: 'Hi,', html: '<p>Hi,</p>', headers: { 'List-Unsubscribe': '<https://x/u>' } };
+  it("sends to Pavel through the NOTIFY binding, whatever SES's state", async () => {
+    await sendMail(OWNER, 'cancel: no_account: x@example.com', 'text');
+    expect(notify.send).toHaveBeenCalledWith({ to: OWNER, from: { email: 'support@shepetal.app', name: 'shepetal' }, subject: 'cancel: no_account: x@example.com', text: 'text' });
+  });
 
-  it('sends text, HTML and the extra headers through SES v2 in its region, from hello@ with replies to support@', async () => {
+  // Until Pavel sets up SES there is no way to email a customer, and nothing may pretend there is.
+  it('refuses a customer address while SES is not set up, and never sends it through the binding', async () => {
+    for (const [k] of Object.entries(SES)) vi.stubEnv(k, '');
+    expect(sesEnabled()).toBe(false);
+    await expect(sendMail('a@example.com', 's', 't')).rejects.toThrow('SES is not set up');
+    expect(notify.send).not.toHaveBeenCalled();
+  });
+
+  it('sends a customer email through SES v2 in its region, signed, once the three secrets are there', async () => {
+    for (const [k, v] of Object.entries(SES)) vi.stubEnv(k, v);
+    const fetch = vi.fn(async (_url: string, _init: RequestInit) => new Response('{"MessageId":"x"}'));
+    vi.stubGlobal('fetch', fetch);
+    await sendMail('a@example.com', 'Your cancellation', 'Received.');
+    const [url, init] = fetch.mock.calls[0];
+    expect(url).toBe('https://email.eu-central-1.amazonaws.com/v2/email/outbound-emails');
+    expect(JSON.parse(init.body as string)).toEqual({
+      FromEmailAddress: 'shepetal <support@shepetal.app>',
+      Destination: { ToAddresses: ['a@example.com'] },
+      ReplyToAddresses: ['support@shepetal.app'],
+      Content: { Simple: { Subject: { Data: 'Your cancellation', Charset: 'UTF-8' }, Body: { Text: { Data: 'Received.', Charset: 'UTF-8' } } } },
+    });
+    expect((init.headers as Record<string, string>).authorization).toMatch(/^AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE\/\d{8}\/eu-central-1\/ses\/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=[0-9a-f]{64}$/);
+    fetch.mockResolvedValueOnce(new Response('{"message":"Email address is not verified."}', { status: 400 }));
+    await expect(sendMail('a@example.com', 's', 't')).rejects.toThrow('SES 400: {"message":"Email address is not verified."}');
+  });
+});
+
+describe('sesSend', () => {
+  const mail = { from: 'shepetal <hello@shepetal.app>', to: 'a@example.com', subject: 'Welcome to shepetal', text: 'Hi,', html: '<p>Hi,</p>', headers: { 'List-Unsubscribe': '<https://x/u>' } };
+
+  it('sends text, HTML and the extra headers through SES v2 in its region, from the given sender with replies to support@', async () => {
     const fetch = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => new Response('{"MessageId":"m-1"}'));
-    expect(await sendMail(SES, mail, fetch as typeof globalThis.fetch)).toBe('m-1');
+    expect(await sesSend(SES, mail, fetch as typeof globalThis.fetch)).toBe('m-1');
     const [url, init] = fetch.mock.calls[0];
     expect(url).toBe('https://email.eu-central-1.amazonaws.com/v2/email/outbound-emails');
     expect(JSON.parse(init!.body as string)).toEqual({
@@ -58,17 +98,17 @@ describe('sendMail', () => {
 
   it("carries SES's status on a refusal, and 0 when SES never answered, so the caller can tell retry from give up", async () => {
     const refused = vi.fn(async () => new Response('{"message":"Email address is not verified."}', { status: 400 }));
-    await expect(sendMail(SES, mail, refused as unknown as typeof fetch)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('not verified') });
+    await expect(sesSend(SES, mail, refused as unknown as typeof fetch)).rejects.toMatchObject({ status: 400, message: expect.stringContaining('not verified') });
     const down = vi.fn(async () => {
       throw new TypeError('network');
     });
-    await expect(sendMail(SES, mail, down as unknown as typeof fetch)).rejects.toBeInstanceOf(SesError);
-    await expect(sendMail(SES, mail, down as unknown as typeof fetch)).rejects.toMatchObject({ status: 0 });
+    await expect(sesSend(SES, mail, down as unknown as typeof fetch)).rejects.toBeInstanceOf(SesError);
+    await expect(sesSend(SES, mail, down as unknown as typeof fetch)).rejects.toMatchObject({ status: 0 });
   });
 
   it('sends nothing without all three secrets', async () => {
     const fetch = vi.fn();
-    await expect(sendMail({ ...SES, SES_REGION: '' }, mail, fetch)).rejects.toThrow('SES is not set up');
+    await expect(sesSend({ ...SES, SES_REGION: '' }, mail, fetch)).rejects.toThrow('SES is not set up');
     expect(fetch).not.toHaveBeenCalled();
   });
 

@@ -33,13 +33,17 @@ export function planLine(s: Settings): { value: string; note: string } {
   return { value: 'Free trial', note: 'Ended.' };
 }
 
+/** Cancelled to a date after the paid time: one more charge comes, shortened to that date. */
+export const lastCharge = (sub: NonNullable<Settings['subscription']>) =>
+  sub.status === 'cancels_at_period_end' && !!sub.paid_through && !!sub.ends_at && Date.parse(sub.ends_at) > Date.parse(sub.paid_through);
+
 /** What the Status row says for a subscription. */
 export function statusLine(sub: NonNullable<Settings['subscription']>): { value: string; note: string } {
   switch (sub.status) {
     case 'active':
       return { value: 'Active', note: `Renews on ${day(sub.next_billing_date)}.` };
     case 'cancels_at_period_end':
-      return { value: 'Cancels at the end of the period', note: `Works until ${day(sub.ends_at)}.` };
+      return { value: lastCharge(sub) ? 'Cancelled' : 'Cancels at the end of the period', note: `Works until ${day(sub.ends_at)}.` };
     case 'past_due':
       return { value: 'Payment failed', note: 'Update your card in Manage billing.' };
     default:
@@ -77,6 +81,11 @@ export function PlanSettings({ settings }: { settings: Settings }) {
           <Row label="Next charge">
             {sub.status === 'active' && sub.next_billing_date ? (
               <Value note={`On ${day(sub.next_billing_date)}.`}>{sub.amount_display ?? '$0.99'}</Value>
+            ) : lastCharge(sub) ? (
+              // An end on a date after the paid month (/cancel): Stripe renews once more and prorates that last month.
+              <Value note={`On ${day(sub.paid_through)}, only for the days up to ${day(sub.ends_at)}. Nothing after that.`}>
+                One last charge
+              </Value>
             ) : (
               <Value note={sub.status === 'past_due' ? 'Once the card works.' : 'Nothing is charged again.'}>
                 None

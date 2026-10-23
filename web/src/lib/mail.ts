@@ -1,10 +1,17 @@
+import { getCloudflareContext } from '@opennextjs/cloudflare';
+
 /**
- * Email to customers through Amazon SES v2 (SendEmail), signed with SigV4 on WebCrypto: no SDK, so a cron run stays
- * far inside the Workers Free plan's 10 ms of CPU. The secrets SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY and SES_REGION
- * (eu-central-1) are Worker secrets. sigv4 has the same shape as the one in legal/eu-consumer's mail.ts: once both are
- * merged, one of them goes.
+ * Email from shepetal. Two ways out:
+ * - to OWNER (Pavel's mailbox, where support@shepetal.app forwards): the NOTIFY binding (wrangler.toml [[send_email]]),
+ *   Cloudflare Email Routing's sending to a verified address. Free on Workers Free, and it can reach no one else.
+ * - to anyone else (a customer): Amazon SES v2 (sesSend, SigV4 on WebCrypto, no SDK), only when the secrets
+ *   SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY and SES_REGION are set (README.md has the setup). Without them nothing is
+ *   sent and the caller is told: nothing claims a customer was emailed.
+ * sendMail is the plain-text email from support@ (cancellations, purchases); the trial emails (lifecycle.ts) call
+ * sesSend with their own sender, an HTML part and the unsubscribe headers.
  */
-export const FROM = 'shepetal <hello@shepetal.app>';
+export const OWNER = 'pavel@hegler.tech';
+const FROM = 'support@shepetal.app';
 export const REPLY_TO = 'support@shepetal.app';
 
 export type SesEnv = {
@@ -15,7 +22,7 @@ export type SesEnv = {
   SES_API_BASE?: string;
 };
 
-export type Mail = { to: string; subject: string; text: string; html: string; headers?: Record<string, string> };
+export type Mail = { to: string; subject: string; text: string; html?: string; from?: string; headers?: Record<string, string> };
 
 /** SES did not take the email. `status` is SES's HTTP status, 0 when no answer came. */
 export class SesError extends Error {
@@ -25,6 +32,7 @@ export class SesError extends Error {
 }
 
 export const sesConfigured = (env: SesEnv) => !!(env.SES_ACCESS_KEY_ID && env.SES_SECRET_ACCESS_KEY && env.SES_REGION);
+export const sesEnabled = () => sesConfigured(process.env as SesEnv);
 
 /** The SendEmail URL: SES in SES_REGION, or the e2e's fake on this machine. */
 export function sesUrl(env: SesEnv): string {
@@ -33,29 +41,39 @@ export function sesUrl(env: SesEnv): string {
   return `${local ? fake.origin : `https://email.${env.SES_REGION}.amazonaws.com`}/v2/email/outbound-emails`;
 }
 
-/** Sends one email and returns SES's MessageId. Throws SesError when SES refuses it or does not answer. */
-export async function sendMail(env: SesEnv, mail: Mail, fetchImpl: typeof fetch = fetch): Promise<string> {
+export async function sendMail(to: string, subject: string, text: string): Promise<void> {
+  if (to === OWNER) {
+    await getCloudflareContext().env.NOTIFY.send({ to, from: { email: FROM, name: 'shepetal' }, subject, text });
+    return;
+  }
+  if (!sesEnabled()) throw new Error('no email to customers: SES is not set up');
+  await sesSend(process.env as SesEnv, { to, subject, text });
+}
+
+/** Sends one email through SES and returns SES's MessageId. Throws SesError when SES refuses it or does not answer. */
+export async function sesSend(env: SesEnv, mail: Mail, fetchImpl: typeof fetch = fetch): Promise<string> {
   if (!sesConfigured(env)) throw new SesError(0, 'SES is not set up');
   const url = sesUrl(env);
+  const headers = Object.entries(mail.headers ?? {}).map(([Name, Value]) => ({ Name, Value }));
   const body = JSON.stringify({
-    FromEmailAddress: FROM,
+    FromEmailAddress: mail.from ?? `shepetal <${FROM}>`,
     Destination: { ToAddresses: [mail.to] },
     ReplyToAddresses: [REPLY_TO],
     Content: {
       Simple: {
         Subject: { Data: mail.subject, Charset: 'UTF-8' },
-        Body: { Text: { Data: mail.text, Charset: 'UTF-8' }, Html: { Data: mail.html, Charset: 'UTF-8' } },
-        Headers: Object.entries(mail.headers ?? {}).map(([Name, Value]) => ({ Name, Value })),
+        Body: { Text: { Data: mail.text, Charset: 'UTF-8' }, ...(mail.html ? { Html: { Data: mail.html, Charset: 'UTF-8' } } : {}) },
+        ...(headers.length ? { Headers: headers } : {}),
       },
     },
   });
-  const headers = await sigv4({
+  const signed = await sigv4({
     method: 'POST', url, body, region: env.SES_REGION!, service: 'ses', headers: { 'content-type': 'application/json' },
     key: env.SES_ACCESS_KEY_ID!, secret: env.SES_SECRET_ACCESS_KEY!,
   });
   let res: Response;
   try {
-    res = await fetchImpl(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(5000) });
+    res = await fetchImpl(url, { method: 'POST', headers: signed, body, signal: AbortSignal.timeout(5000) });
   } catch (e) {
     throw new SesError(0, `SES did not answer: ${(e as Error).message}`);
   }

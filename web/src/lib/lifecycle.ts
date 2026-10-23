@@ -1,7 +1,7 @@
 import { licenseOf, TRIAL_DAYS, type User } from './account';
 import { db } from './db';
 import { copyFor, render, type Kind } from './lifecycle-copy';
-import { sendMail, sesConfigured, SesError, type SesEnv } from './ses';
+import { sesConfigured, SesError, sesSend, type SesEnv } from './mail';
 import { SITE_URL } from './site';
 
 /**
@@ -61,12 +61,16 @@ export function eligible({ kind, user }: Due, now: number): boolean {
 export const daysLeft = (user: User, now: number) =>
   Math.max(0, Math.ceil((Date.parse(user.trial_started_at) + TRIAL_DAYS * DAY - now) / DAY));
 
+/** The trial emails' sender; replies go to support@ (mail.ts REPLY_TO). */
+export const FROM = 'shepetal <hello@shepetal.app>';
+
 /** The email for one user: subject, text, HTML and the one-click unsubscribe headers (RFC 8058). */
 export async function compose({ kind, user }: Due, secret: string, now: number) {
   const l = licenseOf(user, now);
   const unsubscribe = await unsubscribeUrl(user.id, secret);
   const mail = render(copyFor(kind, { trial: l.plan === 'trial', daysLeft: daysLeft(user, now) }), unsubscribe);
   return {
+    from: FROM,
     to: user.email,
     ...mail,
     headers: { 'List-Unsubscribe': `<${unsubscribe}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
@@ -99,7 +103,7 @@ export async function runLifecycle(
       .run();
     if (claim.meta.changes !== 1) continue;
     try {
-      const id = await sendMail(env, await compose(d, env.AUTH_SECRET!, now), fetchImpl);
+      const id = await sesSend(env, await compose(d, env.AUTH_SECRET!, now), fetchImpl);
       await env.DB.prepare("UPDATE lifecycle_emails SET status = 'sent', sent_at = ?3, message_id = ?4 WHERE user_id = ?1 AND kind = ?2")
         .bind(d.user.id, d.kind, iso(Date.now()), id)
         .run();

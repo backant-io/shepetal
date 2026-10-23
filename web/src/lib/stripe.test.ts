@@ -1,12 +1,15 @@
+import { readFileSync } from 'node:fs';
 import Stripe from 'stripe';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
-import { checkoutUrl, CONFIRMATION, consentText, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, setCancelAtPeriodEnd } from './stripe';
+import { cancelAt, checkoutUrl, CONFIRMATION, consentText, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, purchaseText, setCancelAtPeriodEnd } from './stripe';
 import { SITE_URL } from './site';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
+const mail = vi.hoisted(() => ({ OWNER: 'owner@example.com', sendMail: vi.fn(async (_to: string, _subject: string, _text: string) => {}), sesEnabled: vi.fn(() => false) }));
+vi.mock('./mail', () => mail);
 useTestDb();
 
 const SECRET = 'whsec_test_secret';
@@ -27,7 +30,11 @@ beforeEach(async () => {
   vi.spyOn(getStripe().customers, 'create').mockResolvedValue({ id: 'cus_1' } as never);
   vi.spyOn(getStripe().checkout.sessions, 'list').mockImplementation(() => none() as never);
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.restoreAllMocks();
+  mail.sendMail.mockClear();
+  mail.sesEnabled.mockReturnValue(false);
+});
 
 /** An empty Stripe list (auto-pagination), or one with these items. */
 const none = (...items: object[]) => ({ async *[Symbol.asyncIterator]() { yield* items; } });
@@ -126,7 +133,7 @@ describe('lifetime ($23.99 once)', () => {
       consent_collection: { terms_of_service: 'required' },
       custom_text: { terms_of_service_acceptance: { message: consentText('lifetime', SITE_URL) } },
     });
-    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/delivered right away.*ends my 14-day right of withdrawal/);
+    expect((params.custom_text?.terms_of_service_acceptance as { message: string } | undefined)?.message).toMatch(/delivered right away.*ends my 14-day \[right of withdrawal\]\(https:\/\/[^/]+\/refunds#withdrawal\)/);
     expect(params.payment_intent_data?.description).toContain('ends the 14-day right of withdrawal');
     expect(params.payment_intent_data?.statement_descriptor_suffix).toBe('SHEPETAL');
     await send(event(session({ client_reference_id: params.client_reference_id, metadata: params.metadata })));
@@ -518,6 +525,86 @@ describe('plan settings: cancel, resume, the portal', () => {
     expect(await nextCharge({ ...u, sub_amount: null, sub_currency: null })).toMatchObject({ amount: 99, currency: 'usd' });
   });
 
+  // /cancel (§ 312k BGB) can be used by anyone who knows a subscriber's email: what it sets must never cost the owner
+  // more (no end moved later, no far-off date that keeps charging), and /account must show it and offer Resume.
+  describe('cancelAt, the button without sign-in', () => {
+    const end = nowS() + 29 * DAY;
+    const plus3Months = () => {
+      const d = new Date(end * 1000);
+      d.setUTCMonth(d.getUTCMonth() + 3);
+      return d.getTime() / 1000;
+    };
+
+    it('ends at the period end as soon as possible, stored at once from Stripe and shown on /account', async () => {
+      const u = await subscribed({ current_period_end: end });
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue(sub({ current_period_end: end, cancel_at_period_end: true, cancel_at: end }) as never);
+      expect(await cancelAt(u, null)).toEqual({ ends_at: new Date(end * 1000).toISOString(), changed: true });
+      expect(update).toHaveBeenCalledWith('sub_1', { cancel_at_period_end: true });
+      expect((await fresh()).cancel_at).toBe(new Date(end * 1000).toISOString());
+    });
+
+    it('caps a requested date at three months after the paid time, and never sets an end before the period end', async () => {
+      const u = await subscribed({ current_period_end: end });
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockImplementation(async (_id, p) => sub({ current_period_end: end, cancel_at: (p as { cancel_at: number }).cancel_at }) as never);
+      expect((await cancelAt(u, end + 365 * DAY))?.ends_at).toBe(new Date(plus3Months() * 1000).toISOString());
+      // A date in a later period: Stripe always prorates that last period and takes no proration_behavior 'none'.
+      expect(update).toHaveBeenLastCalledWith('sub_1', { cancel_at: plus3Months() });
+      await cancelAt({ ...u }, end - DAY);
+      expect(update).toHaveBeenLastCalledWith('sub_1', { cancel_at_period_end: true });
+    });
+
+    it('never moves an end already set later, but moves it earlier', async () => {
+      const set = end + 20 * DAY;
+      const u = await subscribed({ current_period_end: end, cancel_at: set });
+      expect(u.cancel_at).toBe(new Date(set * 1000).toISOString());
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue(sub({ current_period_end: end, cancel_at: end }) as never);
+      expect(await cancelAt(u, set + 30 * DAY)).toEqual({ ends_at: u.cancel_at, changed: false });
+      expect(update).not.toHaveBeenCalled();
+      expect(await cancelAt(u, null)).toEqual({ ends_at: new Date(end * 1000).toISOString(), changed: true });
+      expect(update).toHaveBeenCalledWith('sub_1', { cancel_at: end, proration_behavior: 'none' });
+    });
+
+    it('counts an end on a date as not renewing: no next charge, no Cancel, and Resume clears it', async () => {
+      const u = await subscribed({ current_period_end: end, cancel_at: end + 20 * DAY, items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } });
+      expect(await nextCharge(u)).toBeNull();
+      expect(await setCancelAtPeriodEnd(u, true)).toBe(false);
+      const update = vi.spyOn(getStripe().subscriptions, 'update').mockResolvedValue(sub({ current_period_end: end }) as never);
+      expect(await setCancelAtPeriodEnd(u, false)).toBe(true);
+      expect(update).toHaveBeenCalledWith('sub_1', { cancel_at: '' });
+      expect((await fresh()).cancel_at).toBeNull();
+      expect((await license()).renews).toBe(true);
+    });
+
+    // Stripe may send cancel_at_period_end with no cancel_at (and rows from before cancel_at have none): that
+    // subscription already ends at its period end, and a later date on /cancel must not move it later.
+    it('counts cancel_at_period_end with no cancel_at as ending at the period end, and never sets a later end', async () => {
+      const u = { ...(await subscribed({ current_period_end: end })), cancel_at_period_end: 1, cancel_at: null };
+      const update = vi.spyOn(getStripe().subscriptions, 'update');
+      expect(await cancelAt(u, end + 30 * DAY)).toEqual({ ends_at: new Date(end * 1000).toISOString(), changed: false });
+      expect(await cancelAt(u, null)).toEqual({ ends_at: new Date(end * 1000).toISOString(), changed: false });
+      expect(update).not.toHaveBeenCalled();
+      // And the row from the webhook carries the period end as cancel_at.
+      await subscribed({ current_period_end: end, cancel_at_period_end: true, cancel_at: null });
+      expect((await fresh()).cancel_at).toBe(new Date(end * 1000).toISOString());
+    });
+
+    it('migration 0004 gives such rows the end of their paid time as cancel_at', async () => {
+      const sql = readFileSync(new URL('../../migrations/0004_cancellations.sql', import.meta.url), 'utf8').replace(/--.*$/gm, '');
+      const backfill = sql.split(';').find((q) => /^\s*UPDATE users SET cancel_at/.test(q))!;
+      const paid = '2026-11-21T00:00:00.000Z';
+      const other = await upsertUser('b@example.com');
+      await db().prepare('UPDATE users SET cancel_at_period_end = 1, cancel_at = NULL, paid_through = ?2 WHERE id = ?1').bind(user.id, paid).run();
+      await db().prepare("UPDATE users SET cancel_at_period_end = 1, cancel_at = '2026-12-01T00:00:00.000Z', paid_through = ?2 WHERE id = ?1").bind(other.id, paid).run();
+      await db().prepare(backfill).run();
+      expect((await fresh()).cancel_at).toBe(paid);
+      expect((await userById(other.id))?.cancel_at).toBe('2026-12-01T00:00:00.000Z');
+    });
+
+    it('does nothing without a live subscription', async () => {
+      expect(await cancelAt(user, null)).toBeNull();
+    });
+  });
+
   it('refuses to cancel without a subscription', async () => {
     const update = vi.spyOn(getStripe().subscriptions, 'update');
     expect(await setCancelAtPeriodEnd(user, true)).toBe(false);
@@ -544,6 +631,66 @@ describe('plan settings: cancel, resume, the portal', () => {
   it('stores what a renewal charges, for the settings', async () => {
     await subscribed({ items: { data: [{ price: { unit_amount: 99, currency: 'usd' } }] } });
     expect(await fresh()).toMatchObject({ sub_amount: 99, sub_currency: 'usd' });
+  });
+});
+
+// § 356(6) Nr. 2 d BGB: the withdrawal right ends early only once we confirm the contract, with the consent and the
+// acknowledgement, on a durable medium. Our own email does that; without SES nothing may pretend it went out.
+describe('the purchase confirmation', () => {
+  const toCustomer = () => mail.sendMail.mock.calls.filter(([to]) => to !== mail.OWNER);
+  const toOwner = () => mail.sendMail.mock.calls.filter(([to]) => to === mail.OWNER);
+  const paid = (over: object = {}) => session({ amount_total: 2399, currency: 'usd', consent: { terms_of_service: 'accepted' }, ...over });
+
+  it('states what was bought, the price paid, and the consent with the loss of the withdrawal right', () => {
+    const t = purchaseText({ plan: 'lifetime', email: 'a@example.com', amount: 2399, currency: 'eur', at: new Date('2026-10-22T14:03:05Z'), consented: true });
+    for (const s of ['shepetal lifetime license', 'Price paid: €23.99, tax included', 'Paid on: 2026-10-22 at 14:03:05 UTC', 'Account: a@example.com', CONFIRMATION, `${SITE_URL}/refunds`])
+      expect(t).toContain(s);
+    expect(purchaseText({ plan: 'monthly', email: 'a@example.com', amount: 99, currency: 'usd', at: new Date(), consented: true })).toContain('shepetal monthly subscription. It renews every month until you cancel.');
+    // Never claims a consent Stripe did not record.
+    expect(purchaseText({ plan: 'lifetime', email: 'a@example.com', amount: 2399, currency: 'usd', at: new Date(), consented: false })).not.toContain('withdrawal right');
+  });
+
+  it('with SES on, emails the account after a lifetime purchase, once', async () => {
+    mail.sesEnabled.mockReturnValue(true);
+    const body = event(paid({ payment_intent: 'pi_1' }));
+    await send(body);
+    await vi.waitFor(() => expect(toCustomer()).toHaveLength(1));
+    const [[to, subject, text]] = toCustomer();
+    expect([to, subject]).toEqual(['a@example.com', 'Your shepetal lifetime license (Bestellbestätigung)']);
+    expect(text).toContain('Price paid: $23.99, tax included');
+    expect(text).toContain(CONFIRMATION);
+    await send(body); // redelivered
+    expect(toCustomer()).toHaveLength(1);
+  });
+
+  it('with SES on, emails the account when a subscription starts, not before it is paid', async () => {
+    mail.sesEnabled.mockReturnValue(true);
+    const monthly = { mode: 'subscription', subscription: 'sub_1', client_reference_id: null, metadata: { app: 'shepetal', plan: 'monthly', user_id: String(user.id) }, amount_total: 99 };
+    retrieving(sub());
+    await send(event(paid({ ...monthly, payment_status: 'unpaid' })));
+    expect(toCustomer()).toHaveLength(0);
+    retrieving(sub());
+    await send(event(paid(monthly), 'checkout.session.async_payment_succeeded'));
+    await vi.waitFor(() => expect(toCustomer()).toHaveLength(1));
+    expect(toCustomer()[0][1]).toBe('Your shepetal subscription (Bestellbestätigung)');
+    expect(toCustomer()[0][2]).toContain('Price paid: $0.99, tax included');
+  });
+
+  it('with SES off, emails the buyer nothing and gives Pavel the text to send by hand', async () => {
+    await send(event(paid({ payment_intent: 'pi_1' })));
+    await vi.waitFor(() => expect(toOwner()).toHaveLength(1));
+    expect(toCustomer()).toEqual([]);
+    expect(toOwner()[0][2]).toContain('was not sent (SES is not set up). Send the text below to it by hand.');
+  });
+
+  it('sends none for a second lifetime payment, which is refunded', async () => {
+    mail.sesEnabled.mockReturnValue(true);
+    await send(event(paid({ payment_intent: 'pi_1' })));
+    await vi.waitFor(() => expect(toCustomer()).toHaveLength(1));
+    vi.spyOn(getStripe().refunds, 'create').mockResolvedValue({} as never);
+    await send(event(paid({ id: 'cs_2', payment_intent: 'pi_2' })));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(toCustomer()).toHaveLength(1);
   });
 });
 

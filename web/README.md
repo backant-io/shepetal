@@ -6,7 +6,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 
 - **Runtime:** Next.js 16 (App Router), built with `@opennextjs/cloudflare` and served by its own Cloudflare Worker, `shepetal-web`. `worker.ts` is the entry: it applies the host rules (`src/lib/site.ts`: www to the apex; the old host `shepetal.backant.io` is a 301 to the domain for every path, `/api/*` included), then hands over to OpenNext's worker. The custom domains are attached at launch (GO-LIVE.md, step 5).
 - **Sign-in:** next-auth v5 with Google, JWT sessions and no adapter, the same setup as backant.io. Cookies are host-only, so a shepetal session never reaches backant.io.
-- **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens`, `app_codes`, `stripe_events`, `lifecycle_emails` and `email_unsubscribes`, and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
+- **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens`, `app_codes`, `stripe_events`, `lifecycle_emails` and `email_unsubscribes` (the trial emails), `cancellations` (what the "Verträge hier kündigen" button received, API.md) and `visitor_salts` (the daily analytics salt), and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
 - **Payments:** Stripe Checkout in backant's Stripe account: the lifetime price (lookup_key `shepetal_lifetime`, mode payment) or the monthly price (`shepetal_monthly`, mode subscription), both with promotion codes. `scripts/stripe-setup.mjs` creates the products, prices, the PRODUCTHUNT code and the Billing Portal configuration, in test or live mode. The webhook at `/api/stripe/webhook` stores the lifetime license or the subscription; `/api/billing/portal` opens the Stripe Billing Portal.
 - **Apps:** OAuth for native apps with PKCE (RFC 8252, RFC 7636): the app opens `/app/login`, which signs in with Google, asks the user to confirm on a consent page, and redirects to `shepetal://auth` or `http://127.0.0.1:<port>/callback` with a one-time code, and `/api/app/token` trades the code for an opaque bearer token. Only the token's SHA-256 hash is stored, in `tokens`. It ends 90 days after its last use, and `/api/app/revoke` ends it on Sign out. `/api/license` checks the token.
 
@@ -17,12 +17,12 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | `src/lib/account.ts` | `upsertUser`, `getLicense`, `licenseOf` (the trial rule, tested in `account.test.ts`) |
 | `src/lib/stripe.ts` | `getStripe()`, checkout per plan, the Billing Portal, the webhook |
 | `scripts/stripe-setup.mjs` | finds or creates the Stripe objects and prints their IDs |
-| `src/lib/analytics.ts`, `src/components/Analytics.tsx` | PostHog (backant's project, US cloud), cookieless, every event tagged `app=shepetal`; off unless the `POSTHOG_KEY` secret is set. Server events from the Worker: `download_served`, `appcast_check`, `license_first_call`, `checkout_completed` |
+| `src/lib/analytics.ts`, `src/lib/server-analytics.ts`, `src/lib/visitor-salt.ts` | PostHog (backant's project, US cloud), every event tagged `app=shepetal`, all sent by the Worker after the answer: no analytics code, cookie or storage in the browser, so no consent banner. Off unless the `POSTHOG_KEY` secret is set. Events: `$pageview`, `download_served`, `app_login_opened`, `app_login_consented`, `appcast_check`, `license_first_call`, `checkout_completed` (GO-LIVE.md, step 4). Visitors are an HMAC under a random salt per UTC day, kept in D1 and deleted after 48 h |
 | `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |
 | `src/app/(story)/page.tsx`, `src/components/story/` | the landing page: the approved "full scroll story". `choreography.ts` is the design's one table of scroll timings and writing windows (ported from its build.mjs); `story.generated.css` is generated from it (native CSS scroll timelines plus the paused-animation fallback that `StoryMotion.tsx` drives with `--p`) |
 | `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
 | `src/lib/download.ts` | `/download`, the release files and `/appcast.xml`, from the R2 bucket `shepetal-releases` |
-| `src/lib/lifecycle.ts`, `lifecycle-copy.ts`, `ses.ts` | the trial emails (welcome, day 3, day 25) from the Cron Trigger, their words, the signed unsubscribe link, and sending through Amazon SES v2 (SigV4 on WebCrypto, no SDK) |
+| `src/lib/lifecycle.ts`, `lifecycle-copy.ts` | the trial emails (welcome, day 3, day 25) from the Cron Trigger, their words and branded HTML, and the signed unsubscribe link; sent through `mail.ts`'s SES transport |
 | `src/app/api/` | the API routes in API.md |
 
 ## What comes from backant.io
@@ -117,6 +117,35 @@ The `routes` in `wrangler.toml` attach the custom domains `shepetal.app`, `www.s
 - **Trial emails:** a Cron Trigger every 15 minutes (`wrangler.toml` [triggers]) runs `runLifecycle` from `worker.ts`'s `scheduled`, without Next. It sends at most 5 emails a run, from `shepetal <hello@shepetal.app>` with replies to support@shepetal.app: welcome in the first 2 days of the trial, a tip on days 3 to 5, and on day 25 (one day wide) the note that the trial ends in 5 days, only to users still on the free trial. Each email is claimed in `lifecycle_emails` before SES is called, so none goes out twice. Every email carries a signed unsubscribe link (HMAC with `AUTH_SECRET`) and the one-click headers of RFC 8058; `/unsubscribe` is answered in `worker.ts`. `LIFECYCLE_EMAILS` in `wrangler.toml` [vars] is the switch: only `"on"` sends, anything else logs what a run would send (user ids, never addresses). To switch on: `npm run db:migrate:remote` (0006), check `npx wrangler secret list` shows `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY` and `SES_REGION`, set `LIFECYCLE_EMAILS = "on"` and `npm run deploy`. To stop at once: set it back to `"off"` and deploy (or remove the cron in the dashboard).
 - **Copy:** never name the speech model or any AI model in site copy, metadata or alt text. Write "on-device speech recognition".
 
+## Email
+
+`src/lib/mail.ts` sends email, two ways (one SES transport, `sesSend`, for every customer email: plain text from support@shepetal.app, and the trial emails from hello@shepetal.app with an HTML part):
+
+- **To Pavel** (pavel@hegler.tech, where support@shepetal.app forwards): the `NOTIFY` binding (`[[send_email]]` in `wrangler.toml`), Email Routing's sending to a verified destination. It works on Workers Free, costs nothing, and can reach no other address. Every declaration on /cancel is sent here with what was done and what is left to do. `wrangler dev` (and so the e2e) only prints these emails; a deployed or preview version sends them for real.
+- **To customers**: Amazon SES (v2 API, SigV4 signed with WebCrypto in `mail.ts`), only when the three secrets below are set. Without them no customer is emailed, and /cancel's receipt says so. With them, two emails go to customers, each to the address of the account, never to one a stranger typed: the § 312k(4) BGB confirmation of a cancellation (never with the reason as typed), and the purchase confirmation after a lifetime purchase or a subscription start (§ 356(6) Nr. 2 d BGB: what was bought, the price paid, the consent to delivery right away and the acknowledged loss of the withdrawal right). Without them, Pavel gets each text to send by hand.
+
+Setting up SES (backant's AWS account, eu-central-1, which has production access; run with `AWS_PROFILE=backant`):
+
+```sh
+export AWS_PROFILE=backant AWS_REGION=eu-central-1
+# 1. The domain identity, with Easy DKIM: prints three tokens.
+aws sesv2 create-email-identity --email-identity shepetal.app --query DkimAttributes.Tokens
+# 2. In Cloudflare DNS for shepetal.app, for each token: CNAME <token>._domainkey -> <token>.dkim.amazonses.com
+#    (DNS only, not proxied). Then wait until this prints true:
+aws sesv2 get-email-identity --email-identity shepetal.app --query VerifiedForSendingStatus
+# 3. A user that can only send from support@shepetal.app and hello@shepetal.app (the trial emails), and its key:
+ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+aws iam create-user --user-name shepetal-ses-send
+aws iam put-user-policy --user-name shepetal-ses-send --policy-name send-from-shepetal --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ses:SendEmail\",\"Resource\":\"arn:aws:ses:eu-central-1:${ACCOUNT}:identity/shepetal.app\",\"Condition\":{\"StringEquals\":{\"ses:FromAddress\":[\"support@shepetal.app\",\"hello@shepetal.app\"]}}}]}"
+aws iam create-access-key --user-name shepetal-ses-send --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text
+# 4. The Worker secrets, after a deploy (wrangler secret put fails while a newer preview version exists):
+npx wrangler secret put SES_ACCESS_KEY_ID       # paste the first value of step 3
+npx wrangler secret put SES_SECRET_ACCESS_KEY   # paste the second
+echo eu-central-1 | npx wrangler secret put SES_REGION
+```
+
+Then cancel your own test subscription on /cancel: the confirmation should arrive at the account's address, and the notice to Pavel should say `Confirmation to the customer: sent to …`. A test-mode purchase should bring the purchase confirmation to the buyer's account address. The Privacy Policy already names Amazon Web Services for these emails.
+
 ## Preview
 
 https://shepetal-web.business-c0d.workers.dev (the live version also answers on shepetal.backant.io; shepetal.app is attached at GO). Preview versions get their own URL from `wrangler versions upload`. The D1 database `shepetal` (`bd45470f-27b2-4564-aa94-850856413b3e`) has `0001_init.sql` applied. The secrets `AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` and `STRIPE_SECRET_KEY` are set. `STRIPE_WEBHOOK_SECRET` may not be. The plan prices exist only in test mode until action 2 runs `scripts/stripe-setup.mjs --live`, so `/api/checkout` fails in production until then. Google sign-in comes back to https://shepetal.app, so it completes only there, after go-live.
@@ -125,5 +154,5 @@ https://shepetal-web.business-c0d.workers.dev (the live version also answers on 
 
 1. In Google Cloud Console, go to APIs & Services, then Credentials, and open backant's OAuth client (the one `GOOGLE_CLIENT_ID` names). Add the authorized redirect URI `https://shepetal.app/api/auth/callback/google`, and `shepetal.app` under the consent screen's authorized domains (GO-LIVE.md, step 2). Add `http://localhost:3000/api/auth/callback/google` too if it is missing. The Google consent screen will show backant's app name.
 2. In the backant Stripe account (live), run `node scripts/stripe-setup.mjs --live` with the live key (GO-LIVE.md, step 3): the $23.99 and $0.99 prices, the PRODUCTHUNT code and the Billing Portal configuration. After the deploy in action 4, move the webhook endpoint (we_1USl5ADrjgXysMQjYGGaUepu) to `https://shepetal.app/api/stripe/webhook` with every event it needs (GO-LIVE.md, step 3.2). Its signing secret stays `STRIPE_WEBHOOK_SECRET`.
-3. After action 2: run `npm run db:migrate:remote` (0002_app_login, 0003_plans), `npx wrangler secret put STRIPE_WEBHOOK_SECRET` with the endpoint's signing secret, and `npm run deploy`. The other deploy steps above are done. The full ordered list, with smoke tests, is [GO-LIVE.md](GO-LIVE.md).
+3. After action 2: run `npm run db:migrate:remote` (0002_app_login, 0003_plans, 0004_cancellations: without it /cancel records nothing and Pavel's notice says so; 0007_visitor_salt), `npx wrangler secret put STRIPE_WEBHOOK_SECRET` with the endpoint's signing secret, and `npm run deploy`. The other deploy steps above are done. The full ordered list, with smoke tests, is [GO-LIVE.md](GO-LIVE.md).
 4. Go live: check that the shepetal.app zone has no records on the apex or www, then `cd web && npm run deploy`, which attaches the custom domains (GO-LIVE.md, step 5).
