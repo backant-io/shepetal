@@ -8,6 +8,7 @@ Tests/ShepetalTests/UITokenTests.swift reads tokens.json on its own and fails wh
 so a hand edit to Tokens.swift or a new tokens.json without a rerun turns the swift suite red.
 """
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -58,7 +59,7 @@ def shadow_layers(css: str) -> str:
             c = re.fullmatch(r"rgba\(([\d.]+),\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)\)", color)
             assert c, color
             r, g, b = (int(c.group(i)) for i in (1, 2, 3))
-            a = round(float(c.group(4)) * 255)
+            a = math.floor(float(c.group(4)) * 255 + 0.5)  # half up, as CSS and Swift's rounded() do
             rgba = f"0x{r:02X}{g:02X}{b:02X}{a:02X}"
         x, y, blur, spread = lengths
         layers.append(f"SHShadowLayer(inset: {str(inset).lower()}, x: {num(x)}, y: {num(y)}, blur: {num(blur)}, "

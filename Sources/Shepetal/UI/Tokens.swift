@@ -109,18 +109,18 @@ extension SH {
     static let keyPrimary = SHShadow(
         "sh-key-primary",
         light: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF1F), SHShadowLayer(inset: false, x: 0, y: 4, blur: 0, spread: 0, rgba: 0x000000FF), SHShadowLayer(inset: false, x: 0, y: 9, blur: 14, spread: -6, rgba: 0x16151273)],
-        dark: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF99), SHShadowLayer(inset: false, x: 0, y: 4, blur: 0, spread: 0, rgba: 0x8C8880FF), SHShadowLayer(inset: false, x: 0, y: 9, blur: 14, spread: -6, rgba: 0x000000B2)])
+        dark: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF99), SHShadowLayer(inset: false, x: 0, y: 4, blur: 0, spread: 0, rgba: 0x8C8880FF), SHShadowLayer(inset: false, x: 0, y: 9, blur: 14, spread: -6, rgba: 0x000000B3)])
     static let keyPrimaryDown = SHShadow(
         "sh-key-primary-down",
         light: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF14), SHShadowLayer(inset: false, x: 0, y: 1, blur: 0, spread: 0, rgba: 0x000000FF), SHShadowLayer(inset: false, x: 0, y: 2, blur: 4, spread: -2, rgba: 0x16151273)],
-        dark: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF66), SHShadowLayer(inset: false, x: 0, y: 1, blur: 0, spread: 0, rgba: 0x8C8880FF), SHShadowLayer(inset: false, x: 0, y: 2, blur: 4, spread: -2, rgba: 0x000000B2)])
+        dark: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF66), SHShadowLayer(inset: false, x: 0, y: 1, blur: 0, spread: 0, rgba: 0x8C8880FF), SHShadowLayer(inset: false, x: 0, y: 2, blur: 4, spread: -2, rgba: 0x000000B3)])
     static let key = SHShadow(
         "sh-key",
-        light: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFFB2), SHShadowLayer(inset: false, x: 0, y: 3, blur: 0, spread: 0, rgba: 0xB5B1A8FF), SHShadowLayer(inset: false, x: 0, y: 7, blur: 12, spread: -6, rgba: 0x1615124C)],
+        light: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFFB3), SHShadowLayer(inset: false, x: 0, y: 3, blur: 0, spread: 0, rgba: 0xB5B1A8FF), SHShadowLayer(inset: false, x: 0, y: 7, blur: 12, spread: -6, rgba: 0x1615124D)],
         dark: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF14), SHShadowLayer(inset: false, x: 0, y: 3, blur: 0, spread: 0, rgba: 0x0D0C0AFF), SHShadowLayer(inset: false, x: 0, y: 7, blur: 12, spread: -6, rgba: 0x00000099)])
     static let keyDown = SHShadow(
         "sh-key-down",
-        light: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF80), SHShadowLayer(inset: false, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xB5B1A8FF), SHShadowLayer(inset: false, x: 0, y: 2, blur: 3, spread: -2, rgba: 0x1615124C)],
+        light: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF80), SHShadowLayer(inset: false, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xB5B1A8FF), SHShadowLayer(inset: false, x: 0, y: 2, blur: 3, spread: -2, rgba: 0x1615124D)],
         dark: [SHShadowLayer(inset: true, x: 0, y: 1, blur: 0, spread: 0, rgba: 0xFFFFFF0D), SHShadowLayer(inset: false, x: 0, y: 1, blur: 0, spread: 0, rgba: 0x0D0C0AFF), SHShadowLayer(inset: false, x: 0, y: 2, blur: 3, spread: -2, rgba: 0x00000099)])
     static let keyHint = SHShadow(
         "sh-key-hint",
@@ -129,7 +129,7 @@ extension SH {
     static let pop = SHShadow(
         "sh-pop",
         light: [SHShadowLayer(inset: false, x: 0, y: 0, blur: 0, spread: 1, rgba: 0x1615121F), SHShadowLayer(inset: false, x: 0, y: 12, blur: 32, spread: -8, rgba: 0x16151259)],
-        dark: [SHShadowLayer(inset: false, x: 0, y: 0, blur: 0, spread: 1, rgba: 0xE6E4DE1F), SHShadowLayer(inset: false, x: 0, y: 12, blur: 32, spread: -8, rgba: 0x000000B2)])
+        dark: [SHShadowLayer(inset: false, x: 0, y: 0, blur: 0, spread: 1, rgba: 0xE6E4DE1F), SHShadowLayer(inset: false, x: 0, y: 12, blur: 32, spread: -8, rgba: 0x000000B3)])
 
     // MARK: type styles (pt; line heights given as a ratio are multiplied out)
     static let webDisplay = SHTextStyle("web-display", family: .ui, size: 76, lineHeight: 73.72, weight: 520, tracking: -0.043, italic: false)
