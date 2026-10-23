@@ -1,5 +1,6 @@
 import { db } from './db';
 import { createToken, randomSecret, sha256 } from './tokens';
+import { TRIAL_EMAILS_FIELD, TRIAL_EMAILS_LABEL, TRIAL_EMAILS_PRIVACY } from './trial-emails';
 
 // App sign-in: OAuth for native apps (RFC 8252) with PKCE (RFC 7636), see API.md.
 export const CODE_TTL = 60; // seconds a one-time code lives
@@ -67,7 +68,8 @@ h1{margin:0;font-weight:520;font-size:clamp(2.5rem,calc(5.3*var(--u)),10rem);lin
 .mono{font-family:'Fragment Mono',ui-monospace,Menlo,monospace;font-size:.75rem;letter-spacing:.01em;line-height:1.45;color:#57544E}
 .as{margin:0;font-size:clamp(1.2rem,calc(1.9*var(--u)),3.2rem);font-weight:520;line-height:1.2;letter-spacing:-.02em;overflow-wrap:anywhere}
 .small{margin:0;font-size:1rem;line-height:1.5;color:#57544E;max-width:28rem}
-form{margin:0}
+form{margin:0;display:grid;row-gap:1.6rem;justify-items:start}
+.check{display:block;max-width:28rem;font-size:.9375rem;line-height:1.45;color:#57544E}.check input{margin:0 .3rem 0 0;vertical-align:-2px;accent-color:#161512}
 button{display:inline-flex;align-items:center;font:inherit;font-weight:600;font-size:1.0625rem;letter-spacing:-.005em;padding:1.1rem 1.6rem;border:0;border-radius:4px;cursor:pointer;background:#FF4F12;color:#161512;box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 4px 0 #9a2f08,0 9px 14px -6px rgba(154,47,8,.5)}
 button:hover{background:#ff5f28}button:active{transform:translateY(3px)}
 a{color:#161512}
@@ -77,7 +79,7 @@ a:focus-visible,button:focus-visible{outline:2px solid #FF4F12;outline-offset:3p
 
 /**
  * The consent page /app/login shows to a signed-in user. A GET never issues a code: only this
- * form, posted back with its CSRF token, does.
+ * form, posted back with its CSRF token, does. The trial emails box is unticked (lib/trial-emails.ts).
  */
 export function consentPage(email: string, r: LoginRequest, csrf: string): string {
   const fields = { redirect_uri: r.redirect_uri, state: r.state, code_challenge: r.code_challenge, code_challenge_method: 'S256', csrf };
@@ -90,7 +92,7 @@ export function consentPage(email: string, r: LoginRequest, csrf: string): strin
 <div class="side"><span class="mono">The ${appKind(r.redirect_uri)} on this computer</span>
 <p class="as">As ${esc(email)}</p>
 <p class="small">Continue if you just chose Sign in in the app yourself.</p>
-<form method="post" action="/app/login">${inputs}<button type="submit">Continue</button></form>
+<form method="post" action="/app/login">${inputs}<label class="check"><input type="checkbox" name="${TRIAL_EMAILS_FIELD}" value="yes"> ${TRIAL_EMAILS_LABEL} <a href="${TRIAL_EMAILS_PRIVACY}">Privacy</a></label><button type="submit">Continue</button></form>
 <a class="mono" href="/app/login?${esc(loginQuery(r))}&amp;switch=1">Not you? Use another account</a></div></main>
 <footer class="mono"><a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="/cancel" lang="de">Verträge hier kündigen</a></footer>
 </body></html>`;

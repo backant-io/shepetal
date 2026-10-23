@@ -6,7 +6,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 
 - **Runtime:** Next.js 16 (App Router), built with `@opennextjs/cloudflare` and served by its own Cloudflare Worker, `shepetal-web`. `worker.ts` is the entry: it applies the host rules (`src/lib/site.ts`: www to the apex; the old host `shepetal.backant.io` is a 301 to the domain for every path, `/api/*` included), then hands over to OpenNext's worker. The custom domains are attached at launch (GO-LIVE.md, step 5).
 - **Sign-in:** next-auth v5 with Google, JWT sessions and no adapter, the same setup as backant.io. Cookies are host-only, so a shepetal session never reaches backant.io.
-- **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens`, `app_codes`, `stripe_events`, `cancellations` (what the "Verträge hier kündigen" button received, API.md) and `visitor_salts` (the daily analytics salt), and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
+- **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens`, `app_codes`, `stripe_events`, `lifecycle_emails` and `email_unsubscribes` (the trial emails, sent only to users with the opt-in `users.trial_emails_at`), `cancellations` (what the "Verträge hier kündigen" button received, API.md) and `visitor_salts` (the daily analytics salt), and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
 - **Payments:** Stripe Checkout in backant's Stripe account: the lifetime price (lookup_key `shepetal_lifetime`, mode payment) or the monthly price (`shepetal_monthly`, mode subscription), both with promotion codes. `scripts/stripe-setup.mjs` creates the products, prices, the PRODUCTHUNT code and the Billing Portal configuration, in test or live mode. The webhook at `/api/stripe/webhook` stores the lifetime license or the subscription; `/api/billing/portal` opens the Stripe Billing Portal.
 - **Apps:** OAuth for native apps with PKCE (RFC 8252, RFC 7636): the app opens `/app/login`, which signs in with Google, asks the user to confirm on a consent page, and redirects to `shepetal://auth` or `http://127.0.0.1:<port>/callback` with a one-time code, and `/api/app/token` trades the code for an opaque bearer token. Only the token's SHA-256 hash is stored, in `tokens`. It ends 90 days after its last use, and `/api/app/revoke` ends it on Sign out. `/api/license` checks the token.
 
@@ -22,6 +22,8 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | `src/app/(story)/page.tsx`, `src/components/story/` | the landing page: the approved "full scroll story". `choreography.ts` is the design's one table of scroll timings and writing windows (ported from its build.mjs); `story.generated.css` is generated from it (native CSS scroll timelines plus the paused-animation fallback that `StoryMotion.tsx` drives with `--p`) |
 | `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
 | `src/lib/download.ts` | `/download`, the release files and `/appcast.xml`, from the R2 bucket `shepetal-releases` |
+| `src/lib/trial-emails.ts` | the opt-in to the trial emails: the checkbox's field and label, and `recordTrialEmailsOptIn` |
+| `src/lib/lifecycle.ts`, `lifecycle-copy.ts` | the trial emails (welcome, day 3, day 25) from the Cron Trigger, their words and branded HTML, and the signed unsubscribe link; sent through `mail.ts`'s SES transport |
 | `src/app/api/` | the API routes in API.md |
 
 ## What comes from backant.io
@@ -113,11 +115,20 @@ The `routes` in `wrangler.toml` attach the custom domains `shepetal.app`, `www.s
 - **Stripe on Workers:** `getStripe()` already uses the fetch HTTP client. To verify the webhook, read the raw body with `req.text()`, then call `stripe.webhooks.constructEventAsync(body, sig, process.env.STRIPE_WEBHOOK_SECRET, undefined, Stripe.createSubtleCryptoProvider())`.
 - **Emails:** `upsertUser` lowercases emails. Store the email from the row it returns.
 - **Downloads:** `/download`, `/download/<v>/<file>` and `/appcast.xml` (API.md) read the R2 bucket `shepetal-releases` (binding `RELEASES`) and never another server. LATEST is `latest.json` there, written only by `scripts/mac/promote.sh <v> --latest` after it has checked the files. Never add `public/appcast.xml`: it would shadow the route. To try it locally, put files with `npx wrangler r2 object put shepetal-releases/releases/<v>/<file> --local --file <file>` and `latest.json` the same way.
+- **Trial emails:** only to users who opted in: an unchecked box, "Send me three short emails about my trial.", on /login and on the app's consent page (`/app/login`), recorded in `users.trial_emails_at` by `src/lib/trial-emails.ts` (any other sign-in calls the same helper). A user already signed up can tick it at their next sign-in. A Cron Trigger every 5 minutes (`wrangler.toml` [triggers]) runs `runLifecycle` from `worker.ts`'s `scheduled`, without Next. It sends at most 5 emails a run (1,440 a day), from `shepetal <hello@shepetal.app>` with replies to support@shepetal.app: welcome in the first 2 days of the trial, a tip on days 3 to 5, and on day 25 (one day wide) the note that the trial ends in 5 days, only to users still on the free trial. When more were due than fit in a run, the run logs `lifecycle: more than 5 emails due`. Each email is claimed in `lifecycle_emails` before SES is called, so none goes out twice. SES refusing one message (MessageRejected, a bad recipient address) marks only that email failed; any other error (429, 5xx, sending paused, a suspended account, a wrong region, no answer) releases the claim and stops the run, so the email goes out on a later run once the fault is fixed. Every email carries a signed unsubscribe link (HMAC with `AUTH_SECRET`) and the one-click headers of RFC 8058; `/unsubscribe` is answered in `worker.ts`. The logs carry user ids, never addresses.
+
+  The switch, `LIFECYCLE_EMAILS` in `wrangler.toml` [vars], and the cron live in the committed `wrangler.toml`: a change in the Cloudflare dashboard is undone by the next deploy, so switching on or off is a commit and a deploy. Only `"on"` sends; anything else logs what a run would send. To switch on, in this order:
+  1. `npm run db:migrate:remote` (0006: the opt-in column and the two tables).
+  2. Check `npx wrangler secret list` shows `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY` and `SES_REGION`, then `npm run deploy` with `LIFECYCLE_EMAILS = "off"`.
+  3. In the Worker's logs, read one cron run: `lifecycle: would_send …` lines for opted-in users, and no error.
+  4. Commit `LIFECYCLE_EMAILS = "on"` and `npm run deploy`.
+
+  To stop at once: commit `LIFECYCLE_EMAILS = "off"` and deploy.
 - **Copy:** never name the speech model or any AI model in site copy, metadata or alt text. Write "on-device speech recognition".
 
 ## Email
 
-`src/lib/mail.ts` sends plain text from support@shepetal.app, two ways:
+`src/lib/mail.ts` sends email, two ways (one SES transport, `sesSend`, for every customer email: plain text from support@shepetal.app, and the trial emails from hello@shepetal.app with an HTML part):
 
 - **To Pavel** (pavel@hegler.tech, where support@shepetal.app forwards): the `NOTIFY` binding (`[[send_email]]` in `wrangler.toml`), Email Routing's sending to a verified destination. It works on Workers Free, costs nothing, and can reach no other address. Every declaration on /cancel is sent here with what was done and what is left to do. `wrangler dev` (and so the e2e) only prints these emails; a deployed or preview version sends them for real.
 - **To customers**: Amazon SES (v2 API, SigV4 signed with WebCrypto in `mail.ts`), only when the three secrets below are set. Without them no customer is emailed, and /cancel's receipt says so. With them, two emails go to customers, each to the address of the account, never to one a stranger typed: the § 312k(4) BGB confirmation of a cancellation (never with the reason as typed), and the purchase confirmation after a lifetime purchase or a subscription start (§ 356(6) Nr. 2 d BGB: what was bought, the price paid, the consent to delivery right away and the acknowledged loss of the withdrawal right). Without them, Pavel gets each text to send by hand.
@@ -131,10 +142,10 @@ aws sesv2 create-email-identity --email-identity shepetal.app --query DkimAttrib
 # 2. In Cloudflare DNS for shepetal.app, for each token: CNAME <token>._domainkey -> <token>.dkim.amazonses.com
 #    (DNS only, not proxied). Then wait until this prints true:
 aws sesv2 get-email-identity --email-identity shepetal.app --query VerifiedForSendingStatus
-# 3. A user that can only send from support@shepetal.app, and its key:
+# 3. A user that can only send from support@shepetal.app and hello@shepetal.app (the trial emails), and its key:
 ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
 aws iam create-user --user-name shepetal-ses-send
-aws iam put-user-policy --user-name shepetal-ses-send --policy-name send-from-shepetal --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ses:SendEmail\",\"Resource\":\"arn:aws:ses:eu-central-1:${ACCOUNT}:identity/shepetal.app\",\"Condition\":{\"StringEquals\":{\"ses:FromAddress\":\"support@shepetal.app\"}}}]}"
+aws iam put-user-policy --user-name shepetal-ses-send --policy-name send-from-shepetal --policy-document "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Action\":\"ses:SendEmail\",\"Resource\":\"arn:aws:ses:eu-central-1:${ACCOUNT}:identity/shepetal.app\",\"Condition\":{\"StringEquals\":{\"ses:FromAddress\":[\"support@shepetal.app\",\"hello@shepetal.app\"]}}}]}"
 aws iam create-access-key --user-name shepetal-ses-send --query 'AccessKey.[AccessKeyId,SecretAccessKey]' --output text
 # 4. The Worker secrets, after a deploy (wrangler secret put fails while a newer preview version exists):
 npx wrangler secret put SES_ACCESS_KEY_ID       # paste the first value of step 3
