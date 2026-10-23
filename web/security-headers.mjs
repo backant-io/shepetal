@@ -1,5 +1,5 @@
 // The security headers, from one place: next.config.ts puts them on everything Next answers, worker.ts on what it
-// answers itself (/api/license, /api/app/token, /api/app/revoke, /api/cancel). The CSP has no nonce, so prerendered pages are
+// answers itself (/api/license, /api/app/token, /api/app/revoke, /api/cancel, /unsubscribe). The CSP has no nonce, so prerendered pages are
 // served as they were built.
 
 /** The headers for every answer. Analytics run on the server (src/lib/server-analytics.ts): pages connect to the site only. */

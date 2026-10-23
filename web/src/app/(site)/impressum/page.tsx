@@ -48,8 +48,8 @@ export default function Impressum() {
           </p>
 
           <p>
-            The terms for using shepetal are in the <Link href="/terms">Terms of Use</Link>, refunds in the{' '}
-            <Link href="/refunds">Refund Policy</Link> and your data in the <Link href="/privacy">Privacy Policy</Link>.
+            The terms for using shepetal are in the <Link href="/terms" prefetch={false}>Terms of Use</Link>, refunds in the{' '}
+            <Link href="/refunds" prefetch={false}>Refund Policy</Link> and your data in the <Link href="/privacy" prefetch={false}>Privacy Policy</Link>.
           </p>
         </div>
       </main>

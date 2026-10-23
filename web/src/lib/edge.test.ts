@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { securityHeaders } from '../../security-headers.mjs';
-import { withEdgeHtml } from './edge-html';
+import { downloadStarter, withEdgeHtml } from './edge-html';
 
 // What worker.ts adds at the edge. The pages are served from their build-time copies without Next (open-next.config.ts),
 // so whatever depends on the request has to be added here, and only here.
@@ -31,15 +31,19 @@ describe('withEdgeHtml', () => {
     return { out: withEdgeHtml(res, new URL(url)), done };
   };
 
-  it('adds the refresh that starts the download on /install, carrying ?ref= and utm_* to it and the link', () => {
+  it('adds the script that starts the download on /install, carrying ?ref= and utm_* to it and the link', () => {
     const { out, done } = run('https://shepetal.app/install?ref=producthunt&utm_source=x.com&other=1');
     expect(done).toEqual([
-      'head + <meta http-equiv="refresh" content="1;url=/download?ref=producthunt&utm_source=x.com">',
+      'head + <script>addEventListener("DOMContentLoaded",function(){setTimeout(function(){location.replace("/download?ref=producthunt&utm_source=x.com")},1000)})</script>',
       'a[href="/download"] href=/download?ref=producthunt&utm_source=x.com',
     ]);
+    // One download starter, the script: no timed meta refresh (axe meta-refresh, Lighthouse accessibility).
+    expect(done.filter((d) => d.includes('location.replace'))).toHaveLength(1);
+    expect(done.join('\n')).not.toMatch(/http-equiv/i);
     expect(out.headers.get('etag')).toBeNull();
     // Without attribution the download still starts.
-    expect(run('https://shepetal.app/install').done).toEqual(['head + <meta http-equiv="refresh" content="1;url=/download">']);
+    expect(run('https://shepetal.app/install').done).toEqual([`head + ${downloadStarter('')}`]);
+    expect(downloadStarter('')).toContain('location.replace("/download")');
   });
 
   it('leaves every other page as built, ETag included (page views are counted on the server, no meta, no script), and never touches what is not HTML', () => {
@@ -73,5 +77,9 @@ describe('securityHeaders: one list for Next (next.config.ts) and for what worke
     expect(csp).not.toContain('posthog');
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
+  });
+
+  it("allows the inline script that starts the download on /install (edge-html.ts)", () => {
+    expect(h['Content-Security-Policy']).toMatch(/script-src 'self' 'unsafe-inline'/);
   });
 });
