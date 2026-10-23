@@ -29,13 +29,3 @@ export function hostRedirect(url: URL, domain: string = SHEPETAL_DOMAIN): Respon
   return null;
 }
 
-/**
- * next-auth reads AUTH_URL for its callback URLs. In production it is SITE_URL, so Google always comes back to the
- * domain, whichever host the sign-in started on. Local runs (next dev, wrangler dev, the e2e) set their own.
- */
-export function ensureAuthUrl(env: Record<string, string | undefined> = process.env): string {
-  const url = env.AUTH_URL || env.NEXTAUTH_URL || SITE_URL;
-  env.AUTH_URL ||= url;
-  env.NEXTAUTH_URL ||= url;
-  return url;
-}

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { ensureAuthUrl, hostRedirect, LEGACY_HOST, SHEPETAL_DOMAIN, SITE_URL } from './site';
+import { hostRedirect, LEGACY_HOST, SHEPETAL_DOMAIN, SITE_URL } from './site';
 
 const at = (host: string, path: string) => hostRedirect(new URL(`https://${host}${path}`));
 const moved = (r: Response | null) => r && [r.status, r.headers.get('location')];
@@ -18,14 +18,6 @@ describe('the one domain', () => {
     expect(toml).not.toMatch(/^(AUTH_URL|NEXTAUTH_URL)\s*=/m);
   });
 
-  it('gives next-auth SITE_URL in production and leaves a local AUTH_URL alone', () => {
-    const prod: Record<string, string | undefined> = {};
-    expect(ensureAuthUrl(prod)).toBe(SITE_URL);
-    expect(prod).toEqual({ AUTH_URL: SITE_URL, NEXTAUTH_URL: SITE_URL });
-    const local: Record<string, string | undefined> = { AUTH_URL: 'http://localhost:8787' };
-    expect(ensureAuthUrl(local)).toBe('http://localhost:8787');
-    expect(local.NEXTAUTH_URL).toBe('http://localhost:8787');
-  });
 });
 
 describe('hosts', () => {

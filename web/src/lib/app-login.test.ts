@@ -193,3 +193,73 @@ describe('consent page', () => {
     expect(html).toContain('value="&#34;&#62;&#60;script&#62;x&#60;/script&#62;"');
   });
 });
+
+// The route itself (answered by worker.ts): a code only for the user who pressed Continue on this site, for the
+// account the page showed. Status order as API.md: 400, then 403, then 401, then 302.
+describe('/app/login route', async () => {
+  const { GET, POST } = await import('@/app/app/login/route');
+  const { seal } = await import('./session');
+  const SITE = 'https://shepetal.app';
+  process.env.AUTH_SECRET = 'app-login-test-secret';
+  const q = new URLSearchParams({ redirect_uri: MAC, state: 'a b', code_challenge: CHALLENGE, code_challenge_method: 'S256' });
+  const session = async (email = 'a@example.com') => `__Host-shepetal-session=${await seal('app-login-test-secret', 'shepetal-session', { e: email }, 600)}`;
+  const codes = async () => (await db().prepare('SELECT count(*) AS n FROM app_codes').first<{ n: number }>())!.n;
+  /** The consent page for `email`, then its form posted back as a browser would. */
+  async function consent(email: string, { origin = SITE as string | null, csrf = undefined as string | undefined, as = email, fields = q } = {}) {
+    const page = await GET(new Request(`${SITE}/app/login?${q}`, { headers: { cookie: await session(email) } }));
+    expect(page.status).toBe(200);
+    const kept = page.headers.get('set-cookie')!;
+    expect(kept).toMatch(/^__Host-app-login-csrf=[^;]+; Path=\/; Max-Age=600; HttpOnly; SameSite=Lax; Secure$/);
+    const sent = (await page.text()).match(/name="csrf" value="([^"]+)"/)![1];
+    const body = new URLSearchParams(fields);
+    body.set('csrf', csrf ?? sent);
+    const cookie = [kept.split(';')[0], as && (await session(as))].filter(Boolean).join('; ');
+    return POST(new Request(`${SITE}/app/login`, { method: 'POST', body, headers: { cookie, ...(origin && { origin }), 'content-type': 'application/x-www-form-urlencoded' } }));
+  }
+
+  it('GET: 400 for a bad query, Google with state and PKCE when signed out, the consent page signed in', async () => {
+    expect((await GET(new Request(`${SITE}/app/login?redirect_uri=https%3A%2F%2Fevil.example`))).status).toBe(400);
+    const out = await GET(new Request(`${SITE}/app/login?${q}`));
+    expect(out.status).toBe(307);
+    const google = new URL(out.headers.get('location')!);
+    expect(google.searchParams.get('redirect_uri')).toBe(`${SITE}/api/auth/callback/google`);
+    expect(google.searchParams.get('code_challenge_method')).toBe('S256');
+    expect(out.headers.get('set-cookie')).toMatch(/^__Host-shepetal-oauth=/);
+    const chooser = await GET(new Request(`${SITE}/app/login?${q}&switch=1`, { headers: { cookie: await session() } }));
+    expect([chooser.status, new URL(chooser.headers.get('location')!).searchParams.get('prompt')]).toEqual([307, 'select_account']);
+    expect(await codes()).toBe(0);
+  });
+
+  it('POST: Continue on this site is a 302 to the app with a code and the state', async () => {
+    const res = await consent('a@example.com');
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toMatch(/^shepetal:\/\/auth\?code=[A-Za-z0-9_-]{43}&state=a%20b$/);
+    expect(res.headers.get('set-cookie')).toMatch(/^__Host-app-login-csrf=; Path=\/; Max-Age=0;/);
+  });
+
+  it('POST: 400, then 403 (CSRF, Origin, another account than the page showed), then 401; no code issued', async () => {
+    const bad = new URLSearchParams(q);
+    bad.set('redirect_uri', 'https://evil.example/callback');
+    expect((await consent('a@example.com', { fields: bad, origin: 'https://evil.example' })).status).toBe(400);
+    expect((await consent('a@example.com', { csrf: 'A'.repeat(43) })).status).toBe(403); // same length, wrong value
+    expect((await consent('a@example.com', { csrf: '' })).status).toBe(403);
+    expect((await consent('a@example.com', { origin: 'https://evil.example' })).status).toBe(403);
+    expect((await consent('a@example.com', { origin: null })).status).toBe(403);
+    expect((await consent('a@example.com', { as: 'b@example.com' })).status).toBe(403); // signed in as someone else since
+    expect((await consent('a@example.com', { as: '' })).status).toBe(401);
+    expect(await codes()).toBe(0);
+  });
+
+  // No trial emails are sent: Continue records no opt-in, even with the old box's field posted.
+  it('POST: Continue records no trial emails opt-in, with or without a posted trial_emails=yes', async () => {
+    const optIn = async (email: string) => (await db().prepare('SELECT trial_emails_at FROM users WHERE email = ?1').bind(email).first<{ trial_emails_at: string | null }>())?.trial_emails_at;
+    expect((await consent('quiet@example.com')).status).toBe(302);
+    expect(await optIn('quiet@example.com')).toBeNull();
+    const ticked = new URLSearchParams(q);
+    ticked.set('trial_emails', 'yes');
+    expect((await consent('loud@example.com', { fields: ticked, origin: 'https://evil.example' })).status).toBe(403);
+    expect(await optIn('loud@example.com')).toBeUndefined(); // no user row either
+    expect((await consent('loud@example.com', { fields: ticked })).status).toBe(302);
+    expect(await optIn('loud@example.com')).toBeNull();
+  });
+});

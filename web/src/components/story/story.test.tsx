@@ -1,11 +1,9 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { FLOWS, HERO_WORDS, storyCss, table, TRACK_LENGTH, TYPED_WORDS } from './choreography';
 
-// The trial buttons are next-auth sign-in forms; the story itself needs no session.
-vi.mock('@/lib/auth', () => ({ signIn: async () => undefined }));
 const { Story } = await import('./Story');
 
 const here = (f: string) => join(__dirname, f);

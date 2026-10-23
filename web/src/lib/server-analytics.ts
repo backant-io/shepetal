@@ -79,7 +79,7 @@ async function send(event: Event, req: Request, url: URL, res: Response, env: En
       props.client = redirect === 'shepetal://auth' ? 'app' : 'loopback';
       props.app_version = appVersion(req, url);
       // Whether a site session already existed, as a yes or no: never which account.
-      if (event === 'app_login_opened') props.signed_in = (req.headers.get('cookie') ?? '').includes('authjs.session-token=');
+      if (event === 'app_login_opened') props.signed_in = (req.headers.get('cookie') ?? '').includes('shepetal-session=') // __Host-shepetal-session, or the plain name on http (lib/auth.ts);
     }
     await capture(event, id, props, env);
   } catch {

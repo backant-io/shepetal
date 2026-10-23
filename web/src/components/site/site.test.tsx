@@ -1,10 +1,9 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { safeNext } from '@/lib/next-path';
 
-vi.mock('@/lib/auth', () => ({ signIn: async () => undefined }));
 const { SignIn } = await import('./SignIn');
 
 describe('sign-in page', () => {
@@ -13,9 +12,11 @@ describe('sign-in page', () => {
   it('has one clear action, Continue with Google, as the page’s only orange, in a real form', () => {
     expect(html).toContain('<h1 class="s-h1">Sign in.</h1>');
     expect(html.match(/s-btn-signal/g)).toHaveLength(1);
+    // A plain POST that works without JavaScript: no server action, the return path in the action (worker.ts sets it).
     expect(html).toMatch(
-      /<form class="s-form"[^>]*><button type="submit" class="s-btn s-btn-signal">Continue with Google<\/button><\/form>/,
+      /<form class="s-form" action="\/api\/auth\/signin\/google\?callbackUrl=%2Faccount" method="post"><button type="submit" class="s-btn s-btn-signal">Continue with Google<\/button><\/form>/,
     );
+    expect(renderToStaticMarkup(<SignIn next="/app/login?state=a b" />)).toContain('action="/api/auth/signin/google?callbackUrl=%2Fapp%2Flogin%3Fstate%3Da%20b"');
     expect(html.match(/<button\b/g)).toHaveLength(1);
   });
 
@@ -28,8 +29,9 @@ describe('sign-in page', () => {
   it('keeps the key small, beside the heading, and says what failed when Google sends the user back', () => {
     expect(html).toContain('class="s-key"');
     expect(html).toContain('class="kd-art"');
-    expect(html).not.toContain('role="alert"');
-    expect(renderToStaticMarkup(<SignIn failed />)).toContain('Sign-in did not finish. Try again.');
+    // Always in the page, hidden until ?error= (worker.ts drops `hidden`: hydration leaves attributes alone).
+    expect(html).toContain('<p role="alert" class="s-alert" hidden="">Sign-in did not finish. Try again.</p>');
+    expect(renderToStaticMarkup(<SignIn failed />)).toContain('<p role="alert" class="s-alert">Sign-in did not finish. Try again.</p>');
   });
 
   it('keeps the voice: lowercase shepetal, no hedges, no sign-in mechanics', () => {
@@ -42,8 +44,20 @@ describe('where a sign-in returns to', () => {
   it('stays on this site', () => {
     expect(safeNext('/account#plans')).toBe('/account#plans');
     expect(safeNext('/account?purchased=1')).toBe('/account?purchased=1');
+    expect(safeNext('/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=a%20b')).toBe('/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=a%20b');
+    expect(safeNext('/%09/evil.example')).toBe('/account'); // an encoded tab: refused once decoded (next-path.test.ts)
     for (const bad of [undefined, null, '', 'https://evil.example/', '//evil.example/x', '/\\evil.example', 'account'])
       expect(safeNext(bad)).toBe('/account');
+  });
+
+  // A browser drops tabs and newlines from a URL and reads a backslash as a slash, so these are //evil.example to it;
+  // dot segments resolve to //evil.example too. Each would make the signed-in /login redirect leave the site.
+  it('never becomes another site once a browser resolves it', () => {
+    for (const bad of ['/\t/evil.example', '/\n/evil.example', '/\r/evil.example', '/\x00/evil.example', '/\\evil.example',
+      '/..//evil.example', '/.//evil.example', '/%2e%2e//evil.example', '/%2e//evil.example', '/a/..//evil.example', 'https://evil.example'])
+      expect(safeNext(bad), JSON.stringify(bad)).toBe('/account');
+    for (const x of ['/account', '/account?purchased=1#plans', '/a/../b', '/..//evil.example', '/%09/x'])
+      expect(safeNext(safeNext(x))).toBe(safeNext(x));
   });
 });
 
@@ -63,7 +77,7 @@ describe('install help (the app is not notarized)', () => {
 
   it('is where the account’s Download button lands, and that page starts the download', () => {
     const read = (p: string) => readFileSync(join(__dirname, '..', '..', 'app', '(site)', p, 'page.tsx'), 'utf8');
-    expect(read('account')).toContain('href={`/install${from}`}');
+    expect(readFileSync(join(__dirname, '..', 'account', 'Account.tsx'), 'utf8')).toContain('href={`/install${from}`}');
     const install = read('install');
     // The script that starts the download comes from worker.ts with ?ref= and utm_* (edge.test.ts), never from React: a
     // refresh rendered by React got a bare second one on hydration that browsers followed, and the download lost its

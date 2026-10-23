@@ -5,6 +5,7 @@ import { licenseOf, upsertUser, userById, type User } from './account';
 import { db } from './db';
 import { cancelAt, checkoutUrl, CONFIRMATION, consentText, getStripe, handleWebhook, nextCharge, portalUrl, priceFor, purchaseText, setCancelAtPeriodEnd } from './stripe';
 import { SITE_URL } from './site';
+import { StripeApiError } from './stripe-api';
 import { useTestDb } from './test-db';
 
 vi.mock('./db', () => import('./test-db'));
@@ -240,7 +241,7 @@ describe('the PRODUCTHUNT code', () => {
   it("says when Stripe refuses the code (used before, ended, a customer who has paid)", async () => {
     vi.spyOn(getStripe().promotionCodes, 'list').mockResolvedValue({ data: [promo('PRODUCTHUNT', 'shepetal')] } as never);
     vi.spyOn(getStripe().checkout.sessions, 'create').mockRejectedValue(
-      new Stripe.errors.StripeInvalidRequestError({ message: 'This promotion code cannot be redeemed because the associated customer has prior transactions.' } as never),
+      new StripeApiError('invalid_request_error', undefined, 'This promotion code cannot be redeemed because the associated customer has prior transactions.', 400),
     );
     await expect(checkoutUrl(user, 'https://s', 'lifetime', 'PRODUCTHUNT')).rejects.toMatchObject({ code: 'code_not_applicable' });
   });
@@ -383,7 +384,7 @@ describe('never charged twice', () => {
   it('treats a refund Stripe already made (after its 24 h idempotency window) as done', async () => {
     await send(event(session({ payment_intent: 'pi_first' })));
     vi.spyOn(getStripe().refunds, 'create').mockRejectedValue(
-      new Stripe.errors.StripeInvalidRequestError({ code: 'charge_already_refunded', message: 'Charge has already been refunded.' } as never),
+      new StripeApiError('invalid_request_error', 'charge_already_refunded', 'Charge has already been refunded.', 400),
     );
     expect((await send(event(session({ id: 'cs_2', payment_intent: 'pi_second' })))).status).toBe(200);
   });

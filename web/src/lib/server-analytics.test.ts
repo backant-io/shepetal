@@ -82,7 +82,7 @@ describe('server page views', () => {
 
   it('sends no IP, no user agent, no full referrer and no query beyond ref and utm_*; the referrer host, device type and OS family only', async () => {
     const req = at('/faq?ref=producthunt&utm_source=x.com&email=ana@example.com&state=secret', {
-      headers: { 'user-agent': IPHONE, referer: 'https://news.ycombinator.com/item?id=4242', 'x-forwarded-for': IP, cookie: 'authjs.session-token=abc' },
+      headers: { 'user-agent': IPHONE, referer: 'https://news.ycombinator.com/item?id=4242', 'x-forwarded-for': IP, cookie: '__Host-shepetal-session=abc' },
     });
     await run(req).done();
     const [body] = sent(posthog);
@@ -135,7 +135,7 @@ describe('the app sign-in funnel: app_login_opened and app_login_consented', () 
   const consentPage = () => html(200);
 
   it('app_login_opened carries only the anonymous v_ id: never the account, its email, the session or the state', async () => {
-    const req = at(q('shepetal://auth', '&app_version=0.3.0'), { headers: { cookie: `authjs.session-token=jwt-of-${EMAIL}`, 'sec-fetch-site': 'none' } });
+    const req = at(q('shepetal://auth', '&app_version=0.3.0'), { headers: { cookie: `__Host-shepetal-session=sealed-for-${EMAIL}`, 'sec-fetch-site': 'none' } });
     await run(req, consentPage()).done();
     const [body] = sent(posthog);
     expect(body).toMatchObject({ event: 'app_login_opened', properties: { client: 'app', app_version: '0.3.0', signed_in: true, $process_person_profile: false } });

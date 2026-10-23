@@ -5,7 +5,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 ## Architecture
 
 - **Runtime:** Next.js 16 (App Router), built with `@opennextjs/cloudflare` and served by its own Cloudflare Worker, `shepetal-web`. `worker.ts` is the entry: it applies the host rules (`src/lib/site.ts`: www to the apex; the old host `shepetal.backant.io` is a 301 to the domain for every path, `/api/*` included), then hands over to OpenNext's worker. The custom domains are attached at launch (GO-LIVE.md, step 5).
-- **Sign-in:** next-auth v5 with Google, JWT sessions and no adapter, the same setup as backant.io. Cookies are host-only, so a shepetal session never reaches backant.io.
+- **Sign-in:** Google (backant's OAuth client) with the site's own code in `src/lib/auth.ts`, answered by `worker.ts` without Next (the Workers Free plan's 10 ms of CPU): an OpenID Connect code flow with PKCE S256 and a state in a sealed one-time cookie, then a 30-day session cookie sealed with AES-GCM under a key derived from `AUTH_SECRET` (`src/lib/session.ts`). Cookies are host-only, so a shepetal session never reaches backant.io. `/login`, `/account` and `/changelog` are static pages; `worker.ts` adds what depends on the visit (the redirects, the sign-in form's return path, the release list).
 - **Data:** shepetal's own D1 database, `shepetal` (binding `DB`). The tables are `users`, `tokens`, `app_codes`, `stripe_events`, `lifecycle_emails` and `email_unsubscribes` (the trial emails, sent only to users with the opt-in `users.trial_emails_at`), `cancellations` (what the "Verträge hier kündigen" button received, API.md) and `visitor_salts` (the daily analytics salt), and the schema and its rules are in `migrations/`. shepetal never touches backant's Postgres.
 - **Payments:** Stripe Checkout in backant's Stripe account: the lifetime price (lookup_key `shepetal_lifetime`, mode payment) or the monthly price (`shepetal_monthly`, mode subscription), both with promotion codes. `scripts/stripe-setup.mjs` creates the products, prices, the PRODUCTHUNT code and the Billing Portal configuration, in test or live mode. The webhook at `/api/stripe/webhook` stores the lifetime license or the subscription; `/api/billing/portal` opens the Stripe Billing Portal.
 - **Apps:** OAuth for native apps with PKCE (RFC 8252, RFC 7636): the app opens `/app/login`, which signs in with Google, asks the user to confirm on a consent page, and redirects to `shepetal://auth` or `http://127.0.0.1:<port>/callback` with a one-time code, and `/api/app/token` trades the code for an opaque bearer token. Only the token's SHA-256 hash is stored, in `tokens`. It ends 90 days after its last use, and `/api/app/revoke` ends it on Sign out. `/api/license` checks the token.
@@ -13,17 +13,16 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | Path | What |
 |---|---|
 | `src/lib/db.ts` | `db()`: the D1 binding (inside a request only) |
-| `src/lib/auth.ts` | next-auth (Google). The first sign-in creates the user and starts the trial |
+| `src/lib/auth.ts` | Google sign-in, the session, `requestUser` (Bearer token or session). The first sign-in creates the user and starts the trial |
 | `src/lib/account.ts` | `upsertUser`, `getLicense`, `licenseOf` (the trial rule, tested in `account.test.ts`) |
-| `src/lib/stripe.ts` | `getStripe()`, checkout per plan, the Billing Portal, the webhook |
+| `src/lib/stripe.ts` | `getStripe()`, checkout per plan, the Billing Portal, the webhook. The calls go over fetch (`src/lib/stripe-api.ts`, typed as `StripeClient`: only the calls it implements compile; a GET, or a POST or DELETE with an Idempotency-Key, is retried twice after a 429, a 5xx or a network error); the `stripe` package is there for its types, the setup script and the tests |
 | `scripts/stripe-setup.mjs` | finds or creates the Stripe objects and prints their IDs |
 | `src/lib/analytics.ts`, `src/lib/server-analytics.ts`, `src/lib/visitor-salt.ts` | PostHog (backant's project, US cloud), every event tagged `app=shepetal`, all sent by the Worker after the answer: no analytics code, cookie or storage in the browser, so no consent banner. Off unless the `POSTHOG_KEY` secret is set. Events: `$pageview`, `download_served`, `app_login_opened`, `app_login_consented`, `appcast_check`, `license_first_call`, `checkout_completed` (GO-LIVE.md, step 4). Visitors are an HMAC under a random salt per UTC day, kept in D1 and deleted after 48 h |
 | `src/lib/app-login.ts` | the app sign-in: redirect_uri allowlist, one-time codes, PKCE |
 | `src/app/(story)/page.tsx`, `src/components/story/` | the landing page: the approved "full scroll story". `choreography.ts` is the design's one table of scroll timings and writing windows (ported from its build.mjs); `story.generated.css` is generated from it (native CSS scroll timelines plus the paused-animation fallback that `StoryMotion.tsx` drives with `--p`) |
 | `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
 | `src/lib/download.ts` | `/download`, the release files and `/appcast.xml`, from the R2 bucket `shepetal-releases` |
-| `src/lib/trial-emails.ts` | the opt-in to the trial emails: the checkbox's field and label, and `recordTrialEmailsOptIn` |
-| `src/lib/lifecycle.ts`, `lifecycle-copy.ts` | the trial emails (welcome, day 3, day 25) from the Cron Trigger, their words and branded HTML, and the signed unsubscribe link; sent through `mail.ts`'s SES transport |
+| `src/lib/lifecycle.ts`, `lifecycle-copy.ts` | the trial emails (welcome, day 3, day 25; off, `LIFECYCLE_EMAILS`) from the Cron Trigger, their words and branded HTML, and the signed unsubscribe link; sent through `mail.ts`'s SES transport |
 | `src/app/api/` | the API routes in API.md |
 | `src/lib/waitlist.ts`, `src/lib/waitlist-config.ts`, `src/app/(site)/waitlist/` | the waitlist for Windows, Linux and iPhone (API.md): double opt-in, the table `waitlist` (`migrations/0008_waitlist.sql`), the confirmation email through `src/lib/mail.ts`; off until `WAITLIST` in `wrangler.toml` is `"on"` |
 
@@ -35,7 +34,6 @@ Only the login and payment configuration, referred to here by variable name:
 |---|---|
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | backant's Google OAuth client. Live values are in AWS SSM as `/backant/WEB_GOOGLE_CLIENT_ID` and `/backant/WEB_GOOGLE_CLIENT_SECRET` (eu-central-1, profile `backant`). The same values are in `/Users/sorcecoder/github/backant/backant-mcp/web/.env.local` |
 | `STRIPE_SECRET_KEY` | backant's Stripe account (live key). It is in SSM as `/backant/WEB_STRIPE_SECRET_KEY` |
-| next-auth setup | copied from `backant-mcp/web/src/lib/auth.ts`: Google provider, JWT, `trustHost` |
 
 These belong to shepetal alone:
 
@@ -44,7 +42,7 @@ These belong to shepetal alone:
 | `AUTH_SECRET` | a new random value, not backant's, so a session from one site is never valid on the other |
 | `STRIPE_WEBHOOK_SECRET` | the signing secret of shepetal's own webhook endpoint |
 | prices, portal | found by lookup_key and metadata app=shepetal. `STRIPE_PRICE_LIFETIME`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PORTAL_CONFIG` override them |
-| `SHEPETAL_DOMAIN` | `shepetal.app` (vars in `wrangler.toml`). `AUTH_URL` and `NEXTAUTH_URL` are `https://<SHEPETAL_DOMAIN>` unless set (local runs set them). The OAuth callback is `https://shepetal.app/api/auth/callback/google` |
+| `SHEPETAL_DOMAIN` | `shepetal.app` (vars in `wrangler.toml`). `AUTH_URL` is `https://<SHEPETAL_DOMAIN>` unless set (local runs set it). The OAuth callback is `https://shepetal.app/api/auth/callback/google` |
 
 Nothing about shepetal goes into backant-mcp or onto backant.io.
 
@@ -72,7 +70,9 @@ echo "AUTH_SECRET=$(openssl rand -hex 32)" >> .env.development.local
 grep -E '^GOOGLE_CLIENT_(ID|SECRET)=' /Users/sorcecoder/github/backant/backant-mcp/web/.env.local >> .env.development.local
 ```
 
-Local Google sign-in only works if `http://localhost:3000/api/auth/callback/google` is an authorized redirect URI on the OAuth client.
+Local Google sign-in only works if `http://localhost:3000/api/auth/callback/google` (or `:8787` for `npm run preview`) is an authorized redirect URI on the OAuth client.
+
+Under `npm run dev` (Next alone, no `worker.ts`), `/login` does not send a signed-in visitor on, `/account` does not send a signed-out one to sign in (the page says it did not load), and `/changelog` shows no releases. Use `npm run preview` for those.
 
 ## Tests
 
