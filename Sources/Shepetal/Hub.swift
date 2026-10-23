@@ -323,9 +323,22 @@ private struct HubPage<Content: View>: View {
             }
             .hubColumn(fill: false)
         }
+        .hubFlatTopEdge()
         .shText(SH.appBody)
         .foregroundStyle(SH.text)
         .background(SH.bg)
+    }
+}
+
+extension View {
+    /// The title bar is drawn on sh-bg with its hairline, so the page scrolls under a flat edge: no blur from the
+    /// system's scroll edge effect (macOS 26), which is depth the system does not have.
+    @ViewBuilder fileprivate func hubFlatTopEdge() -> some View {
+        if #available(macOS 26.0, *) {
+            scrollEdgeEffectHidden(true, for: .top)
+        } else {
+            self
+        }
     }
 }
 
