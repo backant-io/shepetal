@@ -89,10 +89,10 @@ final class HubShellScreenshotTests: XCTestCase {
         }
     }
 
-    /// Settings, as tall as it is: every setting as a row.
+    /// Settings, its first rows. (Taller shots get too small for the text check to read.)
     func testHubSettings() throws {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        try shoot("22-hub-settings", NSSize(width: 1120, height: 3200),
+        try shoot("22-hub-settings", NSSize(width: 1120, height: 1400),
                   expect: ["Settings", "Always record meetings automatically", "Show words while you speak", "Open recordings folder"]) {
             let hub = self.hub(pipeline, tab: "settings")
             return (hub, try self.part(hub, "window"))
