@@ -14,9 +14,18 @@ describe('sign-in page', () => {
     expect(html).toContain('<h1 class="s-h1">Sign in.</h1>');
     expect(html.match(/s-btn-signal/g)).toHaveLength(1);
     expect(html).toMatch(
-      /<form class="s-form"[^>]*><button type="submit" class="s-btn s-btn-signal">Continue with Google<\/button><\/form>/,
+      /<form class="s-form"[^>]*><label class="s-check">.*<\/label><button type="submit" class="s-btn s-btn-signal">Continue with Google<\/button><\/form>/,
     );
     expect(html.match(/<button\b/g)).toHaveLength(1);
+  });
+
+  // The trial emails need consent (§ 7 UWG, Art. 6(1)(a) GDPR): asked where the account is created, in the form that
+  // posts to Google, unticked, with a link to what they are.
+  it('asks for the trial emails with an unticked box inside the sign-in form', () => {
+    expect(html).toContain(
+      '<label class="s-check"><input type="checkbox" name="trial_emails" value="yes"/> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a></label>',
+    );
+    expect(html).not.toMatch(/checked/);
   });
 
   it('keeps the key small, beside the heading, and says what failed when Google sends the user back', () => {
@@ -59,14 +68,32 @@ describe('install help (the app is not notarized)', () => {
     const read = (p: string) => readFileSync(join(__dirname, '..', '..', 'app', '(site)', p, 'page.tsx'), 'utf8');
     expect(read('account')).toContain('href={`/install${from}`}');
     const install = read('install');
-    // The refresh comes from worker.ts with ?ref= and utm_* (edge.test.ts). Rendered by React too, hydration added a
-    // bare second one that browsers followed, and the download lost its attribution.
-    expect(install).not.toMatch(/httpEquiv=["']refresh/i);
+    // The script that starts the download comes from worker.ts with ?ref= and utm_* (edge.test.ts), never from React: a
+    // refresh rendered by React got a bare second one on hydration that browsers followed, and the download lost its
+    // attribution. No meta refresh at all (axe meta-refresh).
+    expect(install).not.toMatch(/httpEquiv|refresh|location\.replace|<script/i);
     // static: worker.ts adds ?ref= and utm_* to the /download link at the edge
     expect(install).toContain("const download = '/download';");
     expect(install).not.toContain('searchParams');
     expect(install).toContain('<InstallSteps />');
     expect(install).toContain('href={download}');
+  });
+});
+
+describe('next/link prefetching is off on every link', () => {
+  // A prefetch is a Worker request (an RSC payload, several per link in view), and the Workers Free plan's daily
+  // requests are shared by the account. The pages are cached at the edge, so a click costs one request anyway.
+  it('passes prefetch={false} to every <Link>', () => {
+    const src = join(__dirname, '..', '..');
+    const files = (readdirSync(src, { recursive: true }) as string[]).filter((f) => /\.tsx$/.test(f) && !/\.test\./.test(f));
+    let links = 0;
+    for (const f of files) {
+      for (const [tag] of readFileSync(join(src, f), 'utf8').matchAll(/<Link\b[^>]*>/g)) {
+        links++;
+        expect(tag, f).toContain('prefetch={false}');
+      }
+    }
+    expect(links).toBeGreaterThan(20);
   });
 });
 

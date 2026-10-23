@@ -36,6 +36,9 @@
 .s-btn-line:active { transform: translateY(1px); }
 .s-textbtn { padding: 0; margin: 0; border: 0; background: none; font: inherit; color: var(--ink); text-decoration: underline; text-underline-offset: .2em; cursor: pointer; }
 .s-form { display: contents; }
+.s-check { display: block; margin: 0 0 1.1rem; max-width: 28rem; font-size: .9375rem; line-height: 1.45; color: var(--ink2); }
+.s-check input { margin: 0 .3rem 0 0; vertical-align: -2px; accent-color: var(--ink); }
+.s-check a { color: var(--ink); }
 .s-actions { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 .s-alert { margin: .75rem 0 0; font-size: .9375rem; color: #a3300a; }
 

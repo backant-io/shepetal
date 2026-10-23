@@ -17,8 +17,8 @@ export default function Refunds() {
 
         <div className="s-prose">
           <p>
-            This policy is part of our <Link href="/terms">Terms of Use</Link>. shepetal is sold by BackAnt, Inc. (see the{' '}
-            <Link href="/impressum">legal notice</Link>).
+            This policy is part of our <Link href="/terms" prefetch={false}>Terms of Use</Link>. shepetal is sold by BackAnt, Inc. (see the{' '}
+            <Link href="/impressum" prefetch={false}>legal notice</Link>).
           </p>
 
           <h2>Try it first</h2>
