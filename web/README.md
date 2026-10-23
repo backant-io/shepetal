@@ -22,8 +22,7 @@ The website and account service at https://shepetal.app (`SHEPETAL_DOMAIN` in `w
 | `src/app/(story)/page.tsx`, `src/components/story/` | the landing page: the approved "full scroll story". `choreography.ts` is the design's one table of scroll timings and writing windows (ported from its build.mjs); `story.generated.css` is generated from it (native CSS scroll timelines plus the paused-animation fallback that `StoryMotion.tsx` drives with `--p`) |
 | `src/app/(site)/`, `src/components/account/`, `src/styles/site.css` | sign-in, the app consent page, the account and its plan settings, and the legal pages, in the landing page's system |
 | `src/lib/download.ts` | `/download`, the release files and `/appcast.xml`, from the R2 bucket `shepetal-releases` |
-| `src/lib/trial-emails.ts` | the opt-in to the trial emails: the checkbox's field and label, and `recordTrialEmailsOptIn` |
-| `src/lib/lifecycle.ts`, `lifecycle-copy.ts` | the trial emails (welcome, day 3, day 25) from the Cron Trigger, their words and branded HTML, and the signed unsubscribe link; sent through `mail.ts`'s SES transport |
+| `src/lib/lifecycle.ts`, `lifecycle-copy.ts` | the trial emails (welcome, day 3, day 25; off, `LIFECYCLE_EMAILS`) from the Cron Trigger, their words and branded HTML, and the signed unsubscribe link; sent through `mail.ts`'s SES transport |
 | `src/app/api/` | the API routes in API.md |
 | `src/lib/waitlist.ts`, `src/lib/waitlist-config.ts`, `src/app/(site)/waitlist/` | the waitlist for Windows, Linux and iPhone (API.md): double opt-in, the table `waitlist` (`migrations/0008_waitlist.sql`), the confirmation email through `src/lib/mail.ts`; off until `WAITLIST` in `wrangler.toml` is `"on"` |
 
