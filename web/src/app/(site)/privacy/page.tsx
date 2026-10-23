@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
+import { waitlistOn } from '@/lib/waitlist-config';
 
 export const metadata: Metadata = pageMetadata('privacy', { title: 'Privacy Policy', description: 'How shepetal handles your information. Your voice and your text stay on your Mac.' });
 
@@ -136,7 +137,6 @@ export default function PrivacyPolicy() {
             cancellations (§&nbsp;312k of the German Civil Code), and Art. 6(1)(f) GDPR, our legitimate interest in being
             able to prove them.
           </p>
-
           <h3 id="trial-emails">8. Emails about your trial</h3>
           <p>
             If you tick &quot;Send me three short emails about my trial.&quot; when you sign in, on the Site or in the
@@ -156,6 +156,34 @@ export default function PrivacyPolicy() {
             <a href="mailto:support@shepetal.app">support@shepetal.app</a>. Withdrawing does not make the emails sent
             before unlawful. Receipts and confirmations of what you buy or cancel still come.
           </p>
+
+          {waitlistOn() && (
+            <>
+              <h3 id="waitlist">9. The waitlist</h3>
+              <p>
+                When you join the waitlist for Windows, Linux or iPhone, we store your email address, the platforms you
+                chose, the words of the box you ticked, and when you signed up and when you confirmed. Of your IP
+                address we keep only a keyed hash (HMAC-SHA-256), and we use it to limit how many signups come from one
+                connection.
+              </p>
+              <p>
+                We use your email address for one purpose only, and that is to email you when shepetal comes to a
+                platform you chose. The only one who receives it is Amazon Web Services, which sends the emails for us.
+                First we send you one email to confirm the address (double opt-in), and the address counts only once you
+                click its link, so until you do, that confirmation is the only email you get from us.
+              </p>
+              <p>
+                Every email has a link that unsubscribes you and deletes your address at once. You can also withdraw
+                your consent at any time by writing to <a href="mailto:support@shepetal.app">support@shepetal.app</a>,
+                and what we did before you withdrew stays lawful. The links carry a random number in place of your
+                address, so your address stays out of our request logs.
+              </p>
+              <p>
+                Legal basis: Art. 6(1)(a) GDPR, your consent, which is also the express consent § 7 of the German Act
+                against Unfair Competition (UWG) requires for this email.
+              </p>
+            </>
+          )}
 
           <div className="s-box">
             <h3>Your right to object</h3>
@@ -181,7 +209,10 @@ export default function PrivacyPolicy() {
           </p>
           <ul>
             <li>Cloudflare, Inc. (United States): hosting, the database, file storage, request logs, email forwarding and the emails that tell us of a cancellation.</li>
-            <li>Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7), and the emails about your trial you asked for (section III.8).</li>
+            <li>
+              Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7), and the emails about your trial you asked for (section III.8)
+              {waitlistOn() && ', and the waitlist emails (section III.9)'}.
+            </li>
             <li>Stripe, Inc. (United States): payments and tax. Stripe also uses payment data as its own controller, for example to prevent fraud and to meet its legal duties.</li>
             <li>PostHog, Inc. (United States): the analytics above.</li>
             <li>The provider of our mailbox, which receives mail sent to support@shepetal.app.</li>
@@ -225,6 +256,13 @@ export default function PrivacyPolicy() {
             <li>Payment and tax records: as long as tax law requires, up to 10 years.</li>
             <li>Email to us: up to 3 years after the end of the year of our last exchange.</li>
             <li>Emails about your trial: the time you ticked the box, and the record of which emails we sent, when and with which message id, until you ask us to delete your account. Our record of your unsubscribe, so that no further email goes out: until you ask us to delete your account, or until you tick the box again.</li>
+            {waitlistOn() && (
+              <li>
+                The waitlist: an unconfirmed address is deleted within 30 days of its last signup. A confirmed address
+                is deleted when you unsubscribe, or once shepetal has come to every platform you chose and we have told
+                you.
+              </li>
+            )}
             <li>Cancellations: 3 years after the end of the year you sent them, deleted by the next cancellation sent after that. The email that told us of it is kept like email to us. The counts that limit the form: one minute.</li>
           </ul>
 
@@ -234,7 +272,7 @@ export default function PrivacyPolicy() {
             cannot give you a trial or a license. To buy, Stripe needs your payment and billing details, which the law
             also requires for tax. To cancel without signing in, we need the email of your account to find your
             contract. The emails about your trial are up to you: without the tick you get none, and everything else works
-            the same. Analytics are not needed for anything: the Service works the same without them. No analytics script
+            the same.{waitlistOn() && ' The waitlist needs your email address, and you give it to us only if you want to join.'} Analytics are not needed for anything: the Service works the same without them. No analytics script
             runs in your browser. The server events in section III.5 do not depend on your browser, but you can object
             to them (see the box in section III).
           </p>
