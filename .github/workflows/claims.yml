@@ -68,6 +68,10 @@ jobs:
       - name: Build shepetal (network on)
         run: swift build -c release
 
+      - name: Diagnostic, nsattributedstringagent before the test
+        run: |
+          ps -axo pid,ppid,user,lstart,command | grep -i '[n]sattributedstringagent' || echo "no nsattributedstringagent running"
+          sudo log show --last boot --style compact --predicate 'process == "nsattributedstringagent" OR eventMessage CONTAINS[c] "nsattributedstringagent"' | tail -n 80 || true
       # Network denied from here on.
       - name: Dictation, network denied
         run: |
@@ -114,3 +118,8 @@ jobs:
             echo "::error::network error in the e2e output (above)"; exit 1
           fi
           echo "no network denial but the canary's, and no network error in the e2e output"
+      - name: Diagnostic, nsattributedstringagent after the test
+        if: ${{ always() }}
+        run: |
+          ps -axo pid,ppid,user,lstart,command | grep -i '[n]sattributedstringagent' || echo "no nsattributedstringagent running"
+          sudo log show --last boot --style compact --predicate 'process == "nsattributedstringagent" OR eventMessage CONTAINS[c] "nsattributedstringagent" OR (process == "launchd" AND eventMessage CONTAINS[c] "attributedstring")' | tail -n 300 || true

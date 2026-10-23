@@ -25,7 +25,8 @@ preferences):
    checkout Package.resolved pins, because the release tarball does not ship it) runs non-interactively against that bundle. Passes when the installed app is build N+1, version
    0.0.2, the DMG came from the local feed, and `codesign --verify --deep --strict` accepts it.
 5. N again, and the served DMG replaced by a copy with one byte flipped (same length, same appcast, same signature).
-   Passes when the DMG was downloaded, sparkle-cli printed a signature error and N is still installed.
+   Passes when the DMG was downloaded, sparkle-cli reported error 4005 in SUSparkleErrorDomain (SUInstallationError, how
+   Sparkle 2's installer reports the refused signature) and N is still installed.
 6. N again, the good DMG, and an appcast that says build N-1. Passes when the DMG was never downloaded and N is still
    installed.
 
@@ -34,7 +35,9 @@ site does not count a download: `https://shepetal.app/download` must end at `/do
 file's sha256 must match the `.sha256` next to it, `/appcast.xml` must offer that URL with that length and that build,
 and its EdDSA signature must match the DMG under the SUPublicEDKey inside the DMG's own app. It prints `codesign -dv`,
 `spctl -a -vv` and `stapler validate` for the record and never fails on them: Gatekeeper refuses the release because it
-is not notarized, on purpose (Pavel's decision).
+is not notarized, on purpose (Pavel's decision). Cloudflare's bot protection can answer the runner (a datacenter IP with that bot
+user agent) with 403 where other clients get the file: a 403 is tried once more, and a second 403 from Cloudflare
+(`cf-ray` header, `server: cloudflare`) skips the live chain with a warning annotation; any other error fails it.
 
 ## The test-only overrides
 
