@@ -37,7 +37,7 @@ jobs:
           out="$RUNNER_TEMP/screens"
           mkdir -p "$out"
           SHEPETAL_HOME="$(mktemp -d)" SHEPETAL_KEYCHAIN_SERVICE=io.backant.shepetal.test.screenshots \
-          SHEPETAL_SCREENSHOTS="$out" swift test --filter ShepetalTests.ScreenshotTests
+          SHEPETAL_SCREENSHOTS="$out" swift test --filter "ShepetalTests\..*ScreenshotTests"
           ls -l "$out"
       - uses: actions/upload-artifact@v4
         if: always()
