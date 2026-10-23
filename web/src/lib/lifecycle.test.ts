@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { copyFor, render, type Kind } from './lifecycle-copy';
+import { sweepTick } from './waitlist';
 import { BATCH, compose, due, eligible, runLifecycle, unsubscribeRoute, unsubscribeUrl, verifyUnsubscribe, type LifecycleEnv } from './lifecycle';
 import { db, useTestDb } from './test-db';
 
@@ -29,13 +30,10 @@ beforeEach(() => {
   fakeSes.mockClear();
 });
 
-/**
- * A user whose trial started `days` days before NOW and who ticked the trial emails box at sign-up, with any other
- * columns (trial_emails_at: null for one who never ticked it).
- */
+/** A user whose trial started `days` days before NOW, with any other columns. */
 async function user(email: string, days: number, cols: Record<string, string | number | null> = {}): Promise<number> {
   const started = new Date(NOW - days * DAY).toISOString();
-  const all = { email, trial_started_at: started, trial_emails_at: started, ...cols };
+  const all = { email, trial_started_at: started, ...cols };
   const keys = Object.keys(all);
   const row = await db()
     .prepare(`INSERT INTO users (${keys.join(', ')}) VALUES (${keys.map((_, i) => `?${i + 1}`).join(', ')}) RETURNING id`)
@@ -43,7 +41,6 @@ async function user(email: string, days: number, cols: Record<string, string | n
     .first<{ id: number }>();
   return row!.id;
 }
-const NO_OPT_IN = { trial_emails_at: null };
 const rows = () => db().prepare('SELECT user_id, kind, status FROM lifecycle_emails ORDER BY user_id, kind').all().then((r) => r.results);
 const LIFETIME = { status: 'active', plan: 'lifetime', purchased_at: '2026-10-10T00:00:00.000Z' };
 const SUBSCRIBER = { plan: 'subscription', sub_id: 'sub_1', sub_status: 'active', paid_through: '2026-12-01T00:00:00.000Z' };
@@ -121,24 +118,16 @@ describe('which email goes to whom', () => {
     expect(new Set(sent.map((m) => m.to)).size).toBe(12);
   });
 
-  // The emails are advertising (day 25 names the prices): § 7 UWG and the GDPR allow them only with consent.
-  it('sends nothing, not even the welcome, to a user who never ticked the box, and to users from before it', async () => {
-    await user('quiet@example.com', 0.01, NO_OPT_IN);
-    await user('quiet3@example.com', 3.2, NO_OPT_IN);
-    await user('quiet25@example.com', 25.1, NO_OPT_IN);
-    await user('yes@example.com', 0.01);
-    expect((await due(db(), NOW)).map((d) => d.user.email)).toEqual(['yes@example.com']);
+  // No opt-in: every trial user gets them (Art. 6(1)(f) GDPR), whether trial_emails_at is set or not, unless unsubscribed.
+  it('sends to every trial user, with no opt-in, and nothing to one who unsubscribed', async () => {
+    await user('plain@example.com', 0.01);
+    await user('plain3@example.com', 3.2);
+    await user('plain25@example.com', 25.1);
+    await user('old@example.com', 0.01, { trial_emails_at: '2026-10-01T00:00:00.000Z' });
+    const gone = await user('gone@example.com', 0.01);
+    await db().prepare('INSERT INTO email_unsubscribes (user_id) VALUES (?1)').bind(gone).run();
     await run();
-    expect(sent.map((m) => m.to)).toEqual(['yes@example.com']);
-  });
-
-  it('starts with the tick: a user who ticks the box later gets the emails still in their window', async () => {
-    const id = await user('later@example.com', 3.2, NO_OPT_IN);
-    await run();
-    expect(sent).toEqual([]);
-    await db().prepare('UPDATE users SET trial_emails_at = ?2 WHERE id = ?1').bind(id, new Date(NOW).toISOString()).run();
-    await run();
-    expect(sent.map((m) => m.subject)).toEqual(['A tip for shepetal: your language']);
+    expect(sent.map((m) => m.to).sort()).toEqual(['old@example.com', 'plain25@example.com', 'plain3@example.com', 'plain@example.com']);
   });
 
   it('tries again after 429 or 5xx, and marks failed for good only the one message SES rejected', async () => {
@@ -407,7 +396,7 @@ describe('the branded HTML', () => {
       expect(html).toContain("<p style=\"margin:0 0 4px;font:italic 400 22px/1.3 Georgia,'Bodoni 72','Times New Roman',serif;color:#161512\">Pavel</p>");
       expect(html).toContain('<tr><td style="padding:20px 0 0;border-top:1px solid #D3D0C9">');
       expect(html).toContain(
-        "font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#57544E\">You get this email because you asked for emails about your shepetal trial. It is one of three. Unsubscribe at any time, free of charge: <a href=\"https://shepetal.app/unsubscribe?u=1&amp;s=x\" style=\"color:#161512;text-decoration:underline\">shepetal.app/unsubscribe?u=1&amp;s=x</a></p>",
+        "font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#57544E\">You get this email because you started a shepetal trial. It is one of three. Unsubscribe at any time, free of charge: <a href=\"https://shepetal.app/unsubscribe?u=1&amp;s=x\" style=\"color:#161512;text-decoration:underline\">shepetal.app/unsubscribe?u=1&amp;s=x</a></p>",
       );
       expect(html).toContain('BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA');
       expect(html).not.toContain('>https://'); // links are shown without the scheme
@@ -417,18 +406,24 @@ describe('the branded HTML', () => {
   it('keeps the text part plain: no button, no box, the copy and the footer as they are', () => {
     const { text } = render('day25', copyFor('day25'), UNSUB);
     expect(text).toBe(
-      [...copyFor('day25').paragraphs, '--', `You get this email because you asked for emails about your shepetal trial. It is one of three. Unsubscribe at any time, free of charge: ${UNSUB}`, 'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA'].join('\n\n') + '\n',
+      [...copyFor('day25').paragraphs, '--', `You get this email because you started a shepetal trial. It is one of three. Unsubscribe at any time, free of charge: ${UNSUB}`, 'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA'].join('\n\n') + '\n',
     );
     expect(text).not.toContain('Choose a plan');
   });
 });
 
-// No sign-in asks for the opt-in any more, so the trial emails are off: the switch is "off", and the only cron is the
-// daily waitlist sweep (worker.ts), so no run sends one.
-describe('wrangler.toml', () => {
+// The trial emails go out: the switch is "on" and the cron runs every 5 minutes. The waitlist sweep runs on one tick a
+// day, 03:15 UTC (worker.ts, sweepTick), which the 5-minute cron hits.
+describe('wrangler.toml and the cron', () => {
   const toml = readFileSync(new URL('../../wrangler.toml', import.meta.url), 'utf8');
-  it('ships the trial emails off, with the cron once a day for the waitlist sweep only', () => {
-    expect(toml).toMatch(/^LIFECYCLE_EMAILS = "off"$/m);
-    expect(toml.match(/^crons = .*$/gm)).toEqual(['crons = ["15 3 * * *"]']);
+  it('ships the trial emails on, with the cron every 5 minutes', () => {
+    expect(toml).toMatch(/^LIFECYCLE_EMAILS = "on"$/m);
+    expect(toml.match(/^crons = .*$/gm)).toEqual(['crons = ["*/5 * * * *"]']);
+  });
+  it('runs the waitlist sweep once a day, on the 03:15 UTC tick only', () => {
+    const day = Date.parse('2026-10-23T00:00:00.000Z');
+    const ticks = Array.from({ length: 288 }, (_, i) => day + i * 5 * 60_000).filter(sweepTick);
+    expect(ticks.map((t) => new Date(t).toISOString())).toEqual(['2026-10-23T03:15:00.000Z']);
+    expect(sweepTick(Date.parse('2026-10-24T03:15:00.000Z'))).toBe(true);
   });
 });

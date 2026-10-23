@@ -8,8 +8,8 @@
 // for a token, license = trial, checkout per plan = a Stripe Checkout URL, signed webhooks for the
 // subscription (paid, failed, cancelled), the Billing Portal, then the lifetime license. Then the redirect_uri and PKCE rules.
 // Before that, /download and /appcast.xml against the local R2 bucket, before and after a release is put there the way
-// promote.sh does. Last, the trial emails (off in wrangler.toml; switched on here so the code stays tested): the Cron
-// Trigger against a fake SES, and the unsubscribe link they carry.
+// promote.sh does. Last, the trial emails (to every trial user, no opt-in): the Cron Trigger against a fake SES, and the
+// unsubscribe link they carry.
 //
 // Google is faked with a next-auth session cookie signed with the run's AUTH_SECRET, so the run
 // needs no Google account and no network except Google's OIDC discovery (for the sign-in redirect).
@@ -475,7 +475,7 @@ async function main() {
   assert.equal(decodeURIComponent(back?.split(';')[0].split('=')[1] ?? ''), login.url, 'after Google, next-auth returns to /app/login with the same query');
   ok(`/app/login signed out: ${out.status} to Google with redirect_uri <AUTH_URL>/api/auth/callback/google, back to the same /app/login after`);
 
-  // ---- 1b. The sign-in page: one action, Continue with Google, as a real form. No checkbox: no trial emails are sent.
+  // ---- 1b. The sign-in page: one action, Continue with Google, as a real form. No checkbox: the trial emails need no opt-in.
   await check('sign-in: /login and /account signed out show Continue with Google as a sign-in form, without a checkbox', async () => {
     for (const path of ['/login', '/account']) {
       const r = await browse(`${BASE}${path}`);
@@ -485,7 +485,7 @@ async function main() {
       assert.ok(!html.includes('type="checkbox"') && !/trial_emails|trial-emails|emails about my trial/.test(html), `${path}: no trial emails box`);
     }
     const privacy = await (await fetch(`${BASE}/privacy`)).text();
-    assert.ok(!/id="trial-emails"|Emails about your trial|emails about your trial/.test(privacy), '/privacy: no trial emails section');
+    assert.ok(privacy.includes('<h3 id="trial-emails">8. Emails about your trial</h3>'), '/privacy: the trial emails section');
   });
 
   // ---- 2. Fake the Google sign-in: a next-auth JWT session cookie, as the callback would set it.
@@ -964,7 +964,7 @@ async function main() {
     for (const leak of [email, '127.0.0.1', 'example.com', '4242', 'private', 'Chrome/131', l.state]) assert.ok(!all.includes(leak), `${leak} is not sent`);
   });
 
-  // ---- 7b. The consent page asks nothing about trial emails, and nothing records an opt-in, not even a posted field.
+  // ---- 7b. The consent page asks nothing about trial emails (they need no opt-in), and nothing records one.
   await check('/app/login: no trial emails box; Continue records no opt-in, even with trial_emails=yes posted', async () => {
     const optIn = async () => (await d1(`SELECT trial_emails_at FROM users WHERE email = '${email}'`))[0][0];
     await d1(`UPDATE users SET trial_emails_at = NULL WHERE email = '${email}'`);
@@ -1099,8 +1099,8 @@ async function main() {
     assert.equal((await app('POST', '/api/checkout', { token: accessToken, json: {} })).status, 401);
   });
 
-  // ---- 11. The trial emails (LIFECYCLE_EMAILS on for this run only): the Cron Trigger (wrangler dev --test-scheduled)
-  // sends through the fake SES, to the rows this test inserts with trial_emails_at set.
+  // ---- 11. The trial emails: the Cron Trigger (wrangler dev --test-scheduled) sends through the fake SES, to every
+  // trial user in a window, with no opt-in (trial_emails_at stays NULL).
   const cron = async () => {
     const before = sesCalls.length;
     const r = await fetch(`${BASE}/__scheduled?cron=${encodeURIComponent('*/5 * * * *')}`);
@@ -1111,12 +1111,14 @@ async function main() {
     return sesCalls.slice(before);
   };
   const at = (days) => new Date(Date.now() - days * DAY).toISOString();
-  await check('cron: welcome to a new trial, day 25 to a trial user, never to a lifetime owner or without the opt-in, signed, nothing twice', async () => {
+  await check('cron: welcome to a new trial with no opt-in, day 25 to a trial user, never to a lifetime owner or an unsubscribed user, signed, nothing twice', async () => {
     await d1(`UPDATE users SET trial_started_at = '${at(10)}'`); // everyone signed in above is between windows
-    await d1(`INSERT INTO users (email, trial_started_at, trial_emails_at) VALUES ('fresh@example.com', '${at(0.01)}', '${at(0.01)}'), ('ending@example.com', '${at(25.2)}', '${at(25.2)}')`);
-    await d1(`INSERT INTO users (email, trial_started_at, trial_emails_at, status, plan) VALUES ('owner@example.com', '${at(25.2)}', '${at(25.2)}', 'active', 'lifetime')`);
-    // Never ticked the box: no email, not even the welcome.
-    await d1(`INSERT INTO users (email, trial_started_at) VALUES ('silent@example.com', '${at(0.01)}'), ('silent25@example.com', '${at(25.2)}')`);
+    await d1(`INSERT INTO users (email, trial_started_at) VALUES ('fresh@example.com', '${at(0.01)}'), ('ending@example.com', '${at(25.2)}')`);
+    await d1(`INSERT INTO users (email, trial_started_at, status, plan) VALUES ('owner@example.com', '${at(25.2)}', 'active', 'lifetime')`);
+    // Unsubscribed: no email, not even the welcome.
+    await d1(`INSERT INTO users (email, trial_started_at) VALUES ('gone@example.com', '${at(0.01)}'), ('gone25@example.com', '${at(25.2)}')`);
+    await d1("INSERT INTO email_unsubscribes (user_id) SELECT id FROM users WHERE email IN ('gone@example.com', 'gone25@example.com')");
+    assert.equal((await d1("SELECT COUNT(*) FROM users WHERE trial_emails_at IS NOT NULL AND email LIKE '%@example.com'"))[0][0], 0, 'no opt-in recorded');
     const sent = await cron();
     assert.deepEqual(sent.map((c) => [c.body.Destination.ToAddresses[0], c.body.Content.Simple.Subject.Data]).sort(), [
       ['ending@example.com', 'Your shepetal trial ends in 5 days'],
