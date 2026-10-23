@@ -176,7 +176,11 @@ final class MenuIndicatorOnboardingScreenshotTests: XCTestCase {
                 let image = try layers ? renderLayers(window, size) : render(window, size)
                 try write(image, "\(name)-\(mode)-window@2x.png")
                 let seen = try Self.text(in: image)
-                for line in expect { XCTAssertTrue(seen.contains(line), "\(name) \(mode) does not show “\(line)”:\n\(seen)") }
+                // Vision reads Archivo's word gaps unevenly ("Paste lasttranscript"), so spaces do not count.
+                let squeezed = seen.filter { !$0.isWhitespace }
+                for line in expect {
+                    XCTAssertTrue(squeezed.contains(line.filter { !$0.isWhitespace }), "\(name) \(mode) does not show “\(line)”:\n\(seen)")
+                }
                 assertOnBrand(seen, "\(name) \(mode)")
             }
         }
