@@ -8,7 +8,7 @@
 // for a token, license = trial, checkout per plan = a Stripe Checkout URL, signed webhooks for the
 // subscription (paid, failed, cancelled), the Billing Portal, then the lifetime license. Then the redirect_uri and PKCE rules.
 // Before that, /download and /appcast.xml against the local R2 bucket, before and after a release is put there the way
-// promote.sh does.
+// promote.sh does. Last, the trial emails: the Cron Trigger against a fake SES, and the unsubscribe link they carry.
 //
 // Google is faked with a next-auth session cookie signed with the run's AUTH_SECRET, so the run
 // needs no Google account and no network except Google's OIDC discovery (for the sign-in redirect).
@@ -76,6 +76,9 @@ const fakeSub = {
   items: { object: 'list', data: [] },
 };
 const phEvents = [];
+// The same server stands in for Amazon SES v2 (SES_API_BASE): every customer email (the cancellation and purchase
+// confirmations, the trial emails the cron sends).
+const sesCalls = [];
 const fakeStripe = createServer((req, res) => {
   let body = '';
   req.on('data', (c) => (body += c));
@@ -86,6 +89,11 @@ const fakeStripe = createServer((req, res) => {
     if (req.method === 'POST' && url.pathname === '/i/v0/e/') {
       phEvents.push(JSON.parse(body));
       return res.end('{"status":"Ok"}');
+    }
+    if (req.method === 'POST' && url.pathname === '/v2/email/outbound-emails') {
+      sesCalls.push({ auth: req.headers.authorization, amzDate: req.headers['x-amz-date'], body: JSON.parse(body) });
+      res.setHeader('content-type', 'application/json');
+      return res.end(JSON.stringify({ MessageId: `ses-e2e-${sesCalls.length}` }));
     }
     stripeCalls.push({ method: req.method, path: url.pathname, params, auth: req.headers.authorization });
     res.setHeader('content-type', 'application/json');
@@ -156,6 +164,11 @@ const env = {
   STRIPE_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
   POSTHOG_KEY: 'phc_e2e',
   POSTHOG_HOST: `http://127.0.0.1:${fakeStripe.address().port}`,
+  SES_ACCESS_KEY_ID: 'AKIDE2E',
+  SES_SECRET_ACCESS_KEY: randomBytes(20).toString('hex'),
+  SES_REGION: 'eu-central-1',
+  SES_API_BASE: `http://127.0.0.1:${fakeStripe.address().port}`,
+  LIFECYCLE_EMAILS: 'on',
 };
 // An env file instead of --var keeps values out of `ps`, and replaces any developer .dev.vars.
 const envFile = join(tmp, 'e2e.env');
@@ -255,7 +268,7 @@ async function main() {
     join(BIN, 'wrangler'),
     ['dev', '--ip', '127.0.0.1', '--port', String(port), '--inspector-port', String(await freePort()),
       '--local-upstream', `localhost:${port}`,
-      '--persist-to', state, '--env-file', envFile, '--show-interactive-dev-session=false'],
+      '--persist-to', state, '--env-file', envFile, '--show-interactive-dev-session=false', '--test-scheduled'],
     { cwd: WEB, detached: true, stdio: ['ignore', 'pipe', 'pipe'] },
   );
   worker.stdout.pipe(log);
@@ -331,8 +344,20 @@ async function main() {
     assert.match(missing.type ?? '', /^text\/html/);
     assert.doesNotMatch(missing.body, tracker, 'the 404 page has no analytics meta');
     for (const path of ['/robots.txt', '/sitemap.xml']) await cached(path);
-    // The comparison pages (src/lib/compare.ts): prerendered, in the sitemap, the trial button carrying its ?ref=.
+    // The use-case pages (src/lib/use-cases.ts): prerendered, in the sitemap, the trial button carrying ?ref=for-<slug>.
     const sitemapXml = (await cached('/sitemap.xml')).body;
+    for (const slug of ['developers', 'writers', 'rsi', 'adhd', 'privacy', 'meetings']) {
+      const body = (await cached(`/for/${slug}`)).body;
+      assert.ok(body.includes(`href="/install?ref=for-${slug}"`), `/for/${slug} links the trial with its ref`);
+      assert.ok(body.includes(`<link rel="canonical" href="https://shepetal.app/for/${slug}"/>`), `/for/${slug} canonical`);
+      assert.ok(sitemapXml.includes(`/for/${slug}</loc>`), `/for/${slug} is in the sitemap`);
+      assert.ok(body.includes(`<meta property="og:image" content="https://shepetal.app/og/for-${slug}.jpg"/>`), `/for/${slug} has its own link preview`);
+      assert.equal((body.match(/<h1\b/g) ?? []).length, 1, `/for/${slug} has one h1`);
+    }
+    await cached('/for/not-a-page', {}, 404);
+    const fromFor = (await cached('/install?ref=for-developers')).body;
+    assert.equal(fromFor.match(/location\.replace\("([^"]+)"\)/)?.[1], '/download?ref=for-developers', 'the download from a /for page carries its ref');
+    // The comparison pages (src/lib/compare.ts): prerendered, in the sitemap, the trial button carrying its ?ref=.
     for (const [path, ref] of [
       ['/compare/wispr-flow', 'compare-wispr-flow'],
       ['/compare/superwhisper', 'compare-superwhisper'],
@@ -350,8 +375,9 @@ async function main() {
     }
     await cached('/compare/not-a-page', {}, 404);
     const install = (await cached('/install?ref=x&utm_source=y')).body;
-    assert.equal(unescape(install.match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the refresh carries the attribution');
-    assert.equal(install.match(/http-equiv="refresh"/gi)?.length, 1, 'one refresh only: a second, bare one (from React) is what browsers followed');
+    assert.equal(install.match(/location\.replace\("([^"]+)"\)/)?.[1], '/download?ref=x&utm_source=y', 'the script that starts the download carries the attribution');
+    assert.equal(install.match(/location\.replace\(/g)?.length, 1, 'one download starter only: a second, bare one (from React) is what browsers followed');
+    assert.doesNotMatch(install, /http-equiv="refresh"/i, 'no meta refresh (axe meta-refresh)');
     assert.equal(unescape(install.match(/<a href="(\/download[^"]*)"/)?.[1] ?? ''), '/download?ref=x&utm_source=y', 'the fallback link too');
     assert.match(install, /<meta name="robots" content="noindex"/, '/install stays out of search');
     const license = await fetch(`${BASE}/api/license`);
@@ -410,7 +436,7 @@ async function main() {
     assert.equal(cta, '/install', 'the main CTA');
     const install = await fetch(`${BASE}${cta}?ref=e2e`, { redirect: 'manual' });
     assert.equal(install.status, 200, `/install: ${install.status} ${install.headers.get('location')}`);
-    const next = unescape((await install.text()).match(/http-equiv="refresh" content="1;url=([^"]+)"/i)?.[1] ?? '');
+    const next = (await install.text()).match(/location\.replace\("([^"]+)"\)/)?.[1] ?? '';
     assert.equal(next, '/download?ref=e2e', 'the install guide starts the download, with the attribution');
     const dl = await fetch(`${BASE}${next}`, { redirect: 'manual' });
     assert.equal(dl.status, 302, `/download: ${dl.status}`);
@@ -434,6 +460,7 @@ async function main() {
       const html = await r.text();
       assert.equal(r.status, 200, `${path}: ${r.status}`);
       assert.ok(html.includes('Sign in.') && html.includes('Continue with Google') && /<form[^>]*action=/.test(html), `${path} is the sign-in page`);
+      assert.ok(html.includes('<input type="checkbox" name="trial_emails" value="yes"/> Send me three short emails about my trial.'), `${path}: the unticked trial emails box`);
     }
   });
 
@@ -654,7 +681,7 @@ async function main() {
     assert.match(res.headers.get('content-security-policy') ?? '', /default-src 'self'/, 'worker.ts answers it, with the security headers');
     assert.match(receipt, /Your cancellation is received\.[\s\S]*It will be processed now\./);
     assert.doesNotMatch(receipt, /stops renewing|is cancelled/, 'the receipt claims nothing before it is done');
-    assert.match(receipt, /no email has been sent/, 'and says no email was sent while SES is not set up');
+    assert.match(receipt, /goes to it by email/, 'and says the confirmation goes to the account by email (SES is set up here)');
     const stamp = receipt.match(/Sent with the Jetzt kündigen button on (\d{4}-\d{2}-\d{2}) at (\d{2}:\d{2}:\d{2}) UTC\./);
     assert.ok(stamp && Math.abs(Date.parse(`${stamp[1]}T${stamp[2]}Z`) - sentAt) < 60_000, 'the receipt carries the time it was sent');
     assert.match(receipt, /<a href="data:text\/plain;charset=utf-8,[^"]+" download="shepetal-cancellation-\d{4}-\d{2}-\d{2}\.txt">/, 'and a file to keep');
@@ -673,6 +700,11 @@ async function main() {
     const log = () => readFileSync(logFile, 'utf8');
     await settle("Pavel's notices", () => log().includes(`cancel: no_account (UNMATCHED): ${other}`));
     assert.match(log(), /cancel: cancelled: /, 'Pavel is told of the cancellation too');
+    // The confirmation goes through SES (the fake here), to the account's own address, never to the stranger's.
+    const confirmations = sesCalls.filter((c) => c.body.Content.Simple.Subject.Data === 'Your cancellation of shepetal (Kündigungsbestätigung)');
+    assert.deepEqual(confirmations.map((c) => c.body.Destination.ToAddresses), [[email]], 'one confirmation, to the account');
+    assert.equal(confirmations[0].body.FromEmailAddress, 'shepetal <support@shepetal.app>');
+    assert.equal(confirmations[0].body.Content.Simple.Body.Html, undefined, 'plain text');
     const bad = await press({ email: '' });
     await bad.text(); // an unread body leaves the socket behind (EPIPE on the next request)
     assert.equal(bad.status, 400, 'the email is required');
@@ -723,12 +755,14 @@ async function main() {
   assert.equal(calls('/v1/customers').length, 1, 'the same Stripe customer again');
   const paid = await hook(event('checkout.session.completed', { client_reference_id: sent.client_reference_id, metadata: metadataOf(sent) }));
   assert.equal(paid.status, 200, await paid.clone().text());
-  // § 356(6) Nr. 2 d BGB: the purchase is confirmed after the answer. SES is not set up here, so the buyer gets
-  // nothing and Pavel gets the text to send by hand.
-  for (let i = 0; !readFileSync(logFile, 'utf8').includes(`purchase: confirmation not sent: ${email}`); i++) {
-    if (i > 100) throw new Error('no purchase confirmation notice after 10 s');
+  // § 356(6) Nr. 2 d BGB: the purchase is confirmed after the answer, through SES (the fake here) to the buyer's account.
+  const purchased = () => sesCalls.filter((c) => c.body.Content.Simple.Subject.Data === 'Your shepetal lifetime license (Bestellbestätigung)');
+  for (let i = 0; !purchased().length; i++) {
+    if (i > 100) throw new Error('no purchase confirmation after 10 s');
     await sleep(100);
   }
+  assert.deepEqual(purchased().map((c) => c.body.Destination.ToAddresses), [[email]], 'one purchase confirmation, to the buyer');
+  assert.ok(!readFileSync(logFile, 'utf8').includes(`purchase: confirmation not sent: ${email}`), 'and no hand-off to Pavel');
   lic = await app('GET', '/api/license', { token: accessToken });
   assert.deepEqual(lic.body, { status: 'active', plan: 'lifetime', trial_ends_at: null, paid_through: null, renews: false, payment_failed: false, email });
   assert.equal(calls('/v1/subscriptions/sub_e2e', 'DELETE').length, 1, 'the subscription is cancelled now');
@@ -817,6 +851,18 @@ async function main() {
     assert.equal(phEvents.filter((x) => x.event === '$pageview' && x.properties.ref === 'e2e-page').length, 1, 'one page view per page');
     const all = JSON.stringify(phEvents);
     for (const leak of [email, '127.0.0.1', 'example.com', '4242', 'private', 'Chrome/131', l.state]) assert.ok(!all.includes(leak), `${leak} is not sent`);
+  });
+
+  // ---- 7b. The trial emails box on the consent page: unticked by default, and only a tick records the opt-in.
+  await check('/app/login: the trial emails box is unticked; Continue without it records nothing, with it the time of the opt-in', async () => {
+    const optIn = async () => (await d1(`SELECT trial_emails_at FROM users WHERE email = '${email}'`))[0][0];
+    await d1(`UPDATE users SET trial_emails_at = NULL WHERE email = '${email}'`);
+    const html = await (await browse(pkce().url, session)).text();
+    assert.ok(html.includes('<input type="checkbox" name="trial_emails" value="yes"> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a>'), 'the box and its words');
+    landing(await consent(pkce().url, session), MAC);
+    assert.equal(await optIn(), null, 'unticked: no opt-in');
+    landing(await consent(pkce().url, session, { fields: { trial_emails: 'yes' } }), MAC);
+    assert.match(String(await optIn()), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, 'ticked: the time of the opt-in');
   });
 
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.
@@ -939,6 +985,59 @@ async function main() {
     assert.deepEqual([r.status, r.body], [200, { ok: true }]);
     assert.equal((await app('GET', '/api/license', { token: accessToken })).status, 401);
     assert.equal((await app('POST', '/api/checkout', { token: accessToken, json: {} })).status, 401);
+  });
+
+  // ---- 11. The trial emails: the Cron Trigger (wrangler dev --test-scheduled) sends through the fake SES.
+  const cron = async () => {
+    const before = sesCalls.length;
+    const r = await fetch(`${BASE}/__scheduled?cron=${encodeURIComponent('*/5 * * * *')}`);
+    assert.equal(r.status, 200, `/__scheduled: ${r.status}`);
+    // The sends run in waitUntil, after the answer.
+    for (let i = 0; i < 20 && (await d1("SELECT COUNT(*) FROM lifecycle_emails WHERE status = 'sending'"))[0][0] > 0; i++) await sleep(250);
+    await sleep(500);
+    return sesCalls.slice(before);
+  };
+  const at = (days) => new Date(Date.now() - days * DAY).toISOString();
+  await check('cron: welcome to a new trial, day 25 to a trial user, never to a lifetime owner or without the opt-in, signed, nothing twice', async () => {
+    await d1(`UPDATE users SET trial_started_at = '${at(10)}'`); // everyone signed in above is between windows
+    await d1(`INSERT INTO users (email, trial_started_at, trial_emails_at) VALUES ('fresh@example.com', '${at(0.01)}', '${at(0.01)}'), ('ending@example.com', '${at(25.2)}', '${at(25.2)}')`);
+    await d1(`INSERT INTO users (email, trial_started_at, trial_emails_at, status, plan) VALUES ('owner@example.com', '${at(25.2)}', '${at(25.2)}', 'active', 'lifetime')`);
+    // Never ticked the box: no email, not even the welcome.
+    await d1(`INSERT INTO users (email, trial_started_at) VALUES ('silent@example.com', '${at(0.01)}'), ('silent25@example.com', '${at(25.2)}')`);
+    const sent = await cron();
+    assert.deepEqual(sent.map((c) => [c.body.Destination.ToAddresses[0], c.body.Content.Simple.Subject.Data]).sort(), [
+      ['ending@example.com', 'Your shepetal trial ends in 5 days'],
+      ['fresh@example.com', 'Welcome to shepetal'],
+    ]);
+    for (const c of sent) {
+      assert.match(c.auth, /^AWS4-HMAC-SHA256 Credential=AKIDE2E\/\d{8}\/eu-central-1\/ses\/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=[0-9a-f]{64}$/);
+      assert.equal(c.body.FromEmailAddress, 'shepetal <hello@shepetal.app>');
+      assert.deepEqual(c.body.ReplyToAddresses, ['support@shepetal.app']);
+      assert.ok(c.body.Content.Simple.Body.Html.Data.startsWith('<!doctype html>'));
+      assert.ok(c.body.Content.Simple.Body.Html.Data.includes('<img src="https://shepetal.app/press/shepetal-wordmark-ink.png" width="132" alt="shepetal"'), 'the branded HTML');
+    }
+    assert.deepEqual(await cron(), [], 'the next run sends nothing again');
+    const rows = await d1("SELECT kind, status, message_id FROM lifecycle_emails ORDER BY kind");
+    assert.deepEqual(rows.map((r) => r.slice(0, 2)), [['day25', 'sent'], ['welcome', 'sent']]);
+  });
+  await check('unsubscribe: the List-Unsubscribe link asks on GET, unsubscribes on the one-click POST, refuses a forged one', async () => {
+    const welcome = sesCalls.find((c) => c.body.Destination.ToAddresses[0] === 'fresh@example.com');
+    const link = welcome.body.Content.Simple.Headers.find((h) => h.Name === 'List-Unsubscribe').Value.slice(1, -1);
+    assert.deepEqual(welcome.body.Content.Simple.Headers.find((h) => h.Name === 'List-Unsubscribe-Post'), { Name: 'List-Unsubscribe-Post', Value: 'List-Unsubscribe=One-Click' });
+    const local = `${BASE}${new URL(link).pathname}${new URL(link).search}`;
+    const ask = await fetch(local);
+    assert.equal(ask.status, 200);
+    assert.match(await ask.text(), /<form method="post"/);
+    assert.match(ask.headers.get('content-security-policy') ?? '', /frame-ancestors 'none'/, 'the security headers, as on every native answer');
+    const [[id]] = await d1("SELECT id FROM users WHERE email = 'fresh@example.com'");
+    assert.equal((await d1(`SELECT COUNT(*) FROM email_unsubscribes WHERE user_id = ${id}`))[0][0], 0, 'GET changed nothing');
+    const forged = local.replace(/u=\d+/, `u=${id + 1}`);
+    assert.equal((await fetch(forged, { method: 'POST', body: 'List-Unsubscribe=One-Click', headers: { 'content-type': 'application/x-www-form-urlencoded' } })).status, 400);
+    const done = await fetch(local, { method: 'POST', body: 'List-Unsubscribe=One-Click', headers: { 'content-type': 'application/x-www-form-urlencoded' } });
+    assert.equal(done.status, 200);
+    assert.equal((await d1(`SELECT COUNT(*) FROM email_unsubscribes WHERE user_id = ${id}`))[0][0], 1);
+    await d1(`UPDATE users SET trial_started_at = '${at(3.1)}' WHERE id = ${id}`); // day 3 is due now, but they left
+    assert.deepEqual(await cron(), [], 'no tip after unsubscribing');
   });
 }
 

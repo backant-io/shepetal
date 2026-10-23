@@ -14,6 +14,7 @@
 .s-foot { margin-top: clamp(5rem, calc(9 * var(--u)), 14rem); display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; padding: 1.4rem 0 1.6rem; border-top: 1px solid var(--rule); }
 .s-foot-nav { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; }
 .s-foot-nav a, .s-head-end a { color: var(--ink); }
+.s-foot-for { flex-wrap: wrap; column-gap: 1rem; row-gap: .4rem; }
 .s-foot-cmp { flex-wrap: wrap; column-gap: 1rem; row-gap: .4rem; }
 .s-main { flex: 1; width: 100%; }
 
@@ -36,6 +37,9 @@
 .s-btn-line:active { transform: translateY(1px); }
 .s-textbtn { padding: 0; margin: 0; border: 0; background: none; font: inherit; color: var(--ink); text-decoration: underline; text-underline-offset: .2em; cursor: pointer; }
 .s-form { display: contents; }
+.s-check { display: block; margin: 0 0 1.1rem; max-width: 28rem; font-size: .9375rem; line-height: 1.45; color: var(--ink2); }
+.s-check input { margin: 0 .3rem 0 0; vertical-align: -2px; accent-color: var(--ink); }
+.s-check a { color: var(--ink); }
 .s-actions { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 .s-alert { margin: .75rem 0 0; font-size: .9375rem; color: #a3300a; }
 
@@ -129,6 +133,7 @@
 
 /* use-case and comparison pages (/for/<slug>, /compare/<slug>, the two guides) */
 .s-for-cta { margin-top: 2.25rem; }
+.s-for .s-prose .s-for-note { margin-top: 2rem; color: var(--ink2); }
 .s-for-try { margin-top: clamp(4rem, calc(7 * var(--u)), 10rem); }
 .s-for .s-for-more { margin-top: 2rem; }
 .s-cmp-scroll { overflow-x: auto; margin-top: 1.25rem; }

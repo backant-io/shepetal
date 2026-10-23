@@ -55,6 +55,10 @@ SHEPETAL_DOMAIN = "shepetal.app"
 # Analytics (src/lib/analytics.ts, all server-side): backant's PostHog project on the US cloud. The project key is a secret set at GO
 # (POSTHOG_KEY, from SSM /backant/production/NEXT_PUBLIC_POSTHOG_KEY); without it analytics are off.
 POSTHOG_HOST = "https://us.i.posthog.com"
+# The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. Only "on" sends; anything
+# else logs what each cron run would send. Needs migration 0006 and the SES secrets below. Switch it here, commit and
+# deploy (README.md): a change in the dashboard is undone by the next deploy.
+LIFECYCLE_EMAILS = "on"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
 # and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
 # scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and
@@ -65,11 +69,18 @@ POSTHOG_HOST = "https://us.i.posthog.com"
 #          wrangler secret put GOOGLE_CLIENT_SECRET
 #          wrangler secret put STRIPE_SECRET_KEY
 #          wrangler secret put STRIPE_WEBHOOK_SECRET
-# Optional, the § 312k confirmation email to customers through Amazon SES (README.md): without all three, none is sent.
+# Optional, the § 312k confirmation email to customers through Amazon SES (README.md), and needed for the trial
+# emails (LIFECYCLE_EMAILS): without all three, none is sent.
 #          wrangler secret put SES_ACCESS_KEY_ID
 #          wrangler secret put SES_SECRET_ACCESS_KEY
 #          wrangler secret put SES_REGION
 # For local runs, put the same names in .dev.vars (see README.md).
+
+# The trial emails (src/lib/lifecycle.ts, worker.ts scheduled): every 5 minutes, at most 5 per run (1,440 a day), so a
+# run stays inside the Workers Free plan's 10 ms of CPU. This file is the source of truth: a cron changed in the
+# dashboard is undone by the next deploy.
+[triggers]
+crons = ["*/5 * * * *"]
 
 [observability.logs]
 enabled = true

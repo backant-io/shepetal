@@ -177,6 +177,15 @@ describe('consent page', () => {
     expect(html).toContain('<a href="/cancel" lang="de">Verträge hier kündigen</a>');
   });
 
+  // The trial emails need consent (§ 7 UWG, Art. 6(1)(a) GDPR): asked here, where the app creates the account, unticked.
+  it('asks for the trial emails with an unticked box and a link to what they are', () => {
+    const html = consentPage('a@example.com', r, 'c');
+    expect(html).toContain(
+      '<label class="check"><input type="checkbox" name="trial_emails" value="yes"> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a></label><button type="submit">Continue</button></form>',
+    );
+    expect(html).not.toMatch(/checked/);
+  });
+
   // state and email come from outside: they must never become markup.
   it('escapes what it echoes', () => {
     const html = consentPage('<b>@example.com', r, 'c');

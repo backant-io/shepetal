@@ -5,6 +5,7 @@ import robots from '@/app/robots';
 import sitemap from '@/app/sitemap';
 import { PAGES, pageMetadata, softwareJsonLd } from './seo';
 import { SITE_URL } from './site';
+import { USE_CASES } from './use-cases';
 import { COMPARE_LINKS } from './compare';
 
 const WEB = join(__dirname, '..', '..');
@@ -14,6 +15,7 @@ describe('discovery', () => {
     const urls = sitemap().map((e) => e.url);
     expect(urls).toEqual([
       ...Object.values(PAGES).map((p) => `${SITE_URL}${p.path === '/' ? '' : p.path}`),
+      ...USE_CASES.map((u) => `${SITE_URL}/for/${u.slug}`),
       ...COMPARE_LINKS.map((c) => `${SITE_URL}${c.href}`),
     ]);
     for (const p of ['/faq', '/press', '/changelog', '/refunds', '/impressum', '/privacy', '/terms', '/legal']) expect(urls).toContain(`${SITE_URL}${p}`);
