@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import Vision
 import XCTest
 import ShepetalCore
@@ -44,40 +45,42 @@ final class MenuIndicatorOnboardingScreenshotTests: XCTestCase {
     /// Every state of the indicator at its real size, named beside it, and the menu bar icon at rest and recording.
     func testIndicator() throws {
         try shoot("20-indicator", NSSize(width: 360, height: 300), layers: true,
-                  expect: ["Recording", "Hands-free", "Writing", "A note", "Mic is off"]) {
-            let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 300), styleMask: [.titled],
-                                  backing: .buffered, defer: false)
-            window.title = "Indicator"
-            window.backgroundColor = SH.bg.nsColor
-            let plate = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 300))
-            plate.wantsLayer = true
-            var indicators: [Indicator] = []
-            let states: [(String, Indicator.Mode, String?)] = [
-                ("Ready", .idle, nil), ("Recording", .recording, nil), ("Hands-free", .handsFree, nil),
-                ("Writing", .processing, nil), ("A note", .error, "Mic is off"),
-            ]
-            for (n, (name, mode, note)) in states.enumerated() {
-                let y = 300 - 40 - CGFloat(n) * 40
-                let i = Indicator(screen: { .zero }, present: { _ in })
-                i.set(mode)
-                if let note { i.show(note, seconds: 60) }
-                indicators.append(i)
-                let view = try XCTUnwrap(i.panel.contentView)
-                i.panel.contentView = NSView()
-                view.setFrameOrigin(NSPoint(x: 120, y: y))
-                plate.addSubview(view)
-                plate.addSubview(Self.caption(name, at: NSPoint(x: 24, y: y)))
-            }
-            for (n, live) in [false, true].enumerated() {
-                let y = 300 - 40 - CGFloat(states.count + n) * 40 + 4
-                let icon = NSImageView(image: MenuModel.statusIcon(live: live))
-                icon.frame = NSRect(x: 120, y: y - 2, width: 18, height: 18)
-                plate.addSubview(icon)
-                plate.addSubview(Self.caption(live ? "Menu bar, live" : "Menu bar", at: NSPoint(x: 24, y: y - 2)))
-            }
-            window.contentView = plate
-            return (indicators as AnyObject, window)
+                  expect: ["Recording", "Hands-free", "Writing", "A note", "Mic is off"]) { try self.indicatorPlate() }
+    }
+
+    private func indicatorPlate() throws -> (owner: AnyObject, window: NSWindow) {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 300), styleMask: [.titled],
+                              backing: .buffered, defer: false)
+        window.title = "Indicator"
+        window.backgroundColor = SH.bg.nsColor
+        let plate = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 300))
+        plate.wantsLayer = true
+        var indicators: [Indicator] = []
+        let states: [(name: String, mode: Indicator.Mode, note: String?)] = [
+            ("Ready", .idle, nil), ("Recording", .recording, nil), ("Hands-free", .handsFree, nil),
+            ("Writing", .processing, nil), ("A note", .error, "Mic is off"),
+        ]
+        for (n, state) in states.enumerated() {
+            let y: CGFloat = 260 - CGFloat(n) * 40
+            let i = Indicator(screen: { .zero }, present: { _ in })
+            i.set(state.mode)
+            if let note = state.note { i.show(note, seconds: 60) }
+            indicators.append(i)
+            let view = try XCTUnwrap(i.panel.contentView)
+            i.panel.contentView = NSView()
+            view.setFrameOrigin(NSPoint(x: 120, y: y))
+            plate.addSubview(view)
+            plate.addSubview(Self.caption(state.name, at: NSPoint(x: 24, y: y)))
         }
+        for (n, live) in [false, true].enumerated() {
+            let y: CGFloat = 260 - CGFloat(states.count + n) * 40 + 2
+            let icon = NSImageView(image: MenuModel.statusIcon(live: live))
+            icon.frame = NSRect(x: 120, y: y, width: 18, height: 18)
+            plate.addSubview(icon)
+            plate.addSubview(Self.caption(live ? "Menu bar, live" : "Menu bar", at: NSPoint(x: 24, y: y)))
+        }
+        window.contentView = plate
+        return (indicators as NSArray, window)
     }
 
     /// Step 1: each permission with why in one sentence and Open settings, Continue as the one primary keycap.
