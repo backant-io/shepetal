@@ -25,10 +25,7 @@ permissions:
 
 jobs:
   claims:
-    # macos-15 (arm64, macOS 15.7.9, Xcode 26.3 with Swift 6.2), not ci.yml's macos-26: the e2e makes its speech with
-    # `say`, and macOS 26's voices read e01 so that the model hears "finance led", which fails the quiet clip's
-    # word-for-word check. macOS 15.7.9 is what the local e2e runs on (docs/claims.md).
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 90
     defaults:
       run:
