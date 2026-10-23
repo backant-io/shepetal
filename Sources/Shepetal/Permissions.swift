@@ -14,11 +14,12 @@ enum Permission: CaseIterable {
         }
     }
 
+    /// Why, in one sentence that names the setting as macOS shows it (design/ui 01-platforms, Words for the system).
     var why: String {
         switch self {
-        case .microphone: "to hear you while fn is held"
-        case .inputMonitoring: "to notice the fn key"
-        case .accessibility: "to paste the text where your cursor is"
+        case .microphone: "Microphone lets shepetal hear you while you hold fn."
+        case .inputMonitoring: "Input Monitoring lets shepetal notice when you press fn."
+        case .accessibility: "Accessibility lets shepetal paste your text where your cursor is."
         }
     }
 
@@ -61,10 +62,11 @@ final class Onboarding: NSWindowController {
 
     init(allowRequests: Bool, engine: @escaping () -> (ready: Bool, status: String), loginItem: LoginItem) {
         model = OnboardingModel(allowRequests: allowRequests, engine: engine, loginItem: loginItem)
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 360),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 420),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Welcome to Shepetal"
+        window.title = "Welcome to shepetal"
         window.isReleasedWhenClosed = false
+        SmallWindow.style(window)
         super.init(window: window)
         model.close = { [weak window] in window?.close() }
         window.contentView = NSHostingView(rootView: OnboardingView(model: model))
@@ -121,62 +123,131 @@ final class OnboardingModel: ObservableObject {
     static let systemAudioPane = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!
 }
 
+/// One step at a time on sh-bg: the step in mono, its title, its rows, and one primary keycap (sh-control-lg) that
+/// moves on. Permission rows say why in one sentence and open the setting; the fn key is a key hint.
 private struct OnboardingView: View {
     @ObservedObject var model: OnboardingModel
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { _ in  // live permission status
             VStack(alignment: .leading, spacing: 0) {
-                Form { step }.formStyle(.grouped)
-                HStack {
-                    if model.flow.index > 0 { Button("Back") { model.flow.back() } }
+                SmallWindowTitle("Welcome to shepetal")
+                VStack(alignment: .leading, spacing: SH.space5) {
+                    VStack(alignment: .leading, spacing: SH.space2) {
+                        Text("Step \(model.flow.index + 1) of \(model.flow.steps.count)").shText(SH.label).foregroundStyle(SH.textMuted)
+                        Text(title).shText(SH.appTitle).foregroundStyle(SH.text)
+                        if let lead { Text(lead).shText(SH.appBody).foregroundStyle(SH.textMuted).fixedSize(horizontal: false, vertical: true) }
+                    }
+                    step
+                }
+                .padding(.horizontal, SH.space5)
+                .padding(.top, SH.space2)
+                HStack(spacing: SH.space3) {
+                    if model.flow.index > 0 { Button("Back") { model.flow.back() }.buttonStyle(.keycap(.secondary, .lg)) }
                     Spacer()
                     Button(model.flow.isLast ? "Done" : "Continue", action: model.next)
+                        .buttonStyle(.keycap(.primary, .lg))
                         .keyboardShortcut(.defaultAction)
                         .disabled(!model.flow.canContinue(requiredGranted: model.requiredGranted, signedIn: model.signedIn))
                 }
-                .padding([.horizontal, .bottom])
+                .padding(SH.space5)
             }
         }
-        .frame(width: 520)
+        .frame(width: 560)
+        .background(SH.bg)
+        .ignoresSafeArea(.container, edges: .top)  // the title sits in the title bar, beside the traffic lights
+    }
+
+    private var title: String {
+        switch model.flow.step {
+        case .permissions: "Permissions"
+        case .signIn: "Account"
+        case .tryIt: "Try it"
+        }
+    }
+
+    private var lead: String? {
+        model.flow.step == .permissions ? "shepetal runs on this Mac only. It needs these permissions." : nil
     }
 
     @ViewBuilder private var step: some View {
         switch model.flow.step {
         case .permissions:
-            Section("Shepetal runs on this Mac only. It needs these permissions:") {
+            SHRows {
                 ForEach(Permission.allCases, id: \.self) { p in
-                    row(p.granted, p.title, p.why) { model.grant(p) }
+                    row(p.granted, "Required", p.title, p.why) { model.grant(p) }
                 }
                 let audio = SystemMeetingCapture.systemAudioStatus()
-                row(audio == 0, "System Audio Recording (optional)", "to record the other people in a meeting") {
+                row(audio == 0, "Optional", "System Audio Recording",
+                    "System Audio Recording lets shepetal record the other people in a meeting.") {
                     NSWorkspace.shared.open(OnboardingModel.systemAudioPane)
                 }
             }
         case .signIn:
-            AccountSection()
+            VStack(alignment: .leading, spacing: SH.space3) { AccountSection() }
         case .tryIt:
             let engine = model.engine()
-            Section("Try it") {
-                if !engine.ready { Text(engine.status).foregroundStyle(.secondary) }
-                TextField("Click here, hold fn and say something.", text: $model.tried, axis: .vertical)
-                    .lineLimit(3...5).disabled(!engine.ready)
-                if !model.tried.isEmpty { Text("✅ It works") }
-                Toggle("Start Shepetal when I log in", isOn: $model.flow.startAtLogin)
+            VStack(alignment: .leading, spacing: SH.space4) {
+                if !engine.ready { Text(engine.status).shText(SH.appSmall).foregroundStyle(SH.textMuted) }
+                HStack(spacing: 6) {
+                    Text("Click in the field below, hold").shText(SH.appBody)
+                    SHKbd("fn")
+                    Text("and say something.").shText(SH.appBody)
+                }
+                .foregroundStyle(SH.text)
+                .accessibilityElement(children: .combine)
+                TextField("Your words appear here.", text: $model.tried, axis: .vertical)
+                    .lineLimit(3...5)
+                    .textFieldStyle(.shField)
+                    .disabled(!engine.ready)
+                    .accessibilityLabel("Try it")
+                if !model.tried.isEmpty {
+                    HStack(spacing: SH.space2) {
+                        SHIcon(.check)
+                        Text("It works").shText(SH.appStrong)
+                    }
+                    .foregroundStyle(SH.text)
+                    .accessibilityElement(children: .combine)
+                }
+                Toggle("Start shepetal when I log in", isOn: $model.flow.startAtLogin).toggleStyle(.shSwitch)
             }
         }
     }
 
-    private func row(_ granted: Bool, _ title: String, _ why: String, open: @escaping () -> Void) -> some View {
-        HStack {
-            Text("\(granted ? "✅" : "⚠️") \(title): \(why)")
-            Spacer()
-            if !granted { Button("Open", action: open) }
+    /// The setting, why in one sentence, and Open settings while it is off; a check and Allowed once it is on. Laid
+    /// out as SHRow (the mono label column, the title, the control on the right, a hairline below), with the sentence
+    /// wrapping instead of being cut.
+    private func row(_ granted: Bool, _ label: String, _ title: String, _ why: String, open: @escaping () -> Void) -> some View {
+        HStack(alignment: .center, spacing: SH.space5) {
+            HStack(alignment: .firstTextBaseline, spacing: SH.space5) {
+                Text(label).shText(SH.label).foregroundStyle(SH.textMuted)
+                    .frame(width: SH.rowLabel, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).shText(SH.appStrong).foregroundStyle(SH.text)
+                    Text(why).shText(SH.appSmall).foregroundStyle(SH.textMuted).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if granted {
+                HStack(spacing: 6) {
+                    SHIcon(.check)
+                    Text("Allowed").shText(SH.appSmall)
+                }
+                .foregroundStyle(SH.textMuted)
+                .accessibilityElement(children: .combine)
+            } else {
+                Button("Open settings", action: open)
+                    .buttonStyle(.keycap(.secondary))
+                    .accessibilityLabel("Open settings for \(title)")
+            }
         }
+        .padding(.vertical, 14)
+        .shHairline(.bottom)
+        .accessibilityElement(children: .contain)
     }
 }
 
-/// Notices a permission that was turned off while Shepetal runs, and all of them back on: on the 2 s timer,
+/// Notices a permission that was turned off while shepetal runs, and all of them back on: on the 2 s timer,
 /// after wake, and whenever an app comes to the front (the user coming back from System Settings).
 @MainActor
 final class PermissionMonitor {

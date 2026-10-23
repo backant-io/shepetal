@@ -14,28 +14,32 @@ struct StatsSection: View {
     @State private var problem = ""
 
     var body: some View {
-        Section("Your stats") {
-            Grid(alignment: .topLeading, horizontalSpacing: 24, verticalSpacing: 6) {
-                GridRow {
-                    Text("")
-                    Text("Last 7 days").bold()
-                    Text("All time").bold()
-                }
-                ForEach(StatsFormat.rows(week: week, all: all), id: \.title) { r in
-                    GridRow {
-                        Text(r.title).foregroundStyle(.secondary)
-                        Text(r.week).fixedSize(horizontal: false, vertical: true)  // top apps span lines
-                        Text(r.all).fixedSize(horizontal: false, vertical: true)
-                    }
+        SHRowGroup("Your stats") {
+            SHContentRow("") {
+                columns(Text("Last 7 days"), Text("All time"))
+                    .shText(SH.label).foregroundStyle(SH.textMuted)
+            }
+            ForEach(StatsFormat.rows(week: week, all: all), id: \.title) { r in
+                SHContentRow(r.title) {
+                    columns(Text(r.week), Text(r.all))  // top apps span lines
+                        .shText(SH.appBody).foregroundStyle(SH.text)
                 }
             }
+        } footer: {
             Text("Time saved: typing the same words at \(Int(typingWpm)) words per minute, minus the time spent speaking.")
-                .font(.caption).foregroundStyle(.secondary)
-            if !problem.isEmpty { Text(problem).font(.caption).foregroundStyle(.orange) }
+            if !problem.isEmpty { SHErrorLine(problem) }
         }
         .onAppear(perform: load)
         .onChange(of: typingWpm) { load() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in load() }
+    }
+
+    /// The last 7 days and all time, in two columns of the same width.
+    private func columns(_ week: Text, _ all: Text) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: SH.space5) {
+            week.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+            all.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func load() {

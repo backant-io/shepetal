@@ -20,7 +20,7 @@ struct MenuEntry: Equatable {
     var submenu: [MenuEntry]?
     var key = ""
     var modifiers: NSEvent.ModifierFlags = []
-    /// The yellow mark: something has to be done before dictation works.
+    /// The alert mark: something has to be done before dictation works.
     var attention = false
 }
 
@@ -133,16 +133,60 @@ enum MenuModel {
     }
 
     /// Fills `menu` with `groups`. Every item calls `action` on `target` with its MenuAction as representedObject;
-    /// `provide` returns the items the app builds itself (Microphone, Languages).
-    static func build(_ groups: [[MenuEntry]], into menu: NSMenu, target: AnyObject, action: Selector,
+    /// `provide` returns the items the app builds itself (Microphone, Languages). `head`, when given, is the state in
+    /// words at the top (design/ui/components/Menu), e.g. the indicator's `stateName`.
+    static func build(_ groups: [[MenuEntry]], into menu: NSMenu, target: AnyObject, action: Selector, head: String? = nil,
                       provide: (MenuAction) -> NSMenuItem? = { _ in nil }) {
         menu.removeAllItems()
         menu.autoenablesItems = false  // every item is enabled; AppKit does not get to grey one out
+        menu.font = SH.appBody.nsFont  // Archivo, as everything you operate
+        if let head { menu.addItem(Self.head(head)) }
         for (n, group) in groups.enumerated() {
             if n > 0 { menu.addItem(.separator()) }
             for e in group { menu.addItem(item(e, target: target, action: action, provide: provide)) }
         }
     }
+
+    /// The state in words: a section header in the mono label, sh-text-muted. It names, it does nothing.
+    static func head(_ state: String) -> NSMenuItem {
+        let i = NSMenuItem.sectionHeader(title: state)
+        i.attributedTitle = NSAttributedString(string: state, attributes: [.font: SH.label.nsFont, .foregroundColor: SH.textMuted.nsColor])
+        return i
+    }
+
+    /// The menu bar icon: the Noto 🤫 (never a typed emoji) at 16 pt in an 18 pt square, with a 2 pt sh-signal ring
+    /// while `live` (a meeting records). Not a template: the artwork keeps its colors on a light and a dark menu bar.
+    static func statusIcon(live: Bool) -> NSImage {
+        let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+            let side: CGFloat = live ? 12 : 16
+            SHIndicator.shush.draw(in: NSRect(x: (rect.width - side) / 2, y: (rect.height - side) / 2, width: side, height: side))
+            if live, let ring = IndicatorRing.path(.recording, in: rect) {
+                SH.signal.nsColor.setStroke()
+                ring.stroke()
+            }
+            return true
+        }
+        image.accessibilityDescription = live ? "shepetal, recording" : "shepetal"
+        return image
+    }
+
+    /// Lucide's triangle-alert, 16 pt at 1.5 pt, as a template so it takes the menu's text color.
+    static let attentionIcon: NSImage = {
+        let image = NSImage(size: NSSize(width: 16, height: 16), flipped: true) { rect in
+            let s = rect.width / SHIconShape.grid
+            let path = NSBezierPath(cgPath: SHIconName.triangleAlert.path.cgPath)
+            path.transform(using: AffineTransform(scaleByX: s, byY: s))
+            path.lineWidth = SHIconShape.stroke
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            NSColor.black.setStroke()
+            path.stroke()
+            return true
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "Needs attention"
+        return image
+    }()
 
     private static func item(_ e: MenuEntry, target: AnyObject, action: Selector, provide: (MenuAction) -> NSMenuItem?) -> NSMenuItem {
         if let a = e.action, let provided = provide(a) { return provided }
@@ -154,10 +198,7 @@ enum MenuModel {
             i.submenu = NSMenu()
             build([sub], into: i.submenu!, target: target, action: action, provide: provide)
         }
-        if e.attention {
-            i.image = NSImage(systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)?
-                .withSymbolConfiguration(.init(paletteColors: [.systemYellow]))
-        }
+        if e.attention { i.image = attentionIcon }
         return i
     }
 }
