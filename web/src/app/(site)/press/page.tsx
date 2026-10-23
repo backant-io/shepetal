@@ -99,7 +99,7 @@ export default function Press() {
           <h2>Contact</h2>
           <p>
             Pavel Hegler, <a href="mailto:support@shepetal.app">support@shepetal.app</a>. Try it yourself: 30 days free,
-            from the <Link href="/">home page</Link>.
+            from the <Link href="/" prefetch={false}>home page</Link>.
           </p>
         </div>
       </main>

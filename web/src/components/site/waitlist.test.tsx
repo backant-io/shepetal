@@ -166,7 +166,7 @@ describe('the waitlist copy', () => {
       privacy.match(/<h3 id="waitlist">[\s\S]*?(?=<div class="s-box">)/)![0],
       privacy.match(/<li>The waitlist:[^<]*<\/li>/)![0],
       privacy.match(/The waitlist needs[^.]*\./)![0],
-      privacy.match(/and the waitlist emails \(section III\.8\)/)![0],
+      privacy.match(/and the waitlist emails \(section III\.9\)/)![0],
     ].map(visibleText).join(' ');
     for (const [where, text] of Object.entries(texts)) expect(copyProblems(text), `${where}: ${text}`).toEqual([]);
     expect(texts.privacy).toContain('one purpose only');
