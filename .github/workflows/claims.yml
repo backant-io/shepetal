@@ -1,6 +1,7 @@
 # Claims: public, repeatable evidence for "100% private. Your data is yours." and "Works offline." (docs/claims.md).
 # The speech model is fetched with the network on; then shepetal is built and the dictation and meeting
-# end-to-end runs go with the network denied, and the unified log must hold no network denial for shepetal.
+# end-to-end runs go with the network denied: a network attempt kills the process that makes it, which fails the run,
+# and the unified log must hold no network denial but the canary's.
 name: Claims
 on:
   workflow_dispatch:
@@ -32,7 +33,8 @@ jobs:
         shell: bash  # -eo pipefail, so a failed run is not hidden by tee
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
-      NO_NETWORK: (version 1)(allow default)(deny network*)
+      # A process that tries the network is killed (SIGKILL), so the e2e itself fails; the log can drop denials.
+      NO_NETWORK: (version 1)(allow default)(deny network* (with send-signal SIGKILL))
     steps:
       - uses: actions/checkout@v7
       - uses: actions/cache@v6
@@ -46,13 +48,13 @@ jobs:
           restore-keys: claims-swiftpm-
 
       # Network on. Parakeet v3 (about 470 MB) the way bench/fluid fetches it: FluidAudio's own AsrModels.download
-      # into FluidAudio's default cache, where the app loads it from. Cached on the FluidAudio pin, saved as soon as
-      # it is fetched, so a red run does not download it again.
+      # into FluidAudio's default cache, where the app loads it from. Cached on the FluidAudio pins (the app's and
+      # bench/fluid's), saved as soon as it is fetched, so a red run does not download it again.
       - id: model
         uses: actions/cache/restore@v6
         with:
           path: ~/Library/Application Support/FluidAudio/Models
-          key: parakeet-tdt-0.6b-v3-${{ hashFiles('bench/fluid/Package.resolved') }}
+          key: parakeet-tdt-0.6b-v3-${{ hashFiles('Package.resolved', 'bench/fluid/Package.resolved') }}
       - name: Fetch the speech model (network on)
         if: steps.model.outputs.cache-hit != 'true'
         run: |
@@ -70,29 +72,36 @@ jobs:
       - name: Dictation, network denied
         run: |
           echo "SINCE=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
-          # The canary: the same profile must stop curl, and its denial is what the log check looks for below.
-          if sandbox-exec -p "$NO_NETWORK" curl -sS -m 10 -o /dev/null https://example.com; then
+          # The canary, under the plain deny profile (no kill), so curl lives to fail: it must not get through, and
+          # its denial, by pid, is what the log check looks for below.
+          sandbox-exec -p '(version 1)(allow default)(deny network*)' curl -sS -m 10 -o /dev/null https://example.com &
+          canary=$!
+          echo "CANARY_PID=$canary" >> "$GITHUB_ENV"
+          if wait $canary; then
             echo "::error::curl reached example.com under the deny-network profile"; exit 1
           fi
-          # LATENCY=report: the runner is a VM with no Neural Engine, so the speed bars are reported, not asserted.
+          # LATENCY=report: the runner is a VM with no Neural Engine, so the 700 and 800 ms bars are reported and
+          # only a loose 2000 ms bar is asserted.
           CLEANUP=rules LANGUAGES=skip LATENCY=report sandbox-exec -p "$NO_NETWORK" scripts/e2e-mac.sh 2>&1 | tee e2e-mac.log
       - name: Meeting, network denied
-        # The script runs shepetal under the same profile itself; a sandbox cannot be applied inside another.
+        # The script runs shepetal under the same kill profile itself; a sandbox cannot be applied inside another.
         run: SHEPETAL_BIN=.build/release/shepetal scripts/e2e-meeting.sh 2>&1 | tee e2e-meeting.log
       - name: Nothing leaves the Mac
         if: ${{ !cancelled() && env.SINCE != '' }}
         run: |
           sudo log show --start "$SINCE" --style compact \
             --predicate 'eventMessage CONTAINS "deny(" AND eventMessage CONTAINS "network"' > denials.log
-          echo "network denials on this Mac since $SINCE, from any process:"
+          echo "network denials on this Mac since $SINCE, from any process (the canary is curl($CANARY_PID)):"
           grep 'Sandbox:' denials.log || true
-          grep -qE 'curl\([0-9]+\) deny\([0-9]+\) network' denials.log ||
+          grep -qE "curl\($CANARY_PID\) deny\([0-9]+\) network-" denials.log ||
             { echo "::error::the canary's denial is not in the log, so this check cannot see one"; exit 1; }
-          if grep -E 'shepetal\([0-9]+\) deny\([0-9]+\) network' denials.log; then
-            echo "::error::shepetal tried to reach the network (denials above)"; exit 1
+          # Any process but the canary: shepetal, or anything it or the scripts start. Daemons' file-read-data
+          # denials of network preference files do not match.
+          if grep -E 'deny\([0-9]+\) network-' denials.log | grep -vF "curl($CANARY_PID)"; then
+            echo "::error::a process other than the canary tried to reach the network (denials above)"; exit 1
           fi
           if grep -shiE 'NSURLErrorDomain|kCFErrorDomainCFNetwork|nw_connection|nw_resolver|appears to be offline|hostname could not be found|could not connect to the server|network is unreachable' \
             e2e-mac.log e2e-meeting.log .cache/e2e/stderr.log .cache/e2e-meeting/stderr.log; then
             echo "::error::network error in the e2e output (above)"; exit 1
           fi
-          echo "no network attempt from shepetal, and no network error in the e2e output"
+          echo "no network denial but the canary's, and no network error in the e2e output"
