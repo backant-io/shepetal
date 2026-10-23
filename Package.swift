@@ -34,7 +34,7 @@ let package = Package(
             .product(name: "MeetingCore", package: "meeting"),
             .product(name: "MeetingMac", package: "meeting"),
             .product(name: "Sparkle", package: "Sparkle"),
-        ]),
+        ], resources: [.copy("UI/Assets")]),  // shepetal UI: fonts, Lucide icons, the 🤫 (UI/Assets/SOURCES.md)
         // bench/cleanup/run.sh: scores cleanup models on bench/cleanup/fixtures.
         .executableTarget(name: "cleanup-bench", dependencies: ["ShepetalCleanup"], path: "bench/cleanup/Sources"),
         // Meeting summarizer: not an LLM (rule 6).

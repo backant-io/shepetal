@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let crashHint = Watchdog.start()  // F99: first, so a crash in the rest of the launch is caught too
+        SHFonts.register()  // shepetal UI: the bundled Archivo, Fragment Mono and Bodoni Moda, for this process only
         if allowPrompts, MoveToApplications.offerIfNeeded() { return }  // the copy in /Applications takes over; Quit stays quit
         indicator = Indicator()
         let updated = WhatsNewWindow.atLaunch()  // before Pipeline creates history.sqlite (how an update from 0.1.0 is told from a first install)
