@@ -22,7 +22,7 @@ export function SiteHeader({ end }: { end?: React.ReactNode }) {
 }
 
 /**
- * The footer, as on the landing page: the wordmark, the "Made for" pages, the "Compare" pages, then Privacy · Terms · Refunds · Legal,
+ * The footer, as on the landing page: the wordmark, the "Made for" pages, the "Compare" pages, the blog, then Privacy · Terms · Refunds · Legal,
  * and the cancellation button "Verträge hier kündigen" (§ 312k BGB: on every page, no sign-in, in exactly these words).
  */
 export function SiteFooter() {
@@ -44,6 +44,9 @@ export function SiteFooter() {
             {c.label}
           </Link>
         ))}
+      </nav>
+      <nav aria-label="Blog" className="s-mono s-foot-nav">
+        <Link href="/blog" prefetch={false}>Blog</Link>
       </nav>
       <nav aria-label="Legal" className="s-mono s-foot-nav">
         <Link href="/privacy" prefetch={false}>Privacy</Link>

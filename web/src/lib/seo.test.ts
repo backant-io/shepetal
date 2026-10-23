@@ -7,6 +7,7 @@ import { PAGES, pageMetadata, softwareJsonLd } from './seo';
 import { SITE_URL } from './site';
 import { USE_CASES } from './use-cases';
 import { COMPARE_LINKS } from './compare';
+import { BLOG_LINKS } from './blog';
 
 const WEB = join(__dirname, '..', '..');
 
@@ -18,6 +19,7 @@ describe('discovery', () => {
       ...Object.values(PAGES).filter((p) => p.path !== '/waitlist').map((p) => `${SITE_URL}${p.path === '/' ? '' : p.path}`),
       ...USE_CASES.map((u) => `${SITE_URL}/for/${u.slug}`),
       ...COMPARE_LINKS.map((c) => `${SITE_URL}${c.href}`),
+      ...BLOG_LINKS.map((b) => `${SITE_URL}${b.href}`),
     ]);
     for (const p of ['/faq', '/press', '/changelog', '/refunds', '/impressum', '/privacy', '/terms', '/legal']) expect(urls).toContain(`${SITE_URL}${p}`);
     expect(urls.some((u) => /account|install|download|\/app\b|\/api\//.test(u))).toBe(false);
