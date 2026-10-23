@@ -571,29 +571,12 @@ private struct HistoryTab: View {
                     if !expanded, Self.lines(e.shownText, width: width) > 4 {
                         Button("Show all") { expanded = true }.buttonStyle(.keycap(.quiet, .sm)).padding(.top, 6)
                     }
-                    HStack(spacing: SH.space1) {
-                        Button { model.copy(e) } label: { Label { Text("Copy text") } icon: { SHIcon(.copy) } }
-                            .focused($focus, equals: .copy)
-                            .disabled(e.shownText.isEmpty)
-                        Button(e.reverted ? "Show cleaned" : "Show raw") { model.setReverted(e, !e.reverted) }
-                            .focused($focus, equals: .raw)
-                            .disabled(e.text.isEmpty)
-                        Button("Play") { model.play(e) }.focused($focus, equals: .play).disabled(!replay)
-                        Menu {
-                            ForEach(model.retryChoices, id: \.title) { c in Button(c.title) { model.retry(e, with: c.model) } }
-                        } label: {
-                            Label { Text("Re-transcribe") } icon: { SHIcon(.rotateCcwClock) }
-                        }
-                        .menuStyle(.button)
-                        .menuIndicator(.hidden)
-                        .fixedSize()
-                        .focused($focus, equals: .retranscribe)
-                        .disabled(!replay || model.busy != nil)
-                        Button(e.archived ? "Unarchive" : "Archive") { model.setArchived(e, !e.archived) }
-                            .focused($focus, equals: .archive)
+                    // One row of tools when it fits the column, else one tool per line.
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: SH.space1) { toolButtons(replay: replay) }
+                        VStack(alignment: .leading, spacing: SH.space1) { toolButtons(replay: replay) }
                     }
                     .buttonStyle(.keycap(.quiet, .sm))
-                    .fixedSize()
                     // Folded away until hover or focus, but still in the key view loop, so Tab reaches and opens them.
                     .padding(.top, tools ? 6 : 0)
                     .frame(maxHeight: tools ? nil : 0, alignment: .top)
@@ -606,6 +589,29 @@ private struct HistoryTab: View {
             .contentShape(Rectangle())
             .shHairline(.bottom)
             .onHover { hover = $0 }
+        }
+
+        /// Copy text, Show raw, Play, Re-transcribe and Archive, each at its own width.
+        @ViewBuilder private func toolButtons(replay: Bool) -> some View {
+            Button { model.copy(e) } label: { Label { Text("Copy text") } icon: { SHIcon(.copy) } }
+                .focused($focus, equals: .copy)
+                .disabled(e.shownText.isEmpty)
+            Button(e.reverted ? "Show cleaned" : "Show raw") { model.setReverted(e, !e.reverted) }
+                .focused($focus, equals: .raw)
+                .disabled(e.text.isEmpty)
+            Button("Play") { model.play(e) }.focused($focus, equals: .play).disabled(!replay)
+            Menu {
+                ForEach(model.retryChoices, id: \.title) { c in Button(c.title) { model.retry(e, with: c.model) } }
+            } label: {
+                Label { Text("Re-transcribe") } icon: { SHIcon(.rotateCcwClock) }
+            }
+            .menuStyle(.button)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .focused($focus, equals: .retranscribe)
+            .disabled(!replay || model.busy != nil)
+            Button(e.archived ? "Unarchive" : "Archive") { model.setArchived(e, !e.archived) }
+                .focused($focus, equals: .archive)
         }
 
         /// How many lines `text` takes in app-body at `width`.
