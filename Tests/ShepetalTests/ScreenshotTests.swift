@@ -94,7 +94,7 @@ final class ScreenshotTests: XCTestCase {
                                                   audioPath: wav.path, durationMs: d.text.split(separator: " ").count * 380,
                                                   rawText: d.text, text: d.text, app: d.app))
         }
-        try shoot("01-history", Self.hubSize, expect: ["floor plan", "Running ten minutes late", "plumber comes"]) {
+        try shoot("01-history", Self.hubSize, expect: ["floor plan", "Running ten minutes late", "Newsletter ideas"]) {
             let hub = self.hub(pipeline, tab: "history")
             // Hub.show() loads the rows, and it would put the window on screen.
             (try self.part(hub, "model") as HubModel).reload()
