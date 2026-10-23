@@ -158,6 +158,15 @@
 .s-cmp .s-prose h3 + ul { margin-top: .5rem; }
 .s-cmp-line { display: block; }
 .s-cmp-sources ul { font-size: .9375rem; color: var(--ink2); overflow-wrap: anywhere; }
+/* the blog (/blog, /blog/<slug>): the comparison pages' style, and the index as a list of articles */
+.s-blog > .s-mono { margin-top: 1.2rem; }
+.s-blog-list { list-style: none; margin: 3rem 0 0; padding: 0; border-top: 1px solid var(--rule); }
+.s-blog-list > li { padding: 1.6rem 0; border-bottom: 1px solid var(--rule); }
+.s-blog-title { margin: 0; font-weight: 520; font-size: clamp(1.5rem, calc(2.3 * var(--u)), 2.4rem); line-height: 1.1; letter-spacing: -.025em; }
+.s-blog-title a { color: var(--ink); text-decoration: none; }
+.s-blog-title a:hover { text-decoration: underline; text-underline-offset: .18em; }
+.s-blog-list p { margin: .6rem 0 0; font-size: 1.0625rem; line-height: 1.55; color: #2a2824; }
+.s-blog-list .s-mono { margin-top: .5rem; color: var(--ink2); }
 
 /* changelog */
 .s-releases { list-style: none; margin: 3rem 0 0; padding: 0; border-top: 1px solid var(--rule); }
