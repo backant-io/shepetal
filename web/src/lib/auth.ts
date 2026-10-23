@@ -1,10 +1,8 @@
 import NextAuth from 'next-auth';
-import { cookies } from 'next/headers';
 import Google from 'next-auth/providers/google';
 import { upsertUser, type User } from './account';
 import { ensureAuthUrl, SITE_URL } from './site';
 import { bearer, userForToken } from './tokens';
-import { recordTrialEmailsOptIn, TRIAL_EMAILS_COOKIE } from './trial-emails';
 
 // Same Google OAuth client and next-auth setup as backant.io: JWT sessions, no adapter.
 // Cookies stay host-only, so a shepetal session never reaches backant.io and the reverse.
@@ -24,7 +22,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
       async signIn({ user, profile }) {
         if (!user.email || profile?.email_verified === false) return false;
         await upsertUser(user.email); // first shepetal sign-in starts the 30-day trial
-        await trialEmailsFromCookie(user.email);
         return true;
       },
     },
@@ -33,18 +30,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth(() => {
     trustHost: true,
   };
 });
-
-/** The trial emails box ticked on /login (SignInButton keeps it in a cookie through Google): recorded, then dropped. */
-export async function trialEmailsFromCookie(email: string): Promise<void> {
-  const jar = await cookies();
-  if (jar.get(TRIAL_EMAILS_COOKIE)?.value !== 'yes') return;
-  await recordTrialEmailsOptIn(email);
-  try {
-    jar.delete(TRIAL_EMAILS_COOKIE);
-  } catch {
-    // Not every caller may change cookies: it expires within 10 minutes anyway.
-  }
-}
 
 /**
  * The origin links point at (Stripe's return URLs, the app login's Origin check): SITE_URL in production, whichever
