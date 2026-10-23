@@ -20,7 +20,9 @@ pub const CHECK_EVERY: i64 = DAY;
 /// After a failed check, try again this much later.
 pub const RETRY_AFTER_FAILURE: i64 = 3_600;
 
-pub const DEFAULT_BASE: &str = "https://shepetal.backant.io";
+/// The account service. Builds released before the move to shepetal.app called
+/// https://shepetal.backant.io, which still answers /api/* for them.
+pub const DEFAULT_BASE: &str = "https://shepetal.app";
 
 /// SHEPETAL_ACCOUNT_URL overrides the service (tests and hand tests point it at a local copy).
 pub fn base_url(env: Option<&str>) -> String {
@@ -603,10 +605,10 @@ mod tests {
     #[test]
     fn login_url_names_the_loopback_redirect_and_s256() {
         let p = Pkce::new("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk", "st~ate.1");
-        let url = login_url("https://shepetal.backant.io", &redirect_uri(50123), &p);
+        let url = login_url("https://shepetal.app", &redirect_uri(50123), &p);
         assert_eq!(
             url,
-            "https://shepetal.backant.io/app/login?redirect_uri=http%3A%2F%2F127.0.0.1%3A50123%2Fcallback\
+            "https://shepetal.app/app/login?redirect_uri=http%3A%2F%2F127.0.0.1%3A50123%2Fcallback\
              &state=st~ate.1&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256"
         );
     }
@@ -634,13 +636,14 @@ mod tests {
         assert!(!is_web_page("file:///C:/x"));
         assert!(!is_web_page("javascript:alert(1)"));
         assert_eq!(base_url(None), DEFAULT_BASE);
+        assert_eq!(DEFAULT_BASE, "https://shepetal.app");
         assert_eq!(base_url(Some("http://localhost:3000/")), "http://localhost:3000");
         assert_eq!(base_url(Some("")), DEFAULT_BASE);
     }
 
     #[test]
     fn urls_split_for_winhttp() {
-        assert_eq!(split_url("https://shepetal.backant.io/api/license"), Some((true, "shepetal.backant.io".into(), 443, "/api/license".into())));
+        assert_eq!(split_url("https://shepetal.app/api/license"), Some((true, "shepetal.app".into(), 443, "/api/license".into())));
         assert_eq!(split_url("http://127.0.0.1:3000/api/app/token"), Some((false, "127.0.0.1".into(), 3000, "/api/app/token".into())));
         assert_eq!(split_url("https://h"), Some((true, "h".into(), 443, "/".into())));
         assert_eq!(split_url("https://h?x=1"), Some((true, "h".into(), 443, "/?x=1".into())));
