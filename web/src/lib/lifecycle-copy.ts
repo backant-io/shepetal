@@ -71,9 +71,12 @@ export function copyFor(kind: Kind, { trial = true, daysLeft = 5 }: { trial?: bo
 
 const days = (n: number) => (n === 1 ? '1 day' : `${n} days`);
 
-/** The footer of every trial email: why it came, the unsubscribe link, and who sends it. */
+/**
+ * The footer of every trial email: why it came (the box ticked at sign-in), that unsubscribing is possible at any time
+ * and costs nothing, the link, and who sends it.
+ */
 export const footer = (unsubscribeUrl: string) => [
-  `You get this email because you started a shepetal trial. It is one of three. To get no more: ${unsubscribeUrl}`,
+  `You get this email because you asked for emails about your shepetal trial. It is one of three. Unsubscribe at any time, free of charge: ${unsubscribeUrl}`,
   'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA',
 ];
 

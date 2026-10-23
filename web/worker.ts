@@ -68,7 +68,7 @@ export default {
     });
   },
 
-  // The Cron Trigger (wrangler.toml [triggers], every 15 minutes): the trial emails, at most 5 a run. No Next here.
+  // The Cron Trigger (wrangler.toml [triggers], every 5 minutes): the trial emails, at most 5 a run. No Next here.
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     ctx.waitUntil(runLifecycle(env));
   },

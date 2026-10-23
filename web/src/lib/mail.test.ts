@@ -106,6 +106,15 @@ describe('sesSend', () => {
     await expect(sesSend(SES, mail, down as unknown as typeof fetch)).rejects.toMatchObject({ status: 0 });
   });
 
+  // The trial emails mark an email failed for good only when SES refused that one message (MessageRejected): the type,
+  // not the status, tells it from a paused account or a malformed request, which are 400s too.
+  it("carries SES's error type, from the x-amzn-ErrorType header or the body", async () => {
+    const answer = (init: ResponseInit, body = '{}') => vi.fn(async () => new Response(body, init)) as unknown as typeof fetch;
+    await expect(sesSend(SES, mail, answer({ status: 400, headers: { 'x-amzn-ErrorType': 'MessageRejected:http://internal.amazon.com/coral/' } }))).rejects.toMatchObject({ type: 'MessageRejected' });
+    await expect(sesSend(SES, mail, answer({ status: 400 }, '{"__type":"com.amazonaws#SendingPausedException"}'))).rejects.toMatchObject({ type: 'SendingPausedException' });
+    await expect(sesSend(SES, mail, answer({ status: 503 }, 'not json'))).rejects.toMatchObject({ status: 503, type: '' });
+  });
+
   it('sends nothing without all three secrets', async () => {
     const fetch = vi.fn();
     await expect(sesSend({ ...SES, SES_REGION: '' }, mail, fetch)).rejects.toThrow('SES is not set up');

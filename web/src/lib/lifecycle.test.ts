@@ -28,9 +28,13 @@ beforeEach(() => {
   fakeSes.mockClear();
 });
 
-/** A user whose trial started `days` days before NOW, with any other columns. */
+/**
+ * A user whose trial started `days` days before NOW and who ticked the trial emails box at sign-up, with any other
+ * columns (trial_emails_at: null for one who never ticked it).
+ */
 async function user(email: string, days: number, cols: Record<string, string | number | null> = {}): Promise<number> {
-  const all = { email, trial_started_at: new Date(NOW - days * DAY).toISOString(), ...cols };
+  const started = new Date(NOW - days * DAY).toISOString();
+  const all = { email, trial_started_at: started, trial_emails_at: started, ...cols };
   const keys = Object.keys(all);
   const row = await db()
     .prepare(`INSERT INTO users (${keys.join(', ')}) VALUES (${keys.map((_, i) => `?${i + 1}`).join(', ')}) RETURNING id`)
@@ -38,6 +42,7 @@ async function user(email: string, days: number, cols: Record<string, string | n
     .first<{ id: number }>();
   return row!.id;
 }
+const NO_OPT_IN = { trial_emails_at: null };
 const rows = () => db().prepare('SELECT user_id, kind, status FROM lifecycle_emails ORDER BY user_id, kind').all().then((r) => r.results);
 const LIFETIME = { status: 'active', plan: 'lifetime', purchased_at: '2026-10-10T00:00:00.000Z' };
 const SUBSCRIBER = { plan: 'subscription', sub_id: 'sub_1', sub_status: 'active', paid_through: '2026-12-01T00:00:00.000Z' };
@@ -115,17 +120,112 @@ describe('which email goes to whom', () => {
     expect(new Set(sent.map((m) => m.to)).size).toBe(12);
   });
 
-  it('tries again after SES says 429 or 5xx, and never again after it refused the address or never answered', async () => {
+  // The emails are advertising (day 25 names the prices): § 7 UWG and the GDPR allow them only with consent.
+  it('sends nothing, not even the welcome, to a user who never ticked the box, and to users from before it', async () => {
+    await user('quiet@example.com', 0.01, NO_OPT_IN);
+    await user('quiet3@example.com', 3.2, NO_OPT_IN);
+    await user('quiet25@example.com', 25.1, NO_OPT_IN);
+    await user('yes@example.com', 0.01);
+    expect((await due(db(), NOW)).map((d) => d.user.email)).toEqual(['yes@example.com']);
+    await run();
+    expect(sent.map((m) => m.to)).toEqual(['yes@example.com']);
+  });
+
+  it('starts with the tick: a user who ticks the box later gets the emails still in their window', async () => {
+    const id = await user('later@example.com', 3.2, NO_OPT_IN);
+    await run();
+    expect(sent).toEqual([]);
+    await db().prepare('UPDATE users SET trial_emails_at = ?2 WHERE id = ?1').bind(id, new Date(NOW).toISOString()).run();
+    await run();
+    expect(sent.map((m) => m.subject)).toEqual(['A tip for shepetal: your language']);
+  });
+
+  it('tries again after 429 or 5xx, and marks failed for good only the one message SES rejected', async () => {
     await user('busy@example.com', 0.5);
-    answer = () => new Response('{"message":"slow down"}', { status: 429 });
+    answer = () => new Response('{"message":"slow down"}', { status: 429, headers: { 'x-amzn-ErrorType': 'TooManyRequestsException' } });
     expect((await run())[0].result).toBe('retry');
     expect(await rows()).toEqual([]);
-    answer = () => new Response('{"message":"bad address"}', { status: 400 });
+    answer = () => new Response('{"message":"Email address is not verified."}', { status: 400, headers: { 'x-amzn-ErrorType': 'MessageRejected:http://internal.amazon.com/coral/com.amazon.coral.service/' } });
     expect((await run())[0].result).toBe('failed');
     answer = () => new Response('{"MessageId":"m"}');
     expect(await run()).toEqual([]);
     expect(sent).toEqual([]);
     expect((await rows())[0]).toMatchObject({ status: 'failed' });
+  });
+
+  // One bad address must cost only its own email: the run goes on to the next users.
+  it('marks only the email with the invalid recipient failed, and sends the rest of the run', async () => {
+    const bad = await user('bad@example.com', 0.2); // the older trial goes first
+    await user('good@example.com', 0.1);
+    let calls = 0;
+    answer = () =>
+      calls++ === 0
+        ? new Response('{"message":"Missing final \'@domain\'"}', { status: 400, headers: { 'x-amzn-ErrorType': 'BadRequestException' } })
+        : new Response('{"MessageId":"m2"}');
+    const out = await run();
+    expect(out.map((o) => o.result)).toEqual(['failed', 'sent']);
+    expect(sent.map((m) => m.to)).toEqual(['good@example.com']);
+    expect(await rows()).toEqual([
+      { user_id: bad, kind: 'welcome', status: 'failed' },
+      { user_id: bad + 1, kind: 'welcome', status: 'sent' },
+    ]);
+  });
+
+  // A 403 (wrong key, paused account, wrong region) is the setup's fault, not the email's: marking emails failed for
+  // it would lose them for good, 5 users a run, though nothing was wrong with them.
+  it.each([
+    ['403', () => new Response('{"message":"The security token included in the request is invalid."}', { status: 403, headers: { 'x-amzn-ErrorType': 'UnrecognizedClientException' } })],
+    ['sending paused', () => new Response('{"message":"Sending is paused for this account."}', { status: 400, headers: { 'x-amzn-ErrorType': 'SendingPausedException' } })],
+    ['account suspended', () => new Response('{"message":"suspended"}', { status: 400, headers: { 'x-amzn-ErrorType': 'AccountSuspendedException' } })],
+    ['a 5xx', () => new Response('oops', { status: 503 })],
+    ['no answer', () => { throw new TypeError('fetch failed'); }],
+  ])('on %s, releases the claim and stops the run; the email goes out on a later run once SES answers 200', async (_, fail) => {
+    for (let i = 0; i < 3; i++) await user(`u${i}@example.com`, 0.5);
+    answer = fail as () => Response;
+    const log = vi.fn();
+    const out = await runLifecycle(env(), NOW, { fetchImpl: fakeSes as typeof fetch, log });
+    expect(fakeSes).toHaveBeenCalledTimes(1); // stopped after the first error, the other two were not tried
+    expect(out.map((o) => o.result)).toEqual(['retry']);
+    expect(await rows()).toEqual([]); // nothing claimed, nothing failed
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^lifecycle: retry welcome user \d+: run stopped, nothing marked failed: /));
+    expect(JSON.stringify(log.mock.calls)).not.toContain('@example.com');
+    answer = () => new Response('{"MessageId":"m"}');
+    await run(undefined, NOW + 5 * 60_000);
+    expect(sent.map((m) => m.to).sort()).toEqual(['u0@example.com', 'u1@example.com', 'u2@example.com']);
+  });
+
+  // Here SES_REGION reads as set when the run starts and as gone when sesSend checks it: sesSend throws before fetch.
+  it('releases the claim and stops on an error thrown before SES is called', async () => {
+    await user('a@example.com', 0.5);
+    await user('b@example.com', 0.6);
+    let reads = 0;
+    const flaky = { ...env(), get SES_REGION() { return reads++ === 0 ? 'eu-central-1' : undefined; } } as LifecycleEnv;
+    const out = await runLifecycle(flaky, NOW, { fetchImpl: fakeSes as typeof fetch, log: () => {} });
+    expect(out.map((o) => o.result)).toEqual(['retry']);
+    expect(fakeSes).not.toHaveBeenCalled();
+    expect(await rows()).toEqual([]);
+  });
+
+  it('keeps every email address out of the log, even when SES echoes one', async () => {
+    await user('a@example.com', 0.5);
+    answer = () => new Response('{"message":"Email address is not verified: a@example.com, hello@shepetal.app"}', { status: 400, headers: { 'x-amzn-ErrorType': 'MessageRejected' } });
+    const log = vi.fn();
+    await runLifecycle(env(), NOW, { fetchImpl: fakeSes as typeof fetch, log });
+    expect(JSON.stringify(log.mock.calls)).not.toMatch(/@example\.com|hello@/);
+    expect(log).toHaveBeenCalledWith(expect.stringMatching(/^lifecycle: failed welcome user \d+: SES 400: .*<address>/));
+  });
+
+  // At most 5 a run keeps a run in 10 ms of CPU; when more are due, the backlog must show, or emails whose window
+  // closes are lost without a trace.
+  it(`logs when more than ${BATCH} emails were due, and not when they all fit`, async () => {
+    for (let i = 0; i < BATCH; i++) await user(`u${i}@example.com`, 0.5);
+    const log = vi.fn();
+    await runLifecycle(env({ LIFECYCLE_EMAILS: 'off' }), NOW, { fetchImpl: fakeSes as typeof fetch, log });
+    expect(JSON.stringify(log.mock.calls)).not.toContain('more than');
+    await user('one-more@example.com', 0.5);
+    const out = await runLifecycle(env(), NOW, { fetchImpl: fakeSes as typeof fetch, log });
+    expect(out).toHaveLength(BATCH);
+    expect(log).toHaveBeenCalledWith(`lifecycle: more than ${BATCH} emails due, ${BATCH} taken this run, the rest wait for the next runs`);
   });
 });
 
@@ -306,7 +406,7 @@ describe('the branded HTML', () => {
       expect(html).toContain("<p style=\"margin:0 0 4px;font:italic 400 22px/1.3 Georgia,'Bodoni 72','Times New Roman',serif;color:#161512\">Pavel</p>");
       expect(html).toContain('<tr><td style="padding:20px 0 0;border-top:1px solid #D3D0C9">');
       expect(html).toContain(
-        "font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#57544E\">You get this email because you started a shepetal trial. It is one of three. To get no more: <a href=\"https://shepetal.app/unsubscribe?u=1&amp;s=x\" style=\"color:#161512;text-decoration:underline\">shepetal.app/unsubscribe?u=1&amp;s=x</a></p>",
+        "font:400 13px/1.5 -apple-system,BlinkMacSystemFont,'Helvetica Neue',Helvetica,Arial,sans-serif;color:#57544E\">You get this email because you asked for emails about your shepetal trial. It is one of three. Unsubscribe at any time, free of charge: <a href=\"https://shepetal.app/unsubscribe?u=1&amp;s=x\" style=\"color:#161512;text-decoration:underline\">shepetal.app/unsubscribe?u=1&amp;s=x</a></p>",
       );
       expect(html).toContain('BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA');
       expect(html).not.toContain('>https://'); // links are shown without the scheme
@@ -316,7 +416,7 @@ describe('the branded HTML', () => {
   it('keeps the text part plain: no button, no box, the copy and the footer as they are', () => {
     const { text } = render('day25', copyFor('day25'), UNSUB);
     expect(text).toBe(
-      [...copyFor('day25').paragraphs, '--', `You get this email because you started a shepetal trial. It is one of three. To get no more: ${UNSUB}`, 'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA'].join('\n\n') + '\n',
+      [...copyFor('day25').paragraphs, '--', `You get this email because you asked for emails about your shepetal trial. It is one of three. Unsubscribe at any time, free of charge: ${UNSUB}`, 'BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA'].join('\n\n') + '\n',
     );
     expect(text).not.toContain('Choose a plan');
   });

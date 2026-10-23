@@ -429,6 +429,7 @@ async function main() {
       const html = await r.text();
       assert.equal(r.status, 200, `${path}: ${r.status}`);
       assert.ok(html.includes('Sign in.') && html.includes('Continue with Google') && /<form[^>]*action=/.test(html), `${path} is the sign-in page`);
+      assert.ok(html.includes('<input type="checkbox" name="trial_emails" value="yes"/> Send me three short emails about my trial.'), `${path}: the unticked trial emails box`);
     }
   });
 
@@ -821,6 +822,18 @@ async function main() {
     for (const leak of [email, '127.0.0.1', 'example.com', '4242', 'private', 'Chrome/131', l.state]) assert.ok(!all.includes(leak), `${leak} is not sent`);
   });
 
+  // ---- 7b. The trial emails box on the consent page: unticked by default, and only a tick records the opt-in.
+  await check('/app/login: the trial emails box is unticked; Continue without it records nothing, with it the time of the opt-in', async () => {
+    const optIn = async () => (await d1(`SELECT trial_emails_at FROM users WHERE email = '${email}'`))[0][0];
+    await d1(`UPDATE users SET trial_emails_at = NULL WHERE email = '${email}'`);
+    const html = await (await browse(pkce().url, session)).text();
+    assert.ok(html.includes('<input type="checkbox" name="trial_emails" value="yes"> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a>'), 'the box and its words');
+    landing(await consent(pkce().url, session), MAC);
+    assert.equal(await optIn(), null, 'unticked: no opt-in');
+    landing(await consent(pkce().url, session, { fields: { trial_emails: 'yes' } }), MAC);
+    assert.match(String(await optIn()), /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/, 'ticked: the time of the opt-in');
+  });
+
   // ---- 8. Consent: a program that opens /app/login by itself must not get a code without the user.
   await check('/app/login POST: no code without the CSRF token, with a wrong one, cross-site, or signed out', async () => {
     const before = await codes();
@@ -946,7 +959,7 @@ async function main() {
   // ---- 11. The trial emails: the Cron Trigger (wrangler dev --test-scheduled) sends through the fake SES.
   const cron = async () => {
     const before = sesCalls.length;
-    const r = await fetch(`${BASE}/__scheduled?cron=${encodeURIComponent('*/15 * * * *')}`);
+    const r = await fetch(`${BASE}/__scheduled?cron=${encodeURIComponent('*/5 * * * *')}`);
     assert.equal(r.status, 200, `/__scheduled: ${r.status}`);
     // The sends run in waitUntil, after the answer.
     for (let i = 0; i < 20 && (await d1("SELECT COUNT(*) FROM lifecycle_emails WHERE status = 'sending'"))[0][0] > 0; i++) await sleep(250);
@@ -954,10 +967,12 @@ async function main() {
     return sesCalls.slice(before);
   };
   const at = (days) => new Date(Date.now() - days * DAY).toISOString();
-  await check('cron: welcome to a new trial, day 25 to a trial user and never to a lifetime owner, signed, nothing twice', async () => {
+  await check('cron: welcome to a new trial, day 25 to a trial user, never to a lifetime owner or without the opt-in, signed, nothing twice', async () => {
     await d1(`UPDATE users SET trial_started_at = '${at(10)}'`); // everyone signed in above is between windows
-    await d1(`INSERT INTO users (email, trial_started_at) VALUES ('fresh@example.com', '${at(0.01)}'), ('ending@example.com', '${at(25.2)}')`);
-    await d1(`INSERT INTO users (email, trial_started_at, status, plan) VALUES ('owner@example.com', '${at(25.2)}', 'active', 'lifetime')`);
+    await d1(`INSERT INTO users (email, trial_started_at, trial_emails_at) VALUES ('fresh@example.com', '${at(0.01)}', '${at(0.01)}'), ('ending@example.com', '${at(25.2)}', '${at(25.2)}')`);
+    await d1(`INSERT INTO users (email, trial_started_at, trial_emails_at, status, plan) VALUES ('owner@example.com', '${at(25.2)}', '${at(25.2)}', 'active', 'lifetime')`);
+    // Never ticked the box: no email, not even the welcome.
+    await d1(`INSERT INTO users (email, trial_started_at) VALUES ('silent@example.com', '${at(0.01)}'), ('silent25@example.com', '${at(25.2)}')`);
     const sent = await cron();
     assert.deepEqual(sent.map((c) => [c.body.Destination.ToAddresses[0], c.body.Content.Simple.Subject.Data]).sort(), [
       ['ending@example.com', 'Your shepetal trial ends in 5 days'],

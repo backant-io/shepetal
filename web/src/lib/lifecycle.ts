@@ -6,14 +6,16 @@ import { SITE_URL } from './site';
 
 /**
  * The trial emails: welcome, a tip on day 3, and on day 25 the note that the trial ends in 5 days. The Cron Trigger
- * (wrangler.toml [triggers], every 15 minutes) calls runLifecycle from worker.ts. Each run sends at most BATCH emails:
- * the Workers Free plan gives a cron run 10 ms of CPU, like a request.
+ * (wrangler.toml [triggers], every 5 minutes) calls runLifecycle from worker.ts. Each run sends at most BATCH emails:
+ * the Workers Free plan gives a cron run 10 ms of CPU, like a request. That is 1,440 a day.
  *
+ * - Only users who opted in get them (users.trial_emails_at, set by the unticked box at sign-in, lib/trial-emails.ts).
  * - Each email has a window after trial_started_at. Outside it nothing is sent, so switching this on later never
  *   sends a welcome to someone in their third week.
  * - day25 only goes to a user still on the free trial (no lifetime license, no subscription, ever).
  * - lifecycle_emails is claimed before SES is called, so no email goes out twice.
  * - Users in email_unsubscribes get nothing.
+ * - A fault of the setup (SES paused, a wrong region, 5xx) stops the run and costs no email (runLifecycle).
  * - LIFECYCLE_EMAILS (wrangler.toml [vars]) is the kill switch: only "on" sends; anything else logs what would go.
  */
 export type { Kind };
@@ -34,12 +36,16 @@ export type Outcome = { kind: Kind; user_id: number; result: 'sent' | 'would_sen
 
 const iso = (ms: number) => new Date(ms).toISOString();
 
-/** The emails due at `now`, at most `limit`, in one query: day25 first (it cannot wait), then welcome, then day3. */
+/**
+ * The emails due at `now`, at most `limit`, in one query: day25 first (it cannot wait), then welcome, then day3.
+ * Only to users who ticked the trial emails box (users.trial_emails_at, lib/trial-emails.ts) and never unsubscribed.
+ */
 export async function due(DB: D1Database, now: number, limit = BATCH): Promise<Due[]> {
   const parts = KINDS.map(
     (kind, i) => `SELECT ${i} AS prio, '${kind}' AS kind, u.* FROM users u
       WHERE u.trial_started_at > ?${2 * i + 1} AND u.trial_started_at <= ?${2 * i + 2}
         ${kind === 'day25' ? "AND u.status = 'trial' AND u.plan IS NULL" : ''}
+        AND u.trial_emails_at IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM lifecycle_emails e WHERE e.user_id = u.id AND e.kind = '${kind}')
         AND NOT EXISTS (SELECT 1 FROM email_unsubscribes x WHERE x.user_id = u.id)`,
   );
@@ -77,7 +83,26 @@ export async function compose({ kind, user }: Due, secret: string, now: number) 
   };
 }
 
-/** One cron run. Never throws for one email: each outcome is logged and returned. */
+/**
+ * SES refused this one message for good: MessageRejected, or a recipient address it cannot send to. Anything else
+ * (429, 5xx, a paused or suspended account, a wrong region, a malformed request, no answer, an error before SES was
+ * called) is a fault of the setup, not of the email.
+ */
+export function refusedForGood(e: unknown): boolean {
+  if (!(e instanceof SesError) || e.status !== 400) return false;
+  if (e.type === 'MessageRejected') return true;
+  return e.type === 'BadRequestException' && /address|recipient|destination|@domain/i.test(e.message);
+}
+
+/** A log line never carries an email address (SES's errors can echo them). */
+const redact = (s: string) => s.replace(/[^\s"'<>()@:]+@[^\s"'<>(),]+/g, '<address>');
+
+/**
+ * One cron run. Never throws for one email: each outcome is logged and returned.
+ * A message SES refused for good is marked failed and never tried again. Any other error releases the claim and stops
+ * the run: a fault of the setup costs no email, and each goes out on a later run, once it is fixed, while its window
+ * is open.
+ */
 export async function runLifecycle(
   env: LifecycleEnv,
   now = Date.now(),
@@ -88,8 +113,12 @@ export async function runLifecycle(
     log('lifecycle: LIFECYCLE_EMAILS is on, but SES or AUTH_SECRET is not set: nothing sent');
     return [];
   }
+  // One more than a run sends, to tell when emails are waiting: a backlog that outgrows the runs loses emails whose
+  // window closes, so it must show in the logs.
+  const all = await due(env.DB, now, BATCH + 1);
+  if (all.length > BATCH) log(`lifecycle: more than ${BATCH} emails due, ${BATCH} taken this run, the rest wait for the next runs`);
   const out: Outcome[] = [];
-  for (const d of await due(env.DB, now)) {
+  for (const d of all.slice(0, BATCH)) {
     const o: Outcome = { kind: d.kind, user_id: d.user.id, result: 'skipped' };
     out.push(o);
     if (!eligible(d, now)) continue;
@@ -102,27 +131,29 @@ export async function runLifecycle(
       .bind(d.user.id, d.kind)
       .run();
     if (claim.meta.changes !== 1) continue;
+    let id: string;
     try {
-      const id = await sesSend(env, await compose(d, env.AUTH_SECRET!, now), fetchImpl);
-      await env.DB.prepare("UPDATE lifecycle_emails SET status = 'sent', sent_at = ?3, message_id = ?4 WHERE user_id = ?1 AND kind = ?2")
-        .bind(d.user.id, d.kind, iso(Date.now()), id)
-        .run();
-      o.result = 'sent';
+      id = await sesSend(env, await compose(d, env.AUTH_SECRET!, now), fetchImpl);
     } catch (e) {
-      const status = e instanceof SesError ? e.status : 0;
-      o.detail = (e as Error).message.slice(0, 300);
-      if (status === 429 || status >= 500) {
-        // SES did not take it: release the claim, the next run tries again while the window is open.
-        await env.DB.prepare('DELETE FROM lifecycle_emails WHERE user_id = ?1 AND kind = ?2').bind(d.user.id, d.kind).run();
-        o.result = 'retry';
-      } else {
-        // Refused for good (4xx), or no answer: it may have gone out, so it is never sent again.
+      o.detail = redact((e as Error)?.message ?? String(e)).slice(0, 300);
+      if (refusedForGood(e)) {
+        // This one message: never sent again.
         await env.DB.prepare("UPDATE lifecycle_emails SET status = 'failed', error = ?3 WHERE user_id = ?1 AND kind = ?2")
           .bind(d.user.id, d.kind, o.detail)
           .run();
         o.result = 'failed';
+        continue;
       }
+      // The setup, not this email: release the claim and stop, so the rest are not spent on the same fault.
+      await env.DB.prepare('DELETE FROM lifecycle_emails WHERE user_id = ?1 AND kind = ?2').bind(d.user.id, d.kind).run();
+      o.result = 'retry';
+      o.detail = `run stopped, nothing marked failed: ${o.detail}`;
+      break;
     }
+    await env.DB.prepare("UPDATE lifecycle_emails SET status = 'sent', sent_at = ?3, message_id = ?4 WHERE user_id = ?1 AND kind = ?2")
+      .bind(d.user.id, d.kind, iso(Date.now()), id)
+      .run();
+    o.result = 'sent';
   }
   // User ids only: no email address goes into the Worker's logs.
   for (const o of out) log(`lifecycle: ${o.result} ${o.kind} user ${o.user_id}${o.detail ? `: ${o.detail}` : ''}`);

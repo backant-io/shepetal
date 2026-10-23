@@ -56,7 +56,8 @@ SHEPETAL_DOMAIN = "shepetal.app"
 # (POSTHOG_KEY, from SSM /backant/production/NEXT_PUBLIC_POSTHOG_KEY); without it analytics are off.
 POSTHOG_HOST = "https://us.i.posthog.com"
 # The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. Only "on" sends; anything
-# else logs what each cron run would send. Needs migration 0006 and the SES secrets below.
+# else logs what each cron run would send. Needs migration 0006 and the SES secrets below. Switch it here, commit and
+# deploy (README.md): a change in the dashboard is undone by the next deploy.
 LIFECYCLE_EMAILS = "off"
 # Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
 # and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
@@ -75,10 +76,11 @@ LIFECYCLE_EMAILS = "off"
 #          wrangler secret put SES_REGION
 # For local runs, put the same names in .dev.vars (see README.md).
 
-# The trial emails (src/lib/lifecycle.ts, worker.ts scheduled): at most 5 per run, so a run stays inside the Workers
-# Free plan's 10 ms of CPU.
+# The trial emails (src/lib/lifecycle.ts, worker.ts scheduled): every 5 minutes, at most 5 per run (1,440 a day), so a
+# run stays inside the Workers Free plan's 10 ms of CPU. This file is the source of truth: a cron changed in the
+# dashboard is undone by the next deploy.
 [triggers]
-crons = ["*/15 * * * *"]
+crons = ["*/5 * * * *"]
 
 [observability.logs]
 enabled = true

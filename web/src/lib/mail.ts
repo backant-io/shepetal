@@ -24,10 +24,25 @@ export type SesEnv = {
 
 export type Mail = { to: string; subject: string; text: string; html?: string; from?: string; headers?: Record<string, string> };
 
-/** SES did not take the email. `status` is SES's HTTP status, 0 when no answer came. */
+/**
+ * SES did not take the email. `status` is SES's HTTP status, 0 when no answer came. `type` is SES's error type
+ * (MessageRejected, BadRequestException, SendingPausedException, ...), '' when unknown.
+ */
 export class SesError extends Error {
-  constructor(readonly status: number, message: string) {
+  constructor(readonly status: number, message: string, readonly type = '') {
     super(message);
+  }
+}
+
+/** SES's error type: the x-amzn-ErrorType header ("MessageRejected:http://..."), else the body's __type or code. */
+export function sesErrorType(res: Response, text: string): string {
+  const header = res.headers.get('x-amzn-errortype');
+  if (header) return header.split(':')[0];
+  try {
+    const b = JSON.parse(text) as { __type?: string; code?: string };
+    return (b.__type ?? b.code ?? '').split('#').pop() ?? '';
+  } catch {
+    return '';
   }
 }
 
@@ -78,7 +93,7 @@ export async function sesSend(env: SesEnv, mail: Mail, fetchImpl: typeof fetch =
     throw new SesError(0, `SES did not answer: ${(e as Error).message}`);
   }
   const text = await res.text();
-  if (!res.ok) throw new SesError(res.status, `SES ${res.status}: ${text.slice(0, 300)}`);
+  if (!res.ok) throw new SesError(res.status, `SES ${res.status}: ${text.slice(0, 300)}`, sesErrorType(res, text));
   return (JSON.parse(text) as { MessageId?: string }).MessageId ?? '';
 }
 
