@@ -51,7 +51,9 @@ cp "$DMG" "$T/archives/"; cp "$DMG" "$WWW/$DL"; cp "$DMG" "$T/good.dmg"
 cat "$WWW/appcast.xml"
 SIG=$("$SP/bin/sign_update" --ed-key-file "$T/ed.key" "$DMG")
 echo "sign_update: $SIG"
-grep -qF "$SIG" "$WWW/appcast.xml" || fail "sign_update's signature and length are not the ones in the appcast"
+for part in $SIG; do  # sparkle:edSignature="..." length="...", in another order in the appcast
+  grep -qF "$part" "$WWW/appcast.xml" || fail "sign_update's $part is not in the appcast"
+done
 grep -qF "url=\"${FEED%appcast.xml}$DL\"" "$WWW/appcast.xml" || fail "the appcast does not offer ${FEED%appcast.xml}$DL"
 grep -q "<sparkle:version>$B_N1</sparkle:version>" "$WWW/appcast.xml" || fail "the appcast is not for build $B_N1"
 swift scripts/mac/verify-update.swift "$WWW/appcast.xml" "$DMG" dist/Shepetal.app/Contents/Info.plist
