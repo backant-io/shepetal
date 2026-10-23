@@ -1,0 +1,8 @@
+{
+  "for-developers": { "path": "/for/developers", "title": "Dictation for developers.", "sub": "Your words appear in the terminal, the editor and the browser." },
+  "for-writers": { "path": "/for/writers", "title": "Dictation for writers.", "sub": "Your words appear in the app you write in, in 25 European languages." },
+  "for-rsi": { "path": "/for/rsi", "title": "Dictation for RSI and wrist pain.", "sub": "Your words appear wherever your cursor is, in every app." },
+  "for-adhd": { "path": "/for/adhd", "title": "Dictation for ADHD.", "sub": "Your words appear wherever your cursor is, right away." },
+  "for-privacy": { "path": "/for/privacy", "title": "Private dictation for Mac.", "sub": "100% private. Your data is yours." },
+  "for-meetings": { "path": "/for/meetings", "title": "Meetings, transcribed on your Mac.", "sub": "shepetal offers to record when a call starts." }
+}

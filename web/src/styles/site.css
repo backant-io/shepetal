@@ -14,6 +14,7 @@
 .s-foot { margin-top: clamp(5rem, calc(9 * var(--u)), 14rem); display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; padding: 1.4rem 0 1.6rem; border-top: 1px solid var(--rule); }
 .s-foot-nav { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; }
 .s-foot-nav a, .s-head-end a { color: var(--ink); }
+.s-foot-for { flex-wrap: wrap; column-gap: 1rem; row-gap: .4rem; }
 .s-main { flex: 1; width: 100%; }
 
 /* type */
@@ -128,6 +129,12 @@
 .s-prose .s-steps > li + li { margin-top: 0; }
 .s-prose .s-step-title { margin: 0; }
 .s-faq section + section { margin-top: .5rem; }
+
+/* use-case pages (/for/<slug>) */
+.s-for-cta { margin-top: 2.25rem; }
+.s-for .s-prose .s-for-note { margin-top: 2rem; color: var(--ink2); }
+.s-for-try { margin-top: clamp(4rem, calc(7 * var(--u)), 10rem); }
+.s-for .s-for-more { margin-top: 2rem; }
 
 /* changelog */
 .s-releases { list-style: none; margin: 3rem 0 0; padding: 0; border-top: 1px solid var(--rule); }
