@@ -177,6 +177,15 @@ describe('consent page', () => {
     expect(html).toContain('<a href="/cancel" lang="de">Verträge hier kündigen</a>');
   });
 
+  // The trial emails need consent (§ 7 UWG, Art. 6(1)(a) GDPR): asked here, where the app creates the account, unticked.
+  it('asks for the trial emails with an unticked box and a link to what they are', () => {
+    const html = consentPage('a@example.com', r, 'c');
+    expect(html).toContain(
+      '<label class="check"><input type="checkbox" name="trial_emails" value="yes"> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a></label><button type="submit">Continue</button></form>',
+    );
+    expect(html).not.toMatch(/checked/);
+  });
+
   // state and email come from outside: they must never become markup.
   it('escapes what it echoes', () => {
     const html = consentPage('<b>@example.com', r, 'c');
@@ -240,5 +249,18 @@ describe('/app/login route', async () => {
     expect((await consent('a@example.com', { as: 'b@example.com' })).status).toBe(403); // signed in as someone else since
     expect((await consent('a@example.com', { as: '' })).status).toBe(401);
     expect(await codes()).toBe(0);
+  });
+
+  // The consent page's trial emails box (lib/trial-emails.ts): only a tick, posted with Continue, records the opt-in.
+  it('POST: Continue unticked records no trial emails opt-in, ticked records its time; a refused POST records nothing', async () => {
+    const optIn = async (email: string) => (await db().prepare('SELECT trial_emails_at FROM users WHERE email = ?1').bind(email).first<{ trial_emails_at: string | null }>())?.trial_emails_at;
+    expect((await consent('quiet@example.com')).status).toBe(302);
+    expect(await optIn('quiet@example.com')).toBeNull();
+    const ticked = new URLSearchParams(q);
+    ticked.set('trial_emails', 'yes');
+    expect((await consent('loud@example.com', { fields: ticked, origin: 'https://evil.example' })).status).toBe(403);
+    expect(await optIn('loud@example.com')).toBeUndefined(); // no user row either
+    expect((await consent('loud@example.com', { fields: ticked })).status).toBe(302);
+    expect(await optIn('loud@example.com')).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
   });
 });

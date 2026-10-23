@@ -68,7 +68,7 @@ git switch main && git pull
 npm ci
 npx wrangler whoami                      # Hegler Technologies
 npx wrangler secret list                 # names only: AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY
-npm run db:migrate:remote                # applies what is not applied yet: 0002_app_login, 0003_plans (plan and subscription columns, stripe_events)
+npm run db:migrate:remote                # applies what is not applied yet: 0002_app_login, 0003_plans (plan and subscription columns, stripe_events), 0007_visitor_salt (the daily analytics salt)
 npx wrangler secret put STRIPE_WEBHOOK_SECRET   # paste the whsec_ value from step 3
 npm run deploy
 ```
@@ -81,7 +81,23 @@ aws ssm get-parameter --name /backant/production/NEXT_PUBLIC_POSTHOG_HOST --quer
 aws ssm get-parameter --with-decryption --name /backant/production/NEXT_PUBLIC_POSTHOG_KEY --query Parameter.Value --output text | npx wrangler secret put POSTHOG_KEY
 ```
 
-The project is shared with backant, so every shepetal event and person carries `app = shepetal`: filter on it in PostHog. Server events: `download_served` (version, ref, utm_*), `appcast_check` (= active, app_version), `license_first_call` (= install, plan) and `checkout_completed` (= paid, plan, amount). Page views come from the browser, cookieless (memory persistence), with `$geoip_disable`. To check after the deploy: `curl -s https://shepetal.app/ | grep -c shepetal-analytics` is 1, and the events show up in PostHog's activity view with `app = shepetal`. To turn analytics off: `npx wrangler secret delete POSTHOG_KEY`.
+Analytics run on the server only: the Worker counts the page views and sends every event to PostHog after the answer (in `waitUntil`). No analytics script, cookie or storage is in the browser, so the site shows no consent banner (§ 25 TDDDG, EDPB Guidelines 2/2023; Pavel, 22.10.26). Visitors are `v_…`: an HMAC of IP + user agent under a random salt per UTC day, kept in D1 (`visitor_salts`, `0007_visitor_salt`) and deleted after 48 h, so an id joins a visitor's page views, downloads and app sign-in within one day and never across days. No IP is sent and every event has `$geoip_disable`. Signed-in users (`u_…`, a salted hash of the email) appear only on `license_first_call` and `checkout_completed`.
+
+The project is shared with backant, so every shepetal event and person carries `app = shepetal`: filter on it in PostHog. The events for the dashboard:
+
+| Event | When | Properties |
+|---|---|---|
+| `$pageview` | a browser's GET of a page that answers 200 or 404 (not RSC, prefetches, HEAD, assets, `/api/*`, the release routes, `/app/*`, bots or link previews) | `$current_url` (only `ref`/`utm_*` kept of the query), `path`, `$pathname`, `$host`, `$referring_domain` (the host only, or `$direct`), `ref`, `utm_*`, `$device_type`, `$os` (family only), `status` 404 on a missing page |
+| `download_served` | a GET of `/download` that redirects to the DMG (not HEAD, bots or link previews) | `version`, `ref`, `utm_*` |
+| `app_login_opened` | the app opens `/app/login` (`redirect_uri` `shepetal://auth` or the loopback), once per sign-in | `client` (`app` or `loopback`), `app_version` if the request carries one (`?app_version=`), `signed_in` (yes or no, never which account) |
+| `app_login_consented` | the consent POST that sends the code to the app | `client`, `app_version` |
+| `appcast_check` | the app's update check (= active) | `app_version` |
+| `license_first_call` | an account's first license check (= install) | `plan`, `status` |
+| `checkout_completed` | a paid checkout (= paid) | `plan`, `amount` |
+
+The funnel: `$pageview` → `download_served` (same `v_` id that day) → `app_login_opened` → `app_login_consented` → `license_first_call` → `checkout_completed`. PostHog keeps events for the project's retention period; the salt that could link a `v_` id to a request is gone after 48 h.
+
+To check after the deploy: `curl -s https://shepetal.app/ | grep -c -i posthog` is 0 (no script, no meta), then open https://shepetal.app/ in a browser: a `$pageview` with `app = shepetal` shows up in PostHog's activity view within a minute. To turn analytics off: `npx wrangler secret delete POSTHOG_KEY`.
 
 If any of the four secrets is missing from the list, set it without printing it:
 

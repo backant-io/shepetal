@@ -23,6 +23,22 @@
     "priority": 0.6,
     "freq": "weekly"
   },
+  "blog": {
+    "path": "/blog",
+    "title": "The shepetal blog.",
+    "sub": "Dictation apps for Mac, side by side, with a source for every fact.",
+    "updated": "2026-10-23",
+    "priority": 0.7,
+    "freq": "weekly"
+  },
+  "waitlist": {
+    "path": "/waitlist",
+    "title": "The waitlist.",
+    "sub": "shepetal is on the Mac today, and if you leave your email we will tell you when it comes to yours.",
+    "updated": "2026-10-23",
+    "priority": 0.5,
+    "freq": "monthly"
+  },
   "press": {
     "path": "/press",
     "title": "Press.",

@@ -10,11 +10,12 @@ const nextConfig: NextConfig = {
   // Pin the root: stray lockfiles in parent folders otherwise become the workspace root.
   outputFileTracingRoot: __dirname,
   // The site's one domain (wrangler.toml [vars]), inlined for what is built ahead of time: metadata, OG, the sitemap.
-  env: { SHEPETAL_DOMAIN: shepetalDomain() },
+  // WAITLIST likewise: off, the waitlist pages are built as 404s and the FAQ and the sitemap leave it out.
+  env: { SHEPETAL_DOMAIN: shepetalDomain(), WAITLIST: wranglerVar('WAITLIST') },
   // No experimental.inlineCss: it puts the CSS in the page twice (a <style> and the RSC payload), 49.8 KB gzip
   // against 24.9 KB plus a cacheable stylesheet, and Lighthouse mobile scored one point lower with it.
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders(wranglerVar('POSTHOG_HOST')) }];
+    return [{ source: '/:path*', headers: securityHeaders() }];
   },
   // A path no route answers shows the prerendered not-found page (status 404), served from the cache like the other
   // pages (open-next.config.ts). Without this OpenNext asks for /404, which has no prerendered copy, and renders it.

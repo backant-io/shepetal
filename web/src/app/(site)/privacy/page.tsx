@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { pageMetadata } from '@/lib/seo';
 import Link from 'next/link';
 import { SiteHeader } from '@/components/site/Shell';
+import { waitlistOn } from '@/lib/waitlist-config';
 
 export const metadata: Metadata = pageMetadata('privacy', { title: 'Privacy Policy', description: 'How shepetal handles your information. Your voice and your text stay on your Mac.' });
 
@@ -11,7 +12,7 @@ export default function PrivacyPolicy() {
       <SiteHeader end={<Link href="/account" prefetch={false}>Account</Link>} />
       <main className="s-main s-legal">
         <h1 className="s-h2">Privacy Policy</h1>
-        <p className="s-mono">Last updated: October 22, 2026</p>
+        <p className="s-mono">Last updated: October 23, 2026</p>
 
         <div className="s-prose">
           <p>
@@ -26,7 +27,7 @@ export default function PrivacyPolicy() {
           <h2>I. Who is responsible</h2>
           <p>
             The controller of your data is BackAnt, Inc., a Delaware corporation, 131 Continental Dr, Suite 305, Newark,
-            DE 19713, USA (see the <Link href="/impressum">legal notice</Link>). For anything about your data, including
+            DE 19713, USA (see the <Link href="/impressum" prefetch={false}>legal notice</Link>). For anything about your data, including
             your rights below, write to <a href="mailto:support@shepetal.app">support@shepetal.app</a>. We have not
             appointed a data protection officer.
           </p>
@@ -83,22 +84,36 @@ export default function PrivacyPolicy() {
           </p>
           <h3>5. Analytics</h3>
           <p>
-            We count visits and a few product events with PostHog, without cookies and without storing anything in your
-            browser. For a page view, PostHog receives the page address, the referring site, what your browser reports
-            about itself (its name and version, the operating system, the device type, the language, the time zone and
-            the screen size) and, like any server you connect to, your IP address, which we do not use to find out who
-            or where you are. Each page view gets a new random id, so visits are not linked together. If your browser sends Do Not
-            Track or Global Privacy Control, the Site sends nothing.
+            We count visits and a few product events on our own server. No analytics script runs in your browser, and
+            nothing is stored on or read from your device for analytics: no cookies, no local storage, no fingerprinting
+            in the browser.
           </p>
           <p>
-            Our server also records four events: a download of the app, the app&apos;s first license check after you
-            sign in, the app checking for updates, and a completed purchase. A download and an update check carry the
-            app version and the site that sent you (for example ?ref=producthunt), under an id made by hashing your IP
-            address and browser together with the date, so it changes every day and neither your IP address nor your
-            browser is sent or kept. A first license check and a purchase carry your plan, under an id made by hashing
-            your email address, which is not sent; PostHog keeps a profile under that id. These four events do not
-            depend on Do Not Track or Global Privacy Control. The app itself sends no analytics, and nothing about what
-            you dictate ever leaves your Mac.
+            When you open a page, our server (a Cloudflare Worker) sends a page-view event to PostHog after the page has
+            been delivered. It contains the page address, keeping only the campaign fields of the link (for example
+            ?ref=producthunt or utm_source), the domain of the site that linked to us (never the full address), the
+            device type (desktop, mobile or tablet), the operating system family without its version, and whether the
+            page was found. We don&apos;t send your IP address, your full browser string or the full address you came
+            from, and PostHog&apos;s IP location lookup is switched off. Requests from search engines, link previews and
+            scripts are not counted.
+          </p>
+          <p>
+            Our server also records these events: a download of the app; the app opening its sign-in page and you
+            confirming the sign-in; the app checking for updates; the app&apos;s first license check after you sign in;
+            and a completed purchase. A download carries the app version and the campaign fields of the link. The
+            sign-in events carry which kind of app asked, the app version if the app sends it, and whether you were
+            already signed in to the Site, never which account. An update check carries the app version. A first license
+            check and a purchase carry your plan, under an id made by hashing your email address, which is not sent;
+            PostHog keeps a profile under that id.
+          </p>
+          <p>
+            Page views, downloads, sign-in events and update checks are linked only by a daily visitor id: a keyed hash
+            (HMAC-SHA-256) of your IP address and browser string, made with a random key we generate for each calendar
+            day (UTC). The key never leaves our server and is deleted after 48 hours. After that nobody, including us,
+            can work out which IP address or browser an id belonged to, and the ids of different days can&apos;t be
+            linked. Your IP address and browser string are used only for this calculation and are not stored or sent.
+            Because nothing is stored on or read from your device for analytics, no consent is needed for it (§ 25
+            TDDDG). The app itself sends no analytics, and nothing about what you dictate ever leaves your Mac.
           </p>
           <p>
             Legal basis: Art. 6(1)(f) GDPR, our legitimate interest in counting, in total, how many people visit,
@@ -122,6 +137,53 @@ export default function PrivacyPolicy() {
             cancellations (§&nbsp;312k of the German Civil Code), and Art. 6(1)(f) GDPR, our legitimate interest in being
             able to prove them.
           </p>
+          <h3 id="trial-emails">8. Emails about your trial</h3>
+          <p>
+            If you tick &quot;Send me three short emails about my trial.&quot; when you sign in, on the Site or in the
+            app, we send you three emails: a welcome when your trial starts, a tip on day 3,
+            and on day 25 the note that your free trial ends in 5 days, with our prices. The day 25 email goes only to
+            you while you are still on the free trial. Without the tick we send you none of them.
+          </p>
+          <p>
+            For these emails we use your email address, the date your trial started, the time you ticked the box, which
+            of the emails we sent and when, the message id Amazon SES gives each of them, and, if you unsubscribe, the
+            time you did. Amazon Web Services (SES) sends the emails for us, as our processor. Legal basis: Art. 6(1)(a)
+            GDPR, your consent.
+          </p>
+          <p>
+            You can withdraw your consent at any time, free of charge and with effect for the future, through the
+            unsubscribe link in every one of these emails, or by writing to{' '}
+            <a href="mailto:support@shepetal.app">support@shepetal.app</a>. Withdrawing does not make the emails sent
+            before unlawful. Receipts and confirmations of what you buy or cancel still come.
+          </p>
+
+          {waitlistOn() && (
+            <>
+              <h3 id="waitlist">9. The waitlist</h3>
+              <p>
+                When you join the waitlist for Windows, Linux or iPhone, we store your email address, the platforms you
+                chose, the words of the box you ticked, and when you signed up and when you confirmed. Of your IP
+                address we keep only a keyed hash (HMAC-SHA-256), and we use it to limit how many signups come from one
+                connection.
+              </p>
+              <p>
+                We use your email address for one purpose only, and that is to email you when shepetal comes to a
+                platform you chose. The only one who receives it is Amazon Web Services, which sends the emails for us.
+                First we send you one email to confirm the address (double opt-in), and the address counts only once you
+                click its link, so until you do, that confirmation is the only email you get from us.
+              </p>
+              <p>
+                Every email has a link that unsubscribes you and deletes your address at once. You can also withdraw
+                your consent at any time by writing to <a href="mailto:support@shepetal.app">support@shepetal.app</a>,
+                and what we did before you withdrew stays lawful. The links carry a random number in place of your
+                address, so your address stays out of our request logs.
+              </p>
+              <p>
+                Legal basis: Art. 6(1)(a) GDPR, your consent, which is also the express consent § 7 of the German Act
+                against Unfair Competition (UWG) requires for this email.
+              </p>
+            </>
+          )}
 
           <div className="s-box">
             <h3>Your right to object</h3>
@@ -132,6 +194,12 @@ export default function PrivacyPolicy() {
               legitimate grounds that override your interests, or we need the data to establish, exercise or defend
               legal claims.
             </p>
+            <p>
+              The emails about your trial (section 8) go out only with your consent, and you can withdraw it at any
+              time, with effect for the future, through the link in every one of them or by writing to us (Art. 7(3)
+              GDPR). You can also object at any time to the use of your data for direct marketing, without giving a
+              reason, and we then stop using it for that (Art. 21(2) and (3) GDPR).
+            </p>
           </div>
 
           <h2>IV. Who receives your data</h2>
@@ -141,7 +209,10 @@ export default function PrivacyPolicy() {
           </p>
           <ul>
             <li>Cloudflare, Inc. (United States): hosting, the database, file storage, request logs, email forwarding and the emails that tell us of a cancellation.</li>
-            <li>Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7).</li>
+            <li>
+              Amazon Web Services, Inc. (United States): sends the confirmation of a cancellation, once automatic confirmation emails are switched on (section III.7), and the emails about your trial you asked for (section III.8)
+              {waitlistOn() && ', and the waitlist emails (section III.9)'}.
+            </li>
             <li>Stripe, Inc. (United States): payments and tax. Stripe also uses payment data as its own controller, for example to prevent fraud and to meet its legal duties.</li>
             <li>PostHog, Inc. (United States): the analytics above.</li>
             <li>The provider of our mailbox, which receives mail sent to support@shepetal.app.</li>
@@ -184,6 +255,14 @@ export default function PrivacyPolicy() {
             <li>Analytics: PostHog keeps events for as long as our PostHog plan does, 1 year on its free plan and 7 years on its paid plans. A profile stays until we delete it.</li>
             <li>Payment and tax records: as long as tax law requires, up to 10 years.</li>
             <li>Email to us: up to 3 years after the end of the year of our last exchange.</li>
+            <li>Emails about your trial: the time you ticked the box, and the record of which emails we sent, when and with which message id, until you ask us to delete your account. Our record of your unsubscribe, so that no further email goes out: until you ask us to delete your account, or until you tick the box again.</li>
+            {waitlistOn() && (
+              <li>
+                The waitlist: an unconfirmed address is deleted within 30 days of its last signup. A confirmed address
+                is deleted when you unsubscribe, or once shepetal has come to every platform you chose and we have told
+                you.
+              </li>
+            )}
             <li>Cancellations: 3 years after the end of the year you sent them, deleted by the next cancellation sent after that. The email that told us of it is kept like email to us. The counts that limit the form: one minute.</li>
           </ul>
 
@@ -192,10 +271,10 @@ export default function PrivacyPolicy() {
             You need a Google account and its email address to have an account and to use the app: without them we
             cannot give you a trial or a license. To buy, Stripe needs your payment and billing details, which the law
             also requires for tax. To cancel without signing in, we need the email of your account to find your
-            contract. Analytics are not needed for anything: the Service works the same without them. The Site sends no
-            page views when your browser sends Do Not Track or Global Privacy Control, or blocks scripts. The four
-            server events in section III.5 do not depend on your browser, but you can object to them (see the box in
-            section III).
+            contract. The emails about your trial are up to you: without the tick you get none, and everything else works
+            the same.{waitlistOn() && ' The waitlist needs your email address, and you give it to us only if you want to join.'} Analytics are not needed for anything: the Service works the same without them. No analytics script
+            runs in your browser. The server events in section III.5 do not depend on your browser, but you can object
+            to them (see the box in section III).
           </p>
 
           <h2>VIII. No automated decisions</h2>
@@ -221,7 +300,7 @@ export default function PrivacyPolicy() {
 
           <h2>X. Children</h2>
           <p>
-            The Service is for adults: our <Link href="/terms">Terms of Use</Link> require you to be at least 18. We do
+            The Service is for adults: our <Link href="/terms" prefetch={false}>Terms of Use</Link> require you to be at least 18. We do
             not knowingly collect information from anyone under 18. If we learn that we have, we will delete it as soon
             as possible. If you believe we have, please contact us at{' '}
             <a href="mailto:support@shepetal.app">support@shepetal.app</a>.

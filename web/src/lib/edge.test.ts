@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { securityHeaders } from '../../security-headers.mjs';
-import { withEdgeHtml } from './edge-html';
+import { downloadStarter, withEdgeHtml } from './edge-html';
 
 // What worker.ts adds at the edge. The pages are served from their build-time copies without Next (open-next.config.ts),
 // so whatever depends on the request has to be added here, and only here.
@@ -27,61 +27,75 @@ const page = (etag = '"abc"') => new Response('<html><head></head></html>', { he
 
 describe('withEdgeHtml', () => {
   afterEach(() => vi.unstubAllGlobals());
-  const run = (url: string, env: { POSTHOG_KEY?: string; POSTHOG_HOST?: string }, res = page(), releases?: string) => {
+  const run = (url: string, res = page(), releases?: string) => {
     const done: string[] = [];
     vi.stubGlobal('HTMLRewriter', fakeRewriter(done));
-    return { out: withEdgeHtml(res, env, new URL(url), releases), done };
+    return { out: withEdgeHtml(res, new URL(url), releases), done };
   };
 
-  it('adds the refresh that starts the download on /install, carrying ?ref= and utm_* to it and the link, with analytics off too', () => {
-    const { out, done } = run('https://shepetal.app/install?ref=producthunt&utm_source=x.com&other=1', {});
+  it('adds the script that starts the download on /install, carrying ?ref= and utm_* to it and the link', () => {
+    const { out, done } = run('https://shepetal.app/install?ref=producthunt&utm_source=x.com&other=1');
     expect(done).toEqual([
-      'head + <meta http-equiv="refresh" content="1;url=/download?ref=producthunt&utm_source=x.com">',
+      'head + <script>addEventListener("DOMContentLoaded",function(){setTimeout(function(){location.replace("/download?ref=producthunt&utm_source=x.com")},1000)})</script>',
       'a[href="/download"] href=/download?ref=producthunt&utm_source=x.com',
     ]);
+    // One download starter, the script: no timed meta refresh (axe meta-refresh, Lighthouse accessibility).
+    expect(done.filter((d) => d.includes('location.replace'))).toHaveLength(1);
+    expect(done.join('\n')).not.toMatch(/http-equiv/i);
     expect(out.headers.get('etag')).toBeNull();
     // Without attribution the download still starts.
-    expect(run('https://shepetal.app/install', {}).done).toEqual(['head + <meta http-equiv="refresh" content="1;url=/download">']);
+    expect(run('https://shepetal.app/install').done).toEqual([`head + ${downloadStarter('')}`]);
+    expect(downloadStarter('')).toContain('location.replace("/download")');
   });
 
-  it('adds the analytics meta to every HTML page when the key is set, and drops the ETag of the page as built', () => {
-    const { out, done } = run('https://shepetal.app/faq', { POSTHOG_KEY: 'phc_x', POSTHOG_HOST: 'https://us.i.posthog.com' });
-    expect(done).toEqual(['head + <meta name="shepetal-analytics" content="{&quot;key&quot;:&quot;phc_x&quot;,&quot;host&quot;:&quot;https://us.i.posthog.com&quot;}">']);
+  // The unsubscribe page is static; the link's signed token reaches its form only here.
+  it('puts the signed ?t= into the unsubscribe form on /waitlist/unsubscribe, and nothing that is not a signed token', () => {
+    const t = `${'a'.repeat(20)}.${'B'.repeat(43)}`;
+    const { out, done } = run(`https://shepetal.app/waitlist/unsubscribe?t=${t}`);
+    expect(done).toEqual([`input[name="t"] value=${t}`]);
     expect(out.headers.get('etag')).toBeNull();
+    for (const bad of ['%22%3E%3Cscript%3E', `${t}x`, 'abc', '']) {
+      const res = page();
+      expect(run(`https://shepetal.app/waitlist/unsubscribe?t=${bad}`, res).out, bad).toBe(res);
+    }
+    const res = page();
+    expect(run(`https://shepetal.app/faq?t=${t}`, res).out).toBe(res);
   });
 
   // /login is static: where the form returns to and the failed line are set per visit, as attributes only (hydration
   // keeps attributes, and React would reset a hidden input's value to the build's).
   it('/login: the form returns to ?next= (only a path on this site), the failed line shows on ?error, never cached', () => {
-    const { out, done } = run('https://shepetal.app/login?next=%2Fapp%2Flogin%3Fstate%3Da%2520b&error=AccessDenied', {});
+    const { out, done } = run('https://shepetal.app/login?next=%2Fapp%2Flogin%3Fstate%3Da%2520b&error=AccessDenied');
     expect(done).toEqual([
       'form[action^="/api/auth/signin/google"] action=/api/auth/signin/google?callbackUrl=%2Fapp%2Flogin%3Fstate%3Da%2520b',
       'p[role="alert"][hidden] -hidden',
     ]);
     expect(out.headers.get('cache-control')).toBe('private, no-store');
     for (const evil of ['%2F%2Fevil.example', '%2F%09%2Fevil.example', 'https%3A%2F%2Fevil.example', '%2F..%2F%2Fevil.example'])
-      expect(run(`https://shepetal.app/login?next=${evil}`, {}).done, evil).toEqual(['form[action^="/api/auth/signin/google"] action=/api/auth/signin/google?callbackUrl=%2Faccount']);
-    expect(run('https://shepetal.app/account', {}).out.headers.get('cache-control')).toBe('private, no-store');
+      expect(run(`https://shepetal.app/login?next=${evil}`).done, evil).toEqual(['form[action^="/api/auth/signin/google"] action=/api/auth/signin/google?callbackUrl=%2Faccount']);
+    expect(run('https://shepetal.app/account').out.headers.get('cache-control')).toBe('private, no-store');
   });
 
   it('/changelog: the release list goes into its container as HTML, and the page is not cached', () => {
-    const { out, done } = run('https://shepetal.app/changelog', {}, page(), '<ol class="s-releases"></ol>');
+    const { out, done } = run('https://shepetal.app/changelog', page(), '<ol class="s-releases"></ol>');
     expect(done).toEqual(['[data-releases] = <ol class="s-releases"></ol>']);
     expect(out.headers.get('cache-control')).toBe('no-store');
   });
 
-  it('leaves the page as built without a key and without attribution, and never touches what is not HTML', () => {
+  it('leaves every other page as built, ETag included (page views are counted on the server, no meta, no script), and never touches what is not HTML', () => {
     for (const url of ['https://shepetal.app/', 'https://shepetal.app/faq?ref=x']) {
       const res = page();
-      expect(run(url, {}, res).out).toBe(res);
+      const { out, done } = run(url, res);
+      expect(out).toBe(res);
+      expect(done).toEqual([]);
     }
     const json = Response.json({});
-    expect(run('https://shepetal.app/install?ref=x', { POSTHOG_KEY: 'phc_x' }, json).out).toBe(json);
+    expect(run('https://shepetal.app/install?ref=x', json).out).toBe(json);
   });
 });
 
 describe('securityHeaders: one list for Next (next.config.ts) and for what worker.ts answers itself', () => {
-  const h = Object.fromEntries(securityHeaders('https://us.i.posthog.com/').map(({ key, value }) => [key, value]));
+  const h = Object.fromEntries(securityHeaders().map(({ key, value }) => [key, value]));
 
   it('keeps every header the site promises', () => {
     expect(h['Strict-Transport-Security']).toBe('max-age=31536000; includeSubDomains; preload');
@@ -91,12 +105,17 @@ describe('securityHeaders: one list for Next (next.config.ts) and for what worke
     expect(h['Permissions-Policy']).toBe('camera=(), microphone=(), geolocation=()');
   });
 
-  it('lets forms post only to the site, Google, Stripe Checkout and the app; fonts and connections stay on known hosts', () => {
+  it('lets forms post only to the site, Google, Stripe Checkout and the app; fonts and connections stay on the site (analytics run on the server)', () => {
     const csp = h['Content-Security-Policy'];
     expect(csp).toContain("form-action 'self' https://accounts.google.com https://checkout.stripe.com shepetal: http://127.0.0.1:*");
     expect(csp).toContain("font-src 'self' data:");
-    expect(csp).toContain("connect-src 'self' https://us.i.posthog.com;");
+    expect(csp).toContain("connect-src 'self';");
+    expect(csp).not.toContain('posthog');
     expect(csp).toContain("frame-ancestors 'none'");
     expect(csp).toContain("object-src 'none'");
+  });
+
+  it("allows the inline script that starts the download on /install (edge-html.ts)", () => {
+    expect(h['Content-Security-Policy']).toMatch(/script-src 'self' 'unsafe-inline'/);
   });
 });

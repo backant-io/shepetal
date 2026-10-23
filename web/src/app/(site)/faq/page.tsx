@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { InstallSteps } from '@/components/site/InstallSteps';
 import { SiteHeader } from '@/components/site/Shell';
 import { SITE_URL } from '@/lib/site';
+import { waitlistOn } from '@/lib/waitlist-config';
 
 export const metadata: Metadata = pageMetadata('faq', { title: 'FAQ', description: 'Installing shepetal, privacy, offline use, languages, the Macs it runs on, prices, refunds and what comes next.' });
 
@@ -27,7 +28,7 @@ const QAS: QA[] = [
         <p>
           Your words go where you put them: into the app you dictate into. shepetal itself sends no text and no
           analytics. To sign in it uses your Google email, and it checks your license once a day. The details are in
-          the <Link href="/privacy">Privacy Policy</Link>.
+          the <Link href="/privacy" prefetch={false}>Privacy Policy</Link>.
         </p>
       </>
     ),
@@ -100,15 +101,26 @@ const QAS: QA[] = [
       <p>
         Yes. Write to <a href="mailto:support@shepetal.app">support@shepetal.app</a> within 14 days of buying the
         lifetime license for a full refund. A subscription stops charging the moment you cancel. The whole policy is
-        on the <Link href="/refunds">refunds page</Link>.
+        on the <Link href="/refunds" prefetch={false}>refunds page</Link>.
       </p>
     ),
     text: 'Yes. Write to support@shepetal.app within 14 days of buying the lifetime license for a full refund. A subscription stops charging the moment you cancel.',
   },
   {
     q: 'Is there shepetal for Windows, Linux or iPhone?',
-    a: <p>Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready.</p>,
-    text: 'Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready.',
+    a: (
+      <p>
+        Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they
+        are ready.
+        {waitlistOn() && (
+          <>
+            {' '}
+            <Link href="/waitlist" prefetch={false}>Join the waitlist</Link> and we will email you when yours is out.
+          </>
+        )}
+      </p>
+    ),
+    text: `Not yet. shepetal is for Mac today. Windows, Linux and iPhone are in the works, and they will be here when they are ready.${waitlistOn() ? ' Join the waitlist and we will email you when yours is out.' : ''}`,
   },
   {
     q: 'Can I use it on more than one Mac?',

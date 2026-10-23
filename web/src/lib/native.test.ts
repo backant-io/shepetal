@@ -13,20 +13,19 @@ useTestDb();
 // page: a 500 that names the Worker, carries none of the site's headers and may be cached by nobody's rules. It is
 // the site's own 500 now, with no stack or message in it, and a log line that names the route and the class only.
 
-const HOST = 'https://eu.i.posthog.com';
 afterEach(() => {
   vi.restoreAllMocks();
   process.env.AUTH_SECRET = 'native-test-secret';
 });
 
 const expectSecured = (res: Response) => {
-  for (const { key, value } of securityHeaders(HOST)) expect(res.headers.get(key), key).toBe(value);
+  for (const { key, value } of securityHeaders()) expect(res.headers.get(key), key).toBe(value);
 };
 
 describe('an exception in a native route', () => {
   it('is a 500 of the site’s own: JSON for an API, no stack or message, no-store, the security headers', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const res = await guarded('GET /api/account', true, HOST, async () => {
+    const res = await guarded('GET /api/account', true, async () => {
       throw new TypeError('D1 said no for a@example.com with token sk_live_123');
     });
     expect(res.status).toBe(500);
@@ -43,7 +42,7 @@ describe('an exception in a native route', () => {
 
   it('on a page is a plain-text 500, and a thrown non-Error is logged by its type', async () => {
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
-    const res = await guarded('GET page', false, HOST, () => Promise.reject('a@example.com'));
+    const res = await guarded('GET page', false, () => Promise.reject('a@example.com'));
     expect([res.status, res.headers.get('content-type'), res.headers.get('cache-control')]).toEqual([500, 'text/plain; charset=utf-8', 'no-store']);
     expectSecured(res);
     expect(await res.text()).not.toContain('a@example.com');
@@ -57,13 +56,13 @@ describe('an exception in a native route', () => {
     delete process.env.AUTH_SECRET;
     const req = new Request(`${SITE_URL}/api/account`, { headers: { cookie } });
     await expect(account(req)).rejects.toThrow(/AUTH_SECRET/); // what Cloudflare would have turned into a 1101
-    const res = await guarded('GET /api/account', true, HOST, () => account(req));
+    const res = await guarded('GET /api/account', true, () => account(req));
     expect([res.status, await res.json()]).toEqual([500, { error: 'server_error' }]);
     expectSecured(res);
   });
 
   it('leaves an answer alone otherwise, adding the security headers to a copy (redirect headers are immutable)', async () => {
-    const res = await guarded('GET /api/billing/portal', true, HOST, async () => secured(Response.redirect('https://billing.stripe.com/p/x', 303), HOST));
+    const res = await guarded('GET /api/billing/portal', true, async () => secured(Response.redirect('https://billing.stripe.com/p/x', 303)));
     expect([res.status, res.headers.get('location')]).toEqual([303, 'https://billing.stripe.com/p/x']);
     expectSecured(res);
   });

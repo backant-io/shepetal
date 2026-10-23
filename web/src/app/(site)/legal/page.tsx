@@ -15,11 +15,11 @@ export default function Legal() {
         <div className="s-prose">
           <h2>Who we are</h2>
           <p>
-            The <Link href="/impressum">legal notice (Impressum)</Link> names who runs shepetal and how to reach us. The{' '}
-            <Link href="/terms">Terms of Use</Link>, the <Link href="/refunds">Refund Policy</Link> and the{' '}
-            <Link href="/privacy">Privacy Policy</Link> are their own pages. Questions are answered in the{' '}
-            <Link href="/faq">FAQ</Link>, releases are in the <a href="/changelog">changelog</a>, and the press kit
-            is on the <Link href="/press">press page</Link>.
+            The <Link href="/impressum" prefetch={false}>legal notice (Impressum)</Link> names who runs shepetal and how to reach us. The{' '}
+            <Link href="/terms" prefetch={false}>Terms of Use</Link>, the <Link href="/refunds" prefetch={false}>Refund Policy</Link> and the{' '}
+            <Link href="/privacy" prefetch={false}>Privacy Policy</Link> are their own pages. Questions are answered in the{' '}
+            <Link href="/faq" prefetch={false}>FAQ</Link>, releases are in the <a href="/changelog">changelog</a>, and the press kit
+            is on the <Link href="/press" prefetch={false}>press page</Link>.
           </p>
 
           <h2>Fonts</h2>

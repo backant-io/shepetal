@@ -54,6 +54,14 @@ describe('the scroll timings: one table, exactly the design’s', () => {
   });
 });
 
+describe('the header (Pavel, 23.10.26)', () => {
+  it('has Log in at the top right, a plain link to the sign-in page', () => {
+    const html = renderToStaticMarkup(<Story />);
+    // after the wordmark, in the same header, so it sits on the right
+    expect(html).toMatch(/<header class="kc-head"><a class="kc-mark" href="\/">shepetal<\/a><a class="kc-login" href="\/login">Log in<\/a><\/header>/);
+  });
+});
+
 describe('the hero (Pavel, 22.10.26)', () => {
   it('shows the trial button only once the six words are written, and no "For Mac" beside it', () => {
     const t = table();

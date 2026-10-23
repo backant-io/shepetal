@@ -7,9 +7,9 @@ import { securityHeaders } from '../../security-headers.mjs';
 export const errorName = (e: unknown) => (e instanceof Error ? e.name || 'Error' : typeof e).replace(/[^\w.-]/g, '').slice(0, 40);
 
 /** `res` with the security headers. A copy: Response.redirect() (the billing portal link) has immutable headers. */
-export function secured(res: Response, posthogHost: string): Response {
+export function secured(res: Response): Response {
   const out = new Response(res.body, res);
-  for (const { key, value } of securityHeaders(posthogHost)) out.headers.set(key, value);
+  for (const { key, value } of securityHeaders()) out.headers.set(key, value);
   return out;
 }
 
@@ -29,10 +29,10 @@ export function serverError(route: string, e: unknown, api: boolean): Response {
  * What `run` answers, or serverError() with the security headers if it throws. `route` is the method and the path
  * pattern, never the URL (a path or query may carry anything).
  */
-export async function guarded(route: string, api: boolean, posthogHost: string, run: () => Promise<Response>): Promise<Response> {
+export async function guarded(route: string, api: boolean, run: () => Promise<Response>): Promise<Response> {
   try {
     return await run();
   } catch (e) {
-    return secured(serverError(route, e, api), posthogHost);
+    return secured(serverError(route, e, api));
   }
 }
