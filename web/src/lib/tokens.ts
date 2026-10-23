@@ -38,6 +38,15 @@ export async function userForToken(token: string, now = Date.now()): Promise<Use
   return live && db().prepare('SELECT * FROM users WHERE email = ?1').bind(live.email).first<User>();
 }
 
+/** True while a live token has never been used: its first license check is the app's install (analytics). */
+export async function neverUsed(token: string): Promise<boolean> {
+  const row = await db()
+    .prepare('SELECT last_used_at FROM tokens WHERE hash = ?1 AND revoked_at IS NULL')
+    .bind(await sha256(token))
+    .first<{ last_used_at: string | null }>();
+  return !!row && row.last_used_at === null;
+}
+
 export async function revokeToken(token: string, now = Date.now()): Promise<void> {
   await db()
     .prepare('UPDATE tokens SET revoked_at = ?2 WHERE hash = ?1 AND revoked_at IS NULL')

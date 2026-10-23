@@ -1,0 +1,355 @@
+@supports (animation-timeline: view()) {
+  .kc .kc-k-cap { animation-name: kc-press; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 0% contain 100%; }
+  .kc .kc-ks-r { animation-name: kc-shR; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 0% contain 100%; }
+  .kc .kc-ks-d { animation-name: kc-shD; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 0% contain 100%; }
+  .kc .kc-k-led { animation-name: kc-led; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 0% contain 100%; }
+  .kc .kc-k-glow { animation-name: kc-glow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 0% contain 100%; }
+  .kc .kc-w0 .kc-wx { animation-name: kc-wx; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 16% contain 31%; }
+  .kc .kc-w0 .kc-wy { animation-name: kc-wy; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 16% contain 31%; }
+  .kc .kc-w0 .kc-wi { animation-name: kc-wi; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 16% contain 31%; }
+  .kc .kc-w0 .kc-wo { animation-name: kc-wo; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 16% contain 31%; }
+  .kc .kc-w1 .kc-wx { animation-name: kc-wx; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 23% contain 38%; }
+  .kc .kc-w1 .kc-wy { animation-name: kc-wy; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 23% contain 38%; }
+  .kc .kc-w1 .kc-wi { animation-name: kc-wi; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 23% contain 38%; }
+  .kc .kc-w1 .kc-wo { animation-name: kc-wo; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 23% contain 38%; }
+  .kc .kc-w2 .kc-wx { animation-name: kc-wx; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 30% contain 45%; }
+  .kc .kc-w2 .kc-wy { animation-name: kc-wy; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 30% contain 45%; }
+  .kc .kc-w2 .kc-wi { animation-name: kc-wi; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 30% contain 45%; }
+  .kc .kc-w2 .kc-wo { animation-name: kc-wo; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 30% contain 45%; }
+  .kc .kc-w3 .kc-wx { animation-name: kc-wx; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 37% contain 52%; }
+  .kc .kc-w3 .kc-wy { animation-name: kc-wy; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 37% contain 52%; }
+  .kc .kc-w3 .kc-wi { animation-name: kc-wi; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 37% contain 52%; }
+  .kc .kc-w3 .kc-wo { animation-name: kc-wo; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 37% contain 52%; }
+  .kc .kc-w4 .kc-wx { animation-name: kc-wx; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 44% contain 59%; }
+  .kc .kc-w4 .kc-wy { animation-name: kc-wy; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 44% contain 59%; }
+  .kc .kc-w4 .kc-wi { animation-name: kc-wi; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 44% contain 59%; }
+  .kc .kc-w4 .kc-wo { animation-name: kc-wo; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 44% contain 59%; }
+  .kc .kc-w5 .kc-wx { animation-name: kc-wx; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 51% contain 66%; }
+  .kc .kc-w5 .kc-wy { animation-name: kc-wy; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 51% contain 66%; }
+  .kc .kc-w5 .kc-wi { animation-name: kc-wi; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 51% contain 66%; }
+  .kc .kc-w5 .kc-wo { animation-name: kc-wo; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 51% contain 66%; }
+  .kc .kc-stagekey { animation-name: kc-out; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 80% contain 80.2%; }
+  .kc .kc-dock-in { animation-name: kc-dockin; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 80% contain 98%; }
+  .kc .kc-dock-out { animation-name: kc-dockout; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t5; animation-range: entry 0% entry 50%; }
+  .kc .kc-shf { animation-name: kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none, none; animation-timeline: --t0, --t1, --t1, --t1, --t1, --t1, --t2, --t3, --t4, --t4, --t4; animation-range: contain 3% contain 79%, contain 4.5% contain 21%, contain 22.5% contain 39%, contain 40.5% contain 57%, contain 58.5% contain 75%, contain 76.5% contain 93%, contain 4% contain 27%, contain 46.5% contain 91%, contain 28.5% contain 48%, contain 51.5% contain 71%, contain 74.5% contain 94%; }
+  .kc .kc-sp-led { animation-name: kc-speak; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 6% contain 24%; }
+  .kc .kc-sp-text { animation-name: kc-in; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 24% contain 27%; }
+  .kc .kc-ty0 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 6% contain 6.6%; }
+  .kc .kc-ty1 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 17.5% contain 18.1%; }
+  .kc .kc-ty2 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 29% contain 29.6%; }
+  .kc .kc-ty3 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 40.5% contain 41.1%; }
+  .kc .kc-ty4 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 52% contain 52.6%; }
+  .kc .kc-ty5 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 63.5% contain 64.1%; }
+  .kc .kc-ty6 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 75% contain 75.6%; }
+  .kc .kc-ty7 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t2; animation-range: contain 86.5% contain 87.1%; }
+  .kc .kc-net-l { animation-name: kc-out; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 6% contain 22%; }
+  .kc .kc-net-b { animation-name: kc-cut; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 6% contain 32%; }
+  .kc .kc-net-a { animation-name: kc-shrink; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 12% contain 36%; }
+  .kc .kc-off { animation-name: kc-in; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 34% contain 42%; }
+  .kc .kc-rem { animation-name: kc-slide; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 4% contain 16%; }
+  .kc .kc-recface { animation-name: kc-btn; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 20% contain 26%; }
+  .kc .kc-rec-a { animation-name: kc-out; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 22% contain 25%; }
+  .kc .kc-rec-b { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 22% contain 25%; }
+  .kc .kc-sl0 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 30% contain 31%; }
+  .kc .kc-sl1 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 53% contain 54%; }
+  .kc .kc-sl2 { animation-name: kc-pop; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 76% contain 77%; }
+  .kc .kc-n0 { animation-name: kc-in; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t5; animation-range: contain 5% contain 30%; }
+  .kc .kc-n1 { animation-name: kc-in; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t5; animation-range: contain 12% contain 45%; }
+  .kc .kc-n2 { animation-name: kc-in; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t5; animation-range: contain 30% contain 60%; }
+  .kc .kc-f0-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 6% contain 7.12%; }
+  .kc .kc-f0-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 7.4% contain 8.52%; }
+  .kc .kc-f0-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 8.8% contain 9.92%; }
+  .kc .kc-f0-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 10.2% contain 11.32%; }
+  .kc .kc-f0-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 11.6% contain 12.72%; }
+  .kc .kc-f0-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 13% contain 14.12%; }
+  .kc .kc-f0-6 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 14.4% contain 15.52%; }
+  .kc .kc-f0-7 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 15.8% contain 16.92%; }
+  .kc .kc-f0-8 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 17.2% contain 18.32%; }
+  .kc .kc-f0-9 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 18.6% contain 19.72%; }
+  .kc .kc-f1-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 24% contain 25.6%; }
+  .kc .kc-f1-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 26% contain 27.6%; }
+  .kc .kc-f1-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 28% contain 29.6%; }
+  .kc .kc-f1-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 30% contain 31.6%; }
+  .kc .kc-f1-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 32% contain 33.6%; }
+  .kc .kc-f1-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 34% contain 35.6%; }
+  .kc .kc-f1-6 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 36% contain 37.6%; }
+  .kc .kc-f2-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 42% contain 43.87%; }
+  .kc .kc-f2-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 44.33% contain 46.2%; }
+  .kc .kc-f2-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 46.67% contain 48.54%; }
+  .kc .kc-f2-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 49% contain 50.87%; }
+  .kc .kc-f2-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 51.33% contain 53.2%; }
+  .kc .kc-f2-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 53.67% contain 55.54%; }
+  .kc .kc-f3-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 60% contain 61.6%; }
+  .kc .kc-f3-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 62% contain 63.6%; }
+  .kc .kc-f3-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 64% contain 65.6%; }
+  .kc .kc-f3-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 66% contain 67.6%; }
+  .kc .kc-f3-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 68% contain 69.6%; }
+  .kc .kc-f3-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 70% contain 71.6%; }
+  .kc .kc-f3-6 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 72% contain 73.6%; }
+  .kc .kc-f4-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 78% contain 80.24%; }
+  .kc .kc-f4-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 80.8% contain 83.04%; }
+  .kc .kc-f4-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 83.6% contain 85.84%; }
+  .kc .kc-f4-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 86.4% contain 88.64%; }
+  .kc .kc-f4-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t1; animation-range: contain 89.2% contain 91.44%; }
+  .kc .kc-b3-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 48% contain 50.5%; }
+  .kc .kc-b3-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 52.2% contain 54.7%; }
+  .kc .kc-b3-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 56.4% contain 58.9%; }
+  .kc .kc-b3-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 60.6% contain 63.1%; }
+  .kc .kc-b3-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 64.8% contain 67.3%; }
+  .kc .kc-b3-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 69% contain 71.5%; }
+  .kc .kc-b3-6 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 73.2% contain 75.7%; }
+  .kc .kc-b3-7 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 77.4% contain 79.9%; }
+  .kc .kc-b3-8 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 81.6% contain 84.1%; }
+  .kc .kc-b3-9 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t3; animation-range: contain 85.8% contain 88.3%; }
+  .kc .kc-t0-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 30% contain 31.7%; }
+  .kc .kc-t0-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 32.12% contain 33.82%; }
+  .kc .kc-t0-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 34.25% contain 35.95%; }
+  .kc .kc-t0-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 36.38% contain 38.08%; }
+  .kc .kc-t0-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 38.5% contain 40.2%; }
+  .kc .kc-t0-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 40.63% contain 42.33%; }
+  .kc .kc-t0-6 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 42.75% contain 44.45%; }
+  .kc .kc-t0-7 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 44.87% contain 46.57%; }
+  .kc .kc-t1-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 53% contain 55.27%; }
+  .kc .kc-t1-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 55.83% contain 58.1%; }
+  .kc .kc-t1-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 58.67% contain 60.94%; }
+  .kc .kc-t1-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 61.5% contain 63.77%; }
+  .kc .kc-t1-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 64.33% contain 66.6%; }
+  .kc .kc-t1-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 67.17% contain 69.44%; }
+  .kc .kc-t2-0 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 76% contain 77.7%; }
+  .kc .kc-t2-1 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 78.13% contain 79.83%; }
+  .kc .kc-t2-2 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 80.25% contain 81.95%; }
+  .kc .kc-t2-3 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 82.37% contain 84.07%; }
+  .kc .kc-t2-4 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 84.5% contain 86.2%; }
+  .kc .kc-t2-5 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 86.63% contain 88.33%; }
+  .kc .kc-t2-6 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 88.75% contain 90.45%; }
+  .kc .kc-t2-7 { animation-name: kc-flow; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t4; animation-range: contain 90.88% contain 92.58%; }
+  .kc .kd-k-cap { animation-name: kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-timeline: --t1, --t1, --t1, --t1, --t1, --t2, --t3, --t4, --t4, --t4; animation-range: contain 4.5% contain 21%, contain 22.5% contain 39%, contain 40.5% contain 57%, contain 58.5% contain 75%, contain 76.5% contain 93%, contain 4% contain 27%, contain 46.5% contain 91%, contain 28.5% contain 48%, contain 51.5% contain 71%, contain 74.5% contain 94%; }
+  .kc .kd-k-led { animation-name: kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-timeline: --t1, --t1, --t1, --t1, --t1, --t2, --t3, --t4, --t4, --t4; animation-range: contain 4.5% contain 21%, contain 22.5% contain 39%, contain 40.5% contain 57%, contain 58.5% contain 75%, contain 76.5% contain 93%, contain 4% contain 27%, contain 46.5% contain 91%, contain 28.5% contain 48%, contain 51.5% contain 71%, contain 74.5% contain 94%; }
+  .kc .kd-ks-r { animation-name: kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-timeline: --t1, --t1, --t1, --t1, --t1, --t2, --t3, --t4, --t4, --t4; animation-range: contain 4.5% contain 21%, contain 22.5% contain 39%, contain 40.5% contain 57%, contain 58.5% contain 75%, contain 76.5% contain 93%, contain 4% contain 27%, contain 46.5% contain 91%, contain 28.5% contain 48%, contain 51.5% contain 71%, contain 74.5% contain 94%; }
+  .kc .kd-ks-d { animation-name: kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-timeline: --t1, --t1, --t1, --t1, --t1, --t2, --t3, --t4, --t4, --t4; animation-range: contain 4.5% contain 21%, contain 22.5% contain 39%, contain 40.5% contain 57%, contain 58.5% contain 75%, contain 76.5% contain 93%, contain 4% contain 27%, contain 46.5% contain 91%, contain 28.5% contain 48%, contain 51.5% contain 71%, contain 74.5% contain 94%; }
+  .kc .kc-dock-on { animation-name: kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-timeline: --t1, --t1, --t1, --t1, --t1, --t2, --t3, --t4, --t4, --t4; animation-range: contain 4.5% contain 21%, contain 22.5% contain 39%, contain 40.5% contain 57%, contain 58.5% contain 75%, contain 76.5% contain 93%, contain 4% contain 27%, contain 46.5% contain 91%, contain 28.5% contain 48%, contain 51.5% contain 71%, contain 74.5% contain 94%; }
+}
+@supports not (animation-timeline: view()) {
+  .kc .kc-k-cap { animation-name: kc-press; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0) / 1 * -1s); }
+  .kc .kc-ks-r { animation-name: kc-shR; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0) / 1 * -1s); }
+  .kc .kc-ks-d { animation-name: kc-shD; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0) / 1 * -1s); }
+  .kc .kc-k-led { animation-name: kc-led; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0) / 1 * -1s); }
+  .kc .kc-k-glow { animation-name: kc-glow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0) / 1 * -1s); }
+  .kc .kc-w0 .kc-wx { animation-name: kc-wx; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.16) / 0.15 * -1s); }
+  .kc .kc-w0 .kc-wy { animation-name: kc-wy; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.16) / 0.15 * -1s); }
+  .kc .kc-w0 .kc-wi { animation-name: kc-wi; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.16) / 0.15 * -1s); }
+  .kc .kc-w0 .kc-wo { animation-name: kc-wo; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.16) / 0.15 * -1s); }
+  .kc .kc-w1 .kc-wx { animation-name: kc-wx; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.23) / 0.15 * -1s); }
+  .kc .kc-w1 .kc-wy { animation-name: kc-wy; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.23) / 0.15 * -1s); }
+  .kc .kc-w1 .kc-wi { animation-name: kc-wi; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.23) / 0.15 * -1s); }
+  .kc .kc-w1 .kc-wo { animation-name: kc-wo; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.23) / 0.15 * -1s); }
+  .kc .kc-w2 .kc-wx { animation-name: kc-wx; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.3) / 0.15 * -1s); }
+  .kc .kc-w2 .kc-wy { animation-name: kc-wy; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.3) / 0.15 * -1s); }
+  .kc .kc-w2 .kc-wi { animation-name: kc-wi; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.3) / 0.15 * -1s); }
+  .kc .kc-w2 .kc-wo { animation-name: kc-wo; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.3) / 0.15 * -1s); }
+  .kc .kc-w3 .kc-wx { animation-name: kc-wx; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.37) / 0.15 * -1s); }
+  .kc .kc-w3 .kc-wy { animation-name: kc-wy; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.37) / 0.15 * -1s); }
+  .kc .kc-w3 .kc-wi { animation-name: kc-wi; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.37) / 0.15 * -1s); }
+  .kc .kc-w3 .kc-wo { animation-name: kc-wo; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.37) / 0.15 * -1s); }
+  .kc .kc-w4 .kc-wx { animation-name: kc-wx; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.44) / 0.15 * -1s); }
+  .kc .kc-w4 .kc-wy { animation-name: kc-wy; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.44) / 0.15 * -1s); }
+  .kc .kc-w4 .kc-wi { animation-name: kc-wi; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.44) / 0.15 * -1s); }
+  .kc .kc-w4 .kc-wo { animation-name: kc-wo; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.44) / 0.15 * -1s); }
+  .kc .kc-w5 .kc-wx { animation-name: kc-wx; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.51) / 0.15 * -1s); }
+  .kc .kc-w5 .kc-wy { animation-name: kc-wy; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.51) / 0.15 * -1s); }
+  .kc .kc-w5 .kc-wi { animation-name: kc-wi; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.51) / 0.15 * -1s); }
+  .kc .kc-w5 .kc-wo { animation-name: kc-wo; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.51) / 0.15 * -1s); }
+  .kc .kc-stagekey { animation-name: kc-out; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.8) / 0.002 * -1s); }
+  .kc .kc-dock-in { animation-name: kc-dockin; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.8) / 0.18 * -1s); }
+  .kc .kc-dock-out { animation-name: kc-dockout; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--e5) - 0) / 0.5 * -1s); }
+  .kc .kc-shf { animation-name: kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh, kc-hold-shh; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none, none; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.03) / 0.76 * -1s), calc((var(--p1) - 0.045) / 0.165 * -1s), calc((var(--p1) - 0.225) / 0.165 * -1s), calc((var(--p1) - 0.405) / 0.165 * -1s), calc((var(--p1) - 0.585) / 0.165 * -1s), calc((var(--p1) - 0.765) / 0.165 * -1s), calc((var(--p2) - 0.04) / 0.23 * -1s), calc((var(--p3) - 0.465) / 0.445 * -1s), calc((var(--p4) - 0.285) / 0.195 * -1s), calc((var(--p4) - 0.515) / 0.195 * -1s), calc((var(--p4) - 0.745) / 0.195 * -1s); }
+  .kc .kc-sp-led { animation-name: kc-speak; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.06) / 0.18 * -1s); }
+  .kc .kc-sp-text { animation-name: kc-in; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.24) / 0.03 * -1s); }
+  .kc .kc-ty0 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.06) / 0.006 * -1s); }
+  .kc .kc-ty1 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.175) / 0.006 * -1s); }
+  .kc .kc-ty2 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.29) / 0.006 * -1s); }
+  .kc .kc-ty3 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.405) / 0.006 * -1s); }
+  .kc .kc-ty4 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.52) / 0.006 * -1s); }
+  .kc .kc-ty5 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.635) / 0.006 * -1s); }
+  .kc .kc-ty6 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.75) / 0.006 * -1s); }
+  .kc .kc-ty7 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p2) - 0.865) / 0.006 * -1s); }
+  .kc .kc-net-l { animation-name: kc-out; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.06) / 0.16 * -1s); }
+  .kc .kc-net-b { animation-name: kc-cut; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.06) / 0.26 * -1s); }
+  .kc .kc-net-a { animation-name: kc-shrink; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.12) / 0.24 * -1s); }
+  .kc .kc-off { animation-name: kc-in; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.34) / 0.08 * -1s); }
+  .kc .kc-rem { animation-name: kc-slide; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.04) / 0.12 * -1s); }
+  .kc .kc-recface { animation-name: kc-btn; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.2) / 0.06 * -1s); }
+  .kc .kc-rec-a { animation-name: kc-out; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.22) / 0.03 * -1s); }
+  .kc .kc-rec-b { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.22) / 0.03 * -1s); }
+  .kc .kc-sl0 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.3) / 0.01 * -1s); }
+  .kc .kc-sl1 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.53) / 0.01 * -1s); }
+  .kc .kc-sl2 { animation-name: kc-pop; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.76) / 0.01 * -1s); }
+  .kc .kc-n0 { animation-name: kc-in; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p5) - 0.05) / 0.25 * -1s); }
+  .kc .kc-n1 { animation-name: kc-in; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p5) - 0.12) / 0.33 * -1s); }
+  .kc .kc-n2 { animation-name: kc-in; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p5) - 0.3) / 0.3 * -1s); }
+  .kc .kc-f0-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.06) / 0.0112 * -1s); }
+  .kc .kc-f0-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.074) / 0.0112 * -1s); }
+  .kc .kc-f0-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.088) / 0.0112 * -1s); }
+  .kc .kc-f0-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.102) / 0.0112 * -1s); }
+  .kc .kc-f0-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.116) / 0.0112 * -1s); }
+  .kc .kc-f0-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.13) / 0.0112 * -1s); }
+  .kc .kc-f0-6 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.144) / 0.0112 * -1s); }
+  .kc .kc-f0-7 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.158) / 0.0112 * -1s); }
+  .kc .kc-f0-8 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.172) / 0.0112 * -1s); }
+  .kc .kc-f0-9 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.186) / 0.0112 * -1s); }
+  .kc .kc-f1-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.24) / 0.016 * -1s); }
+  .kc .kc-f1-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.26) / 0.016 * -1s); }
+  .kc .kc-f1-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.28) / 0.016 * -1s); }
+  .kc .kc-f1-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.3) / 0.016 * -1s); }
+  .kc .kc-f1-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.32) / 0.016 * -1s); }
+  .kc .kc-f1-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.34) / 0.016 * -1s); }
+  .kc .kc-f1-6 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.36) / 0.016 * -1s); }
+  .kc .kc-f2-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.42) / 0.0187 * -1s); }
+  .kc .kc-f2-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.4433) / 0.0187 * -1s); }
+  .kc .kc-f2-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.4667) / 0.0187 * -1s); }
+  .kc .kc-f2-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.49) / 0.0187 * -1s); }
+  .kc .kc-f2-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.5133) / 0.0187 * -1s); }
+  .kc .kc-f2-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.5367) / 0.0187 * -1s); }
+  .kc .kc-f3-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.6) / 0.016 * -1s); }
+  .kc .kc-f3-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.62) / 0.016 * -1s); }
+  .kc .kc-f3-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.64) / 0.016 * -1s); }
+  .kc .kc-f3-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.66) / 0.016 * -1s); }
+  .kc .kc-f3-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.68) / 0.016 * -1s); }
+  .kc .kc-f3-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.7) / 0.016 * -1s); }
+  .kc .kc-f3-6 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.72) / 0.016 * -1s); }
+  .kc .kc-f4-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.78) / 0.0224 * -1s); }
+  .kc .kc-f4-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.808) / 0.0224 * -1s); }
+  .kc .kc-f4-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.836) / 0.0224 * -1s); }
+  .kc .kc-f4-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.864) / 0.0224 * -1s); }
+  .kc .kc-f4-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.892) / 0.0224 * -1s); }
+  .kc .kc-b3-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.48) / 0.025 * -1s); }
+  .kc .kc-b3-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.522) / 0.025 * -1s); }
+  .kc .kc-b3-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.564) / 0.025 * -1s); }
+  .kc .kc-b3-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.606) / 0.025 * -1s); }
+  .kc .kc-b3-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.648) / 0.025 * -1s); }
+  .kc .kc-b3-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.69) / 0.025 * -1s); }
+  .kc .kc-b3-6 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.732) / 0.025 * -1s); }
+  .kc .kc-b3-7 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.774) / 0.025 * -1s); }
+  .kc .kc-b3-8 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.816) / 0.025 * -1s); }
+  .kc .kc-b3-9 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p3) - 0.858) / 0.025 * -1s); }
+  .kc .kc-t0-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.3) / 0.017 * -1s); }
+  .kc .kc-t0-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.3212) / 0.017 * -1s); }
+  .kc .kc-t0-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.3425) / 0.017 * -1s); }
+  .kc .kc-t0-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.3638) / 0.017 * -1s); }
+  .kc .kc-t0-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.385) / 0.017 * -1s); }
+  .kc .kc-t0-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.4063) / 0.017 * -1s); }
+  .kc .kc-t0-6 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.4275) / 0.017 * -1s); }
+  .kc .kc-t0-7 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.4487) / 0.017 * -1s); }
+  .kc .kc-t1-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.53) / 0.0227 * -1s); }
+  .kc .kc-t1-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.5583) / 0.0227 * -1s); }
+  .kc .kc-t1-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.5867) / 0.0227 * -1s); }
+  .kc .kc-t1-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.615) / 0.0227 * -1s); }
+  .kc .kc-t1-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.6433) / 0.0227 * -1s); }
+  .kc .kc-t1-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.6717) / 0.0227 * -1s); }
+  .kc .kc-t2-0 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.76) / 0.017 * -1s); }
+  .kc .kc-t2-1 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.7813) / 0.017 * -1s); }
+  .kc .kc-t2-2 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.8025) / 0.017 * -1s); }
+  .kc .kc-t2-3 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.8237) / 0.017 * -1s); }
+  .kc .kc-t2-4 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.845) / 0.017 * -1s); }
+  .kc .kc-t2-5 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.8663) / 0.017 * -1s); }
+  .kc .kc-t2-6 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.8875) / 0.017 * -1s); }
+  .kc .kc-t2-7 { animation-name: kc-flow; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p4) - 0.9088) / 0.017 * -1s); }
+  .kc .kd-k-cap { animation-name: kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold, kc-hold; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.045) / 0.165 * -1s), calc((var(--p1) - 0.225) / 0.165 * -1s), calc((var(--p1) - 0.405) / 0.165 * -1s), calc((var(--p1) - 0.585) / 0.165 * -1s), calc((var(--p1) - 0.765) / 0.165 * -1s), calc((var(--p2) - 0.04) / 0.23 * -1s), calc((var(--p3) - 0.465) / 0.445 * -1s), calc((var(--p4) - 0.285) / 0.195 * -1s), calc((var(--p4) - 0.515) / 0.195 * -1s), calc((var(--p4) - 0.745) / 0.195 * -1s); }
+  .kc .kd-k-led { animation-name: kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led, kc-hold-led; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.045) / 0.165 * -1s), calc((var(--p1) - 0.225) / 0.165 * -1s), calc((var(--p1) - 0.405) / 0.165 * -1s), calc((var(--p1) - 0.585) / 0.165 * -1s), calc((var(--p1) - 0.765) / 0.165 * -1s), calc((var(--p2) - 0.04) / 0.23 * -1s), calc((var(--p3) - 0.465) / 0.445 * -1s), calc((var(--p4) - 0.285) / 0.195 * -1s), calc((var(--p4) - 0.515) / 0.195 * -1s), calc((var(--p4) - 0.745) / 0.195 * -1s); }
+  .kc .kd-ks-r { animation-name: kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR, kc-hold-shR; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.045) / 0.165 * -1s), calc((var(--p1) - 0.225) / 0.165 * -1s), calc((var(--p1) - 0.405) / 0.165 * -1s), calc((var(--p1) - 0.585) / 0.165 * -1s), calc((var(--p1) - 0.765) / 0.165 * -1s), calc((var(--p2) - 0.04) / 0.23 * -1s), calc((var(--p3) - 0.465) / 0.445 * -1s), calc((var(--p4) - 0.285) / 0.195 * -1s), calc((var(--p4) - 0.515) / 0.195 * -1s), calc((var(--p4) - 0.745) / 0.195 * -1s); }
+  .kc .kd-ks-d { animation-name: kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD, kc-hold-shD; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.045) / 0.165 * -1s), calc((var(--p1) - 0.225) / 0.165 * -1s), calc((var(--p1) - 0.405) / 0.165 * -1s), calc((var(--p1) - 0.585) / 0.165 * -1s), calc((var(--p1) - 0.765) / 0.165 * -1s), calc((var(--p2) - 0.04) / 0.23 * -1s), calc((var(--p3) - 0.465) / 0.445 * -1s), calc((var(--p4) - 0.285) / 0.195 * -1s), calc((var(--p4) - 0.515) / 0.195 * -1s), calc((var(--p4) - 0.745) / 0.195 * -1s); }
+  .kc .kc-dock-on { animation-name: kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on, kc-hold-on; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: none, none, none, none, none, none, none, none, none, none; animation-play-state: paused; animation-delay: calc((var(--p1) - 0.045) / 0.165 * -1s), calc((var(--p1) - 0.225) / 0.165 * -1s), calc((var(--p1) - 0.405) / 0.165 * -1s), calc((var(--p1) - 0.585) / 0.165 * -1s), calc((var(--p1) - 0.765) / 0.165 * -1s), calc((var(--p2) - 0.04) / 0.23 * -1s), calc((var(--p3) - 0.465) / 0.445 * -1s), calc((var(--p4) - 0.285) / 0.195 * -1s), calc((var(--p4) - 0.515) / 0.195 * -1s), calc((var(--p4) - 0.745) / 0.195 * -1s); }
+}
+.kc-w0 { --l: 0.295; --n: 0.365; }
+.kc-w1 { --l: 0.365; --n: 0.435; }
+.kc-w2 { --l: 0.435; --n: 0.505; }
+.kc-w3 { --l: 0.505; --n: 0.575; }
+.kc-w4 { --l: 0.575; --n: 0.645; }
+.kc-w5 { --l: 0.645; --n: 9; }
+.kc-c2s { --l: -1; --n: 0.24; }
+.kc-c2e { --l: 0.26; --n: 9; }
+.kc-ty0 { --l: 0.066; --n: 0.175; }
+.kc-ty1 { --l: 0.181; --n: 0.29; }
+.kc-ty2 { --l: 0.296; --n: 0.405; }
+.kc-ty3 { --l: 0.411; --n: 0.52; }
+.kc-ty4 { --l: 0.526; --n: 0.635; }
+.kc-ty5 { --l: 0.641; --n: 0.75; }
+.kc-ty6 { --l: 0.756; --n: 0.865; }
+.kc-ty7 { --l: 0.871; --n: 9; }
+.kc-c2t { --l: -1; --n: 0.06; }
+.kc-f0-0 { --l: 0.0656; --n: 0.0796; }
+.kc-f0-1 { --l: 0.0796; --n: 0.0936; }
+.kc-f0-2 { --l: 0.0936; --n: 0.1076; }
+.kc-f0-3 { --l: 0.1076; --n: 0.1216; }
+.kc-f0-4 { --l: 0.1216; --n: 0.1356; }
+.kc-f0-5 { --l: 0.1356; --n: 0.1496; }
+.kc-f0-6 { --l: 0.1496; --n: 0.1636; }
+.kc-f0-7 { --l: 0.1636; --n: 0.1776; }
+.kc-f0-8 { --l: 0.1776; --n: 0.1916; }
+.kc-f0-9 { --l: 0.1916; --n: 0.22; }
+.kc-f0-s { --l: -1; --n: 0.0656; }
+.kc-f1-0 { --l: 0.248; --n: 0.268; }
+.kc-f1-1 { --l: 0.268; --n: 0.288; }
+.kc-f1-2 { --l: 0.288; --n: 0.308; }
+.kc-f1-3 { --l: 0.308; --n: 0.328; }
+.kc-f1-4 { --l: 0.328; --n: 0.348; }
+.kc-f1-5 { --l: 0.348; --n: 0.368; }
+.kc-f1-6 { --l: 0.368; --n: 0.4; }
+.kc-f1-s { --l: 0.22; --n: 0.248; }
+.kc-f2-0 { --l: 0.4293; --n: 0.4526; }
+.kc-f2-1 { --l: 0.4526; --n: 0.476; }
+.kc-f2-2 { --l: 0.476; --n: 0.4993; }
+.kc-f2-3 { --l: 0.4993; --n: 0.5226; }
+.kc-f2-4 { --l: 0.5226; --n: 0.546; }
+.kc-f2-5 { --l: 0.546; --n: 0.58; }
+.kc-f2-s { --l: 0.4; --n: 0.4293; }
+.kc-f3-0 { --l: 0.608; --n: 0.628; }
+.kc-f3-1 { --l: 0.628; --n: 0.648; }
+.kc-f3-2 { --l: 0.648; --n: 0.668; }
+.kc-f3-3 { --l: 0.668; --n: 0.688; }
+.kc-f3-4 { --l: 0.688; --n: 0.708; }
+.kc-f3-5 { --l: 0.708; --n: 0.728; }
+.kc-f3-6 { --l: 0.728; --n: 0.76; }
+.kc-f3-s { --l: 0.58; --n: 0.608; }
+.kc-f4-0 { --l: 0.7912; --n: 0.8192; }
+.kc-f4-1 { --l: 0.8192; --n: 0.8472; }
+.kc-f4-2 { --l: 0.8472; --n: 0.8752; }
+.kc-f4-3 { --l: 0.8752; --n: 0.9032; }
+.kc-f4-4 { --l: 0.9032; --n: 9; }
+.kc-f4-s { --l: 0.76; --n: 0.7912; }
+.kc-b3-0 { --l: 0.4925; --n: 0.5345; }
+.kc-b3-1 { --l: 0.5345; --n: 0.5765; }
+.kc-b3-2 { --l: 0.5765; --n: 0.6185; }
+.kc-b3-3 { --l: 0.6185; --n: 0.6605; }
+.kc-b3-4 { --l: 0.6605; --n: 0.7025; }
+.kc-b3-5 { --l: 0.7025; --n: 0.7445; }
+.kc-b3-6 { --l: 0.7445; --n: 0.7865; }
+.kc-b3-7 { --l: 0.7865; --n: 0.8285; }
+.kc-b3-8 { --l: 0.8285; --n: 0.8705; }
+.kc-b3-9 { --l: 0.8705; --n: 9; }
+.kc-b3-s { --l: 0.44; --n: 0.4925; }
+.kc-t0-0 { --l: 0.3085; --n: 0.3297; }
+.kc-t0-1 { --l: 0.3297; --n: 0.351; }
+.kc-t0-2 { --l: 0.351; --n: 0.3723; }
+.kc-t0-3 { --l: 0.3723; --n: 0.3935; }
+.kc-t0-4 { --l: 0.3935; --n: 0.4148; }
+.kc-t0-5 { --l: 0.4148; --n: 0.436; }
+.kc-t0-6 { --l: 0.436; --n: 0.4572; }
+.kc-t0-7 { --l: 0.4572; --n: 0.5; }
+.kc-t0-s { --l: 0.27; --n: 0.3085; }
+.kc-t1-0 { --l: 0.5413; --n: 0.5696; }
+.kc-t1-1 { --l: 0.5696; --n: 0.598; }
+.kc-t1-2 { --l: 0.598; --n: 0.6263; }
+.kc-t1-3 { --l: 0.6263; --n: 0.6546; }
+.kc-t1-4 { --l: 0.6546; --n: 0.683; }
+.kc-t1-5 { --l: 0.683; --n: 0.73; }
+.kc-t1-s { --l: 0.5; --n: 0.5413; }
+.kc-t2-0 { --l: 0.7685; --n: 0.7898; }
+.kc-t2-1 { --l: 0.7898; --n: 0.811; }
+.kc-t2-2 { --l: 0.811; --n: 0.8322; }
+.kc-t2-3 { --l: 0.8322; --n: 0.8535; }
+.kc-t2-4 { --l: 0.8535; --n: 0.8748; }
+.kc-t2-5 { --l: 0.8748; --n: 0.896; }
+.kc-t2-6 { --l: 0.896; --n: 0.9173; }
+.kc-t2-7 { --l: 0.9173; --n: 9; }
+.kc-t2-s { --l: 0.73; --n: 0.7685; }

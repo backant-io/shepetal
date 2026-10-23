@@ -1,16 +1,27 @@
 name = "shepetal-web"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
-main = ".open-next/worker.js"
+# worker.ts: the host rules (www and the old host, src/lib/site.ts), then OpenNext's worker (.open-next/worker.js).
+main = "worker.ts"
 
-# workers.dev only for now. The shepetal.backant.io custom domain is added at launch.
 workers_dev = true
-# Go-live: uncomment the next line, then npm run deploy.
-routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]
+# Custom domains: the site's domain (SHEPETAL_DOMAIN below), its www (301 to the apex), and the old host, which
+# released app builds call (every path there, /api/* included, is a 301 to the same path on the domain).
+# `wrangler deploy` attaches them and creates their DNS records: that is a GO step (GO-LIVE.md). site.test.ts checks
+# that these three match SHEPETAL_DOMAIN.
+routes = [
+  { pattern = "shepetal.app", custom_domain = true },
+  { pattern = "www.shepetal.app", custom_domain = true },
+  { pattern = "shepetal.backant.io", custom_domain = true },
+]
 
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
+
+# worker.ts keys its cache of the prerendered pages by version, so a deploy never serves an old page.
+[version_metadata]
+binding = "CF_VERSION_METADATA"
 
 [[d1_databases]]
 binding = "DB"
@@ -18,18 +29,66 @@ database_name = "shepetal"
 database_id = "bd45470f-27b2-4564-aa94-850856413b3e"
 migrations_dir = "migrations"
 
+# Notices to Pavel (src/lib/mail.ts): Email Routing's sending, which reaches only this verified address (support@ forwards
+# there too). Free on Workers Free. Customer email goes through Amazon SES instead, once its secrets are set.
+[[send_email]]
+name = "NOTIFY"
+destination_address = "pavel@hegler.tech"
+
+# POST /api/cancel: at most 5 a minute per IP address and per email, in each Cloudflare location (src/lib/cancel.ts).
+[[ratelimits]]
+name = "CANCEL_LIMIT"
+namespace_id = "3120"
+  [ratelimits.simple]
+  limit = 5
+  period = 60
+
+# The Mac releases (src/lib/download.ts): CI stages them, scripts/mac/promote.sh publishes them and writes latest.json.
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "shepetal-releases"
+
 [vars]
-NEXTAUTH_URL = "https://shepetal.backant.io"
-AUTH_URL = "https://shepetal.backant.io"
-# One-time $4.99 price in backant's Stripe account. Set once the price exists.
-STRIPE_PRICE_ID = "price_1USl5ADrjgXysMQjColtJKH5"
+# The site's one domain (https only). Auth callbacks (AUTH_URL), Stripe's success, cancel and portal return URLs,
+# metadata, OG, canonical URLs and the sitemap are all built from it (src/lib/site.ts, domain.config.mjs).
+SHEPETAL_DOMAIN = "shepetal.app"
+# Analytics (src/lib/analytics.ts, all server-side): backant's PostHog project on the US cloud. The project key is a secret set at GO
+# (POSTHOG_KEY, from SSM /backant/production/NEXT_PUBLIC_POSTHOG_KEY); without it analytics are off.
+POSTHOG_HOST = "https://us.i.posthog.com"
+# The waitlist for Windows, Linux and iPhone (src/lib/waitlist-config.ts). "off" until Pavel approves: no form, no
+# link to it, not in the sitemap, and POST /api/waitlist and the confirmation link answer 404 and store nothing.
+# "on" (with migrations/0008_waitlist.sql applied and the SES_* secrets below set) shows the form and sends the
+# confirmation emails through Amazon SES. It is read at build time too (next.config.ts): change it, then build.
+WAITLIST = "off"
+
+# The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. Only "on" sends; anything
+# else logs what each cron run would send. Needs migration 0006 and the SES secrets below. Switch it here, commit and
+# deploy (README.md): a change in the dashboard is undone by the next deploy.
+LIFECYCLE_EMAILS = "on"
+# Prices: found at runtime by lookup_key (shepetal_lifetime $23.99 once, shepetal_monthly $0.99 a month),
+# and the Billing Portal by metadata app=shepetal, so test and live need no IDs here.
+# scripts/stripe-setup.mjs creates them. STRIPE_PRICE_LIFETIME, STRIPE_PRICE_MONTHLY and
+# STRIPE_PORTAL_CONFIG override the lookups if ever needed.
 
 # Secrets: wrangler secret put AUTH_SECRET
 #          wrangler secret put GOOGLE_CLIENT_ID
 #          wrangler secret put GOOGLE_CLIENT_SECRET
 #          wrangler secret put STRIPE_SECRET_KEY
 #          wrangler secret put STRIPE_WEBHOOK_SECRET
+# Optional, the § 312k confirmation email to customers through Amazon SES (README.md), and needed for the trial
+# emails (LIFECYCLE_EMAILS): without all three, none is sent.
+#   The waitlist's confirmation emails (src/lib/waitlist.ts) need them too, once WAITLIST is "on".
+#          wrangler secret put SES_ACCESS_KEY_ID
+#          wrangler secret put SES_SECRET_ACCESS_KEY
+#          wrangler secret put SES_REGION
 # For local runs, put the same names in .dev.vars (see README.md).
+
+# The trial emails (src/lib/lifecycle.ts, worker.ts scheduled): every 5 minutes, at most 5 per run (1,440 a day), so a
+# run stays inside the Workers Free plan's 10 ms of CPU. This file is the source of truth: a cron changed in the
+# dashboard is undone by the next deploy.
+# The 03:15 UTC run also deletes the waitlist rows that are not confirmed, 29 days after their last signup (worker.ts).
+[triggers]
+crons = ["*/5 * * * *"]
 
 [observability.logs]
 enabled = true

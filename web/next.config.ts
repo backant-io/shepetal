@@ -1,42 +1,26 @@
 import type { NextConfig } from 'next';
 import { initOpenNextCloudflareForDev } from '@opennextjs/cloudflare';
+import { shepetalDomain, wranglerVar } from './domain.config.mjs';
+import { securityHeaders } from './security-headers.mjs';
 
 // Gives `next dev` the D1 binding from wrangler.toml (local D1 in .wrangler/).
 initOpenNextCloudflareForDev();
 
-const securityHeaders = [
-  { key: 'X-Frame-Options', value: 'DENY' },
-  { key: 'X-Content-Type-Options', value: 'nosniff' },
-  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains; preload' },
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
-  {
-    key: 'Content-Security-Policy',
-    value: [
-      "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
-      "img-src 'self' data: https: blob:",
-      // The brand fonts are self-hosted (src/brand/fonts).
-      "font-src 'self' data:",
-      "connect-src 'self'",
-      "frame-src 'self'",
-      "frame-ancestors 'none'",
-      // shepetal: and the loopback: where the /app/login consent form redirects with the code.
-      "form-action 'self' https://accounts.google.com https://checkout.stripe.com shepetal: http://127.0.0.1:*",
-      "base-uri 'self'",
-      "object-src 'none'",
-    ].join('; '),
-  },
-];
-
 const nextConfig: NextConfig = {
   // Pin the root: stray lockfiles in parent folders otherwise become the workspace root.
   outputFileTracingRoot: __dirname,
+  // The site's one domain (wrangler.toml [vars]), inlined for what is built ahead of time: metadata, OG, the sitemap.
+  // WAITLIST likewise: off, the waitlist pages are built as 404s and the FAQ and the sitemap leave it out.
+  env: { SHEPETAL_DOMAIN: shepetalDomain(), WAITLIST: wranglerVar('WAITLIST') },
   // No experimental.inlineCss: it puts the CSS in the page twice (a <style> and the RSC payload), 49.8 KB gzip
   // against 24.9 KB plus a cacheable stylesheet, and Lighthouse mobile scored one point lower with it.
   async headers() {
-    return [{ source: '/:path*', headers: securityHeaders }];
+    return [{ source: '/:path*', headers: securityHeaders() }];
+  },
+  // A path no route answers shows the prerendered not-found page (status 404), served from the cache like the other
+  // pages (open-next.config.ts). Without this OpenNext asks for /404, which has no prerendered copy, and renders it.
+  async rewrites() {
+    return { beforeFiles: [], afterFiles: [], fallback: [{ source: '/:path*', destination: '/_not-found' }] };
   },
 };
 

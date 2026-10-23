@@ -68,7 +68,8 @@ describe('GET /app/login query', () => {
     const p = { redirect_uri: MAC, state: 'st', code_challenge: CHALLENGE, code_challenge_method: 'S256', ...over };
     return new URLSearchParams(Object.entries(p).filter(([, v]) => v !== null) as [string, string][]);
   };
-  it('accepts the contract', () => expect(parseLogin(q())).toEqual({ redirect_uri: MAC, state: 'st', code_challenge: CHALLENGE }));
+  it('accepts the contract', () =>
+    expect(parseLogin(q())).toEqual({ redirect_uri: MAC, state: 'st', code_challenge: CHALLENGE }));
   it.each<Record<string, string | null>>([
     { redirect_uri: 'shepetal://auth.evil' },
     { redirect_uri: null },
@@ -86,7 +87,11 @@ describe('GET /app/login query', () => {
 describe('code and PKCE', () => {
   it('redirects with a one-time code and the state unchanged', async () => {
     const state = 'a b&c=d/é+%?#';
-    const raw = await issueCode((await upsertUser('a@example.com')).email, { redirect_uri: MAC, state, code_challenge: CHALLENGE }, T);
+    const raw = await issueCode(
+      (await upsertUser('a@example.com')).email,
+      { redirect_uri: MAC, state, code_challenge: CHALLENGE },
+      T,
+    );
     expect(raw).toMatch(/^shepetal:\/\/auth\?code=[A-Za-z0-9_-]{43}&state=a%20b%26c%3Dd%2F%C3%A9%2B%25%3F%23$/);
     expect(new URL(raw).searchParams.get('state')).toBe(state);
   });
@@ -153,12 +158,32 @@ describe('consent page', () => {
 
   it('asks before signing the app in, and names the kind of app', () => {
     const html = consentPage('a@example.com', r, 'csrf-1');
-    expect(html).toContain('Sign in to the Shepetal app on this computer as a@example.com?');
-    expect(html).toContain('Mac or iPhone app');
-    expect(consentPage('a@example.com', { ...r, redirect_uri: 'http://127.0.0.1:53682/callback' }, 'c')).toContain('desktop app');
+    expect(html).toContain('<h1>Sign in to the shepetal app?</h1>');
+    expect(html).toContain('As a@example.com');
+    expect(html).toContain('The Mac or iPhone app on this computer');
+    expect(consentPage('a@example.com', { ...r, redirect_uri: 'http://127.0.0.1:53682/callback' }, 'c')).toContain(
+      'desktop app',
+    );
     expect(html).toContain('<form method="post" action="/app/login">');
     expect(html).toContain('<input type="hidden" name="csrf" value="csrf-1">');
     expect(html).toContain('Not you? Use another account');
+  });
+
+  // The account email is collected here (GDPR Art. 13: inform at collection), and § 312k BGB wants the cancel button
+  // on every page of the site.
+  it('links the Privacy Policy and the cancellation button', () => {
+    const html = consentPage('a@example.com', r, 'c');
+    expect(html).toContain('<a href="/privacy">Privacy</a>');
+    expect(html).toContain('<a href="/cancel" lang="de">Verträge hier kündigen</a>');
+  });
+
+  // The trial emails need consent (§ 7 UWG, Art. 6(1)(a) GDPR): asked here, where the app creates the account, unticked.
+  it('asks for the trial emails with an unticked box and a link to what they are', () => {
+    const html = consentPage('a@example.com', r, 'c');
+    expect(html).toContain(
+      '<label class="check"><input type="checkbox" name="trial_emails" value="yes"> Send me three short emails about my trial. <a href="/privacy#trial-emails">Privacy</a></label><button type="submit">Continue</button></form>',
+    );
+    expect(html).not.toMatch(/checked/);
   });
 
   // state and email come from outside: they must never become markup.

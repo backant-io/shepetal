@@ -1,4 +1,6 @@
-# Going live: shepetal.backant.io
+# Going live: shepetal.app
+
+The site's domain is `SHEPETAL_DOMAIN` in `wrangler.toml` [vars] (`shepetal.app`); every URL the site builds comes from it (`src/lib/site.ts`). The old host, `shepetal.backant.io`, is no longer a site: every path there, `/api/*` included, is a 301 to the same path and query on shepetal.app. `www.shepetal.app` is a 301 to the apex. `web/e2e/hosts.mjs` tests all three hosts on the Worker runtime.
 
 Do these in order. Steps marked **Pavel** need an account only Pavel has. Run every command from `web/` on `main`, with wrangler logged in to Hegler Technologies (`npx wrangler whoami`) and `AWS_PROFILE=backant`. No command here prints a secret.
 
@@ -9,21 +11,52 @@ Do these in order. Steps marked **Pavel** need an account only Pavel has. Run ev
 3. #70 (Mac sign-in with PKCE) can merge any time: its sign-in gate is off unless the app bundle has `ShepetalRequiresSignIn` = true. Turn that key on in the release build only after step 6 passes.
 4. backant-io/backant-mcp #84 only adds a test, and shepetal does not depend on it. Merging it to `main` starts the `Deploy to Production` workflow for backant.io, which has failed on its last 3 runs (since 2026-09-11). Merge it whenever backant's deploy is healthy. backant.io needs no change, config or redeploy for shepetal.
 
-## 2. Google OAuth (Pavel)
+## 2. Google OAuth (done)
 
-Google Cloud Console → APIs & Services → Credentials → backant's OAuth client (the ID in SSM `/backant/WEB_GOOGLE_CLIENT_ID`):
+Done by Pavel on 22.10.26: backant's OAuth client has the redirect URI `https://shepetal.app/api/auth/callback/google`, and the consent screen is verified for shepetal.app. Keep `https://backant.io/api/auth/callback/google` and `https://shepetal.backant.io/api/auth/callback/google` (the live site uses the latter until the deploy in step 5, and a rollback would again).
 
-- Authorized redirect URIs: **add** `https://shepetal.backant.io/api/auth/callback/google`. Keep `https://backant.io/api/auth/callback/google`.
-- Nothing else. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, not Google's: never add them to Google. No JavaScript origin is needed (server-side code flow). `backant.io` is already an authorized domain, which covers the subdomain.
-- The consent screen shows backant's app name.
+`AUTH_URL` and `NEXTAUTH_URL` are no longer in `wrangler.toml`: the site sets both to `https://<SHEPETAL_DOMAIN>` (`src/lib/site.ts`), so sign-in always comes back to shepetal.app, whichever host it started on. The deploy in step 5 removes the old `AUTH_URL = https://shepetal.backant.io` vars from the live Worker. Check: `curl -s https://shepetal.app/api/auth/providers` shows `callbackUrl` `https://shepetal.app/api/auth/callback/google`. The apps' `shepetal://auth` and `http://127.0.0.1:<port>/callback` are shepetal's own redirect URIs, never Google's.
 
 ## 3. Stripe (Pavel, backant account, live mode)
 
-1. Create a product "Shepetal" with a one-time price of $4.99 USD. Put the price ID (`price_…`) in `STRIPE_PRICE_ID` in `web/wrangler.toml` and merge that one-line change to `main`.
-2. Create a **new** webhook endpoint `https://shepetal.backant.io/api/stripe/webhook` with the events `checkout.session.completed` **and** `checkout.session.async_payment_succeeded` (without the second, a delayed payment method never activates). Do not touch backant's existing endpoint or its secret.
-3. Copy that endpoint's signing secret (`whsec_…`) for step 4.
+### 3a. Stripe Tax and the EU rules (Dashboard, before the live switch)
 
-Both sites share this Stripe account, so each webhook sees the other's checkouts. shepetal acts only on a paid session with `metadata.app = "shepetal"` and answers everything else 200 (the e2e sends a paid backant subscription checkout and checks that it grants nothing). backant's handler acts only on `mode=subscription`. If shepetal ever sells a subscription, filter backant's handler first.
+**Decision (Pavel, 22.10.26): sell everywhere from day one.** Checkout is open in the EU and the UK while the non-Union OSS and UK VAT registrations are pending; `automatic_tax` stays on, and Stripe starts collecting the VAT by itself the moment each registration is added in Stripe (no code change, no deploy). EU and UK consumer sales made before that owe VAT that was not collected: Stripe Tax → Reports lists them by country, and Pavel settles them with the first OSS and UK returns (from BackAnt's margin, since the prices are tax-inclusive).
+
+1. **Tax settings.** Dashboard → Settings → Tax (or More → Tax → Settings):
+   - Origin (head office) address: live has San Francisco, CA. Set it to BackAnt, Inc., 131 Continental Dr, Suite 305, Newark, DE 19713, USA, the Delaware registered address, as test mode has since 22.10.26 (Stripe uses it for US origin rules; Delaware has no sales tax). Keep San Francisco only if that is where BackAnt is run from.
+   - Default tax behavior: **Inclusive** (the prices include tax; `stripe-setup.mjs` sets it on each price too).
+   - Default product tax code: live has `txcd_10103001` (SaaS, business use) and test has `txcd_10202000`. shepetal does not depend on it: `stripe-setup.mjs` sets `txcd_10202000` (Downloadable Software, personal use) on both shepetal products, and tax-inclusive on each price, so live's `inferred_by_currency` default (which makes USD exclusive) never applies. Leave the account defaults as backant needs them.
+   - Turn Stripe Tax on (live).
+2. **EU VAT: non-Union OSS.** BackAnt, Inc. (a Delaware corporation, file number 10279385) has no EU establishment, so it registers once for the EU's non-Union One-Stop Shop (VoES) in one member state, then files one quarterly OSS return for all EU sales. Apply with that state's tax office (Germany: BZSt, "Online-Antrag VoES"; Ireland: ROS). Stripe can file it for you (Stripe Tax filing partners). When you have the OSS number: Dashboard → Tax → Registrations → Add → European Union → "Non-Union OSS" → the member state and the start date. Without that registration Stripe collects no EU VAT. There is no EU threshold for non-EU sellers: VAT is due from the first EU sale to a consumer.
+3. **UK, Switzerland, Norway and others.** The UK has no VAT threshold for sellers outside the UK: selling to UK consumers from day one means registering with HMRC (online, as a non-established taxable person) and adding the UK registration in Stripe (Tax → Registrations → United Kingdom). Switzerland and Norway have thresholds (CHF 100,000; NOK 50,000 worldwide sales into the country). Dashboard → Tax → Thresholds shows where sales approach a limit.
+4. **US sales tax.** Delaware has no sales tax. Register in another state only when its economic-nexus threshold is reached (most: $100,000 or 200 transactions a year). Dashboard → Tax → Registrations → turn on threshold monitoring (Stripe emails when a state nears its threshold); add each state registration there when you register with the state.
+5. **The consent checkbox needs the terms URL.** Dashboard → Settings → Business → Public details: Terms of service URL `https://shepetal.app/terms`, Privacy policy URL `https://shepetal.app/privacy`. Checkout refuses `consent_collection` without the terms URL. The checkbox text is shepetal's (the EU consent to delivery right away and the end of the 14-day withdrawal right), set per session in the code.
+6. **Receipts.** Dashboard → Settings → Customer emails: "Successful payments" and "Refunds" on. The receipt carries the purchase and the consent confirmation (the payment description); subscription invoices carry it in the footer. That is the confirmation on a durable medium the EU rules ask for.
+7. **Adaptive Pricing** (Settings → Payments → Adaptive Pricing) can stay on: EU buyers see the fixed euro price (`currency_options` EUR, tax inclusive); elsewhere Stripe converts the USD price.
+
+### 3b. Products, prices, the code and the webhook
+
+1. Create or update the products (with tax codes), the tax-inclusive USD and EUR prices, the PRODUCTHUNT code (USD and EUR amounts off) and the Billing Portal configuration (prints the IDs, changes nothing on a second run, archives the old prices):
+
+   ```sh
+   cd web && STRIPE_SECRET_KEY="$(aws ssm get-parameter --with-decryption --name /backant/WEB_STRIPE_SECRET_KEY --query Parameter.Value --output text)" node scripts/stripe-setup.mjs --live
+   ```
+   The script sets the Billing Portal's return URL and its privacy and terms links from SHEPETAL_DOMAIN (`https://shepetal.app/account`, `/privacy`, `/terms`).
+2. Move shepetal's webhook endpoint (we_1USl5ADrjgXysMQjYGGaUepu, today `https://shepetal.backant.io/api/stripe/webhook`) to the domain. Its id and signing secret stay the same, so `STRIPE_WEBHOOK_SECRET` does not change. Do this **right after** step 5, once `curl -s -o /dev/null -w '%{http_code}\n' -X POST https://shepetal.app/api/stripe/webhook -d '{}'` prints 400. From step 5 on, the old URL is a 301, and Stripe does not follow redirects: deliveries fail until the endpoint points at the domain. Stripe retries a failed delivery for up to 3 days, so nothing is lost if the move follows the deploy:
+
+   ```sh
+   stripe webhook_endpoints update we_1USl5ADrjgXysMQjYGGaUepu --live \
+     --url https://shepetal.app/api/stripe/webhook \
+     -d "enabled_events[]=checkout.session.completed" -d "enabled_events[]=checkout.session.async_payment_succeeded" \
+     -d "enabled_events[]=customer.subscription.updated" -d "enabled_events[]=customer.subscription.deleted" \
+     -d "enabled_events[]=invoice.paid" -d "enabled_events[]=invoice.payment_failed" -d "enabled_events[]=charge.refunded"
+   ```
+
+   Then resend any delivery that failed in between from the endpoint's page in the Dashboard. Do not touch backant's own endpoint or its secret.
+3. Copy that endpoint's signing secret (`whsec_…`) for step 4 if it is not set yet.
+
+Both sites share this Stripe account, so each webhook sees the other's events. shepetal acts only on sessions and subscriptions with `metadata.app = "shepetal"` and answers everything else 200. backant's handler acts on every `mode=subscription` checkout that has a `client_reference_id`, so shepetal's subscription checkouts carry none (the user id is in metadata), and backant finds no client for shepetal's Stripe customers on subscription events. Filtering `metadata.app = "shepetal"` out in backant's handler as well is the safe follow-up.
 
 ## 4. Database, Worker and secrets
 
@@ -35,10 +68,36 @@ git switch main && git pull
 npm ci
 npx wrangler whoami                      # Hegler Technologies
 npx wrangler secret list                 # names only: AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, STRIPE_SECRET_KEY
-npm run db:migrate:remote                # applies 0002_app_login (drops device_codes, creates app_codes, adds tokens.last_used_at)
+npm run db:migrate:remote                # applies what is not applied yet: 0002_app_login, 0003_plans (plan and subscription columns, stripe_events), 0007_visitor_salt (the daily analytics salt)
 npx wrangler secret put STRIPE_WEBHOOK_SECRET   # paste the whsec_ value from step 3
 npm run deploy
 ```
+
+Analytics (backant's PostHog project, US cloud; off until this is set). The key goes in as a secret, straight from SSM, never printed. `POSTHOG_HOST` is already `https://us.i.posthog.com` in `wrangler.toml`; check that SSM agrees:
+
+```sh
+export AWS_PROFILE=backant AWS_REGION=eu-central-1
+aws ssm get-parameter --name /backant/production/NEXT_PUBLIC_POSTHOG_HOST --query Parameter.Value --output text   # https://us.i.posthog.com
+aws ssm get-parameter --with-decryption --name /backant/production/NEXT_PUBLIC_POSTHOG_KEY --query Parameter.Value --output text | npx wrangler secret put POSTHOG_KEY
+```
+
+Analytics run on the server only: the Worker counts the page views and sends every event to PostHog after the answer (in `waitUntil`). No analytics script, cookie or storage is in the browser, so the site shows no consent banner (§ 25 TDDDG, EDPB Guidelines 2/2023; Pavel, 22.10.26). Visitors are `v_…`: an HMAC of IP + user agent under a random salt per UTC day, kept in D1 (`visitor_salts`, `0007_visitor_salt`) and deleted after 48 h, so an id joins a visitor's page views, downloads and app sign-in within one day and never across days. No IP is sent and every event has `$geoip_disable`. Signed-in users (`u_…`, a salted hash of the email) appear only on `license_first_call` and `checkout_completed`.
+
+The project is shared with backant, so every shepetal event and person carries `app = shepetal`: filter on it in PostHog. The events for the dashboard:
+
+| Event | When | Properties |
+|---|---|---|
+| `$pageview` | a browser's GET of a page that answers 200 or 404 (not RSC, prefetches, HEAD, assets, `/api/*`, the release routes, `/app/*`, bots or link previews) | `$current_url` (only `ref`/`utm_*` kept of the query), `path`, `$pathname`, `$host`, `$referring_domain` (the host only, or `$direct`), `ref`, `utm_*`, `$device_type`, `$os` (family only), `status` 404 on a missing page |
+| `download_served` | a GET of `/download` that redirects to the DMG (not HEAD, bots or link previews) | `version`, `ref`, `utm_*` |
+| `app_login_opened` | the app opens `/app/login` (`redirect_uri` `shepetal://auth` or the loopback), once per sign-in | `client` (`app` or `loopback`), `app_version` if the request carries one (`?app_version=`), `signed_in` (yes or no, never which account) |
+| `app_login_consented` | the consent POST that sends the code to the app | `client`, `app_version` |
+| `appcast_check` | the app's update check (= active) | `app_version` |
+| `license_first_call` | an account's first license check (= install) | `plan`, `status` |
+| `checkout_completed` | a paid checkout (= paid) | `plan`, `amount` |
+
+The funnel: `$pageview` → `download_served` (same `v_` id that day) → `app_login_opened` → `app_login_consented` → `license_first_call` → `checkout_completed`. PostHog keeps events for the project's retention period; the salt that could link a `v_` id to a request is gone after 48 h.
+
+To check after the deploy: `curl -s https://shepetal.app/ | grep -c -i posthog` is 0 (no script, no meta), then open https://shepetal.app/ in a browser: a `$pageview` with `app = shepetal` shows up in PostHog's activity view within a minute. To turn analytics off: `npx wrangler secret delete POSTHOG_KEY`.
 
 If any of the four secrets is missing from the list, set it without printing it:
 
@@ -55,30 +114,46 @@ ssm /backant/WEB_STRIPE_SECRET_KEY | npx wrangler secret put STRIPE_SECRET_KEY
 - Never set `STRIPE_API_BASE` in production. It is for `web/e2e` only, and the code ignores it unless the key starts with `sk_test_`.
 - The Google client secret now lives in two places. If it is rotated, update `/backant/WEB_GOOGLE_CLIENT_SECRET` and shepetal's `GOOGLE_CLIENT_SECRET` together.
 
-## 5. Custom domain (Pavel)
+## 5. Custom domains (Pavel)
 
-`AUTH_URL` is `https://shepetal.backant.io`, so Google sign-in and `/app/login` only work there, not on workers.dev.
+`wrangler.toml` routes attach three custom domains on deploy: `shepetal.app`, `www.shepetal.app` and `shepetal.backant.io` (already attached today). Cloudflare creates their DNS records and certificates.
 
-1. Check that the backant.io zone has no DNS record for `shepetal` yet (Cloudflare dashboard → backant.io → DNS). A custom domain cannot replace one.
-2. Uncomment the `routes` line in `web/wrangler.toml` (`routes = [{ pattern = "shepetal.backant.io", custom_domain = true }]`), merge that to `main`, and deploy:
+1. Check that the shepetal.app zone (Cloudflare → shepetal.app → DNS) has no A, AAAA or CNAME record on `shepetal.app` or `www`: a custom domain cannot replace one. On 22.10.26 the zone had no records.
+2. Record the live version, for a rollback: `npx wrangler deployments list | tail -8`.
+3. Deploy (this attaches the domains):
 
 ```sh
-sed -i '' 's/^# routes = /routes = /' wrangler.toml && npm run deploy
+npm run deploy          # opennextjs-cloudflare build && opennextjs-cloudflare deploy
+npx wrangler deployments list | tail -8
 ```
+
+4. Wait until `curl -sI https://shepetal.app/` answers (the certificate takes a few minutes), then move the Stripe webhook (step 3.2).
+
+To take the new domain down again without touching the old host: Workers & Pages → shepetal-web → Settings → Domains & Routes → remove `shepetal.app` and `www.shepetal.app`. `npx wrangler rollback <version>` restores the code; custom domains are not part of a version.
 
 ## 6. Smoke tests (anyone, right after step 5)
 
 ```sh
-B=https://shepetal.backant.io
+B=https://shepetal.app
+O=https://shepetal.backant.io
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/                # 301 https://shepetal.app/
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$O/app/login?state=x"   # 301 https://shepetal.app/app/login?state=x
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/appcast.xml     # 301 https://shepetal.app/appcast.xml
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' $O/api/license       # 301 https://shepetal.app/api/license
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' https://www.shepetal.app/terms   # 301 https://shepetal.app/terms
 CH=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM   # any 43-character challenge
 curl -sI $B/ | grep -iE '^(HTTP|strict-transport)'                       # 200, HSTS
 curl -sI $B/ | grep -io "form-action[^;]*"                                # includes shepetal: http://127.0.0.1:* (the consent form's redirect)
-curl -s $B/api/auth/providers                                           # callbackUrl https://shepetal.backant.io/api/auth/callback/google
+curl -s $B/api/auth/providers                                           # callbackUrl https://shepetal.app/api/auth/callback/google
 curl -s -o /dev/null -w '%{http_code}\n' "$B/app/login?redirect_uri=https%3A%2F%2Fevil.com&state=x&code_challenge=$CH&code_challenge_method=S256"   # 400
-curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$B/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=x&code_challenge=$CH&code_challenge_method=S256"   # 307 https://accounts.google.com/...redirect_uri=https%3A%2F%2Fshepetal.backant.io%2Fapi%2Fauth%2Fcallback%2Fgoogle...
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' "$B/app/login?redirect_uri=shepetal%3A%2F%2Fauth&state=x&code_challenge=$CH&code_challenge_method=S256"   # 307 https://accounts.google.com/...redirect_uri=https%3A%2F%2Fshepetal.app%2Fapi%2Fauth%2Fcallback%2Fgoogle...
 curl -s -X POST $B/api/app/token -H 'content-type: application/json' -d '{"code":"x","code_verifier":"x","redirect_uri":"shepetal://auth"}'   # 400 {"error":"invalid_grant"}
 curl -s -o /dev/null -w '%{http_code}\n' $B/api/license                  # 401
 curl -s -o /dev/null -w '%{http_code}\n' -X POST $B/api/stripe/webhook -d '{}'   # 400
+curl -sI https://shepetal.backant.io/terms | grep -i '^location'         # https://shepetal.app/terms (301)
+curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' -X POST https://shepetal.backant.io/api/stripe/webhook   # 301 https://shepetal.app/api/stripe/webhook (Stripe itself calls the domain, step 3.2)
+curl -s $B/appcast.xml | grep -c github                                  # 0
+curl -sI $B/download/Shepetal-<version>.dmg | grep -i '^content-disposition'   # attachment, from shepetal.app
 curl -s https://backant.io/ | grep -ci shepetal                         # 0: nothing about shepetal on backant.io
 curl -s https://backant.io/sitemap.xml | grep -ci shepetal              # 0
 ```
@@ -88,7 +163,7 @@ Then a real sign-in as the Linux and Windows apps do it (loopback redirect, PKCE
 ```sh
 python3 - <<'PY'
 import base64, hashlib, http.server, json, secrets, urllib.error, urllib.parse, urllib.request, webbrowser
-B, R = 'https://shepetal.backant.io', 'http://127.0.0.1:53682/callback'
+B, R = 'https://shepetal.app', 'http://127.0.0.1:53682/callback'
 v = secrets.token_urlsafe(48); st = secrets.token_urlsafe(16)
 ch = base64.urlsafe_b64encode(hashlib.sha256(v.encode()).digest()).rstrip(b'=').decode()
 got = {}
@@ -108,7 +183,7 @@ t = call('/api/app/token', dict(code=got['code'], code_verifier=v, redirect_uri=
 print('signed in as', t['email'])
 print('license', call('/api/license', tok=t['access_token']))        # trial, trial_ends_at = now + 30 days
 print('checkout', call('/api/checkout', {}, t['access_token'])['url'])  # https://checkout.stripe.com/...
-input('Pay in the browser (live, $4.99), then press Enter: ')
+input('Pay in the browser (live, $23.99 or €23.99 incl. VAT, $4.99 with PRODUCTHUNT; tick the consent box), then press Enter: ')
 print('license', call('/api/license', tok=t['access_token']))        # active, trial_ends_at null
 print('sign out', call('/api/app/revoke', {}, t['access_token']))    # {'ok': True}
 try: call('/api/license', tok=t['access_token']); print('FAIL: the revoked token still works')
@@ -120,7 +195,7 @@ PY
 - Sign in on https://backant.io and open its dashboard: backant's own login still works.
 - Mac (#70): install a build with `ShepetalRequiresSignIn` = true, choose Sign in with Google in the menu, and check that Home shows "Free trial: 30 days left" and that fn dictates.
 
-If something is wrong: `npx wrangler rollback` (previous version) or remove the `routes` line and deploy, which takes shepetal.backant.io down without touching backant.io.
+If something is wrong: `npx wrangler rollback <the version from step 5.2>`. Removing a custom domain in the dashboard takes that host down without touching backant.io.
 
 ## Known limits
 
