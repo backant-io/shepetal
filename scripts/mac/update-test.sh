@@ -114,7 +114,11 @@ cmp -l "$T/good.dmg" "$WWW/$DL" | sed 's/^/  cmp: /' || true
 update tampered
 sleep 10  # an installer that should not run would have started by now
 grep -q "GET /$DL" "$T/http.log" || fail "the tampered DMG was never downloaded, so its signature was never checked"
-grep -iE 'signature|signed|validat' "$T/tampered.log" || fail "sparkle-cli printed no signature error for the tampered DMG"
+# Sparkle 2 checks the signature in its installer and reports a refused update to sparkle-cli as SUInstallationError,
+# 4005 in SUSparkleErrorDomain (SUErrors.h); sparkle-cli prints it as "error 4005
+# (SUSparkleErrorDomain)". The sentence around the code is Sparkle's and can change; the code and domain are matched.
+grep -F '4005 (SUSparkleErrorDomain)' "$T/tampered.log" ||
+  fail "sparkle-cli did not report error 4005 (SUSparkleErrorDomain) for the tampered DMG"
 [ "$(plist CFBundleVersion "$APP")" = "$B_N" ] || fail "the tampered DMG was installed: build $(plist CFBundleVersion "$APP")"
 codesign --verify --deep --strict "$APP"
 echo "PASS: the tampered DMG was refused and N (build $B_N) is still installed"
