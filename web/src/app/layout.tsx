@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import { preload } from 'react-dom';
-import { Analytics } from '@/components/Analytics';
 import { ogImage } from '@/lib/seo';
 import { SITE_URL } from '@/lib/site';
 import '@/styles/system.css';
@@ -45,7 +44,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body>
         {children}
-        <Analytics />
       </body>
     </html>
   );

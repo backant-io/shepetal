@@ -1,5 +1,6 @@
 import { getCloudflareContext } from '@opennextjs/cloudflare';
 import { attribution, track, visitorId } from './analytics';
+import { isBot } from './user-agent';
 
 // The Mac releases live in the R2 bucket shepetal-releases (binding RELEASES), served from this site only:
 //   staging/<v>/…   CI uploads, never served
@@ -93,7 +94,8 @@ const appVersion = (ua: string | null) => ua?.match(/^shepetal\/([\w.+-]{1,32})/
  * GET /download, /download/<v>/<file> and /appcast.xml, or null for any other request. worker.ts serves these before
  * OpenNext (the Next routes call this too): a 22 MB DMG streamed through Next's layers ran out of the Workers Free
  * plan's 10 ms of CPU and ended early (error 1102). A served download counts as download_served (the version, ?ref=,
- * utm_*), each feed check as appcast_check (= active, the app's version).
+ * utm_*), each feed check as appcast_check (= active, the app's version). A HEAD, a bot or a link preview (Slack or
+ * iMessage unfolding a /download link) downloads nothing, so it is not counted.
  */
 export async function releaseRoute(b: R2Bucket, req: Request): Promise<Response | null> {
   if (req.method !== 'GET' && req.method !== 'HEAD') return null;
@@ -101,11 +103,13 @@ export async function releaseRoute(b: R2Bucket, req: Request): Promise<Response 
   if (url.pathname === '/download') {
     const res = await download(b);
     const version = res.status === 302 ? res.headers.get('location')?.split('/')[2] : undefined;
-    if (version) await track('download_served', visitorId(req), { version, ...attribution(url.searchParams) });
+    if (version && req.method === 'GET' && !isBot(req.headers.get('user-agent'))) {
+      await track('download_served', () => visitorId(req), { version, ...attribution(url.searchParams) });
+    }
     return res;
   }
   if (url.pathname === '/appcast.xml') {
-    await track('appcast_check', visitorId(req), { app_version: appVersion(req.headers.get('user-agent')) });
+    await track('appcast_check', () => visitorId(req), { app_version: appVersion(req.headers.get('user-agent')) });
     return appcast(b, req);
   }
   const m = url.pathname.match(/^\/download\/([^/]+)\/([^/]+)$/);

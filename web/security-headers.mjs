@@ -2,8 +2,8 @@
 // answers itself (/api/license, /api/app/token, /api/app/revoke, /api/cancel). The CSP has no nonce, so prerendered pages are
 // served as they were built.
 
-/** @param {string} posthogHost PostHog's ingestion host (POSTHOG_HOST), the one place analytics may connect to */
-export function securityHeaders(posthogHost) {
+/** The headers for every answer. Analytics run on the server (src/lib/server-analytics.ts): pages connect to the site only. */
+export function securityHeaders() {
   return [
     { key: 'X-Frame-Options', value: 'DENY' },
     { key: 'X-Content-Type-Options', value: 'nosniff' },
@@ -19,8 +19,7 @@ export function securityHeaders(posthogHost) {
         "img-src 'self' data: https: blob:",
         // The brand fonts are self-hosted (src/brand/fonts).
         "font-src 'self' data:",
-        // PostHog (src/components/Analytics.tsx), only its ingestion host
-        `connect-src 'self' ${new URL(posthogHost).origin}`,
+        "connect-src 'self'",
         "frame-src 'self'",
         "frame-ancestors 'none'",
         // shepetal: and the loopback: where the /app/login consent form redirects with the code.
