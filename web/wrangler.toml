@@ -59,7 +59,7 @@ POSTHOG_HOST = "https://us.i.posthog.com"
 # link to it, not in the sitemap, and POST /api/waitlist and the confirmation link answer 404 and store nothing.
 # "on" (with migrations/0008_waitlist.sql applied and the SES_* secrets below set) shows the form and sends the
 # confirmation emails through Amazon SES. It is read at build time too (next.config.ts): change it, then build.
-WAITLIST = "off"
+WAITLIST = "on"
 
 # The trial emails (src/lib/lifecycle.ts): welcome, day 3 and day 25, through Amazon SES. Only "on" sends; anything
 # else logs what each cron run would send. Needs migration 0006 and the SES secrets below. Switch it here, commit and
