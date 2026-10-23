@@ -583,6 +583,7 @@ private struct HistoryTab: View {
                             .focused($focus, equals: .archive)
                     }
                     .buttonStyle(.keycap(.quiet, .sm))
+                    .fixedSize()
                     // Folded away until hover or focus, but still in the key view loop, so Tab reaches and opens them.
                     .padding(.top, tools ? 6 : 0)
                     .frame(maxHeight: tools ? nil : 0, alignment: .top)

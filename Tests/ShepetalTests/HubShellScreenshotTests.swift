@@ -83,7 +83,7 @@ final class HubShellScreenshotTests: XCTestCase {
     /// Home, as tall as it is: the account, the status rows, the stats and Recent notices.
     func testHubHome() throws {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
-        try shoot("21-hub-home", NSSize(width: 1120, height: 1400), expect: ["Home", "Speech recognition", "Recent notices"]) {
+        try shoot("21-hub-home", NSSize(width: 1120, height: 1400), expect: ["Home", "All granted", "Recent notices"]) {
             let hub = self.hub(pipeline, tab: "home")
             return (hub, try self.part(hub, "window"))
         }
@@ -93,7 +93,7 @@ final class HubShellScreenshotTests: XCTestCase {
     func testHubSettings() throws {
         let pipeline = try Pipeline(root: root, pasteboard: pasteboard)
         try shoot("22-hub-settings", NSSize(width: 1120, height: 2600),
-                  expect: ["Settings", "Always record meetings automatically", "Show words while you speak", "Start at login"]) {
+                  expect: ["Settings", "Always record meetings automatically", "Show words while you speak", "Milestone notices"]) {
             let hub = self.hub(pipeline, tab: "settings")
             return (hub, try self.part(hub, "window"))
         }
@@ -173,15 +173,6 @@ final class HubShellScreenshotTests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.3))
             window.contentView?.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-        }
-        if ProcessInfo.processInfo.environment["SHEPETAL_DUMP_VIEWS"] != nil || true {
-            func dump(_ v: NSView, _ depth: Int) {
-                guard depth < 14 else { return }
-                print(String(repeating: "  ", count: depth) + "\(type(of: v)) \(v.frame) hidden=\(v.isHidden) layer=\(v.layer.map { "\($0.frame)" } ?? "-")")
-                for s in v.subviews { dump(s, depth + 1) }
-            }
-            print("VIEWS for \(window.title) \(size)")
-            if let f = window.contentView?.superview { dump(f, 0) }
         }
         XCTAssertFalse(window.isVisible, "a screenshot must not put the window on screen")
         XCTAssertNil(NSApp.keyWindow, "a screenshot must not make a window key")
