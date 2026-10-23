@@ -2,6 +2,8 @@
 
 Local dictation for macOS. Hold `fn` to talk, double-tap `fn` for hands-free, and the text lands wherever your cursor is. Speech-to-text runs on your machine with the fastest model it can handle. Your audio and your text never leave your Mac. The only network calls are sign-in, the license check (at launch and once a day, never while you dictate) and checkout, all to shepetal.app, and the one-time speech model download from the 🤫 menu. Signing in brings a sign-in window to the front, so a dictation running at that moment goes to the clipboard (focus moved).
 
+The Claims workflow checks the offline and privacy claims in public, on every change to the app and every week: [docs/claims.md](docs/claims.md).
+
 An open-source replacement for Wispr Flow. Status: in design.
 
 ## Mac

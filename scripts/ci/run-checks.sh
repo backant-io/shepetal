@@ -5,7 +5,7 @@
 #   scripts/ci/run-checks.sh --only NAME  one suite
 #   scripts/ci/run-checks.sh --self-test  check this runner (the scripts suite runs it)
 # .github/workflows/ci.yml runs the same suites one by one with --only.
-# Not run here or in CI: scripts/e2e-mac.sh, which needs the 470 MB Parakeet model. Run it by hand.
+# scripts/e2e-mac.sh needs the 470 MB Parakeet model. Not run here; the Claims workflow runs it (docs/claims.md).
 set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 CACHE=${CI_CACHE:-$ROOT/.cache/ci}   # Docker build caches and the iOS DerivedData (gitignored)

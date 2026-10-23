@@ -6,7 +6,7 @@
 # Asserts: segments in time order with the right speaker at the right time, at least 80% of each speaker's words,
 # live segments stored before the end, the meeting read back from the store and found by search, owner-only
 # audio, and a summary with at least one action item. The app runs with the network denied (sandbox-exec), so
-# transcription and summary make no network call.
+# transcription and summary make no network call: a network attempt kills it (SIGKILL) and fails the run.
 # BLEED=0.05 also mixes the other side into the mic channel at that gain (about -26 dB), as a MacBook's speakers
 # do without headphones: the same checks must pass, so none of that echo may come out as Me.
 set -euo pipefail
@@ -71,8 +71,9 @@ json.dump(ref, open(os.path.join(fix, "ref.json"), "w"), indent=1)
 print(f"meeting: {len(ref)} lines, {t / rate:.1f} s, bleed {bleed}", file=sys.stderr)
 PY
 
-sandbox-exec -p '(version 1)(allow default)(deny network*)' \
-  "$SHEPETAL_BIN" --e2e-meeting "$FIX/me.wav" "$FIX/others.wav" 2>"$WORK/stderr.log" | tee "$WORK/result.json"
+sandbox-exec -p '(version 1)(allow default)(deny network* (with send-signal SIGKILL))' \
+  "$SHEPETAL_BIN" --e2e-meeting "$FIX/me.wav" "$FIX/others.wav" 2>"$WORK/stderr.log" | tee "$WORK/result.json" ||
+  { echo "e2e-meeting: shepetal exited $? (137: killed, as on a network attempt)" >&2; exit 1; }
 
 python3 - "$WORK/result.json" "$FIX/ref.json" <<'PY'
 import json, os, re, stat, sys

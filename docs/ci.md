@@ -34,5 +34,7 @@ Build caches (Docker targets, the iOS DerivedData) go to `.cache/ci/` (gitignore
 
 ## Not run in CI
 
-- `scripts/e2e-mac.sh` needs the 470 MB Parakeet v3 model, so neither CI nor `run-checks.sh` runs it. Run it by hand before a change to the Mac pipeline lands.
+- `scripts/e2e-mac.sh` needs the 470 MB Parakeet v3 model, so `ci.yml` and `run-checks.sh` do not run it. The Claims workflow
+  (`.github/workflows/claims.yml`, see [claims.md](claims.md)) runs it with the network denied, with `CLEANUP=rules`,
+  `LANGUAGES=skip` and `LATENCY=report` (ready times reported, held to 2000 ms instead of 700), together with `scripts/e2e-meeting.sh`. Run the full script by hand before a change to the Mac pipeline lands.
 - The copied-Wispr-string check in `check_re_docs.py` and `parity.py --completeness` need `/Users/sorcecoder/shepetal-re/`, which is only on Pavel's Mac. CI runs `check_re_docs.py --no-bundle` and skips `--completeness` with a `SKIP` line. `run-checks.sh` runs both in full when that folder exists.

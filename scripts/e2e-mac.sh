@@ -18,7 +18,9 @@
 # at release; the default engine must show words for each clip and have that partial running, the 700 and 800 ms bars
 # hold with it, and the partial at release is dropped.
 # Run it offline to prove transcription makes no network call:
-#   sandbox-exec -p '(version 1)(allow default)(deny network*)' scripts/e2e-mac.sh
+#   sandbox-exec -p '(version 1)(allow default)(deny network* (with send-signal SIGKILL))' scripts/e2e-mac.sh
+# A network attempt then kills the process that makes it, and a shepetal killed that way (or exiting with anything
+# but 0 or 1) fails the run.
 # ENGINE=fallback runs the whisper.cpp fallback instead of Parakeet (the latency bar applies to the
 # default model only).
 # The c* clips need the local cleanup model: SHEPETAL_CLEANUP_MODEL (default: Qwen3.5 2B in bench/.cache/cleanup,
@@ -33,9 +35,15 @@
 # French chosen, on e02: the English text is kept and the wrong-language hint names English. The whisper model is
 # SHEPETAL_WHISPER_MODEL (default: bench/.cache/whisper, downloaded there on the first run, about 574 MB).
 # LANGUAGES=skip skips this part and says so.
+# LATENCY=report prints the ready times instead of asserting the 700 and 800 ms bars, and says so; it asserts a loose
+# 2000 ms bar instead, so a gross slowdown still fails. Only the Claims workflow uses it: GitHub's Macs are virtual
+# machines with no Neural Engine (docs/claims.md has the times).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 BIN=${SHEPETAL_BIN:-.build/release/shepetal}
+# shepetal --e2e exits 1 when a clip has an error (the checks below name it); anything else fails here, such as 137,
+# SIGKILL, which is what the kill profile above does to a process that tries the network.
+ran() { local rc=$?; [ "$rc" -le 1 ] || { echo "e2e-mac: shepetal exited $rc (137: killed, as on a network attempt)" >&2; exit 1; }; }
 [ -x "$BIN" ] || swift build -c release
 # The cleanup model's and whisper's libraries link no socket or DNS call, so they cannot reach the network even
 # when a failed call would be swallowed (the sandboxed run below only shows that nothing breaks without the network).
@@ -60,11 +68,12 @@ if [ -e "$DICT" ] && ! head -1 "$DICT" | grep -q '^# e2e-mac'; then
 fi
 printf '# e2e-mac dictionary\ndentist => orthodontist\n' > "$DICT"
 
-while IFS='|' read -r id voice text; do
-  [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "$text"
+# id|voice|text[|what the voice is given instead, where it reads the text wrong]. The text is the reference either way.
+while IFS='|' read -r id voice text spoken; do
+  [ -f "$FIX/$id.wav" ] || say -v "$voice" --data-format=LEI16@44100 -o "$FIX/$id.wav" "${spoken:-$text}"
   printf '%s\n' "$text" > "$FIX/$id.txt"
 done <<'FIXTURES'
-e01|Samantha|Please send the quarterly report to the design team before Friday afternoon, and copy the finance lead on the thread.
+e01|Samantha|Please send the quarterly report to the design team before Friday afternoon, and copy the finance lead on the thread.|Please send the quarterly report to the design team before Friday afternoon, and copy the finance leed on the thread.
 e02|Daniel|The deployment finished without errors, but the staging database still needs a fresh backup tonight.
 e03|Samantha|Remind me to call the dentist tomorrow morning and to pick up groceries on the way home.
 e04|Daniel|Our new onboarding flow cut the average setup time in half, so let's share the results at the next team meeting.
@@ -120,12 +129,12 @@ open(sys.argv[1], "w").write(s + "\n\n\t\n\n" + s)' "$FIX/c05.field"
   fi
 fi
 
-# A clip with an error exits 1; the checks below name it.
-"$BIN" --e2e "${CLIPS[@]}" ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl" || true
+[ "${LATENCY:-}" != report ] || echo "NOT ASSERTED: the 700 and 800 ms bars, ready times are reported and held to 2000 ms (LATENCY=report)"
+"$BIN" --e2e "${CLIPS[@]}" ${ENGINE:+--engine "$ENGINE"} 2>"$WORK/stderr.log" | tee "$WORK/results.jsonl" || ran
 
 # Silence exits 1 by design ("No speech heard"); the checks below read its JSON line.
 python3 -c 'import sys, wave; w = wave.open(sys.argv[1], "wb"); w.setnchannels(1); w.setsampwidth(2); w.setframerate(16000); w.writeframes(bytes(64000)); w.close()' "$FIX/silence.wav"
-"$BIN" --e2e "$FIX/silence.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/silence.jsonl" || true
+"$BIN" --e2e "$FIX/silence.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/silence.jsonl" || ran
 
 python3 - "$FIX/e01.wav" "$FIX/short.wav" <<'PY'
 import struct, sys, wave
@@ -137,7 +146,7 @@ start = max(range(0, n - win, rate // 50), key=lambda i: sum(v * v for v in x[i:
 o = wave.open(sys.argv[2], "wb"); o.setnchannels(1); o.setsampwidth(2); o.setframerate(rate)
 o.writeframes(struct.pack(f"<{win}h", *x[start:start + win])); o.close()
 PY
-"$BIN" --e2e "$FIX/short.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/short.jsonl" || true
+"$BIN" --e2e "$FIX/short.wav" ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" | tee "$WORK/short.jsonl" || ran
 
 python3 - "$WORK/results.jsonl" "$FIX" "$DICT" "$WORK/silence.jsonl" "$WORK/short.jsonl" <<'PY'
 import json, os, re, stat, struct, sys
@@ -186,7 +195,13 @@ for r in rows:
     assert not r["window_visible"], (name, "the test put a window on screen")
     field = os.path.join(fix, name[:-4] + ".field")
     if not os.environ.get("ENGINE"):  # F24's field costs time: Pavel set its bar to 800 ms (2026-10-21)
-        assert r["ready_ms"] <= (800 if os.path.exists(field) else 700), (name, "slow", r["ready_ms"])
+        bar = 800 if os.path.exists(field) else 700
+        if os.environ.get("LATENCY") != "report":
+            assert r["ready_ms"] <= bar, (name, "slow", r["ready_ms"])
+        else:  # a CI Mac: only a gross slowdown fails
+            assert r["ready_ms"] <= 2000, (name, "slow even for a CI Mac (LATENCY=report bar: 2000 ms)", r["ready_ms"])
+            if r["ready_ms"] > bar:
+                print(f"{name}: ready {r['ready_ms']} ms, over the {bar} ms bar (LATENCY=report: not asserted)")
         assert r["partials"] > 0, (name, "no live words while it recorded", r["partials"])  # F13: Parakeet only
         assert r["release_partial_running"], (name, "no partial running at the release: the bar missed the worst case")
     assert not r["late_partial_shown"], (name, "a partial came back after the release and was shown", r["last_partial"])
@@ -244,7 +259,7 @@ print(f"short.wav: {c['audio_seconds']:.2f} s, outcome {c['history_outcome']}, e
 PY
 
 # A paste that does not land (the target lost focus) must leave the text on the clipboard.
-"$BIN" --e2e "$FIX/e01.wav" --drop-paste ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" > "$WORK/dropped.jsonl" || true
+"$BIN" --e2e "$FIX/e01.wav" --drop-paste ${ENGINE:+--engine "$ENGINE"} 2>>"$WORK/stderr.log" > "$WORK/dropped.jsonl" || ran
 python3 - "$WORK/dropped.jsonl" <<'PY'
 import json, sys
 r = [json.loads(l) for l in open(sys.argv[1]) if l.strip()][0]
@@ -272,10 +287,10 @@ J=$FIX/j01
 J_TEXT="明日の会議の資料を、金曜日までに送ってください。"
 [ -f "$J.wav" ] || say -v Kyoko --data-format=LEI16@44100 -o "$J.wav" "$J_TEXT"
 printf '%s\n' "$J_TEXT" > "$J.txt"
-SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ja "$BIN" --e2e "$J.wav" "$FIX/e01.wav" 2>>"$WORK/stderr.log" | tee "$WORK/languages.jsonl" || true
-SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ko "$BIN" --e2e "$J.wav" 2>>"$WORK/stderr.log" | tee "$WORK/outside.jsonl" || true
+SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ja "$BIN" --e2e "$J.wav" "$FIX/e01.wav" 2>>"$WORK/stderr.log" | tee "$WORK/languages.jsonl" || ran
+SHEPETAL_WHISPER_MODEL=$WHISPER E2E_LANGUAGES=en,ko "$BIN" --e2e "$J.wav" 2>>"$WORK/stderr.log" | tee "$WORK/outside.jsonl" || ran
 # The hint names the language in the system language (Locale.current): pinned, so "English" is checked on any Mac.
-E2E_LANGUAGES=de,fr "$BIN" -AppleLocale en_US --e2e "$FIX/e02.wav" 2>>"$WORK/stderr.log" | tee "$WORK/wrong-language.jsonl" || true
+E2E_LANGUAGES=de,fr "$BIN" -AppleLocale en_US --e2e "$FIX/e02.wav" 2>>"$WORK/stderr.log" | tee "$WORK/wrong-language.jsonl" || ran
 python3 - "$WORK/languages.jsonl" "$WORK/wrong-language.jsonl" "$FIX" "$(basename "$WHISPER" .bin)" "$WORK/outside.jsonl" <<'PY'
 import json, os, re, sys, unicodedata
 
