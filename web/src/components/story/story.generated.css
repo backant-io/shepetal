@@ -29,6 +29,7 @@
   .kc .kc-w5 .kc-wy { animation-name: kc-wy; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 51% contain 66%; }
   .kc .kc-w5 .kc-wi { animation-name: kc-wi; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 51% contain 66%; }
   .kc .kc-w5 .kc-wo { animation-name: kc-wo; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 51% contain 66%; }
+  .kc .kc-ctarow { animation-name: kc-cta; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 66% contain 70%; }
   .kc .kc-stagekey { animation-name: kc-out; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 80% contain 80.2%; }
   .kc .kc-dock-in { animation-name: kc-dockin; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t0; animation-range: contain 80% contain 98%; }
   .kc .kc-dock-out { animation-name: kc-dockout; animation-duration: auto; animation-timing-function: linear; animation-fill-mode: both; animation-timeline: --t5; animation-range: entry 0% entry 50%; }
@@ -160,6 +161,7 @@
   .kc .kc-w5 .kc-wy { animation-name: kc-wy; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.51) / 0.15 * -1s); }
   .kc .kc-w5 .kc-wi { animation-name: kc-wi; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.51) / 0.15 * -1s); }
   .kc .kc-w5 .kc-wo { animation-name: kc-wo; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.51) / 0.15 * -1s); }
+  .kc .kc-ctarow { animation-name: kc-cta; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.66) / 0.04 * -1s); }
   .kc .kc-stagekey { animation-name: kc-out; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.8) / 0.002 * -1s); }
   .kc .kc-dock-in { animation-name: kc-dockin; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--p0) - 0.8) / 0.18 * -1s); }
   .kc .kc-dock-out { animation-name: kc-dockout; animation-duration: 1s; animation-timing-function: linear; animation-fill-mode: both; animation-play-state: paused; animation-delay: calc((var(--e5) - 0) / 0.5 * -1s); }

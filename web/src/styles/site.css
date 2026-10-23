@@ -12,7 +12,7 @@
 .s-mark-sm { font-size: 1.5rem; }
 .s-head-end { display: flex; align-items: baseline; gap: 1.5rem; }
 .s-foot { margin-top: clamp(5rem, calc(9 * var(--u)), 14rem); display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; padding: 1.4rem 0 1.6rem; border-top: 1px solid var(--rule); }
-.s-foot-nav { display: flex; gap: 1.5rem; }
+.s-foot-nav { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; }
 .s-foot-nav a, .s-head-end a { color: var(--ink); }
 .s-main { flex: 1; width: 100%; }
 
@@ -35,6 +35,9 @@
 .s-btn-line:active { transform: translateY(1px); }
 .s-textbtn { padding: 0; margin: 0; border: 0; background: none; font: inherit; color: var(--ink); text-decoration: underline; text-underline-offset: .2em; cursor: pointer; }
 .s-form { display: contents; }
+.s-check { display: block; margin: 0 0 1.1rem; max-width: 28rem; font-size: .9375rem; line-height: 1.45; color: var(--ink2); }
+.s-check input { margin: 0 .3rem 0 0; vertical-align: -2px; accent-color: var(--ink); }
+.s-check a { color: var(--ink); }
 .s-actions { display: flex; align-items: center; gap: 1.25rem; flex-wrap: wrap; }
 .s-alert { margin: .75rem 0 0; font-size: .9375rem; color: #a3300a; }
 
@@ -89,6 +92,18 @@
 .s-legal { max-width: 46rem; padding-top: calc(10.5 * var(--u) - 4.7rem); }
 .s-legal .s-mono { display: block; margin-top: 1.2rem; }
 .s-prose { margin-top: 3rem; font-size: 1.0625rem; line-height: 1.6; }
+/* a notice that must stand apart, such as the right to object in the Privacy Policy (Art. 21(4) GDPR) */
+.s-box { margin: 2rem 0; padding: 1.2rem; border: 1px solid var(--ink); border-radius: 4px; }
+.s-prose .s-box h3 { margin-top: 0; }
+/* /cancel (§ 312k BGB): the fields the law lists and the Jetzt kündigen button, nothing else */
+.s-cancel { display: grid; gap: 2rem; justify-items: start; margin-top: 3rem; font-size: 1.0625rem; line-height: 1.4; }
+.s-cancel fieldset { display: grid; gap: .7rem; margin: 0; padding: 0; border: 0; min-width: 0; width: 100%; }
+.s-cancel legend { margin-bottom: .9rem; padding: 0; font-family: var(--mono); font-size: .75rem; letter-spacing: .01em; color: var(--ink2); }
+.s-cancel label { display: flex; gap: .6rem; align-items: baseline; }
+.s-cancel input[type="radio"] { accent-color: var(--ink); }
+.s-cancel .s-cancel-field { flex-direction: column; align-items: stretch; gap: .4rem; width: 100%; max-width: 30rem; font-family: var(--mono); font-size: .75rem; color: var(--ink2); }
+.s-cancel textarea, .s-cancel input[type="email"], .s-cancel input[type="date"] { padding: .65rem .8rem; border: 1px solid var(--ink); border-radius: 4px; background: transparent; color: var(--ink); font: 500 1rem/1.3 var(--sans); }
+.s-cancel textarea:focus-visible, .s-cancel input:focus-visible { outline: 2px solid #FF4F12; outline-offset: 2px; }
 .s-prose h2 { margin: 3rem 0 .9rem; font-weight: 520; font-size: clamp(1.5rem, calc(2.3 * var(--u)), 2.4rem); line-height: 1.1; letter-spacing: -.025em; }
 .s-prose h3 { margin: 2rem 0 .5rem; font-weight: 600; font-size: 1.125rem; letter-spacing: -.01em; }
 .s-prose p, .s-prose li { margin: 0; color: #2a2824; }

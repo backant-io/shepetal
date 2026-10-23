@@ -67,6 +67,8 @@
 .kc a:focus-visible { outline: 2px solid #FF4F12; outline-offset: 3px; }
 @keyframes kc-in { 0% { opacity: 0; transform: translateY(.4em); animation-timing-function: cubic-bezier(.2,.7,.2,1); } 100% { opacity: 1; transform: none; } }
 @keyframes kc-pop { 0% { opacity: 0; } 100% { opacity: 1; } }
+/* kc-in, plus hidden until it starts: an unseen button can be neither clicked nor focused */
+@keyframes kc-cta { 0% { opacity: 0; visibility: hidden; transform: translateY(.4em); animation-timing-function: cubic-bezier(.2,.7,.2,1); } .1% { visibility: visible; } 100% { opacity: 1; visibility: visible; transform: none; } }
 @keyframes kc-out { 0% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes kc-cut { 0% { opacity: 1; transform: translateX(0); } 20% { opacity: 1; transform: translateX(.6rem); animation-timing-function: cubic-bezier(.5,0,.8,.4); } 100% { opacity: 0; transform: translateX(9rem); } }
 @keyframes kc-shrink { 0% { opacity: 1; transform: scaleX(1); } 100% { opacity: 1; transform: scaleX(0); } }
@@ -128,6 +130,9 @@
 .kc-head { position: absolute; z-index: 3; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; padding: 1.6rem var(--gut); }
 .kc-mark { font: italic 500 1.9rem/1 var(--serif); color: #161512; text-decoration: none; letter-spacing: -.01em; }
 .kc-mark-sm { font-size: 1.5rem; }
+.kc-login { font-weight: 500; font-size: 1rem; color: #161512; text-decoration: none; }
+.kc-login:hover { text-decoration: underline; text-underline-offset: .2em; }
+.kc-login:focus-visible { outline: 2px solid #FF4F12; outline-offset: 4px; }
 .kc-grid { position: relative; z-index: 2; height: 100%; display: grid; grid-template-columns: minmax(0, 56fr) minmax(0, 44fr); padding-top: calc(10.5 * var(--u)); row-gap: 2.5rem; align-items: start; align-content: start; }
 .kc-h1 { grid-column: 1; grid-row: 1; margin: 0; padding-left: var(--gut); font-weight: 520; font-size: clamp(2.5rem, calc(5.3 * var(--u)), 10.0rem); line-height: .97; letter-spacing: -.043em; }
 .kc-stagekey { position: absolute; left: calc(-1 * var(--u)); bottom: calc(1.6 * var(--u)); width: calc(60 * var(--u)); z-index: 1; }
@@ -201,7 +206,7 @@
 .kc-price { margin: 0; font-weight: 520; font-size: clamp(2.25rem, calc(4.2 * var(--u)), 7.5rem); line-height: 1; letter-spacing: -.04em; }
 .kc-price-line { margin: .6rem 0 0; font-size: 1.125rem; font-weight: 480; }
 .kc-foot { margin-top: clamp(5rem, calc(9 * var(--u)), 14rem); display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; padding: 1.4rem 0 1.6rem; border-top: 1px solid rgba(22,21,18,.22); }
-.kc-foot-nav { display: flex; gap: 1.5rem; }
+.kc-foot-nav { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; }
 .kc-foot-nav a { color: #161512; }
 
 @media (max-width: 760px) {

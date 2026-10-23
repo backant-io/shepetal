@@ -27,7 +27,7 @@ const QAS: QA[] = [
         <p>
           Your words go where you put them: into the app you dictate into. shepetal itself sends no text and no
           analytics. To sign in it uses your Google email, and it checks your license once a day. The details are in
-          the <Link href="/privacy">Privacy Policy</Link>.
+          the <Link href="/privacy" prefetch={false}>Privacy Policy</Link>.
         </p>
       </>
     ),
@@ -70,7 +70,7 @@ const QAS: QA[] = [
         <InstallSteps headingLevel={3} />
       </>
     ),
-    text: 'Download shepetal. Open the DMG and drag shepetal into Applications. Open it; when macOS says it could not verify it, click Done. Then open System Settings, Privacy & Security, scroll to "shepetal was blocked to protect your Mac", click Open Anyway and confirm with your password. You do this once.',
+    text: 'Download shepetal. Open the DMG and drag shepetal into Applications. Open it; when macOS says it cannot open or could not verify shepetal, close the message (on macOS 15, click Done). Then open System Settings, Privacy & Security, scroll to the message that shepetal was blocked, click Open Anyway (it is there for about an hour after you tried to open it) and confirm with your password. On macOS 14 you can instead Control-click shepetal in Applications, choose Open, then Open. You do this once.',
   },
   {
     q: 'How do I uninstall it?',
@@ -87,10 +87,12 @@ const QAS: QA[] = [
     a: (
       <p>
         30 days free, with no card. Then $23.99 once, yours forever with updates included, or $0.99 a month, which you
-        can cancel anytime on your <Link href="/account" prefetch={false}>account page</Link>.
+        can cancel anytime on your <Link href="/account" prefetch={false}>account page</Link>, under Settings. You can
+        also cancel without signing in: choose <Link href="/cancel" prefetch={false} lang="de">Verträge hier kündigen</Link>{' '}
+        at the bottom of any page.
       </p>
     ),
-    text: '30 days free, with no card. Then $23.99 once, yours forever with updates included, or $0.99 a month, which you can cancel anytime on your account page.',
+    text: '30 days free, with no card. Then $23.99 once, yours forever with updates included, or $0.99 a month, which you can cancel anytime on your account page, under Settings. You can also cancel without signing in: choose Verträge hier kündigen at the bottom of any page.',
   },
   {
     q: 'Can I get a refund?',
@@ -98,7 +100,7 @@ const QAS: QA[] = [
       <p>
         Yes. Write to <a href="mailto:support@shepetal.app">support@shepetal.app</a> within 14 days of buying the
         lifetime license for a full refund. A subscription stops charging the moment you cancel. The whole policy is
-        on the <Link href="/refunds">refunds page</Link>.
+        on the <Link href="/refunds" prefetch={false}>refunds page</Link>.
       </p>
     ),
     text: 'Yes. Write to support@shepetal.app within 14 days of buying the lifetime license for a full refund. A subscription stops charging the moment you cancel.',
