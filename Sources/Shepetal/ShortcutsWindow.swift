@@ -1,56 +1,32 @@
 import AppKit
 import ShepetalCore
+import SwiftUI
 
-/// One row per action: its chord and a Change… button that records the next chord through the tap.
+/// One row per action: its chord as a key hint and a Change… keycap that records the next chord through the tap.
 /// A refused chord shows why. Reset puts the defaults back. Bindings live in UserDefaults ("shortcuts").
 final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
     private static let defaultsKey = "shortcuts"
     static var saved: Shortcuts { Shortcuts(stored: UserDefaults.standard.dictionary(forKey: defaultsKey)) }
 
     private let tap: FnTap
-    private var chords: [ShortcutAction: NSTextField] = [:]
-    private var buttons: [ShortcutAction: NSButton] = [:]
-    private let status = NSTextField(wrappingLabelWithString: "")
-    private let note = NSTextField(wrappingLabelWithString: "")
+    private let model = ShortcutsModel()
     private var recording: ShortcutAction?
 
     init(tap: FnTap) {
         self.tap = tap
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 440, height: 322),
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 440),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
-        window.title = "Shepetal shortcuts"
+        window.title = "Shortcuts"
         window.isReleasedWhenClosed = false
+        SmallWindow.style(window)
         super.init(window: window)
         window.delegate = self
-
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 10
-        stack.edgeInsets = NSEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
-        for (i, action) in ShortcutAction.allCases.enumerated() {
-            let chord = NSTextField(labelWithString: "")
-            chord.font = .systemFont(ofSize: 13, weight: .semibold)
-            let button = NSButton(title: "Change…", target: self, action: #selector(change(_:)))
-            button.tag = i
-            let title = NSTextField(labelWithString: action.title)
-            title.widthAnchor.constraint(equalToConstant: 160).isActive = true
-            let row = NSStackView(views: [title, chord, NSView(), button])
-            row.widthAnchor.constraint(equalToConstant: 408).isActive = true
-            stack.addArrangedSubview(row)
-            chords[action] = chord
-            buttons[action] = button
-        }
-        status.textColor = .systemRed
-        note.textColor = .secondaryLabelColor
-        note.font = .systemFont(ofSize: 11)
-        let reset = NSButton(title: "Reset to defaults", target: self, action: #selector(resetDefaults))
-        for v in [status, note, reset] { stack.addArrangedSubview(v) }
-        for v in [status, note] { v.preferredMaxLayoutWidth = 408 }
-        window.contentView = stack
+        model.change = { [weak self] in self?.change($0) }
+        model.reset = { [weak self] in self?.resetDefaults() }
+        window.contentView = NSHostingView(rootView: ShortcutsView(model: model))
         let refused = tap.router.shortcuts.refused
         if !refused.isEmpty {
-            status.stringValue = "Saved keys for \(refused.map(\.title).joined(separator: ", ")) were not allowed, so the default is back."
+            model.status = "Saved keys for \(refused.map(\.title).joined(separator: ", ")) were not allowed, so the default is back."
         }
         refresh()
     }
@@ -62,9 +38,9 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
         guard let action = recording else { return }
         recording = nil
         if let problem = tap.updateRouter({ $0.shortcuts.set(raw, for: action) }) {
-            status.stringValue = "\(Key.label(raw)): \(problem.message)"
+            model.status = "\(Key.label(raw)): \(problem.message)"
         } else {
-            status.stringValue = ""
+            model.status = ""
             save()
         }
         refresh()
@@ -82,17 +58,17 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
         refresh()
     }
 
-    @objc private func change(_ sender: NSButton) {
-        recording = ShortcutAction.allCases[sender.tag]
-        status.stringValue = ""
+    private func change(_ action: ShortcutAction) {
+        recording = action
+        model.status = ""
         tap.updateRouter { $0.record() }
         refresh()
     }
 
-    @objc private func resetDefaults() {
+    private func resetDefaults() {
         recording = nil
         tap.updateRouter { $0.stopRecording(); $0.shortcuts.reset() }
-        status.stringValue = ""
+        model.status = ""
         save()
         refresh()
     }
@@ -100,19 +76,92 @@ final class ShortcutsWindow: NSWindowController, NSWindowDelegate {
     private func save() { UserDefaults.standard.set(tap.router.shortcuts.stored, forKey: Self.defaultsKey) }
 
     private func refresh() {
-        for action in ShortcutAction.allCases {
+        model.rows = ShortcutAction.allCases.map { action in
             let isRecording = recording == action
             let chord = tap.router.shortcuts.chord(action)
-            chords[action]?.stringValue = isRecording ? "Press the keys…" : chord.isEmpty ? "Not set" : Key.label(chord)
-            buttons[action]?.isEnabled = recording == nil || isRecording
+            return ShortcutsModel.Row(action: action, chord: isRecording || chord.isEmpty ? nil : Key.label(chord),
+                                      placeholder: isRecording ? "Press the keys…" : "Not set",
+                                      recording: isRecording, enabled: recording == nil || isRecording)
         }
         if !tap.isRunning {
-            note.stringValue = "Shortcuts need Input Monitoring. Open Settings > Permissions… in the shepetal window."
+            model.note = "Shortcuts need Input Monitoring. Open Settings > Permissions… in the shepetal window."
         } else if !tap.canSwallow {
-            note.stringValue = "Without Accessibility, Esc and the keys of a shortcut also reach the app you are typing in."
+            model.note = "Without Accessibility, Esc and the keys of a shortcut also reach the app you are typing in."
         } else {
             let cancel = Key.label(tap.router.shortcuts.chord(.dismiss))
-            note.stringValue = "\(cancel) cancels only while Shepetal is listening or transcribing. Otherwise it reaches your app."
+            model.note = "\(cancel) cancels only while shepetal is listening or transcribing. Otherwise it reaches your app."
         }
+    }
+}
+
+/// What the window shows; ShortcutsWindow fills it and does what its buttons ask.
+@MainActor
+final class ShortcutsModel: ObservableObject {
+    struct Row: Identifiable {
+        let action: ShortcutAction
+        /// The chord as printed on the keys ("⌃ ⌘ V"), or nil while recording or unset.
+        let chord: String?
+        let placeholder: String
+        let recording: Bool
+        let enabled: Bool
+        var id: ShortcutAction { action }
+    }
+
+    @Published var rows: [Row] = []
+    /// Why a chord was refused, or "".
+    @Published var status = ""
+    @Published var note = ""
+    var change: (ShortcutAction) -> Void = { _ in }
+    var reset: () -> Void = {}
+}
+
+/// Rows on sh-bg: the action, its keys as one key hint, Change… as a small keycap. A refusal is an error line in
+/// sh-danger with the alert icon; the note under the rows is app-small in sh-text-muted.
+private struct ShortcutsView: View {
+    @ObservedObject var model: ShortcutsModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SmallWindowTitle("Shortcuts")
+            VStack(alignment: .leading, spacing: SH.space4) {
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(model.rows) { row($0) }
+                }
+                .shHairline(.top)
+                if !model.status.isEmpty {
+                    HStack(alignment: .top, spacing: 6) {
+                        SHIcon(.circleAlert).padding(.top, 2)
+                        Text(model.status).shText(SH.appSmall).fixedSize(horizontal: false, vertical: true)
+                    }
+                    .foregroundStyle(SH.danger)
+                    .accessibilityElement(children: .combine)
+                }
+                Text(model.note).shText(SH.appSmall).foregroundStyle(SH.textMuted).fixedSize(horizontal: false, vertical: true)
+                Button("Reset to defaults", action: model.reset).buttonStyle(.keycap(.secondary))
+            }
+            .padding([.horizontal, .bottom], SH.space5)
+        }
+        .frame(width: 520)
+        .background(SH.bg)
+    }
+
+    private func row(_ r: ShortcutsModel.Row) -> some View {
+        HStack(spacing: SH.space4) {
+            Text(r.action.title).shText(SH.appStrong).foregroundStyle(SH.text)
+            Spacer(minLength: SH.space2)
+            if let chord = r.chord {
+                SHKbd(chord)
+            } else {
+                Text(r.placeholder).shText(SH.appSmall).foregroundStyle(SH.textMuted)
+            }
+            Button("Change…") { model.change(r.action) }
+                .buttonStyle(.keycap(.secondary, .sm))
+                .disabled(!r.enabled)
+                .accessibilityLabel("Change \(r.action.title)")
+        }
+        .padding(.vertical, 10)
+        .frame(minHeight: SH.controlLg)
+        .shHairline(.bottom)
+        .accessibilityElement(children: .contain)
     }
 }
