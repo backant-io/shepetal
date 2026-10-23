@@ -8,34 +8,49 @@ struct AccountSection: View {
     @ObservedObject var account = Account.shared
 
     var body: some View {
-        Section("Account") {
-            Text(account.summaryLine).font(.headline)
-            switch account.access {
-            case .signedOut:
-                if account.signingIn {
-                    Button("Cancel sign-in") { account.cancelSignIn() }
-                } else {
-                    Button(AccountText.signIn) { account.signIn() }.buttonStyle(.borderedProminent).controlSize(.large)
+        SHRowGroup("Account") {
+            SHContentRow("Plan") {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(account.summaryLine).shText(SH.appStrong).foregroundStyle(SH.text)
+                    if !account.message.isEmpty, !account.signingIn {
+                        Text(account.message).shText(SH.appSmall).foregroundStyle(SH.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
-            case .trial:
-                Button(AccountText.buy) { account.buy() }
-            case .expired, .subscriptionEnded:
-                Button(AccountText.buy) { account.buy() }
-                Button("Check license now") { account.checkNow() }
-            case .paymentFailed:
-                Button(AccountText.manage) { account.manage() }.buttonStyle(.borderedProminent)
-                Button("Check license now") { account.checkNow() }
-            case .subscription:
-                Button(AccountText.manage) { account.manage() }
-            case .unchecked:
-                Button("Check license now") { account.checkNow() }
-            case .lifetime:
-                EmptyView()
+            } action: {
+                HStack(spacing: SH.space2) {
+                    actions
+                    if account.signedIn { Button("Sign out") { account.signOut() }.buttonStyle(.keycap(.quiet, .sm)) }
+                }
+                .fixedSize()  // a keycap's label is never cut; the summary wraps instead
             }
-            if account.signedIn { Button("Sign out") { account.signOut() } }
-            if !account.message.isEmpty, !account.signingIn {
-                Text(account.message).font(.caption).foregroundStyle(.secondary)
+        }
+    }
+
+    /// The plan's actions: Sign in is the view's one primary keycap while signed out, Manage subscription while a
+    /// payment failed; every other action is a secondary cap.
+    @ViewBuilder private var actions: some View {
+        switch account.access {
+        case .signedOut:
+            if account.signingIn {
+                Button("Cancel sign-in") { account.cancelSignIn() }.buttonStyle(.keycap(.secondary, .sm))
+            } else {
+                Button(AccountText.signIn) { account.signIn() }.buttonStyle(.keycap(.primary))
             }
+        case .trial:
+            Button(AccountText.buy) { account.buy() }.buttonStyle(.keycap(.secondary, .sm))
+        case .expired, .subscriptionEnded:
+            Button(AccountText.buy) { account.buy() }.buttonStyle(.keycap(.secondary, .sm))
+            Button("Check license now") { account.checkNow() }.buttonStyle(.keycap(.secondary, .sm))
+        case .paymentFailed:
+            Button(AccountText.manage) { account.manage() }.buttonStyle(.keycap(.primary, .sm))
+            Button("Check license now") { account.checkNow() }.buttonStyle(.keycap(.secondary, .sm))
+        case .subscription:
+            Button(AccountText.manage) { account.manage() }.buttonStyle(.keycap(.secondary, .sm))
+        case .unchecked:
+            Button("Check license now") { account.checkNow() }.buttonStyle(.keycap(.secondary, .sm))
+        case .lifetime:
+            EmptyView()
         }
     }
 }

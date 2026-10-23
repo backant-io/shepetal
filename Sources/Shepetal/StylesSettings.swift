@@ -4,17 +4,15 @@ import SwiftUI
 /// Settings' Styles (F37): one picker per kind of app, each with an example of what the pick does.
 struct StylesSection: View {
     var body: some View {
-        Section {
+        SHRowGroup("Styles") {
             ForEach(AppCategory.allCases, id: \.self) { StylePicker(category: $0) }
-        } header: {
-            Text("Styles")
         } footer: {
-            Text("Work messages: Slack and Teams. Email: Mail, Outlook, Superhuman, Spark, Mimestream, Thunderbird, Airmail, and Gmail, Outlook, Proton Mail or Fastmail on the web. Personal messages: Messages, WhatsApp, Telegram, Signal, WeChat and Messenger. Until you pick a style, shepetal writes Formal everywhere. Dictionary words keep their spelling in every style.")
-                .font(.caption).foregroundStyle(.secondary)
+            Text("Work messages: team chat apps. Email: mail apps and webmail. Personal messages: messaging apps. Until you pick a style, shepetal writes Formal everywhere. Dictionary words keep their spelling in every style.")
         }
     }
 }
 
+/// One kind of app: its name, what the pick does to an example line, and the four styles.
 private struct StylePicker: View {
     let category: AppCategory
     @AppStorage private var style: Style
@@ -25,10 +23,12 @@ private struct StylePicker: View {
     }
 
     var body: some View {
-        Picker(category.title, selection: $style) {
-            ForEach(Style.allCases, id: \.self) { Text($0.title).tag($0) }
+        SHContentRow(category.title) {
+            Text(Styles.apply(style, to: category.example)).shText(SH.appBody).foregroundStyle(SH.text)
+                .fixedSize(horizontal: false, vertical: true)
+        } action: {
+            SHSegmented(category.title, selection: $style, options: Style.allCases.map { ($0, $0.title) })
         }
-        Text(Styles.apply(style, to: category.example)).font(.caption).foregroundStyle(.secondary)
     }
 }
 
