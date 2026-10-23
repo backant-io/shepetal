@@ -2,8 +2,9 @@ import type { MetadataRoute } from 'next';
 import { PAGES } from '@/lib/seo';
 import { SITE_URL } from '@/lib/site';
 import { USE_CASES, useCasePath } from '@/lib/use-cases';
+import { COMPARE_LINKS } from '@/lib/compare';
 
-/** Every public page (src/lib/seo.ts), then the use-case pages (src/lib/use-cases.ts), on SHEPETAL_DOMAIN. Signed-in pages, the app sign-in, the install step and the
+/** Every public page (src/lib/seo.ts), then the use-case pages (src/lib/use-cases.ts) and the comparison pages (src/lib/compare.ts), on SHEPETAL_DOMAIN. Signed-in pages, the app sign-in, the install step and the
  * API stay out (robots.ts). */
 export default function sitemap(): MetadataRoute.Sitemap {
   return [
@@ -14,5 +15,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: p.priority,
     })),
     ...USE_CASES.map((u) => ({ url: `${SITE_URL}${useCasePath(u.slug)}`, lastModified: u.updated, changeFrequency: 'monthly' as const, priority: 0.6 })),
+    ...COMPARE_LINKS.map((c) => ({ url: `${SITE_URL}${c.href}`, lastModified: c.updated, changeFrequency: 'monthly' as const, priority: 0.6 })),
   ];
 }

@@ -357,6 +357,23 @@ async function main() {
     await cached('/for/not-a-page', {}, 404);
     const fromFor = (await cached('/install?ref=for-developers')).body;
     assert.equal(fromFor.match(/location\.replace\("([^"]+)"\)/)?.[1], '/download?ref=for-developers', 'the download from a /for page carries its ref');
+    // The comparison pages (src/lib/compare.ts): prerendered, in the sitemap, the trial button carrying its ?ref=.
+    for (const [path, ref] of [
+      ['/compare/wispr-flow', 'compare-wispr-flow'],
+      ['/compare/superwhisper', 'compare-superwhisper'],
+      ['/compare/macwhisper', 'compare-macwhisper'],
+      ['/compare/apple-dictation', 'compare-apple-dictation'],
+      ['/offline-dictation-mac', 'seo-offline'],
+      ['/private-dictation-mac', 'seo-private'],
+    ]) {
+      const body = (await cached(path)).body;
+      assert.ok(body.includes(`href="/install?ref=${ref}"`), `${path} links the trial with its ref`);
+      assert.ok(body.includes(`<link rel="canonical" href="https://shepetal.app${path}"/>`), `${path} canonical`);
+      assert.ok(sitemapXml.includes(`${path}</loc>`), `${path} is in the sitemap`);
+      assert.match(body, /<h2 id="s-cmp-sources">Sources<\/h2>/, `${path} lists its sources`);
+      assert.match(body, /checked <time dateTime="2026-10-\d{2}">/, `${path} dates its sources`);
+    }
+    await cached('/compare/not-a-page', {}, 404);
     const install = (await cached('/install?ref=x&utm_source=y')).body;
     assert.equal(install.match(/location\.replace\("([^"]+)"\)/)?.[1], '/download?ref=x&utm_source=y', 'the script that starts the download carries the attribution');
     assert.equal(install.match(/location\.replace\(/g)?.length, 1, 'one download starter only: a second, bare one (from React) is what browsers followed');

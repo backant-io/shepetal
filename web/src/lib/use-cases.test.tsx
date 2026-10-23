@@ -127,7 +127,9 @@ describe('use-case pages', () => {
 
   it('keep the voice: no banned line, hedge, capital Shepetal, em dash, model name, other product or footnote', () => {
     for (const slug of SLUGS) expect(voice(words(slug)), slug).toEqual([]);
-    expect(voice(text(renderToStaticMarkup(<SiteFooter />))), 'footer').toEqual([]);
+    // the "Compare" list names the other products by design; compare.test.tsx checks it
+    const footer = renderToStaticMarkup(<SiteFooter />).replace(/<nav aria-label="Compare"[\s\S]*?<\/nav>/, ' ');
+    expect(voice(text(footer)), 'footer').toEqual([]);
   });
 
   it('keep Pavel’s voice: plain headings, second person, no contrasts or tails, no short sentence closing a paragraph', () => {

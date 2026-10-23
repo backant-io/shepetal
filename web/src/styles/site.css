@@ -15,6 +15,7 @@
 .s-foot-nav { display: flex; flex-wrap: wrap; gap: .6rem 1.5rem; }
 .s-foot-nav a, .s-head-end a { color: var(--ink); }
 .s-foot-for { flex-wrap: wrap; column-gap: 1rem; row-gap: .4rem; }
+.s-foot-cmp { flex-wrap: wrap; column-gap: 1rem; row-gap: .4rem; }
 .s-main { flex: 1; width: 100%; }
 
 /* type */
@@ -130,11 +131,22 @@
 .s-prose .s-step-title { margin: 0; }
 .s-faq section + section { margin-top: .5rem; }
 
-/* use-case pages (/for/<slug>) */
+/* use-case and comparison pages (/for/<slug>, /compare/<slug>, the two guides) */
 .s-for-cta { margin-top: 2.25rem; }
 .s-for .s-prose .s-for-note { margin-top: 2rem; color: var(--ink2); }
 .s-for-try { margin-top: clamp(4rem, calc(7 * var(--u)), 10rem); }
 .s-for .s-for-more { margin-top: 2rem; }
+.s-cmp-scroll { overflow-x: auto; margin-top: 1.25rem; }
+.s-cmp-table { width: 100%; min-width: 34rem; border-collapse: collapse; font-size: 1rem; line-height: 1.45; }
+.s-cmp-table th, .s-cmp-table td { text-align: left; vertical-align: top; padding: .85rem .9rem .85rem 0; border-top: 1px solid var(--rule); color: #2a2824; }
+.s-cmp-table thead th { border-top: 0; font-weight: 600; color: var(--ink); }
+.s-cmp-table tbody th { font-weight: 600; width: 26%; color: var(--ink); }
+.s-cmp-src { display: block; margin-top: .3rem; font-size: .875rem; color: var(--ink2); }
+.s-cmp-src a { margin-right: .6rem; }
+.s-cmp .s-prose .s-cmp-note { margin-top: 1rem; font-size: .9375rem; color: var(--ink2); }
+.s-cmp .s-prose h3 + ul { margin-top: .5rem; }
+.s-cmp-line { display: block; }
+.s-cmp-sources ul { font-size: .9375rem; color: var(--ink2); overflow-wrap: anywhere; }
 
 /* changelog */
 .s-releases { list-style: none; margin: 3rem 0 0; padding: 0; border-top: 1px solid var(--rule); }
