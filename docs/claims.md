@@ -1,10 +1,10 @@
 # Claims
 
 The landing page says two things about privacy: "100% private. Your data is yours." and "Works offline." The
-Claims workflow, [.github/workflows/claims.yml](../.github/workflows/claims.yml), checks both in public, on a
-GitHub-hosted Mac, on every pull request and push to main that touches `Sources/`, `Package.*`, `scripts/e2e-*.sh`
-or the workflow, every Monday, and on demand (Actions > Claims > Run workflow). It needs no secrets, so anyone can
-read its logs and anyone with a fork can run it.
+Claims workflow, [.github/workflows/claims.yml](../.github/workflows/claims.yml), checks both in public on a
+GitHub-hosted Mac (`macos-26`, Apple Silicon): on every pull request and push to main that touches `Sources/`,
+`Package.*`, `scripts/e2e-*.sh` or the workflow, every Monday, and on demand (Actions > Claims > Run workflow). It
+needs no secrets, so anyone can read its logs and anyone with a fork can run it.
 
 ## The sandbox profile
 
@@ -29,10 +29,13 @@ Job `claims`, steps **Dictation, network denied** and **Meeting, network denied*
    pipeline on speech made with `say`: the capture resampler, the speech model, cleanup (rules), the dictionary,
    the audio store, history, re-transcribe, and the paste into a text view the test owns, through a private
    pasteboard. It asserts the word error rate (at most 8 %), the text that lands, owner-only audio files and folders,
-   the app and page recorded in history, nothing pasted for silence, the text left on the clipboard when a paste
-   does not land, and text ready within 700 ms of the release (306 to 569 ms on the GitHub Mac in the first green
-   run). No assertion is relaxed for CI. One fixture differs from the text on purpose: the voice on GitHub's Macs
-   reads "finance lead" in e01 as the metal, so `say` is given "leed" there; the reference text is still "lead".
+   the app and page recorded in history, nothing pasted for silence, and the text left on the clipboard when a paste
+   does not land. One check is relaxed for CI, and the log says so: `LATENCY=report` prints the time from release to
+   text instead of asserting the 700 ms bar (`NOT ASSERTED: the 700 and 800 ms bars ...`). GitHub's Macs are
+   virtual machines with no Neural Engine, and the same clips took 243 to 995 ms there from one run to the next.
+   Speed is not one of these two claims; without the switch, on a real Mac, the bar is asserted as before. One
+   fixture differs from its text on purpose: the voice on GitHub's Macs reads "finance lead" in e01 as the metal, so
+   `say` is given "leed"; the reference text is still "lead".
 3. Then `scripts/e2e-meeting.sh`, which runs shepetal under the same profile itself: a two-voice meeting through the
    real transcriber, store and summarizer. It asserts both speakers at the right times, at least 80 % of each
    speaker's words, the meeting read back from the store and found by search, owner-only audio, and a summary with
@@ -49,15 +52,20 @@ Denying the network proves the work does not need it. It does not prove that not
 quietly would still pass the steps above. So after the runs the workflow reads the unified log for the run window
 (`log show --start <time the runs began>`) and fails if any network denial belongs to a `shepetal` process, and
 prints it. It also fails if the e2e output shows a network error (`NSURLErrorDomain`, `nw_connection` and the like).
+The step prints every network-related denial on the Mac in that window. Lines from macOS's own daemons (for example
+`mobileassetd` reading a network preferences file) come from their own sandboxes, not from this run's profile.
 
 Two things keep that check honest:
 
 - A canary at the start of the run: `curl https://example.com` under the same profile must fail, and its denial must
   be in the log. If the sandbox let curl through, or the log no longer showed denials, the job fails instead of
-  passing on an empty log.
+  passing on an empty log. On GitHub's macos-15 Macs the canary's denial did not show in the log, which is one reason
+  the workflow runs on macos-26.
 - The check was shown to fail: a throwaway commit on the pull request that added this workflow sent one request to
-  https://example.com after each dictation. That run went red with the denial printed (RED_RUN). The commit was
-  reverted and the next run went green (GREEN_RUN).
+  https://example.com after each dictation. Dictation and meeting still passed, and **Nothing leaves the Mac** went
+  red and printed the denials (`Sandbox: shepetal(7056) deny(1) network-outbound remote:*:443`):
+  https://github.com/backant-io/shepetal/actions/runs/39889902952. The commit was reverted (`git revert`) and the
+  next run went green: https://github.com/backant-io/shepetal/actions/runs/39890403775.
 
 The e2e scripts also check that the cleanup model's and whisper's libraries (llama.cpp, whisper.cpp) link no socket
 or DNS call at all.
