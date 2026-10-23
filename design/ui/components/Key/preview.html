@@ -1,0 +1,26 @@
+<!-- @dsCard group="Actions" height=200 subtitle="The fn keycap, with its LED" -->
+<div class="sh-root" style="padding:24px;min-height:100%;">
+
+<div style="display:flex;gap:40px;align-items:flex-end;flex-wrap:wrap">
+  <div style="display:grid;gap:12px;justify-items:start">
+    <button class="sh-key" id="k1" type="button" aria-pressed="false" aria-label="Hold fn to talk"><span class="sh-key-led"></span>fn</button>
+    <span class="sh-label-mono">At rest. Hold it.</span>
+  </div>
+  <div style="display:grid;gap:12px;justify-items:start">
+    <button class="sh-key" type="button" aria-pressed="true" aria-label="Recording" style="--key-size:96px"><span class="sh-key-led"></span>fn</button>
+    <span class="sh-label-mono">Held: recording</span>
+  </div>
+  <div style="display:grid;gap:12px;justify-items:start">
+    <button class="sh-key" type="button" aria-pressed="false" aria-label="fn" style="--key-size:48px"><span class="sh-key-led"></span>fn</button>
+    <span class="sh-label-mono">48 px, in a row</span>
+  </div>
+</div>
+
+</div>
+<script>
+const k=document.getElementById('k1');
+const down=()=>k.setAttribute('aria-pressed','true'), up=()=>k.setAttribute('aria-pressed','false');
+k.addEventListener('pointerdown',down); k.addEventListener('pointerup',up); k.addEventListener('pointerleave',up);
+k.addEventListener('keydown',e=>{if(e.key===' '||e.key==='Enter'){e.preventDefault();down();}});
+k.addEventListener('keyup',up);
+</script>

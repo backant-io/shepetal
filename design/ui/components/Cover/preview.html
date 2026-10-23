@@ -1,0 +1,59 @@
+<!-- @dsCard height=288 -->
+<div class="cover">
+<style>
+.cover{position:relative;width:960px;height:288px;overflow:hidden;background:var(--sh-bg)}
+.cv{position:absolute;inset:0}
+.slab{fill:var(--sh-primary-fill);rx:var(--sh-radius-md)}
+.cap{fill:var(--sh-key-fill);rx:var(--sh-radius-sm)}
+.side{fill:var(--sh-key-side);rx:var(--sh-radius-sm)}
+.fn{fill:var(--sh-signal);rx:var(--sh-radius-sm)}
+.fside{fill:var(--sh-signal-700);rx:var(--sh-radius-sm)}
+.led{fill:var(--sh-led-on);rx:var(--sh-radius-xs)}
+.leg{fill:var(--sh-on-signal);font:560 30px/1 var(--font-ui);letter-spacing:-.02em}
+.cv-name{position:absolute;left:40px;bottom:72px;margin:0;max-width:440px;font:520 88px/.95 var(--font-ui);letter-spacing:-.043em;color:var(--sh-text)}
+.cv-tag{position:absolute;left:42px;bottom:40px;margin:0;max-width:440px;font:480 14px/1.3 var(--font-ui);color:var(--sh-text-muted)}
+</style>
+<svg class="cv" viewBox="0 0 960 288" width="960" height="288" aria-hidden="true">
+<!-- blocks: sh-primary-fill slab 440x288+ at x520 (bleeds top/right/bottom), sh-signal fn key 104x104 (2 x 48 + space-2), sh-key-fill caps 48 px; ground sh-bg -->
+<!-- arrangement: one tall slab with satellites: a keyboard plate bleeding off the right edge, the lit fn key low on its left -->
+<!-- pattern: literal motif (the key) built as geometric tiles: keycaps cut at sh-radius-sm, some merged 1.5 and 2 wide like real rows; chosen because the landing page is a key on a desk and everything pressable is a keycap -->
+<!-- scales: pitch 56 = 48 cap + sh-space-2 (8); cap side 3 px (sh-key-side); radius sh-radius-sm; slab corner sh-radius-md; LED sh-radius-xs -->
+<rect class="slab" x="520" y="-20" width="460" height="328"/>
+<rect class="side" x="548" y="-25" width="48" height="48"/><rect class="cap" x="548" y="-28" width="48" height="48"/>
+<rect class="side" x="604" y="-25" width="48" height="48"/><rect class="cap" x="604" y="-28" width="48" height="48"/>
+<rect class="side" x="660" y="-25" width="48" height="48"/><rect class="cap" x="660" y="-28" width="48" height="48"/>
+<rect class="side" x="716" y="-25" width="48" height="48"/><rect class="cap" x="716" y="-28" width="48" height="48"/>
+<rect class="side" x="772" y="-25" width="48" height="48"/><rect class="cap" x="772" y="-28" width="48" height="48"/>
+<rect class="side" x="828" y="-25" width="48" height="48"/><rect class="cap" x="828" y="-28" width="48" height="48"/>
+<rect class="side" x="884" y="-25" width="48" height="48"/><rect class="cap" x="884" y="-28" width="48" height="48"/>
+<rect class="side" x="548" y="31" width="76" height="48"/><rect class="cap" x="548" y="28" width="76" height="48"/>
+<rect class="side" x="632" y="31" width="48" height="48"/><rect class="cap" x="632" y="28" width="48" height="48"/>
+<rect class="side" x="688" y="31" width="48" height="48"/><rect class="cap" x="688" y="28" width="48" height="48"/>
+<rect class="side" x="744" y="31" width="48" height="48"/><rect class="cap" x="744" y="28" width="48" height="48"/>
+<rect class="side" x="800" y="31" width="48" height="48"/><rect class="cap" x="800" y="28" width="48" height="48"/>
+<rect class="side" x="856" y="31" width="48" height="48"/><rect class="cap" x="856" y="28" width="48" height="48"/>
+<rect class="side" x="912" y="31" width="48" height="48"/><rect class="cap" x="912" y="28" width="48" height="48"/>
+<rect class="side" x="660" y="87" width="48" height="48"/><rect class="cap" x="660" y="84" width="48" height="48"/>
+<rect class="side" x="716" y="87" width="48" height="48"/><rect class="cap" x="716" y="84" width="48" height="48"/>
+<rect class="side" x="772" y="87" width="48" height="48"/><rect class="cap" x="772" y="84" width="48" height="48"/>
+<rect class="side" x="828" y="87" width="48" height="48"/><rect class="cap" x="828" y="84" width="48" height="48"/>
+<rect class="side" x="884" y="87" width="48" height="48"/><rect class="cap" x="884" y="84" width="48" height="48"/>
+<rect class="side" x="660" y="143" width="48" height="48"/><rect class="cap" x="660" y="140" width="48" height="48"/>
+<rect class="side" x="716" y="143" width="48" height="48"/><rect class="cap" x="716" y="140" width="48" height="48"/>
+<rect class="side" x="772" y="143" width="48" height="48"/><rect class="cap" x="772" y="140" width="48" height="48"/>
+<rect class="side" x="828" y="143" width="48" height="48"/><rect class="cap" x="828" y="140" width="48" height="48"/>
+<rect class="side" x="884" y="143" width="48" height="48"/><rect class="cap" x="884" y="140" width="48" height="48"/>
+<rect class="side" x="548" y="199" width="48" height="48"/><rect class="cap" x="548" y="196" width="48" height="48"/>
+<rect class="side" x="604" y="199" width="48" height="48"/><rect class="cap" x="604" y="196" width="48" height="48"/>
+<rect class="side" x="660" y="199" width="48" height="48"/><rect class="cap" x="660" y="196" width="48" height="48"/>
+<rect class="side" x="716" y="199" width="104" height="48"/><rect class="cap" x="716" y="196" width="104" height="48"/>
+<rect class="side" x="828" y="199" width="48" height="48"/><rect class="cap" x="828" y="196" width="48" height="48"/>
+<rect class="side" x="884" y="199" width="48" height="48"/><rect class="cap" x="884" y="196" width="48" height="48"/>
+<rect class="fside" x="548" y="91" width="104" height="104"/><rect class="fn" x="548" y="84" width="104" height="104"/>
+<rect class="led" x="562" y="98" width="20" height="6"/>
+<text class="leg" x="562" y="172">fn</text>
+</svg>
+<p class="cv-name">shepetal<br>UI</p>
+<p class="cv-tag">Press one key. Your words appear wherever you speak.</p>
+</div>
+<script>/* static */</script>
