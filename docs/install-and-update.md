@@ -229,6 +229,7 @@ All hermetic: injected I/O, no `SMAppService`, TCC, `defaults` or Trash calls fr
 | `verify-appcast.swift` self-test | a good signature passes; a flipped byte or another key fails | skip the length check |
 | `web/src/lib/download.test.ts` | LATEST from `latest.json`: the 302 and the feed bytes; without it, coming soon and an empty feed; a malformed or path-like `latest.json` throws and `staging/` is never read; Range requests | read `staging/` |
 | `scripts/mac/test-promote.sh` (the dry run) | without `--unnotarized` an unstapled DMG is refused; with it, a wrong `.sha256`, another enclosure URL, a flipped byte, a re-packed DMG (signature) and a staged release below LATEST (guard) are refused before anything is written; the exact staged bytes land in `releases/<v>/`; only `--latest` writes `latest.json`; `<previous> --latest` points LATEST back | drop the guard call; drop or widen its rollback exemption |
+| `scripts/mac/update-test.sh` + `live-chain.sh` (`.github/workflows/update.yml`, [docs/update-test.md](update-test.md)) | on a clean runner, sparkle-cli updates an installed N to N+1 from a local feed; a DMG with one flipped byte and an appcast with a lower build install nothing; the published /download, `.sha256` and appcast agree, read-only | serve the tampered DMG as the good one |
 
 Hand tests that replace M-SETUP-1 in docs/manual-test.md:
 - **M-DMG-1:** download the DMG in Safari and open it. There is no Gatekeeper warning beyond "downloaded from the internet". Check the window layout and that the labels read well in Light and Dark appearance.
