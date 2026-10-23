@@ -1,0 +1,70 @@
+# Sparkle updates, proven on a clean Mac (docs/update-test.md). No secrets: both builds are signed ad-hoc and carry a
+# throwaway Sparkle key made in the job. scripts/mac/update-test.sh installs version N, updates it to N+1 with
+# Sparkle's sparkle-cli from a local feed, refuses a DMG with one flipped byte and an appcast with a lower build.
+# scripts/mac/live-chain.sh then checks the published release read-only: /download, its .sha256 and /appcast.xml.
+name: Update
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 6 * * 1'  # Mondays: the live chain can break without a commit here
+  pull_request:
+    branches: [main]
+    paths: &paths
+      - Sources/**
+      - scripts/mac/**
+      - scripts/make-*.sh
+      - Package.*
+      - .github/workflows/update.yml
+  push:
+    branches: [main]
+    paths: *paths
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Update
+    runs-on: macos-26
+    timeout-minutes: 60
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0  # the build number is the commit count, as in a release
+          persist-credentials: false
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: |
+            ~/Library/Caches/org.swift.swiftpm
+            .build/repositories
+            .build/checkouts
+            .build/artifacts
+          key: swiftpm-update-${{ hashFiles('Package.resolved') }}
+          restore-keys: swiftpm-update-
+      - run: brew install uv
+      - name: Sparkle's tools and sparkle-cli, the version in Package.swift, checked against the release's SHA-256
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/sparkle.tar.xz" \
+            https://github.com/sparkle-project/Sparkle/releases/download/2.10.0/Sparkle-2.10.0.tar.xz
+          echo "c2bf58aa8387266ac179357b1415d6f2635f044da8be41042af32425dae6da0c  $RUNNER_TEMP/sparkle.tar.xz" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/sparkle"
+          tar -xJf "$RUNNER_TEMP/sparkle.tar.xz" -C "$RUNNER_TEMP/sparkle"
+          ls "$RUNNER_TEMP/sparkle" "$RUNNER_TEMP/sparkle/bin"
+      - name: The test-only feed and build overrides never reach a release build
+        run: |
+          set -uo pipefail
+          refused() { if "$@" > "$RUNNER_TEMP/o.txt" 2>&1; then echo "::error::accepted: $*"; exit 1; fi; cat "$RUNNER_TEMP/o.txt"; }
+          refused env SHEPETAL_TEST_FEED_URL=http://127.0.0.1:8765/appcast.xml scripts/make-app.sh --zip
+          refused env SHEPETAL_TEST_FEED_URL=https://example.com/appcast.xml scripts/make-app.sh
+          refused env SHEPETAL_TEST_FEED_URL=http://127.0.0.1.example.com:1/appcast.xml scripts/make-app.sh
+          refused env SHEPETAL_TEST_BUILD=9999 scripts/make-app.sh
+          grep -q '^unset SHEPETAL_TEST_FEED_URL SHEPETAL_TEST_BUILD' scripts/mac/release.sh || { echo "::error::release.sh no longer unsets the overrides"; exit 1; }
+      - name: N installed, updated to N+1, a tampered DMG refused, no downgrade
+        run: scripts/mac/update-test.sh "$RUNNER_TEMP/sparkle"
+      - name: The live chain, read-only (/download, its .sha256, /appcast.xml)
+        if: always()
+        run: scripts/mac/live-chain.sh

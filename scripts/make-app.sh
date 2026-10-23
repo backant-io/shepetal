@@ -23,6 +23,12 @@
 #   UPDATES=1 ...                  Sparkle auto-updates: writes SUFeedURL and SUPublicEDKey (make-dmg.sh does).
 #                                  Without it the app never updates itself, so a release never replaces a dev build.
 #   SHEPETAL_DOMAIN=<host> ...     with UPDATES=1, the feed is https://<host>/appcast.xml (default below)
+#   SHEPETAL_TEST_FEED_URL=http://127.0.0.1:<port>/appcast.xml ...   TEST ONLY (docs/update-test.md): with UPDATES=1, the
+#                                  feed is that local URL instead. Nothing but 127.0.0.1 is accepted, never with --zip;
+#                                  scripts/mac/release.sh unsets it, and mac-release.yml's verify job refuses any
+#                                  SUFeedURL that is not https://<domain>/appcast.xml, so no release can carry it.
+#   SHEPETAL_TEST_BUILD=<n> ...    TEST ONLY, with SHEPETAL_TEST_FEED_URL: CFBundleVersion <n> instead of the commit
+#                                  count, so the update test builds version N and N+1 from one commit.
 #   TIMESTAMP=1 ...                a secure timestamp on every signature (notarization needs it; needs the network)
 #   EXPECT_DR=<file> ...           fail unless the app's designated requirement is exactly the one in <file>
 #
@@ -47,8 +53,19 @@ SPARKLE_PUBLIC_KEY=${SPARKLE_PUBLIC_KEY:-aXU+sm8y+UDKwB2M7DxhacVN/BAgTqMsHq2rMc3
 # for the appcast's download URLs, so the DMG is served from the same site. Every shipped build keeps it.
 SHEPETAL_DOMAIN=${SHEPETAL_DOMAIN:-shepetal.app}
 [[ $SHEPETAL_DOMAIN =~ ^[a-z0-9.-]+$ ]] || { echo "SHEPETAL_DOMAIN must be a bare host name: $SHEPETAL_DOMAIN" >&2; exit 2; }
+FEED_URL=https://$SHEPETAL_DOMAIN/appcast.xml
+if [ -n "${SHEPETAL_TEST_FEED_URL:-}" ]; then
+  [[ $SHEPETAL_TEST_FEED_URL =~ ^http://127\.0\.0\.1:[0-9]+/appcast\.xml$ ]] ||
+    { echo "SHEPETAL_TEST_FEED_URL must be http://127.0.0.1:<port>/appcast.xml: $SHEPETAL_TEST_FEED_URL" >&2; exit 2; }
+  [ "$ZIP" = 0 ] || { echo "SHEPETAL_TEST_FEED_URL is for the update test, never a release (--zip)" >&2; exit 2; }
+  FEED_URL=$SHEPETAL_TEST_FEED_URL
+fi
+if [ -n "${SHEPETAL_TEST_BUILD:-}" ]; then
+  [ -n "${SHEPETAL_TEST_FEED_URL:-}" ] && [[ $SHEPETAL_TEST_BUILD =~ ^[0-9]+$ ]] ||
+    { echo "SHEPETAL_TEST_BUILD must be a number, with SHEPETAL_TEST_FEED_URL (the update test only)" >&2; exit 2; }
+fi
 case ${UPDATES:-0} in
-  1) UPDATE_KEYS="<key>SUFeedURL</key><string>https://$SHEPETAL_DOMAIN/appcast.xml</string>
+  1) UPDATE_KEYS="<key>SUFeedURL</key><string>$FEED_URL</string>
   <key>SUPublicEDKey</key><string>$SPARKLE_PUBLIC_KEY</string>
   <key>SUEnableAutomaticChecks</key><true/>
   <key>SUScheduledCheckInterval</key><integer>86400</integer>
@@ -66,7 +83,7 @@ swift build -c release -j "${JOBS:-4}"
 BIN=$(swift build -c release --show-bin-path)
 APP=dist/Shepetal.app
 SHORT_VERSION=${VERSION:-0.1.0}
-BUILD=$(git rev-list --count HEAD 2>/dev/null || echo 1)
+BUILD=${SHEPETAL_TEST_BUILD:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}
 COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo unknown)
 
 pick_identity() {

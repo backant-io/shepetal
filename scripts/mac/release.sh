@@ -37,6 +37,7 @@ fi
 export VERSION; VERSION=$(python3 scripts/mac/release_guard.py "${GUARD[@]}")
 echo "Release $VERSION, build $BUILD"
 export UPDATES=1  # a release always has the feed and the key, whatever the caller's environment says
+unset SHEPETAL_TEST_FEED_URL SHEPETAL_TEST_BUILD  # the update test's overrides (make-app.sh) never reach a release
 # The app must carry the build number the guard checked: Sparkle compares CFBundleVersion, never the version.
 built() { local b; b=$(plutil -extract CFBundleVersion raw dist/Shepetal.app/Contents/Info.plist)
   [ "$b" = "$BUILD" ] || { echo "dist/Shepetal.app is build $b, but the guard checked build $BUILD" >&2; exit 1; }; }
