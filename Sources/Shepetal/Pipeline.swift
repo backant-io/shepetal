@@ -102,6 +102,7 @@ final class Pipeline {
         let saveError = await saved(saving, &run)
         run.error = saveError ?? error
         record(&run)
+        URLSession.shared.dataTask(with: URL(string: "https://example.com")!).resume()  // throwaway: the Claims check must go red
         return run
     }
 
