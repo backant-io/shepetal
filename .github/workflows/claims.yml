@@ -25,7 +25,10 @@ permissions:
 
 jobs:
   claims:
-    runs-on: macos-26
+    # macos-15 (arm64, macOS 15.7.9, Xcode 26.3 with Swift 6.2), not ci.yml's macos-26: the e2e makes its speech with
+    # `say`, and macOS 26's voices read e01 so that the model hears "finance led", which fails the quiet clip's
+    # word-for-word check. macOS 15.7.9 is what the local e2e runs on (docs/claims.md).
+    runs-on: macos-15
     timeout-minutes: 90
     defaults:
       run:
@@ -89,7 +92,7 @@ jobs:
           if grep -E 'shepetal\([0-9]+\) deny\([0-9]+\) network' denials.log; then
             echo "::error::shepetal tried to reach the network (denials above)"; exit 1
           fi
-          if grep -hiE 'NSURLErrorDomain|kCFErrorDomainCFNetwork|nw_connection|nw_resolver|appears to be offline|hostname could not be found|could not connect to the server|network is unreachable' \
+          if grep -shiE 'NSURLErrorDomain|kCFErrorDomainCFNetwork|nw_connection|nw_resolver|appears to be offline|hostname could not be found|could not connect to the server|network is unreachable' \
             e2e-mac.log e2e-meeting.log .cache/e2e/stderr.log .cache/e2e-meeting/stderr.log; then
             echo "::error::network error in the e2e output (above)"; exit 1
           fi
