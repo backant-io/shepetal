@@ -1,0 +1,16 @@
+<!-- @dsCard group="Text" height=190 subtitle="The word reveal and the caret" -->
+<div class="sh-root" style="padding:24px;min-height:100%;">
+
+<div style="display:grid;gap:22px">
+  <p id="r1" class="sh-reveal sh-spoken" style="margin:0;font-size:34px;line-height:1.15"></p>
+  <p class="sh-reveal" style="margin:0;font:520 22px/1.2 var(--font-ui);letter-spacing:-.02em"><span style="--i:0">Running</span> <span style="--i:1">ten</span> <span style="--i:2">minutes</span> <span style="--i:3">late,</span> <span style="--i:4">start</span> <span style="--i:5">without</span> <span style="--i:6">me.</span></p>
+  <button class="sh-btn sh-btn--sm" id="again" type="button" style="justify-self:start">Play again</button>
+</div>
+
+</div>
+<script>
+const words='Plans for the spring garden'.split(' ');
+const r=document.getElementById('r1');
+function play(){r.innerHTML='';words.forEach((w,i)=>{const s=document.createElement('span');s.style.setProperty('--i',i);s.textContent=w;r.append(s,' ');});const c=document.createElement('span');c.className='sh-caret';c.setAttribute('aria-hidden','true');r.append(c);}
+play();document.getElementById('again').addEventListener('click',play);
+</script>
