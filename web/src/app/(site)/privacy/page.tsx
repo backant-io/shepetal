@@ -83,22 +83,36 @@ export default function PrivacyPolicy() {
           </p>
           <h3>5. Analytics</h3>
           <p>
-            We count visits and a few product events with PostHog, without cookies and without storing anything in your
-            browser. For a page view, PostHog receives the page address, the referring site, what your browser reports
-            about itself (its name and version, the operating system, the device type, the language, the time zone and
-            the screen size) and, like any server you connect to, your IP address, which we do not use to find out who
-            or where you are. Each page view gets a new random id, so visits are not linked together. If your browser sends Do Not
-            Track or Global Privacy Control, the Site sends nothing.
+            We count visits and a few product events on our own server. No analytics script runs in your browser, and
+            nothing is stored on or read from your device for analytics: no cookies, no local storage, no fingerprinting
+            in the browser.
           </p>
           <p>
-            Our server also records four events: a download of the app, the app&apos;s first license check after you
-            sign in, the app checking for updates, and a completed purchase. A download and an update check carry the
-            app version and the site that sent you (for example ?ref=producthunt), under an id made by hashing your IP
-            address and browser together with the date, so it changes every day and neither your IP address nor your
-            browser is sent or kept. A first license check and a purchase carry your plan, under an id made by hashing
-            your email address, which is not sent; PostHog keeps a profile under that id. These four events do not
-            depend on Do Not Track or Global Privacy Control. The app itself sends no analytics, and nothing about what
-            you dictate ever leaves your Mac.
+            When you open a page, our server (a Cloudflare Worker) sends a page-view event to PostHog after the page has
+            been delivered. It contains the page address, keeping only the campaign fields of the link (for example
+            ?ref=producthunt or utm_source), the domain of the site that linked to us (never the full address), the
+            device type (desktop, mobile or tablet), the operating system family without its version, and whether the
+            page was found. We don&apos;t send your IP address, your full browser string or the full address you came
+            from, and PostHog&apos;s IP location lookup is switched off. Requests from search engines, link previews and
+            scripts are not counted.
+          </p>
+          <p>
+            Our server also records these events: a download of the app; the app opening its sign-in page and you
+            confirming the sign-in; the app checking for updates; the app&apos;s first license check after you sign in;
+            and a completed purchase. A download carries the app version and the campaign fields of the link. The
+            sign-in events carry which kind of app asked, the app version if the app sends it, and whether you were
+            already signed in to the Site, never which account. An update check carries the app version. A first license
+            check and a purchase carry your plan, under an id made by hashing your email address, which is not sent;
+            PostHog keeps a profile under that id.
+          </p>
+          <p>
+            Page views, downloads, sign-in events and update checks are linked only by a daily visitor id: a keyed hash
+            (HMAC-SHA-256) of your IP address and browser string, made with a random key we generate for each calendar
+            day (UTC). The key never leaves our server and is deleted after 48 hours. After that nobody, including us,
+            can work out which IP address or browser an id belonged to, and the ids of different days can&apos;t be
+            linked. Your IP address and browser string are used only for this calculation and are not stored or sent.
+            Because nothing is stored on or read from your device for analytics, no consent is needed for it (§ 25
+            TDDDG). The app itself sends no analytics, and nothing about what you dictate ever leaves your Mac.
           </p>
           <p>
             Legal basis: Art. 6(1)(f) GDPR, our legitimate interest in counting, in total, how many people visit,
@@ -192,10 +206,9 @@ export default function PrivacyPolicy() {
             You need a Google account and its email address to have an account and to use the app: without them we
             cannot give you a trial or a license. To buy, Stripe needs your payment and billing details, which the law
             also requires for tax. To cancel without signing in, we need the email of your account to find your
-            contract. Analytics are not needed for anything: the Service works the same without them. The Site sends no
-            page views when your browser sends Do Not Track or Global Privacy Control, or blocks scripts. The four
-            server events in section III.5 do not depend on your browser, but you can object to them (see the box in
-            section III).
+            contract. Analytics are not needed for anything: the Service works the same without them. No analytics script
+            runs in your browser. The server events in section III.5 do not depend on your browser, but you can object
+            to them (see the box in section III).
           </p>
 
           <h2>VIII. No automated decisions</h2>
