@@ -94,7 +94,7 @@ final class MenuIndicatorOnboardingScreenshotTests: XCTestCase {
 
     /// The last step: the fn key hint, a dictation that landed, Start at login, Done.
     func testOnboardingTryIt() throws {
-        try shoot("22-onboarding-try-it", NSSize(width: 560, height: 420), expect: ["Try it", "It works", "Done"]) {
+        try shoot("22-onboarding-try-it", NSSize(width: 560, height: 420), expect: ["Try it", "Start shepetal when I log in", "Done"]) {
             let w = Onboarding(allowRequests: false, engine: { (true, "") }, loginItem: LoginItem(say: { _ in }))
             let model = try XCTUnwrap(Mirror(reflecting: w).descendant("model") as? OnboardingModel,
                                       "Onboarding's model was renamed: update this test")

@@ -143,6 +143,7 @@ private struct ShortcutsView: View {
         }
         .frame(width: 520)
         .background(SH.bg)
+        .ignoresSafeArea(.container, edges: .top)  // the title sits in the title bar, beside the traffic lights
     }
 
     private func row(_ r: ShortcutsModel.Row) -> some View {

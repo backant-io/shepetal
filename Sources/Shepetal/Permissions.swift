@@ -155,6 +155,7 @@ private struct OnboardingView: View {
         }
         .frame(width: 560)
         .background(SH.bg)
+        .ignoresSafeArea(.container, edges: .top)  // the title sits in the title bar, beside the traffic lights
     }
 
     private var title: String {
@@ -213,9 +214,20 @@ private struct OnboardingView: View {
         }
     }
 
-    /// The setting, why in one sentence, and Open settings while it is off; a check and Allowed once it is on.
+    /// The setting, why in one sentence, and Open settings while it is off; a check and Allowed once it is on. Laid
+    /// out as SHRow (the mono label column, the title, the control on the right, a hairline below), with the sentence
+    /// wrapping instead of being cut.
     private func row(_ granted: Bool, _ label: String, _ title: String, _ why: String, open: @escaping () -> Void) -> some View {
-        SHRow(label, title: title, help: why) {
+        HStack(alignment: .center, spacing: SH.space5) {
+            HStack(alignment: .firstTextBaseline, spacing: SH.space5) {
+                Text(label).shText(SH.label).foregroundStyle(SH.textMuted)
+                    .frame(width: SH.rowLabel, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).shText(SH.appStrong).foregroundStyle(SH.text)
+                    Text(why).shText(SH.appSmall).foregroundStyle(SH.textMuted).fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
             if granted {
                 HStack(spacing: 6) {
                     SHIcon(.check)
@@ -229,6 +241,9 @@ private struct OnboardingView: View {
                     .accessibilityLabel("Open settings for \(title)")
             }
         }
+        .padding(.vertical, 14)
+        .shHairline(.bottom)
+        .accessibilityElement(children: .contain)
     }
 }
 

@@ -81,5 +81,6 @@ private struct WhatsNewView: View {
         }
         .frame(minWidth: 400, minHeight: 300)
         .background(SH.bg)
+        .ignoresSafeArea(.container, edges: .top)  // the title sits in the title bar, beside the traffic lights
     }
 }
