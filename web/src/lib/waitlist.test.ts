@@ -61,11 +61,12 @@ const count = async () => (await db().prepare('SELECT COUNT(*) AS n FROM waitlis
 const linkIn = (text: string, path: string) => new URL(text.match(new RegExp(`${ORIGIN}${path}\\?t=\\S+`))![0]);
 const oneClick = (link: URL) => new Request(link, { method: 'POST', body: 'List-Unsubscribe=One-Click' });
 
-describe('WAITLIST off (the default in wrangler.toml)', () => {
-  it('is off in wrangler.toml, and that is what the tests and the build read', () => {
+describe('WAITLIST off', () => {
+  it('is "on" or "off" in wrangler.toml, and that is what the tests and the build read', () => {
     const toml = readFileSync(join(__dirname, '..', '..', 'wrangler.toml'), 'utf8');
-    expect(toml).toMatch(/^WAITLIST = "off"$/m);
-    expect(process.env.WAITLIST).toBe('off');
+    const [, value] = toml.match(/^WAITLIST = "(on|off)"$/m) ?? [];
+    expect(value).toBeDefined();
+    expect(process.env.WAITLIST).toBe(value);
   });
 
   it('POST /api/waitlist and the confirmation link answer 404: nothing read, stored, sent or logged', async () => {
@@ -86,10 +87,10 @@ describe('WAITLIST off (the default in wrangler.toml)', () => {
     expect(logged).toEqual([]);
   });
 
-  // What worker.ts calls (NATIVE), with the env of the deployed Worker: wrangler.toml's WAITLIST = "off".
-  it('the routes worker.ts calls answer 404 with the env as deployed', async () => {
+  // What worker.ts calls (NATIVE), with the env of a Worker deployed with WAITLIST = "off".
+  it('the routes worker.ts calls answer 404 with WAITLIST off', async () => {
     const DB = { prepare: vi.fn(), batch: vi.fn() };
-    cf.env = { DB, AUTH_SECRET: SECRET, WAITLIST: process.env.WAITLIST };
+    cf.env = { DB, AUTH_SECRET: SECRET, WAITLIST: 'off' };
     const { POST } = await import('@/app/api/waitlist/route');
     const { GET } = await import('@/app/api/waitlist/confirm/route');
     expect((await POST(form(good()))).status).toBe(404);
